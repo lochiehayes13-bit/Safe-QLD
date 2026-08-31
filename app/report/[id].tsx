@@ -13,6 +13,9 @@ import { SERVICE_ROUTINES, routinesForSystem, type ServiceRoutine } from '@/seed
 import { checkSheet, defectSheet, reportCoverSheet, testResultSheet, type ReportBundle } from '@/export/sheets';
 import { serviceReportHtml } from '@/export/pdf';
 import { shareFile, writePdf, writeXlsx } from '@/export/files';
+import {
+  CERTIFICATION_STATEMENT, validateMaintenanceRecord, type MaintenanceRecord,
+} from '@/domain/qldCompliance';
 import { loadPrefs } from '@/app-prefs';
 import { useTheme } from '@/theme';
 import {
@@ -42,6 +45,9 @@ export default function ReportScreen() {
   const [tab, setTab] = useState<Tab>('devices');
   const [filter, setFilter] = useState<'all' | 'untested' | 'failed'>('all');
   const [busy, setBusy] = useState(false);
+  const [qdcAffirmed, setQdcAffirmed] = useState(false);
+  const [workingOrder, setWorkingOrder] = useState<boolean | null>(null);
+  const [hardcopyLeft, setHardcopyLeft] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -135,9 +141,27 @@ export default function ReportScreen() {
     if (uncheckedChecks) issues.push(`${uncheckedChecks} panel check${uncheckedChecks === 1 ? '' : 's'} not completed`);
     const failsWithoutComment = rows.filter((r) => r.result === 'fail' && !r.comment?.trim()).length;
     if (failsWithoutComment) issues.push(`${failsWithoutComment} failure${failsWithoutComment === 1 ? '' : 's'} with no comment`);
-    if (!report.signatureTechnician) issues.push('Not signed by the technician');
+
+    // The statutory record has its own required fields, and they are what an
+    // inspector actually checks — a perfect test sheet without them still fails.
+    const statutory: MaintenanceRecord = {
+      installationDescription: panel ? `${panel.brand} ${panel.model ?? ''} — ${panel.name}`.trim() : (site?.name ?? ''),
+      technicianName: report.technicianName ?? '',
+      technicianLicenceNumber: report.technicianLicence ?? '',
+      maintenanceDate: report.serviceDate,
+      maintenanceDescription: report.title,
+      qdcCompliance: qdcAffirmed,
+      inProperWorkingOrder: workingOrder,
+      correctiveActionRequired: defects.filter((d) => d.status === 'open').map((d) => d.description).join('; '),
+      certificationSignature: report.signatureTechnician,
+      hardcopyLeftOnSite: hardcopyLeft,
+    };
+    for (const issue of validateMaintenanceRecord(statutory)) {
+      issues.push(`${issue.message} (${issue.legalRef})`);
+    }
+
     return issues;
-  }, [report, rows, checks]);
+  }, [report, rows, checks, panel, site, defects, qdcAffirmed, workingOrder, hardcopyLeft]);
 
   const bundle = (): ReportBundle | null => {
     if (!report || !site) return null;
@@ -320,6 +344,40 @@ export default function ReportScreen() {
               multiline
             />
 
+            <H2>Queensland record of maintenance</H2>
+            <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+              These are required by the Building Fire Safety Regulation, separately from the test results. They are what an
+              inspector checks.
+            </Txt>
+
+            <Card>
+              <YesNoRow
+                label="Maintenance was carried out in compliance with QDC MP 6.1"
+                value={qdcAffirmed}
+                onChange={setQdcAffirmed}
+              />
+              <Divider />
+              <TriRow
+                label="Installation considered to be in proper working order"
+                value={workingOrder}
+                onChange={setWorkingOrder}
+              />
+              <Divider />
+              <YesNoRow
+                label="Hardcopy record left on site"
+                value={hardcopyLeft}
+                onChange={setHardcopyLeft}
+              />
+            </Card>
+
+            <Card>
+              <Label>Certification</Label>
+              <Txt size="sm" style={{ marginTop: 6, lineHeight: 20 }}>{CERTIFICATION_STATEMENT}</Txt>
+              <Txt size="xs" tone="faint" style={{ marginTop: 6, lineHeight: 17 }}>
+                Signing below is a distinct legal element — recording your name does not satisfy it.
+              </Txt>
+            </Card>
+
             <SignaturePad
               label="Technician signature"
               value={report.signatureTechnician}
@@ -415,6 +473,37 @@ function ResultButton({ label, active, tone, onPress }: { label: string; active:
     >
       <Txt size="sm" weight="700" style={{ color: active ? '#fff' : t.color.textMuted }}>{label}</Txt>
     </Pressable>
+  );
+}
+
+/** A plain yes/no affirmation, used where the regulation needs a positive answer. */
+function YesNoRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
+  const t = useTheme();
+  return (
+    <Pressable onPress={() => onChange(!value)} style={{ paddingVertical: t.space(2) }}>
+      <Rowed gap={3}>
+        <MaterialCommunityIcons
+          name={value ? 'checkbox-marked' : 'checkbox-blank-outline'}
+          size={24}
+          color={value ? t.color.pass : t.color.textFaint}
+        />
+        <Txt style={{ flex: 1, lineHeight: 20 }} tone={value ? 'default' : 'muted'}>{label}</Txt>
+      </Rowed>
+    </Pressable>
+  );
+}
+
+/** Three-state, because "not yet answered" is different from "no". */
+function TriRow({ label, value, onChange }: { label: string; value: boolean | null; onChange: (v: boolean) => void }) {
+  const t = useTheme();
+  return (
+    <View style={{ paddingVertical: t.space(2), gap: t.space(2) }}>
+      <Txt style={{ lineHeight: 20 }}>{label}</Txt>
+      <Rowed gap={2}>
+        <ResultButton label="Yes" active={value === true} tone="pass" onPress={() => onChange(true)} />
+        <ResultButton label="No" active={value === false} tone="fail" onPress={() => onChange(false)} />
+      </Rowed>
+    </View>
   );
 }
 
