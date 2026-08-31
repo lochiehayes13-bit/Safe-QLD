@@ -5,7 +5,7 @@
  * an app already installed on a tech's phone upgrades cleanly.
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -172,5 +172,81 @@ export const MIGRATIONS: string[] = [
     notes        TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_defect_site ON defect(siteId, status);
+  `,
+
+  // v2 — Safe QLD baseline data, timesheets and the device catalogue
+  `
+  CREATE TABLE IF NOT EXISTS baseline (
+    id                      TEXT PRIMARY KEY NOT NULL,
+    siteId                  TEXT NOT NULL REFERENCES site(id) ON DELETE CASCADE,
+    premisesName            TEXT NOT NULL DEFAULT '',
+    premisesAddress         TEXT NOT NULL DEFAULT '',
+    installType             TEXT NOT NULL DEFAULT '',
+    alterationDetails       TEXT NOT NULL DEFAULT '',
+    systemType              TEXT NOT NULL DEFAULT '',
+    owsAmplifier            TEXT NOT NULL DEFAULT '',
+    monitoringProvider      TEXT NOT NULL DEFAULT '',
+    speakerCircuits         TEXT NOT NULL DEFAULT '[]',
+    equipment               TEXT NOT NULL DEFAULT '{}',
+    fullAlarmCurrentA       TEXT NOT NULL DEFAULT '',
+    quiescentCurrentA       TEXT NOT NULL DEFAULT '',
+    primaryPowerV           TEXT NOT NULL DEFAULT '',
+    batteryVoltage          TEXT NOT NULL DEFAULT '',
+    batteryAh               TEXT NOT NULL DEFAULT '',
+    batteryStandbyHours     TEXT NOT NULL DEFAULT '',
+    batteryManufactureDate  TEXT NOT NULL DEFAULT '',
+    batteryInstallDate      TEXT NOT NULL DEFAULT '',
+    confirmations           TEXT NOT NULL DEFAULT '{}',
+    zoneResults             TEXT NOT NULL DEFAULT '[]',
+    testerNames             TEXT NOT NULL DEFAULT '',
+    testDate                TEXT NOT NULL DEFAULT '',
+    createdAt               TEXT NOT NULL,
+    updatedAt               TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_baseline_site ON baseline(siteId);
+
+  CREATE TABLE IF NOT EXISTS timesheet (
+    id                 TEXT PRIMARY KEY NOT NULL,
+    employeeName       TEXT NOT NULL DEFAULT '',
+    vehicleRego        TEXT NOT NULL DEFAULT '',
+    kilometerReading   TEXT NOT NULL DEFAULT '',
+    weekStarting       TEXT NOT NULL,
+    entries            TEXT NOT NULL DEFAULT '[]',
+    employeeSignature  TEXT,
+    managerName        TEXT NOT NULL DEFAULT '',
+    checkedBy          TEXT NOT NULL DEFAULT '',
+    status             TEXT NOT NULL DEFAULT 'draft',
+    createdAt          TEXT NOT NULL,
+    updatedAt          TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_timesheet_week ON timesheet(weekStarting DESC);
+
+  CREATE TABLE IF NOT EXISTS catalogue_item (
+    id            TEXT PRIMARY KEY NOT NULL,
+    partNumber    TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    brand         TEXT NOT NULL,
+    supplier      TEXT,
+    category      TEXT NOT NULL DEFAULT 'other',
+    subcategory   TEXT,
+    description   TEXT,
+    voltage       TEXT,
+    quiescentMa   REAL,
+    alarmMa       REAL,
+    protocol      TEXT,
+    dbAt1m        REAL,
+    ipRating      TEXT,
+    standards     TEXT,
+    notes         TEXT,
+    sourceUrl     TEXT,
+    confidence    TEXT NOT NULL DEFAULT 'medium',
+    /* Lowercased haystack of part number, name, brand and description, so
+       search is a single indexed LIKE rather than four ORed columns. */
+    searchText    TEXT NOT NULL DEFAULT ''
+  );
+  CREATE INDEX IF NOT EXISTS idx_cat_search ON catalogue_item(searchText);
+  CREATE INDEX IF NOT EXISTS idx_cat_brand ON catalogue_item(brand, category);
+  CREATE INDEX IF NOT EXISTS idx_cat_category ON catalogue_item(category);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_cat_unique ON catalogue_item(brand, partNumber);
   `,
 ];

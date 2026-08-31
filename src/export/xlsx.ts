@@ -11,7 +11,16 @@ import { createZip, toBase64, utf8Bytes, type ZipEntry } from './zip';
 
 export type CellValue = string | number | boolean | null | undefined;
 
-export type CellStyle = 'default' | 'header' | 'title' | 'pass' | 'fail' | 'warn' | 'muted' | 'mono';
+export type CellStyle =
+  | 'default' | 'header' | 'title' | 'pass' | 'fail' | 'warn' | 'muted' | 'mono'
+  /** Yellow input cell, matching the "fill the yellow cells" convention. */
+  | 'input'
+  /** Section band heading. */
+  | 'section'
+  /** Field label in the left column. */
+  | 'field'
+  /** Company name banner. */
+  | 'banner';
 
 export interface Cell {
   v: CellValue;
@@ -29,6 +38,10 @@ export interface Sheet {
   freezeRows?: number;
   /** Turn on autofilter over the header row. */
   autoFilter?: boolean;
+  /** Merged ranges in A1 notation, e.g. "A2:C2". */
+  merges?: string[];
+  /** Row heights in points, keyed by 1-based row number. */
+  rowHeights?: Record<number, number>;
 }
 
 // Style indices must match the order written in buildStyles().
@@ -41,6 +54,10 @@ const STYLE_INDEX: Record<CellStyle, number> = {
   warn: 5,
   muted: 6,
   mono: 7,
+  input: 8,
+  section: 9,
+  field: 10,
+  banner: 11,
 };
 
 function esc(s: string): string {
@@ -92,6 +109,7 @@ function buildSheetXml(sheet: Sheet): string {
 
   sheet.rows.forEach((row, r) => {
     maxCols = Math.max(maxCols, row.length);
+    const height = sheet.rowHeights?.[r + 1];
     const cells: string[] = [];
     row.forEach((raw, c) => {
       const cell = normaliseCell(raw);
@@ -108,7 +126,8 @@ function buildSheetXml(sheet: Sheet): string {
         cells.push(`<c r="${ref}"${sAttr} t="inlineStr"><is><t xml:space="preserve">${esc(String(v))}</t></is></c>`);
       }
     });
-    rows.push(`<row r="${r + 1}">${cells.join('')}</row>`);
+    const heightAttr = height ? ` ht="${height}" customHeight="1"` : '';
+    rows.push(`<row r="${r + 1}"${heightAttr}>${cells.join('')}</row>`);
   });
 
   const cols = sheet.colWidths?.length
@@ -127,8 +146,15 @@ function buildSheetXml(sheet: Sheet): string {
   const lastCol = colName(Math.max(0, maxCols - 1));
   const filter = sheet.autoFilter && sheet.rows.length > 1 ? `<autoFilter ref="A1:${lastCol}${lastRow}"/>` : '';
 
+  // mergeCells must follow sheetData and, per the schema, precede autoFilter.
+  const merges = sheet.merges?.length
+    ? `<mergeCells count="${sheet.merges.length}">${sheet.merges
+        .map((ref) => `<mergeCell ref="${esc(ref)}"/>`)
+        .join('')}</mergeCells>`
+    : '';
+
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${freeze}${cols}<sheetData>${rows.join('')}</sheetData>${filter}</worksheet>`;
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${freeze}${cols}<sheetData>${rows.join('')}</sheetData>${merges}${filter}</worksheet>`;
 }
 
 function buildStyles(): string {
@@ -136,27 +162,31 @@ function buildStyles(): string {
   // fills: 0 none, 1 gray125 (required), 2 header, 3 pass, 4 fail, 5 warn
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-<fonts count="5">
+<fonts count="7">
 <font><sz val="11"/><name val="Calibri"/></font>
 <font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
 <font><b/><sz val="14"/><name val="Calibri"/></font>
 <font><sz val="11"/><color rgb="FF808080"/><name val="Calibri"/></font>
 <font><sz val="10"/><name val="Consolas"/></font>
+<font><b/><sz val="12"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
+<font><b/><sz val="16"/><color rgb="FFC00000"/><name val="Calibri"/></font>
 </fonts>
-<fills count="6">
+<fills count="8">
 <fill><patternFill patternType="none"/></fill>
 <fill><patternFill patternType="gray125"/></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FF333F50"/><bgColor indexed="64"/></patternFill></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FFD4EDDA"/><bgColor indexed="64"/></patternFill></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FFF8D7DA"/><bgColor indexed="64"/></patternFill></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FFFFF3CD"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFC00000"/><bgColor indexed="64"/></patternFill></fill>
 </fills>
 <borders count="2">
 <border><left/><right/><top/><bottom/><diagonal/></border>
 <border><left style="thin"><color rgb="FFD0D0D0"/></left><right style="thin"><color rgb="FFD0D0D0"/></right><top style="thin"><color rgb="FFD0D0D0"/></top><bottom style="thin"><color rgb="FFD0D0D0"/></bottom><diagonal/></border>
 </borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="8">
+<cellXfs count="12">
 <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
 <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
 <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
@@ -165,6 +195,10 @@ function buildStyles(): string {
 <xf numFmtId="0" fontId="0" fillId="5" borderId="1" xfId="0" applyFill="1" applyBorder="1"/>
 <xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>
 <xf numFmtId="0" fontId="4" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+<xf numFmtId="49" fontId="0" fillId="6" borderId="1" xfId="0" applyNumberFormat="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="5" fillId="7" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="6" fillId="0" borderId="0" xfId="0" applyFont="1"/>
 </cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;
