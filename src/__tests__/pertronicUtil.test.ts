@@ -32,6 +32,8 @@ const LIVE = [
   'L01D004=TYPE:----',
   'L01D005=CompositeDeviceData:0|0 TYPE:VES Z:19 F:DZ S:0 AVF:OFF DESC:"MASD 1 ALERT" Out:L01M023 AAF:0',
   'L01D006=CompositeDeviceData:0|0 TYPE:SW_H Z:0 F:H S:0 AVF:OFF DESC:"SPARE" Out: AAF:0',
+  'L01D007=CompositeDeviceData:0|0 TYPE:SW3 Z:0 F:H S:0 AVF:OFF DESC:"3-WAY SWITCH" Out: AAF:0',
+  'L01D008=CompositeDeviceData:0|0 TYPE:ISO Z:0 F:H S:0 AVF:OFF DESC:"ACF ISOLATE" Out: AAF:0',
   'L01M001=CompositeDeviceData:0|0 TYPE:WRN Z:11 F:H S:0 AVF:OFF DESC:"EXTERNAL PLANT ROOM STROBE" Out: AAF:0',
   'L01M021=CompositeDeviceData:0|0 TYPE:ACF Z:0 F:H S:0 AVF:OFF DESC:"MSSB - 1 FIRE TRIP" Out: AAF:0',
   'L01M023=CompositeDeviceData:0|0 TYPE:RLYM Z:0 F:H S:0 AVF:OFF DESC:"SPARE RELAY" Out: AAF:0',
@@ -167,8 +169,8 @@ describe('reading a site', () => {
     expect(spare.unused).toBe(true);
     expect(spare.deviceType).toBe('unknown');
     expect(spare.deviceTypeRaw).toBeUndefined();
-    // Eight addresses carry a device; the two `----` rows do not.
-    expect(points.filter((p) => !p.unused)).toHaveLength(8);
+    // Ten addresses carry a device; the two `----` rows do not.
+    expect(points.filter((p) => !p.unused)).toHaveLength(10);
     expect(points.filter((p) => p.unused)).toHaveLength(2);
   });
 
@@ -187,9 +189,55 @@ describe('reading a site', () => {
     expect(c().panels[0]!.points.find((p) => p.pointRef === 'L01M001')!.deviceTypeRaw).toMatch(/^WRN/);
   });
 
-  it('names the codes it does not know instead of guessing at them', () => {
-    expect(c().panels[0]!.points.find((p) => p.pointRef === 'L01D006')!.deviceType).toBe('unknown');
-    expect(c().warnings.join(' ')).toMatch(/SW_H \(1\)/);
+  it('gives every device the vendor\'s own name for it', () => {
+    // The code alone tells a technician nothing. "MS12" is meaningless at a
+    // panel; "MS12 — M210E-CZR" is a module they can go and find.
+    const raw = (ref: string) => c().panels[0]!.points.find((p) => p.pointRef === ref)!.deviceTypeRaw;
+    expect(raw('L01D001')).toBe('OPT — Optical detector (device address)');
+    expect(raw('L01D006')).toBe('SW_H — Switch Input (Hidden) (device address)');
+    expect(raw('L01M021')).toBe('ACF — Ancillary Control Facility (module address)');
+  });
+
+  it('classes the four switch-input flavours as the one thing they are', () => {
+    // SW, SW3, SW_H and ISO are all a monitored switch; the suffix says how
+    // the panel presents it, not what is wired to it.
+    const t = (ref: string) => c().panels[0]!.points.find((p) => p.pointRef === ref)!.deviceType;
+    expect(t('L01D006')).toBe('module-input');
+    expect(t('L01D007')).toBe('module-input');
+    expect(t('L01D008')).toBe('module-input');
+  });
+
+  it('does not class a disable input as a loop isolator', () => {
+    // FireUtils captions ISO "Switch Input (Disable)". In this app 'isolator'
+    // means a short-circuit isolator on the loop, which is a different device
+    // with a different test — and one that would then appear on a service
+    // sheet that has none.
+    expect(c().panels[0]!.points.find((p) => p.pointRef === 'L01D008')!.deviceType).not.toBe('isolator');
+  });
+
+  it('reports a code that is not in the vocabulary at all', () => {
+    const withUnknown = TEXT.replace(
+      'L01D006=CompositeDeviceData:0|0 TYPE:SW_H',
+      'L01D006=CompositeDeviceData:0|0 TYPE:ZZTOP',
+    );
+    const c2 = parsePertronicUtilText(withUnknown);
+    expect(c2.warnings.join(' ')).toMatch(/ZZTOP \(1\)/);
+    expect(c2.panels[0]!.points.find((p) => p.pointRef === 'L01D006')!.deviceType).toBe('unknown');
+  });
+
+  it('does not report a code whose class is deliberately not claimed', () => {
+    // "Plant" and "M221E" are named but their function is not stated, so they
+    // import as unknown on purpose. Warning about them on every import would
+    // teach the reader to skip the warning that does matter.
+    const withPlant = TEXT.replace(
+      'L01D006=CompositeDeviceData:0|0 TYPE:SW_H',
+      'L01D006=CompositeDeviceData:0|0 TYPE:PLNT',
+    );
+    const c2 = parsePertronicUtilText(withPlant);
+    expect(c2.warnings.join(' ')).not.toMatch(/not in the vocabulary/i);
+    const point = c2.panels[0]!.points.find((p) => p.pointRef === 'L01D006')!;
+    expect(point.deviceType).toBe('unknown');
+    expect(point.deviceTypeRaw).toMatch(/PLNT — Plant/);
   });
 
   it('keeps the module and device address spaces apart', () => {

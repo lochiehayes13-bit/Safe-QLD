@@ -169,7 +169,7 @@ spreadsheet reader.
 
 ## Testing
 
-696 tests, run without a native toolchain:
+700 tests, run without a native toolchain:
 
 ```bash
 npm test
@@ -232,8 +232,12 @@ quietly importing less than it appears to:
   with an unknown type and the key preserved. Guessing "smoke detector" from a
   key would put an invented device on a service sheet.
 - **Notifier** does not record the panel model anywhere in the file.
-- **Pertronic** names most device types plainly; the ones not in the mapping
-  are reported by code and count rather than guessed at.
+- **Pertronic** writes a short type mnemonic, and FireUtils captions the same
+  mnemonics in its device picker. Both halves are kept, so an unmapped code
+  still reads as `MS12 — M210E-CZR` rather than `MS12`. Where the caption is a
+  part number rather than a function, the class stays unknown on purpose — a
+  wrong default test method is worse than none. A code absent from the
+  vocabulary entirely is reported by code and count.
 - **`.NCF`** keeps its devices in a `.pcf` that has no readable structure, so
   only the site and zone list come across.
 - **Notifier `.accdb`** exports carry a database password, which encrypts the

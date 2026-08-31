@@ -26,29 +26,78 @@ const PARSER_ID = 'pertronic-util@1';
 const REFERENCE_BANNER = /Start of Reference Panel Config/i;
 
 /**
- * Device type codes, mapped only where the panel's own vocabulary is
- * unambiguous.
+ * The panel's device type vocabulary.
  *
- * `ACF` is the AS 1670 term for an ancillary control facility, so an output.
- * `VES` is mapped to aspirating on the strength of the data rather than the
- * three letters: every VES point in a real file names the aspirating unit it
- * monitors ("MASD 1 ALERT", "MASD 2 ACTION"), and the test method that follows
- * from aspirating — smoke at the sampling point — is the right one for them.
+ * `TYPE:` in a device record carries a short mnemonic, and FireUtils shows the
+ * same mnemonics in its Device Type Selector with a caption under each one.
+ * Those captions are the authority here, so both halves are recorded: the
+ * vendor's own name for the device, and the class it maps to.
  *
- * Codes not listed here are left unknown and reported, rather than guessed at.
+ * Keeping the name matters even where the class is unknown. "MS12" on a
+ * service sheet tells a technician nothing; "MS12 (M210E-CZR)" tells them
+ * which module to go and look at. So an unmapped code is still better
+ * described than it was.
+ *
+ * `type: 'unknown'` is a deliberate answer, not a gap to be filled in later.
+ * The class drives the default test method, and a wrong one is worse than
+ * none — a technician handed "smoke aerosol" against a plant interface has
+ * been told something false about the building.
  */
-const TYPE_CODES: Record<string, DeviceType> = {
-  OPT: 'smoke-photo',
-  HEAT: 'heat',
-  MCP: 'mcp',
-  VES: 'aspirating',
-  ACF: 'module-output',
-  RLYM: 'relay',
-  MON: 'module-input',
-  SW: 'module-input',
-  // WRN is a warning device but not which kind; the description says whether
-  // it is a sounder or a strobe, so it is resolved from there below.
-  WRN: 'sounder',
+interface TypeCode {
+  /** FireUtils' own caption for this device. */
+  name: string;
+  type: DeviceType;
+}
+
+const TYPE_CODES: Record<string, TypeCode> = {
+  // --- Detectors -------------------------------------------------------
+  OPT: { name: 'Optical detector', type: 'smoke-photo' },
+  HEAT: { name: 'Heat detector', type: 'heat' },
+
+  // --- Input modules, as captioned in the Device Type Selector ---------
+  MCP: { name: 'Manual Callpoint', type: 'mcp' },
+  // Four flavours of the same thing: a monitored switch. The suffix says how
+  // the panel presents it, not what is wired to it.
+  SW: { name: 'Switch Input', type: 'module-input' },
+  SW3: { name: 'Switch Input (3-way)', type: 'module-input' },
+  SW_H: { name: 'Switch Input (Hidden)', type: 'module-input' },
+  // Captioned "Switch Input (Disable)" — an input that disables something.
+  // Emphatically not a loop isolator, which is what 'isolator' means here.
+  ISO: { name: 'Switch Input (Disable)', type: 'module-input' },
+  MON: { name: 'Monitor', type: 'module-input' },
+  ZMU: { name: 'Zone Monitor Unit', type: 'module-input' },
+  '8-LPRS': { name: '8 x Loop Responder', type: 'module-input' },
+  '1-LPRS': { name: '1 x Loop Responder', type: 'module-input' },
+  SPR: { name: 'Sprinkler Input', type: 'sprinkler-flow' },
+  FSW: { name: 'Flow Switch', type: 'sprinkler-flow' },
+  // A pressure switch, but the file does not say which pressure — a sprinkler
+  // alarm line, a pump start, or dry-system air are all written the same way,
+  // and they are not tested the same way. Left as the monitored input it is.
+  PSW: { name: 'Pressure Switch', type: 'module-input' },
+  VMD: { name: 'Valve Monitor', type: 'sprinkler-valve' },
+  BMIF: { name: 'Beam Interface', type: 'beam' },
+  // Confirmed by the vendor's own caption. The real file agreed: every VES
+  // point names the aspirating unit it monitors ("MASD 1 ALERT").
+  VES: { name: 'VESDA', type: 'aspirating' },
+  // Fan control takes a status input and drives the fan, so it is both.
+  FANC: { name: 'Fan Controller', type: 'module-io' },
+  FCSU: { name: 'Fan Control Switch Unit', type: 'module-io' },
+
+  // --- Output modules --------------------------------------------------
+  // Ancillary Control Facility, the AS 1670 term. Real descriptions on these
+  // were "BMS - ALARM", "GAS PANEL FIRE TRIP", "MSSB - 1 FIRE TRIP".
+  ACF: { name: 'Ancillary Control Facility', type: 'module-output' },
+  RLYM: { name: 'Relay Module', type: 'relay' },
+  // A warning device, but not which kind — the description says whether it is
+  // a sounder or a strobe, so it is resolved from there below.
+  WRN: { name: 'Warning device', type: 'sounder' },
+
+  // --- Named by part number, so the class is not claimed ----------------
+  MS12: { name: 'M210E-CZR (M512)', type: 'unknown' },
+  M500DMR: { name: 'M500DMR', type: 'unknown' },
+  M221E: { name: 'M221E', type: 'unknown' },
+  SIP: { name: 'Sub-Indicator Panel', type: 'unknown' },
+  PLNT: { name: 'Plant', type: 'unknown' },
 };
 
 /** Codes whose description is a better guide than the code itself. */
@@ -226,17 +275,20 @@ export function parsePertronicUtilText(text: string, fileName = ''): ParsedConfi
     // "device" on the panel.
     const fitted = code.length > 0 && !/^-+$/.test(code);
 
+    const known = fitted ? TYPE_CODES[code] : undefined;
     let deviceType: DeviceType = 'unknown';
     if (fitted) {
-      const mapped = TYPE_CODES[code];
       if (DESCRIPTION_WINS.has(code)) {
         const fromText = normaliseDeviceType(text);
-        deviceType = fromText !== 'unknown' ? fromText : mapped ?? 'unknown';
-      } else if (mapped) {
-        deviceType = mapped;
-      } else {
-        unmappedTypes.set(code, (unmappedTypes.get(code) ?? 0) + 1);
+        deviceType = fromText !== 'unknown' ? fromText : known?.type ?? 'unknown';
+      } else if (known) {
+        deviceType = known.type;
       }
+      // A code with no entry at all is reported. One that is known but whose
+      // class is deliberately not claimed is not — that is a settled answer,
+      // not a gap, and reporting it every import would train the reader to
+      // ignore the warning.
+      if (!known) unmappedTypes.set(code, (unmappedTypes.get(code) ?? 0) + 1);
     }
 
     if (text) labelByRef.set(ref, text);
@@ -248,7 +300,11 @@ export function parsePertronicUtilText(text: string, fileName = ''): ParsedConfi
       text,
       // The D/M distinction is part of the address, not decoration: a loop can
       // carry both L01D007 and L01M007 and they are different devices.
-      deviceTypeRaw: fitted ? `${code} (${at.kind === 'D' ? 'device' : 'module'} address)` : undefined,
+      // The vendor's own caption where there is one, so an unmapped code still
+      // names something a technician can go and look at.
+      deviceTypeRaw: fitted
+        ? `${code}${known ? ` — ${known.name}` : ''} (${at.kind === 'D' ? 'device' : 'module'} address)`
+        : undefined,
       deviceType,
       zoneNumber: Number.isFinite(zoneNumber) && zoneNumber > 0 ? zoneNumber : undefined,
       unused: !fitted,
@@ -261,8 +317,9 @@ export function parsePertronicUtilText(text: string, fileName = ''): ParsedConfi
   if (unmappedTypes.size) {
     const listed = [...unmappedTypes].sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c} (${n})`).join(', ');
     warnings.push(
-      `Device type codes not in the mapping were left as unknown and kept verbatim: ${listed}. ` +
-      `Tell us what they mean on this panel family and they will be recognised.`,
+      `Device type codes not in the vocabulary were left as unknown and kept verbatim: ${listed}. ` +
+      `They appear in FireUtils' Device Type Selector with a caption under each icon — send that ` +
+      `and they will be recognised.`,
     );
   }
 
