@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { listSiteSummaries, listDefects, type SiteSummary } from '@/db/repo';
+import { listSiteSummaries, listDefects, defectsAwaitingNotice, type SiteSummary } from '@/db/repo';
 import { listJobs, listImpairments, listPromises, pendingSyncCount, restockNeeded, impairmentElapsedMs, type ImpairmentRecord, type JobRecord, type Promise_ } from '@/db/opsRepo';
 import { queryAssets, recurringFailures, type RecurringFailure } from '@/db/assetRepo';
 import type { Defect } from '@/domain/types';
@@ -28,10 +28,11 @@ export default function TodayScreen() {
   const [pending, setPending] = useState(0);
   const [dueAssets, setDueAssets] = useState(0);
   const [recurring, setRecurring] = useState<RecurringFailure[]>([]);
+  const [notices, setNotices] = useState<Defect[]>([]);
 
   const load = useCallback(async () => {
     const today = new Date().toISOString().slice(0, 10);
-    const [j, s, d, imp, pr, rs, pc, due, rec] = await Promise.all([
+    const [j, s, d, imp, pr, rs, pc, due, rec, nt] = await Promise.all([
       listJobs({ limit: 50 }),
       listSiteSummaries(),
       listDefects(),
@@ -41,10 +42,11 @@ export default function TodayScreen() {
       pendingSyncCount(),
       queryAssets({ dueBefore: today, limit: 500 }),
       recurringFailures(undefined, 3),
+      defectsAwaitingNotice(),
     ]);
     setJobs(j); setSites(s); setDefects(d); setImpairments(imp);
     setPromises(pr); setRestock(rs.length); setPending(pc);
-    setDueAssets(due.length); setRecurring(rec);
+    setDueAssets(due.length); setRecurring(rec); setNotices(nt);
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
@@ -70,6 +72,23 @@ export default function TodayScreen() {
       </Rowed>
 
       {nextJob ? <NextJobCard job={nextJob} /> : null}
+
+      {notices.length ? (
+        <Card onPress={() => router.push({ pathname: '/work/notice/[id]', params: { id: notices[0]!.id } })}>
+          <Rowed gap={3}>
+            <MaterialCommunityIcons name="clock-alert-outline" size={22} color={t.color.fail} />
+            <View style={{ flex: 1 }}>
+              <Txt weight="700" tone="fail">
+                {notices.length} critical defect notice{notices.length === 1 ? '' : 's'} not yet issued
+              </Txt>
+              <Txt size="sm" tone="muted" numberOfLines={2}>
+                The occupier has to be given written notice within 24 hours of the maintenance.
+              </Txt>
+            </View>
+            <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
+          </Rowed>
+        </Card>
+      ) : null}
 
       {promises.length ? (
         <Card onPress={() => router.push('/work/promises')}>

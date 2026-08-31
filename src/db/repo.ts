@@ -423,6 +423,27 @@ export async function listDefects(siteId?: string, status?: Defect['status']): P
       CASE severity WHEN 'critical' THEN 0 ELSE 1 END, raisedAt DESC`,
     ...args,
   );
+  return rows.map((r) => ({
+    ...r,
+    photos: safeParseArray(r.photos),
+    qldLimbInoperable: (r as unknown as { qldLimbInoperable?: number }).qldLimbInoperable === 1,
+    qldLimbAdverseImpact: (r as unknown as { qldLimbAdverseImpact?: number }).qldLimbAdverseImpact === 1,
+  }));
+}
+
+/**
+ * Critical defects whose statutory notice has not been issued.
+ *
+ * The 24 hour clock runs from the maintenance, so this is what has to be dealt
+ * with before the end of the day rather than at the next visit.
+ */
+export async function defectsAwaitingNotice(): Promise<Defect[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<Omit<Defect, 'photos'> & { photos: string }>(
+    `SELECT * FROM defect
+     WHERE severity = 'critical' AND noticeIssuedAt IS NULL AND status = 'open'
+     ORDER BY raisedAt`,
+  );
   return rows.map((r) => ({ ...r, photos: safeParseArray(r.photos) }));
 }
 
@@ -442,10 +463,15 @@ export async function updateDefect(id: string, patch: Partial<Defect>): Promise<
   const db = await getDb();
   const sets: string[] = [];
   const vals: SqlValue[] = [];
-  for (const f of ['location', 'description', 'severity', 'status', 'rectifiedAt', 'notes'] as const) {
+  for (const f of ['location', 'description', 'severity', 'status', 'rectifiedAt', 'notes',
+    'defectCode', 'as1851Class', 'noticeIssuedAt', 'noticeRecipient', 'verbalNotifiedAt',
+    'verbalNotifiedTo', 'rectificationDueAt', 'interimMeasures', 'extentOfImpairment'] as const) {
     if (patch[f] !== undefined) { sets.push(`${f} = ?`); vals.push((patch[f] as string | undefined) ?? null); }
   }
   if (patch.photos !== undefined) { sets.push('photos = ?'); vals.push(JSON.stringify(patch.photos)); }
+  for (const f of ['qldLimbInoperable', 'qldLimbAdverseImpact'] as const) {
+    if (patch[f] !== undefined) { sets.push(`${f} = ?`); vals.push(patch[f] ? 1 : 0); }
+  }
   if (!sets.length) return;
   await db.runAsync(`UPDATE defect SET ${sets.join(', ')} WHERE id = ?`, ...vals, id);
 }

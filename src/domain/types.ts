@@ -323,6 +323,27 @@ export interface Defect {
   /** Local file URIs of attached photos. */
   photos: string[];
   notes?: string;
+
+  // --- Queensland statutory fields -----------------------------------------
+  /** The library code this defect was raised from. */
+  defectCode?: string;
+  /** AS 1851 classification, which is not the same test as the Queensland one. */
+  as1851Class?: 'critical' | 'non-critical' | 'non-conformance';
+  /** Limb (a): the defect renders the installation inoperable. */
+  qldLimbInoperable?: boolean;
+  /** Limb (b): reasonably likely to significantly affect occupant safety. */
+  qldLimbAdverseImpact?: boolean;
+  /** When the written notice was given to the occupier. */
+  noticeIssuedAt?: string;
+  noticeRecipient?: string;
+  /** Verbal notification before leaving site. */
+  verbalNotifiedAt?: string;
+  verbalNotifiedTo?: string;
+  /** One month from the maintenance. */
+  rectificationDueAt?: string;
+  interimMeasures?: string;
+  /** Zones, floors or devices affected — supports the limb (b) judgement. */
+  extentOfImpairment?: string;
 }
 
 // ---------------------------------------------------------------------------

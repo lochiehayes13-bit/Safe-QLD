@@ -349,3 +349,26 @@ CREATE TABLE IF NOT EXISTS sync_queue (
 );
 CREATE INDEX IF NOT EXISTS idx_sync_status ON sync_queue(status, createdAt);
 `;
+
+/**
+ * Schema v4 — Queensland statutory fields on a defect.
+ *
+ * The Queensland critical defect test has two limbs and is not the same as the
+ * AS 1851 definition, so both limbs are stored rather than one being inferred.
+ * The notice and rectification clocks are stored alongside, because "when was
+ * the occupier told" is the question that gets asked afterwards.
+ */
+export const MIGRATION_V4 = `
+ALTER TABLE defect ADD COLUMN qldLimbInoperable INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE defect ADD COLUMN qldLimbAdverseImpact INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE defect ADD COLUMN defectCode TEXT;
+ALTER TABLE defect ADD COLUMN as1851Class TEXT NOT NULL DEFAULT 'non-critical';
+ALTER TABLE defect ADD COLUMN noticeIssuedAt TEXT;
+ALTER TABLE defect ADD COLUMN noticeRecipient TEXT;
+ALTER TABLE defect ADD COLUMN verbalNotifiedAt TEXT;
+ALTER TABLE defect ADD COLUMN verbalNotifiedTo TEXT;
+ALTER TABLE defect ADD COLUMN rectificationDueAt TEXT;
+ALTER TABLE defect ADD COLUMN interimMeasures TEXT;
+ALTER TABLE defect ADD COLUMN extentOfImpairment TEXT;
+CREATE INDEX IF NOT EXISTS idx_defect_notice ON defect(noticeIssuedAt, raisedAt DESC);
+`;
