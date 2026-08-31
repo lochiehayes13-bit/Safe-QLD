@@ -115,6 +115,28 @@ describe('service routines', () => {
     }
   });
 
+  it('covers the long intervals, not just the ones that come around often', () => {
+    // Five-yearly work is the most often skipped, because the gap outlasts the
+    // technician, the contract and usually the building manager. The frequency
+    // was declared and labelled here long before any routine used it, which is
+    // exactly the kind of gap that looks like coverage.
+    const fiveYearly = SERVICE_ROUTINES.filter((r) => r.frequency === 'five-yearly');
+    expect(fiveYearly.length).toBeGreaterThan(0);
+    for (const system of ['extinguisher', 'hose-reel', 'hydrant', 'sprinkler', 'pump'] as const) {
+      expect({ system, covered: fiveYearly.some((r) => r.system === system) })
+        .toEqual({ system, covered: true });
+    }
+  });
+
+  it('flags the long-interval figures as needing the standard, not this file', () => {
+    // A five-yearly test pressure or sample size is exactly the sort of figure
+    // that must not be trusted from here.
+    for (const r of SERVICE_ROUTINES.filter((x) => x.frequency === 'five-yearly')) {
+      expect({ routine: r.id, anyVerified: r.tests.some((t) => t.verify) })
+        .toEqual({ routine: r.id, anyVerified: true });
+    }
+  });
+
   it('records where every requirement comes from', () => {
     // The app promises never to blur a standard, a manufacturer instruction and
     // an internal procedure. That promise is only kept if each one says which.

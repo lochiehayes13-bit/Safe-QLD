@@ -560,6 +560,167 @@ export const SERVICE_ROUTINES: ServiceRoutine[] = [
       },
     ],
   },
+  // --------------------------------------------------------------- five-yearly
+  //
+  // The long-interval work. These matter disproportionately: they are the
+  // activities most often skipped, because a five-year gap outlasts the
+  // technician, the contract and often the building manager. Every interval and
+  // pressure here is flagged for verification — the specific figure belongs to
+  // the current standard or the cylinder, not to this file.
+  {
+    id: 'ext-five-yearly',
+    label: 'Extinguishers — five-yearly',
+    system: 'extinguisher',
+    frequency: 'five-yearly',
+    description: 'Pressure test, discharge and refill of portable equipment at its long interval, and replacement of anything beyond service life.',
+    sourceKind: 'standard',
+    sourceRef: 'AS 1851 — portable fire equipment, five-yearly activities',
+    tests: [
+      {
+        id: 'ext-5-01', section: 'Pressure test', label: 'Cylinder pressure tested or replaced', assetTypeId: 'extinguisher',
+        whatToDo: 'Confirm the cylinder has been pressure tested within its required interval, or replace it.',
+        whatToLookFor: 'Test date stamped or labelled on the cylinder, and the interval that applies to this type.',
+        failCriteria: 'Test overdue, unreadable, or absent.',
+        defectCode: 'EXT-EXT-003', sourceKind: 'standard', verify: true, photoRequired: true,
+      },
+      {
+        id: 'ext-5-02', section: 'Discharge', label: 'Discharged and refilled', assetTypeId: 'extinguisher',
+        whatToDo: 'Discharge, internally inspect, refill and recharge to the manufacturer\u2019s stated charge.',
+        measurementKey: 'Charged mass', measurementUnit: 'kg',
+        sourceKind: 'standard', verify: true,
+      },
+      {
+        id: 'ext-5-03', section: 'Service life', label: 'Within service life', assetTypeId: 'extinguisher',
+        whatToDo: 'Check age against the service life for the type and replace rather than retest where it is exceeded.',
+        failCriteria: 'Beyond service life, whatever the test result.',
+        defectCode: 'EXT-EXT-005', sourceKind: 'standard', verify: true,
+      },
+    ],
+  },
+  {
+    id: 'hose-reel-five-yearly',
+    label: 'Hose reels — five-yearly',
+    system: 'hose-reel',
+    frequency: 'five-yearly',
+    description: 'Hose pressure test and full deployment, which the shorter intervals do not cover.',
+    sourceKind: 'standard',
+    sourceRef: 'AS 1851 — fire hose reels, five-yearly activities',
+    tests: [
+      {
+        id: 'hr-5-01', section: 'Hose', label: 'Hose pressure tested', assetTypeId: 'hose-reel',
+        whatToDo: 'Pressure test the hose to the required test pressure and hold for the required period.',
+        measurementKey: 'Test pressure', measurementUnit: 'kPa',
+        whatToLookFor: 'Leaks, weeping at the couplings, bulging or delamination under pressure.',
+        sourceKind: 'standard', verify: true, photoRequired: true,
+      },
+      {
+        id: 'hr-5-02', section: 'Deployment', label: 'Fully deployed and rewound', assetTypeId: 'hose-reel',
+        whatToDo: 'Run the hose out to its full length, check along the whole run, then rewind without twists.',
+        whatToLookFor: 'Kinks, abrasion, perished sections, and whether the reel turns freely under load.',
+        failCriteria: 'Hose damaged anywhere along its length, or the reel binds.',
+        sourceKind: 'standard',
+      },
+      {
+        id: 'hr-5-03', section: 'Flow', label: 'Flow and nozzle performance', assetTypeId: 'hose-reel',
+        whatToDo: 'Measure flow at the nozzle at full deployment.',
+        measurementKey: 'Flow rate', measurementUnit: 'L/min',
+        sourceKind: 'standard', verify: true,
+      },
+    ],
+  },
+  {
+    id: 'hydrant-five-yearly',
+    label: 'Hydrants — five-yearly',
+    system: 'hydrant',
+    frequency: 'five-yearly',
+    description: 'Full flow and pressure test of the hydrant system, including the booster, at its long interval.',
+    sourceKind: 'standard',
+    sourceRef: 'AS 1851 — fire hydrant systems, five-yearly activities',
+    tests: [
+      {
+        id: 'hyd-5-01', section: 'Flow', label: 'System flow test at the hydraulically worst hydrant', assetTypeId: 'hydrant',
+        whatToDo: 'Flow the system at the hydraulically most disadvantaged outlet and record flow and residual pressure.',
+        measurementKey: 'Residual pressure', measurementUnit: 'kPa',
+        sourceKind: 'standard', verify: true, photoRequired: true,
+      },
+      {
+        id: 'hyd-5-02', section: 'Booster', label: 'Booster assembly tested', assetTypeId: 'booster',
+        whatToDo: 'Test the booster inlets, check the non-return valves and confirm the connection type matches what the brigade will arrive with.',
+        whatToLookFor: 'Blanks and caps present, threads undamaged, signage legible, access unobstructed.',
+        sourceKind: 'standard', photoRequired: true,
+      },
+      {
+        id: 'hyd-5-03', section: 'Valves', label: 'Isolation valves exercised through full travel', assetTypeId: 'hydrant',
+        whatToDo: 'Operate each isolation valve through its full travel and return it to the correct position.',
+        failCriteria: 'Valve seized, partly closed, or left other than as found.',
+        sourceKind: 'standard',
+      },
+    ],
+  },
+  {
+    id: 'sprinkler-five-yearly',
+    label: 'Sprinkler — five-yearly',
+    system: 'sprinkler',
+    frequency: 'five-yearly',
+    description: 'Internal pipework condition, head sampling and valve overhaul, none of which the shorter intervals reach.',
+    sourceKind: 'standard',
+    sourceRef: 'AS 1851 — automatic fire sprinkler systems, five-yearly activities',
+    tests: [
+      {
+        id: 'spr-5-01', section: 'Pipework', label: 'Internal pipework inspected for obstruction', assetTypeId: 'sprinkler-valve',
+        whatToDo: 'Open the system at the required points and inspect internally.',
+        whatToLookFor: 'Scale, corrosion products, foreign material, and any sign of microbiologically influenced corrosion.',
+        sourceKind: 'standard', verify: true, photoRequired: true,
+      },
+      {
+        id: 'spr-5-02', section: 'Heads', label: 'Head sample submitted for testing', assetTypeId: 'sprinkler-head',
+        whatToDo: 'Take the required sample of heads for laboratory testing and replace those removed.',
+        whatToLookFor: 'Heads showing corrosion, paint, loading or physical damage — sample those in preference.',
+        sourceKind: 'standard', verify: true,
+      },
+      {
+        id: 'spr-5-03', section: 'Valves', label: 'Alarm valve overhauled', assetTypeId: 'sprinkler-valve',
+        whatToDo: 'Strip, inspect and reassemble the alarm valve, replacing seats and seals as required.',
+        sourceKind: 'manufacturer', verify: true,
+      },
+      {
+        id: 'spr-5-04', section: 'Alarm', label: 'Flow alarm proved end to end after reassembly', assetTypeId: 'flow-switch',
+        whatToDo: 'Flow the test connection and confirm the alarm reaches the panel and the monitoring service.',
+        passCriteria: 'Alarm received at the panel and acknowledged by monitoring within the expected time.',
+        sourceKind: 'standard', verify: true,
+      },
+    ],
+  },
+  {
+    id: 'pump-five-yearly',
+    label: 'Fire pumps — five-yearly',
+    system: 'pump',
+    frequency: 'five-yearly',
+    description: 'Full-flow performance test against the pump curve, which the routine running tests do not establish.',
+    sourceKind: 'standard',
+    sourceRef: 'AS 1851 — fire pumpsets, five-yearly activities',
+    tests: [
+      {
+        id: 'pmp-5-01', section: 'Performance', label: 'Full flow test against the pump curve', assetTypeId: 'fire-pump',
+        whatToDo: 'Run the pump across its flow range and record pressure at each point, comparing against the commissioning curve.',
+        measurementKey: 'Duty point pressure', measurementUnit: 'kPa',
+        failCriteria: 'Performance fallen below the commissioning curve by more than the allowance.',
+        sourceKind: 'standard', verify: true, photoRequired: true,
+      },
+      {
+        id: 'pmp-5-02', section: 'Supply', label: 'Suction and supply verified at full flow', assetTypeId: 'water-tank',
+        whatToDo: 'Confirm the supply sustains full flow for the required duration without the level falling below the outlet.',
+        measurementKey: 'Duration sustained', measurementUnit: 'min',
+        sourceKind: 'standard', verify: true,
+      },
+      {
+        id: 'pmp-5-03', section: 'Controller', label: 'Controller sequence and changeover proved', assetTypeId: 'pump-controller',
+        whatToDo: 'Prove the start sequence, the changeover to the alternate supply and every alarm output.',
+        sourceKind: 'manufacturer', verify: true,
+      },
+    ],
+  },
+
 ];
 
 export function routinesForSystem(system: SystemKind): ServiceRoutine[] {
