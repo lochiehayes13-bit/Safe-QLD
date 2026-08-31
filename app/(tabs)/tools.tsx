@@ -72,6 +72,12 @@ const CALCULATORS: ToolDef[] = [
 
 const REFERENCE: ToolDef[] = [
   {
+    href: '/ask',
+    icon: 'help-circle-outline',
+    title: 'Ask Safe QLD',
+    body: 'Search everything the app holds — routines, defects, addressing, end-of-line — with the source on every answer.',
+  },
+  {
     href: '/scan',
     icon: 'qrcode-scan',
     title: 'Scan a tag',
