@@ -26,6 +26,7 @@ export type Container =
   | 'ole-compound'
   | 'gzip'
   | 'ms-access'
+  | 'zlib'
   | 'xml'
   | 'json'
   | 'plain-text'
@@ -42,6 +43,12 @@ export interface FileProbe {
   encoding: 'utf-8' | 'utf-16le' | 'utf-16be' | 'latin1' | 'binary';
   /** Proportion of bytes that are printable ASCII or common whitespace. */
   printableRatio: number;
+  /**
+   * True when the bytes are statistically indistinguishable from random, which
+   * means encrypted or already compressed. Either way there is no structure
+   * left in them to reverse-engineer.
+   */
+  randomLooking: boolean;
   lineCount: number;
   /**
    * Most likely field separator, with how concentrated the record shapes are:
@@ -65,7 +72,13 @@ export interface FileProbe {
   inner?: { name: string; probe: FileProbe };
 }
 
-const MAGIC: { bytes: number[]; container: Container; note: string }[] = [
+const MAGIC: {
+  bytes: number[];
+  container: Container;
+  note: string;
+  /** For a wrapper with a fixed-size header, where the payload starts. */
+  payloadAt?: number;
+}[] = [
   {
     bytes: [0x50, 0x4b, 0x03, 0x04],
     container: 'zip',
@@ -85,9 +98,66 @@ const MAGIC: { bytes: number[]; container: Container; note: string }[] = [
   {
     bytes: [0x00, 0x01, 0x00, 0x00, 0x53, 0x74, 0x61, 0x6e, 0x64, 0x61, 0x72, 0x64, 0x20, 0x4a, 0x65, 0x74],
     container: 'ms-access',
-    note: 'A Microsoft Access database. Readable with an MDB tool, and the table names usually map straight onto panel concepts.',
+    note: 'A Microsoft Access database in the older Jet format. Readable with an MDB tool, and the table names usually map straight onto panel concepts.',
   },
+  {
+    // The newer engine, which is what .accdb means. Worth its own entry: a
+    // 12 MB Notifier export was reported as "unknown binary" purely because
+    // this signature was missing, which is the least useful true statement
+    // available about a file whose format is named in its first sixteen bytes.
+    bytes: [0x00, 0x01, 0x00, 0x00, 0x53, 0x74, 0x61, 0x6e, 0x64, 0x61, 0x72, 0x64, 0x20, 0x41, 0x43, 0x45],
+    container: 'ms-access',
+    note: 'A Microsoft Access database in the ACE format (.accdb). Readable with an ACE-capable tool — unless it carries a database password, in which case the whole file past the header is encrypted.',
+  },
+  {
+    // Fusion's wireless translator status file: a four-byte tag, the
+    // uncompressed length, a checksum, then an ordinary zlib stream.
+    bytes: [0x73, 0x74, 0x73, 0x01],
+    container: 'zlib',
+    note: 'An "sts" wrapper: a twelve-byte header followed by a zlib stream. Decompress from byte 12 and probe the result.',
+    payloadAt: 12,
+  },
+  {
+    bytes: [0x78, 0x9c],
+    container: 'zlib',
+    note: 'A raw zlib stream. Decompress it and probe again.',
+  },
+  { bytes: [0x78, 0x01], container: 'zlib', note: 'A raw zlib stream. Decompress it and probe again.' },
+  { bytes: [0x78, 0xda], container: 'zlib', note: 'A raw zlib stream. Decompress it and probe again.' },
 ];
+
+/**
+ * Whether the bytes carry any structure at all.
+ *
+ * A byte histogram that matches a uniform distribution means the content is
+ * encrypted or compressed. This is worth measuring rather than eyeballing: the
+ * alternative is spending a day looking for record boundaries in a file that
+ * has none, which is exactly what a password-protected Access database invites
+ * — it announces its format in the header and then hands over 12 MB of noise.
+ *
+ * Chi-square over 255 degrees of freedom sits near 255 for random data and runs
+ * into the thousands for anything with repeated values, so the threshold is not
+ * a close call.
+ */
+export function looksRandom(bytes: Uint8Array): boolean {
+  // Skip any header, and cap the sample: a few tens of kilobytes settles this
+  // conclusively and there is no reason to walk a 12 MB file.
+  const start = Math.min(4096, Math.floor(bytes.length / 4));
+  const sample = bytes.subarray(start, start + 65536);
+  if (sample.length < 4096) return false;
+
+  const histogram = new Array<number>(256).fill(0);
+  for (let i = 0; i < sample.length; i++) histogram[sample[i]!]!++;
+
+  const expected = sample.length / 256;
+  let chiSquare = 0;
+  for (const count of histogram) chiSquare += ((count - expected) ** 2) / expected;
+
+  // 350 is comfortably above the spread of a genuinely uniform sample and far
+  // below anything with structure; the Access file measured 284 and the Ampac
+  // text file tens of thousands.
+  return chiSquare < 350;
+}
 
 function startsWith(bytes: Uint8Array, sig: number[]): boolean {
   if (bytes.length < sig.length) return false;
@@ -258,10 +328,13 @@ function assess(probe: Omit<FileProbe, 'assessment'>): string {
     case 'sqlite':
       return 'Readable without reverse engineering: open it and read the schema. Table and column names usually map straight onto zones, loops and devices.';
     case 'ms-access':
-      return 'A database rather than a format to decode. Export the tables and the structure will be self-describing.';
+      return probe.randomLooking
+        ? 'The header says Access, and everything after it is statistically indistinguishable from random — so the database carries a password and its contents are encrypted. Without that password there is nothing here to read, by any tool. Ask whoever exported it for an unprotected copy or a report export.'
+        : 'A database rather than a format to decode. Export the tables and the structure will be self-describing.';
     case 'zip':
       return 'Unpack it and probe the entries — a zip of XML or text is a straightforward parse once the wrapper is off.';
     case 'gzip':
+    case 'zlib':
       return 'Decompress and probe again; the result is likely text.';
     case 'xml':
       return 'Self-describing. Element names will name the concepts, and a parser is schema mapping rather than reverse engineering.';
@@ -272,7 +345,9 @@ function assess(probe: Omit<FileProbe, 'assessment'>): string {
     case 'plain-text':
       break;
     case 'unknown-binary':
-      return 'No recognised signature and largely unprintable. Reverse engineering this needs several sample files from the same site over time — the bytes that change are the data, and the ones that do not are structure.';
+      return probe.randomLooking
+        ? 'No recognised signature, and the bytes are statistically indistinguishable from random — so they are encrypted or already compressed. There is no structure left in them to find, and no number of sample files will change that; the only way in is the tool that wrote it.'
+        : 'No recognised signature and largely unprintable. Reverse engineering this needs several sample files from the same site over time — the bytes that change are the data, and the ones that do not are structure.';
   }
 
   const bits: string[] = [];
@@ -324,7 +399,7 @@ export function decodeForProbe(bytes: Uint8Array, encoding: FileProbe['encoding'
  * vendor choice worth a human looking at, or an archive bomb, and neither is
  * worth unwrapping automatically.
  */
-function unwrap(bytes: Uint8Array, container: Container, sampleLines: number):
+function unwrap(bytes: Uint8Array, container: Container, sampleLines: number, payloadAt = 0):
   { name: string; probe: FileProbe } | undefined {
   try {
     if (container === 'zip' && isZip(bytes)) {
@@ -332,8 +407,11 @@ function unwrap(bytes: Uint8Array, container: Container, sampleLines: number):
       if (!entry) return undefined;
       return { name: entry.name, probe: probeFile(entry.bytes, sampleLines, false) };
     }
-    if (container === 'gzip') {
-      return { name: '(decompressed)', probe: probeFile(inflate(bytes), sampleLines, false) };
+    if (container === 'gzip' || container === 'zlib') {
+      return {
+        name: '(decompressed)',
+        probe: probeFile(inflate(bytes.subarray(payloadAt)), sampleLines, false),
+      };
     }
   } catch {
     // A container that will not open is still worth reporting as a container;
@@ -344,7 +422,7 @@ function unwrap(bytes: Uint8Array, container: Container, sampleLines: number):
 }
 
 export function probeFile(bytes: Uint8Array, sampleLines = 40, unwrapContainers = true): FileProbe {
-  for (const { bytes: sig, container, note } of MAGIC) {
+  for (const { bytes: sig, container, note, payloadAt } of MAGIC) {
     if (startsWith(bytes, sig)) {
       const base: Omit<FileProbe, 'assessment'> = {
         byteLength: bytes.length,
@@ -353,12 +431,13 @@ export function probeFile(bytes: Uint8Array, sampleLines = 40, unwrapContainers 
         textual: false,
         encoding: 'binary',
         printableRatio: printableRatio(bytes),
+        randomLooking: looksRandom(bytes),
         lineCount: 0,
         sectionMarkers: [],
         repeatedTokens: [],
         head: [],
       };
-      const inner = unwrapContainers ? unwrap(bytes, container, sampleLines) : undefined;
+      const inner = unwrapContainers ? unwrap(bytes, container, sampleLines, payloadAt) : undefined;
       return {
         ...base,
         inner,
@@ -411,6 +490,10 @@ export function probeFile(bytes: Uint8Array, sampleLines = 40, unwrapContainers 
     textual,
     encoding: textual ? encoding : 'binary',
     printableRatio: ratio,
+    // Only asked of something that is not readable as text: a byte histogram
+    // of English prose is nowhere near uniform, so the question is meaningless
+    // for a text file and the answer would just be a confusing "no".
+    randomLooking: textual ? false : looksRandom(bytes),
     lineCount: lines.length,
     delimiter,
     sectionMarkers: textual ? detectSectionMarkers(lines) : [],

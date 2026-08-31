@@ -5,14 +5,14 @@ import { File } from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
-  FIELD_SPECS, PANEL_CATALOGUE, classifyFile, importTabular, previewTabular,
-  type ColumnMapping, type FieldKey, type PanelParser, type TabularPreview,
+  FIELD_SPECS, PANEL_CATALOGUE, classifyBytes, importTabular, previewTabular,
+  type ColumnMapping, type FieldKey, type ParserStatus, type TabularPreview,
 } from '@/parsers';
 import { decodePack, PackError } from '@/share/pack';
 import { probeFile, type FileProbe } from '@/parsers/probe';
 import { fromBase64 } from '@/export/zip';
 import { createSite, importParsedConfig, listSites } from '@/db/repo';
-import type { PanelBrand, Site } from '@/domain/types';
+import type { PanelBrand, ParsedConfig, Site } from '@/domain/types';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
 
@@ -24,6 +24,28 @@ import { Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, T
  * second is the one that matters — it means the app is useful on a panel nobody
  * has written a dedicated parser for.
  */
+/** How each parser status reads on the catalogue card. */
+const STATUS_LABEL: Record<ParserStatus, string> = {
+  native: 'Reads config directly',
+  export: 'Reads exports',
+  partial: 'Reads part of the file',
+  planned: 'Via CSV export',
+  unreadable: 'Cannot be read',
+};
+
+/** The brands whose own config files import without an export step. */
+const nativeBrands = [
+  ...new Set(PANEL_CATALOGUE.filter((p) => p.status === 'native').map((p) => p.brandLabel)),
+].join(', ');
+
+const STATUS_TONE: Record<ParserStatus, 'pass' | 'warn' | 'fail' | 'default'> = {
+  native: 'pass',
+  export: 'pass',
+  partial: 'warn',
+  planned: 'default',
+  unreadable: 'fail',
+};
+
 export default function ImportScreen() {
   const t = useTheme();
   const params = useLocalSearchParams<{ siteId?: string }>();
@@ -54,16 +76,36 @@ export default function ImportScreen() {
     setBusy(true);
     try {
       const file = new File(asset.uri);
-      // Read as text first; a pack is detected from its magic bytes either way.
-      const raw = await file.text();
-      const kind = classifyFile(asset.name, raw.slice(0, 400));
+      // Bytes first. Several of the formats read natively are binary — a
+      // SQLite site file, a zip — and decoding one of those to text to look at
+      // it destroys the thing being identified.
+      const bytes = new Uint8Array(await file.bytes());
+      const kind = classifyBytes(asset.name, bytes);
 
       if (kind.kind === 'pack') {
         await importPack(file, asset.name);
         return;
       }
 
-      // A panel format we read directly needs no column mapping.
+      // A binary vendor format read straight from the bytes.
+      if (kind.kind === 'native-binary' && kind.parser?.parseBytes) {
+        await importNative(kind.parser.parseBytes(bytes, asset.name), asset.name);
+        return;
+      }
+
+      // Recognised, and known to be unreadable. Say why, once, rather than
+      // leaving the tech to try again with the same file.
+      if (kind.kind === 'unreadable' && kind.parser) {
+        Alert.alert(
+          `${kind.parser.brandLabel} file`,
+          [kind.parser.limitation, kind.parser.howToExport].filter(Boolean).join('\n\n'),
+        );
+        return;
+      }
+
+      const raw = await file.text();
+
+      // A text panel format we read directly needs no column mapping.
       if (kind.kind === 'native' && kind.parser?.parse) {
         await importNative(kind.parser.parse(raw, asset.name), asset.name);
         return;
@@ -74,8 +116,7 @@ export default function ImportScreen() {
         // understood. A technician who has just pulled a config off a panel we
         // do not read yet is holding the one thing that would let us read it,
         // and "unsupported" gives them no reason to send it on.
-        const probe = probeFile(new Uint8Array(await file.bytes()));
-        setUnknown({ name: asset.name, probe });
+        setUnknown({ name: asset.name, probe: probeFile(bytes) });
         return;
       }
 
@@ -97,7 +138,7 @@ export default function ImportScreen() {
   };
 
   /** Writes a natively parsed vendor configuration straight in. */
-  const importNative = async (parsed: ReturnType<NonNullable<PanelParser['parse']>>, fileName: string) => {
+  const importNative = async (parsed: ParsedConfig, fileName: string) => {
     const targetSite = siteId ?? (await createSite({ name: parsed.siteName || fileName })).id;
     const res = await importParsedConfig(targetSite, parsed, 'config-import');
     const panel = parsed.panels[0];
@@ -201,7 +242,11 @@ export default function ImportScreen() {
             <Banner
               tone="info"
               title="What this reads"
-              body="A Safe QLD share pack (.sqld), or a device list exported as CSV, TSV or tab-separated text from any panel programming tool. Column names are matched automatically and you confirm them before anything is written."
+              body={
+                `Vendor configuration files directly for ${nativeBrands}. A Safe QLD share pack (.sqld). ` +
+                'Or a device list exported as CSV, TSV or tab-separated text from any panel programming tool — ' +
+                'column names are matched automatically and you confirm them before anything is written.'
+              }
             />
 
             <H2>Getting a list out of your panel software</H2>
@@ -209,12 +254,12 @@ export default function ImportScreen() {
               <Card key={p.id}>
                 <Rowed style={{ justifyContent: 'space-between' }}>
                   <Txt weight="700">{p.brandLabel}</Txt>
-                  <Chip
-                    label={p.status === 'native' ? 'Reads config directly' : p.status === 'export' ? 'Reads exports' : 'Via CSV export'}
-                    tone={p.status === 'planned' ? 'default' : 'pass'}
-                  />
+                  <Chip label={STATUS_LABEL[p.status]} tone={STATUS_TONE[p.status]} />
                 </Rowed>
-                <Txt size="sm" tone="muted">{p.models.join(', ')}</Txt>
+                {p.models.length ? <Txt size="sm" tone="muted">{p.models.join(', ')}</Txt> : null}
+                {p.limitation ? (
+                  <Txt size="sm" tone="warn" style={{ marginTop: t.space(1.5), lineHeight: 19 }}>{p.limitation}</Txt>
+                ) : null}
                 {p.howToExport ? (
                   <Txt size="sm" tone="faint" style={{ marginTop: t.space(1.5), lineHeight: 19 }}>{p.howToExport}</Txt>
                 ) : null}
@@ -222,8 +267,10 @@ export default function ImportScreen() {
             ))}
 
             <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-              Reading vendor config files directly needs sample files to work from — the formats are proprietary and
-              undocumented. Until then the CSV path works for every panel, which is why it is the one that is built.
+              Reading a vendor config file directly needs a real sample to work from, because the formats are
+              proprietary and undocumented. Where there is no parser yet the CSV path works for every panel — and if
+              you drop an unrecognised config in here, it will tell you what the file appears to be, which is the
+              first step to reading it.
             </Txt>
           </>
         ) : (

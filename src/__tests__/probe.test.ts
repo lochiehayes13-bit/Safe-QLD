@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'fs';
 import { decodeForProbe, probeFile } from '@/parsers/probe';
 import { createZip, utf8Bytes } from '@/export/zip';
-import { gzip } from 'pako';
+import { deflate, gzip } from 'pako';
 
 /**
  * Characterising an unknown configuration file.
@@ -36,9 +36,13 @@ describe('containers', () => {
     expect(p.assessment).toMatch(/hardest|proprietary/i);
   });
 
-  it('recognises gzip and Access', () => {
+  it('recognises gzip and Access, in both Access formats', () => {
     expect(probeFile(Uint8Array.from([0x1f, 0x8b, 0x08, 0])).container).toBe('gzip');
     expect(probeFile(bytes('\x00\x01\x00\x00Standard Jet DB')).container).toBe('ms-access');
+    // The newer engine, which is what .accdb means. Without this signature a
+    // 12 MB Notifier export reads as "unknown binary" — the least useful true
+    // statement available about a file that names its format in its header.
+    expect(probeFile(bytes('\x00\x01\x00\x00Standard ACE DB')).container).toBe('ms-access');
   });
 
   it('recognises XML', () => {
@@ -59,6 +63,82 @@ describe('containers', () => {
     expect(p.container).toBe('unknown-binary');
     expect(p.textual).toBe(false);
     expect(p.assessment).toMatch(/sample files/i);
+  });
+});
+
+describe('telling encrypted from merely binary', () => {
+  /** Bytes with no structure left in them, as encryption or compression gives. */
+  const random = (n: number): Uint8Array => {
+    // A fixed linear congruential sequence: uniform over the byte range and
+    // identical on every run, so the test cannot flake.
+    const out = new Uint8Array(n);
+    let x = 123456789;
+    for (let i = 0; i < n; i++) {
+      x = (Math.imul(x, 1103515245) + 12345) & 0x7fffffff;
+      out[i] = (x >>> 16) & 0xff;
+    }
+    return out;
+  };
+
+  it('calls a password-protected Access database what it is', () => {
+    // This is the case that motivated the check. The header says Access and
+    // the remaining 12 MB is noise, so the honest answer is "encrypted, and no
+    // amount of work will change that" rather than "a database, go and export
+    // its tables" — which sends someone off to do something impossible.
+    const accdb = new Uint8Array(200000);
+    accdb.set(bytes('\x00\x01\x00\x00Standard ACE DB'), 0);
+    accdb.set(random(accdb.length - 20), 20);
+    const p = probeFile(accdb);
+    expect(p.container).toBe('ms-access');
+    expect(p.randomLooking).toBe(true);
+    expect(p.assessment).toMatch(/encrypted/i);
+    expect(p.assessment).toMatch(/password/i);
+  });
+
+  it('does not call an ordinary Access database encrypted', () => {
+    const accdb = new Uint8Array(200000);
+    accdb.set(bytes('\x00\x01\x00\x00Standard ACE DB'), 0);
+    // Table names, column names and padding: structured, so far from uniform.
+    const filler = 'MSysObjects\0Zones\0ZoneName\0Devices\0Address\0'.repeat(4000);
+    for (let i = 0; i < filler.length && 20 + i < accdb.length; i++) accdb[20 + i] = filler.charCodeAt(i);
+    const p = probeFile(accdb);
+    expect(p.randomLooking).toBe(false);
+    expect(p.assessment).not.toMatch(/encrypted/i);
+  });
+
+  it('separates structured binary from noise', () => {
+    // A device table of fixed-size records is unprintable but has structure;
+    // saying "collect more samples" is right for it and wrong for noise.
+    const structured = new Uint8Array(200000);
+    for (let i = 0; i < structured.length; i += 16) {
+      structured[i] = 0xc1 + ((i / 16) % 32);
+      structured[i + 1] = 0x04;
+      structured[i + 2] = 0x14;
+      structured[i + 13] = 0xfb;
+    }
+    const s = probeFile(structured);
+    expect(s.container).toBe('unknown-binary');
+    expect(s.randomLooking).toBe(false);
+    expect(s.assessment).toMatch(/sample files/i);
+
+    const noise = probeFile(random(200000));
+    expect(noise.container).toBe('unknown-binary');
+    expect(noise.randomLooking).toBe(true);
+    expect(noise.assessment).toMatch(/encrypted or already compressed/i);
+    // And it says the opposite of what it tells you about structured bytes:
+    // collecting more samples is the right advice there and futile here.
+    expect(noise.assessment).toMatch(/no number of sample files will change that/i);
+    expect(noise.assessment).not.toMatch(/Reverse engineering this needs several sample files/i);
+  });
+
+  it('does not ask the question of a text file', () => {
+    // A byte histogram of English prose is nowhere near uniform, so the answer
+    // would always be "no" and would only be confusing.
+    expect(probeFile(bytes('LEVEL 1 EAST\nLEVEL 1 WEST\n')).randomLooking).toBe(false);
+  });
+
+  it('does not guess from too small a sample', () => {
+    expect(probeFile(random(64)).randomLooking).toBe(false);
   });
 });
 
@@ -184,6 +264,27 @@ describe('opening a container', () => {
     expect(p.inner?.name).toBe('site.cfg');
     expect(p.inner?.probe.delimiter?.name).toBe('tab');
     expect(p.assessment).toMatch(/site\.cfg/);
+  });
+
+  it('unwraps a vendor header sitting in front of a zlib stream', () => {
+    // Fusion's .sts is four bytes of tag, a length, a checksum, then ordinary
+    // zlib. Reported as "unknown binary" it looks unreachable; opened, it is
+    // one deflate call away.
+    const body = Array.from({ length: 30 }, (_, i) => `${i}\tDEVICE ${i}\tSMOKE`).join('\n');
+    const compressed = deflate(utf8Bytes(body));
+    const wrapped = new Uint8Array(12 + compressed.length);
+    wrapped.set([0x73, 0x74, 0x73, 0x01], 0);
+    wrapped.set(compressed, 12);
+    const p = probeFile(wrapped);
+    expect(p.container).toBe('zlib');
+    expect(p.inner?.probe.delimiter?.name).toBe('tab');
+  });
+
+  it('probes inside a raw zlib stream', () => {
+    const body = Array.from({ length: 30 }, (_, i) => `${i},DEVICE ${i},SMOKE`).join('\n');
+    const p = probeFile(deflate(utf8Bytes(body)));
+    expect(p.container).toBe('zlib');
+    expect(p.inner?.probe.delimiter?.name).toBe('comma');
   });
 
   it('probes inside a gzip', () => {

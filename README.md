@@ -155,7 +155,7 @@ src/
   db/           SQLite schema, migrations, repositories
   domain/       types: sites, panels, points, baseline data, timesheets
   export/       XLSX writer, PDF templates, Safe QLD form layouts
-  parsers/      Ampac .ffp, CSV, column mapping, device-type normalisation
+  parsers/      vendor config formats, CSV, column mapping, format probe
   seed/         asset types, defect library, service routines, catalogue
   share/        .sqld pack format
   simpro/       API client and resource mappers
@@ -169,7 +169,7 @@ spreadsheet reader.
 
 ## Testing
 
-468 tests, run without a native toolchain:
+660 tests, run without a native toolchain:
 
 ```bash
 npm test
@@ -193,7 +193,52 @@ do not — a typo means a failed check silently raises nothing. Those references
 are tested, along with the rule that a check may only target an asset type in
 its own routine's system, since that is how the runner finds them.
 
-The Ampac parser is verified against two real 1.7 MB site configurations —
-3,299 devices, 474 zones, eight loops, 1,452 cause-and-effect rules. Customer
-configurations are not committed, so those tests skip when the files are
-absent.
+The parsers are verified against real vendor site files. Those are live
+customer data and are never committed, so the tests that read them skip when
+the files are absent — every parser therefore also has fixtures built inside
+the test, and for the SQLite reader those are real databases built with Node's
+own engine and compared value by value against it.
+
+That split is not ceremony. The real Kentec file never exercises a SQLite
+overflow page — its widest row is 893 bytes against a 989-byte threshold — so
+an error in the overflow arithmetic would have passed every test that used only
+real data, and then quietly corrupted the first large site that came along.
+
+## Reading panel configurations
+
+Six vendor formats are read directly, without an export step.
+
+| Format | Panel | What comes across |
+| --- | --- | --- |
+| `.ffp` | Ampac FireFinder | zones, loops, devices, cause and effect |
+| `.nle` | Kentec / Incite Taktis | zones, loops, devices, panel I/O, cause and effect |
+| `.pci` | Notifier NFS | zones, ten loops, devices, the equations behind the matrix |
+| `.util` | Pertronic F-series | zones, loops, devices, output groups, logic blocks |
+| `.ncf` | brand unconfirmed | site and zones only |
+| `.sqld` | Safe QLD share pack | everything |
+
+Formats differ in how much they give up, and the import says so rather than
+quietly importing less than it appears to:
+
+- **Kentec** stores device types as keys into Loop Explorer's own device
+  library, and that library does not travel with the site file. Points import
+  with an unknown type and the key preserved. Guessing "smoke detector" from a
+  key would put an invented device on a service sheet.
+- **Notifier** does not record the panel model anywhere in the file.
+- **Pertronic** names most device types plainly; the ones not in the mapping
+  are reported by code and count rather than guessed at.
+- **`.NCF`** keeps its devices in a `.pcf` that has no readable structure, so
+  only the site and zone list come across.
+- **Notifier `.accdb`** exports carry a database password, which encrypts the
+  whole file — measurably so: the body is statistically indistinguishable from
+  random. The import names that and points at the `.pci` export instead, rather
+  than leaving someone to fetch the same file twice.
+- **Fusion `.sts`** unpacks cleanly — a zlib stream behind a twelve-byte
+  header — and contains a device table with no text in it at all. There is
+  nothing there to name a device with.
+
+An unrecognised file is not simply refused. It is probed: container, encoding,
+delimiter, record shapes, repeated vocabulary, and whether the bytes have any
+structure left in them at all. That last one matters — it is the difference
+between "collect a few more samples and this is readable" and "this is
+encrypted, and no number of samples will change that".
