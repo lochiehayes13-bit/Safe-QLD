@@ -7,8 +7,6 @@
 
 import { MIGRATION_V3, MIGRATION_V4, MIGRATION_V5 } from './schemaV3';
 
-export const SCHEMA_VERSION = 4;
-
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
   `
@@ -261,3 +259,12 @@ export const MIGRATIONS: string[] = [
   // v5 — the annual occupier statement
   MIGRATION_V5,
 ];
+
+/**
+ * How many migrations exist, which is what the runner writes to user_version.
+ *
+ * Derived rather than declared: this was a hand-maintained 4 while five
+ * migrations existed, and a constant that can disagree with the thing it counts
+ * is worse than no constant.
+ */
+export const SCHEMA_VERSION = MIGRATIONS.length;
