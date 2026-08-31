@@ -213,6 +213,12 @@ export default function SiteScreen() {
           onPress={() => router.push({ pathname: '/site/cause-effect', params: { siteId: site.id } })}
         />
         <NavRow
+          icon="calendar-clock"
+          title="What is due"
+          subtitle="Routines due or overdue here, with their tolerance windows"
+          onPress={() => router.push({ pathname: '/site/due', params: { siteId: site.id } })}
+        />
+        <NavRow
           icon="cart-outline"
           title="Parts needed"
           subtitle="What the open defects need ordered, from their coded quote lines"

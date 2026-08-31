@@ -5,7 +5,7 @@
  * an app already installed on a tech's phone upgrades cleanly.
  */
 
-import { MIGRATION_V3, MIGRATION_V4, MIGRATION_V5 } from './schemaV3';
+import { MIGRATION_V3, MIGRATION_V4, MIGRATION_V5, MIGRATION_V6 } from './schemaV3';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -258,6 +258,9 @@ export const MIGRATIONS: string[] = [
 
   // v5 — the annual occupier statement
   MIGRATION_V5,
+
+  // v6 — routine completions, so the app can say what is due
+  MIGRATION_V6,
 ];
 
 /**

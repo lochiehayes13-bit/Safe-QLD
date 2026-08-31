@@ -5,6 +5,7 @@ import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { addAssetEvent, queryAssets, updateAsset, type AssetRecord } from '@/db/assetRepo';
 import { createDefect, getSite } from '@/db/repo';
+import { recordRoutineRun } from '@/db/routineRunRepo';
 import { defectByCode } from '@/seed/defectLibrary';
 import {
   FREQUENCY_LABEL, SERVICE_ROUTINES, SOURCE_LABEL, routineById, testsForAssetType,
@@ -115,6 +116,8 @@ export default function RunRoutineScreen() {
       let defectsRaised = 0;
       let recorded = 0;
       let gaps = 0;
+      let passed = 0;
+      let failed = 0;
 
       for (const test of routine.tests) {
         const targets = test.assetTypeId
@@ -162,6 +165,8 @@ export default function RunRoutineScreen() {
             });
             recorded++;
           }
+          if (a.verdict === 'fail') failed++;
+          else if (a.verdict === 'pass') passed++;
 
           // A failed check raises its coded defect, so nothing depends on the
           // technician remembering to write one afterwards.
@@ -185,6 +190,23 @@ export default function RunRoutineScreen() {
           }
         }
       }
+
+      // Recorded even when every check was a pass: the run itself is what the
+      // schedule counts, and a routine carried out but not recorded is one the
+      // app will keep reporting as due.
+      await recordRoutineRun({
+        siteId: site.id,
+        routineId: routine.id,
+        routineLabel: routine.label,
+        frequency: routine.frequency,
+        system: routine.system,
+        completedAt: now,
+        technician: prefs.technicianName || undefined,
+        checksPassed: passed,
+        checksFailed: failed,
+        checksNotTested: gaps,
+        defectsRaised,
+      });
 
       await draft.discard();
       Alert.alert(

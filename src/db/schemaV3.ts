@@ -406,3 +406,35 @@ CREATE TABLE IF NOT EXISTS occupier_statement (
 );
 CREATE INDEX IF NOT EXISTS idx_occupier_site ON occupier_statement(siteId, periodEnd DESC);
 `;
+
+/**
+ * v6 — routine completions.
+ *
+ * The app recorded that individual assets were tested, and never that the
+ * routine itself was carried out — so it could not answer the question a
+ * technician and an office both ask first, which is what is due and when.
+ *
+ * The schedule is anchored to the earliest run held here, not the latest, so a
+ * service done late does not move the next one. That is why every run is kept
+ * rather than a single "last serviced" column being overwritten.
+ */
+export const MIGRATION_V6 = `
+CREATE TABLE IF NOT EXISTS routine_run (
+  id              TEXT PRIMARY KEY NOT NULL,
+  siteId          TEXT NOT NULL REFERENCES site(id) ON DELETE CASCADE,
+  routineId       TEXT NOT NULL,
+  /* Denormalised so a run still reads correctly if a routine is retired. */
+  routineLabel    TEXT NOT NULL DEFAULT '',
+  frequency       TEXT NOT NULL DEFAULT '',
+  system          TEXT NOT NULL DEFAULT '',
+  completedAt     TEXT NOT NULL,
+  technician      TEXT,
+  /* What the run actually covered, so a thin run is visible as one. */
+  checksPassed    INTEGER NOT NULL DEFAULT 0,
+  checksFailed    INTEGER NOT NULL DEFAULT 0,
+  checksNotTested INTEGER NOT NULL DEFAULT 0,
+  defectsRaised   INTEGER NOT NULL DEFAULT 0,
+  notes           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_run_site ON routine_run(siteId, routineId, completedAt);
+`;
