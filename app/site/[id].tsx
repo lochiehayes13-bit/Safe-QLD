@@ -129,6 +129,12 @@ export default function SiteScreen() {
           onPress={() => router.push({ pathname: '/site/points', params: { siteId: site.id } })}
         />
         <NavRow
+          icon="cube-outline"
+          title="Asset register"
+          subtitle="Extinguishers, lights, hydrants, doors, pumps — each with its own history"
+          onPress={() => router.push({ pathname: '/site/assets', params: { siteId: site.id } })}
+        />
+        <NavRow
           icon="shape-outline"
           title="Zones"
           subtitle="Zone list with device counts"
