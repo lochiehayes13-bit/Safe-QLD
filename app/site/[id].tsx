@@ -163,6 +163,12 @@ export default function SiteScreen() {
           onPress={() => router.push({ pathname: '/site/cause-effect', params: { siteId: site.id } })}
         />
         <NavRow
+          icon="help-circle-outline"
+          title="Not tested"
+          subtitle="Assets that were attempted and could not be tested, with the reason"
+          onPress={() => router.push({ pathname: '/site/coverage', params: { siteId: site.id } })}
+        />
+        <NavRow
           icon="file-certificate-outline"
           title="Occupier statement"
           subtitle="Annual declaration, filled from this site's own register and defects"

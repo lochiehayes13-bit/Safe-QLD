@@ -354,3 +354,56 @@ export async function recurringFailures(siteId?: string, minFailures = 3): Promi
     ...args,
   );
 }
+
+export interface CoverageGap {
+  assetId: string;
+  assetName: string;
+  assetCode?: string;
+  assetTypeId: string;
+  level?: string;
+  room?: string;
+  /** The most recent reason the check could not be carried out. */
+  reason: string;
+  occurredAt: string;
+  /** How many times running this asset has gone untested. */
+  attempts: number;
+}
+
+/**
+ * Assets that could not be tested, and are still in that state.
+ *
+ * The point of recording "not tested" separately from a pass or a failure is
+ * that it is the one result nobody chases: a failure raises a defect and a pass
+ * closes the item, while an inaccessible device quietly leaves a hole in the
+ * year's coverage. This is that hole, made visible.
+ *
+ * An asset drops off this list as soon as it is actually tested — the filter is
+ * on events after the last pass or failure, not on the untested events alone.
+ */
+export async function coverageGaps(siteId?: string, limit = 300): Promise<CoverageGap[]> {
+  const db = await getDb();
+  const args: (string | number)[] = [];
+  const siteClause = siteId ? 'AND a.siteId = ?' : '';
+  if (siteId) args.push(siteId);
+  args.push(limit);
+
+  return db.getAllAsync<CoverageGap>(
+    `SELECT e.assetId AS assetId,
+            COALESCE(NULLIF(a.name,''), a.assetTypeId) AS assetName,
+            a.code AS assetCode, a.assetTypeId AS assetTypeId,
+            a.level AS level, a.room AS room,
+            e.summary AS reason,
+            MAX(e.occurredAt) AS occurredAt,
+            COUNT(*) AS attempts
+     FROM asset_event e JOIN asset a ON e.assetId = a.id
+     WHERE e.kind = 'not-tested' ${siteClause}
+       AND e.occurredAt > COALESCE((
+         SELECT MAX(d.occurredAt) FROM asset_event d
+         WHERE d.assetId = e.assetId AND d.kind IN ('passed','failed')
+       ), '')
+     GROUP BY e.assetId
+     ORDER BY attempts DESC, occurredAt DESC
+     LIMIT ?`,
+    ...args,
+  );
+}
