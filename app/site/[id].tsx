@@ -163,6 +163,12 @@ export default function SiteScreen() {
           onPress={() => router.push({ pathname: '/site/cause-effect', params: { siteId: site.id } })}
         />
         <NavRow
+          icon="cart-outline"
+          title="Parts needed"
+          subtitle="What the open defects need ordered, from their coded quote lines"
+          onPress={() => router.push({ pathname: '/site/parts', params: { siteId: site.id } })}
+        />
+        <NavRow
           icon="help-circle-outline"
           title="Not tested"
           subtitle="Assets that were attempted and could not be tested, with the reason"
