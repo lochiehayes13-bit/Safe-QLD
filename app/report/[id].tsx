@@ -173,7 +173,11 @@ export default function ReportScreen() {
     if (!b) return;
     setBusy(true);
     try {
-      const html = serviceReportHtml(b, new Date().toISOString());
+      const html = serviceReportHtml(b, new Date().toISOString(), {
+        qdcCompliance: qdcAffirmed,
+        inProperWorkingOrder: workingOrder,
+        hardcopyLeftOnSite: hardcopyLeft,
+      });
       const file = await writePdf(`${b.report.title} - ${b.site.name}`, html);
       await shareFile(file, 'Service report');
     } catch (e) {

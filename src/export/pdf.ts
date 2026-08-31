@@ -86,7 +86,19 @@ function addressLabel(p: { loopNumber?: number; address?: number; subAddress?: n
  * `generatedAt` is passed in rather than read from the clock so the same report
  * renders identically in tests.
  */
-export function serviceReportHtml(b: ReportBundle, generatedAt: string): string {
+export interface StatutoryRecord {
+  /** Explicit affirmation that the maintenance complied with QDC MP 6.1. */
+  qdcCompliance: boolean;
+  /** Whether the installation was considered to be in proper working order. */
+  inProperWorkingOrder: boolean | null;
+  hardcopyLeftOnSite: boolean;
+  /** The standard the installation is maintained to. */
+  appliedStandard?: string;
+  supervisorName?: string;
+  supervisorLicenceNumber?: string;
+}
+
+export function serviceReportHtml(b: ReportBundle, generatedAt: string, statutory?: StatutoryRecord): string {
   const { site, report, panel, testRows, checkRows, defects } = b;
 
   const pass = testRows.filter((r) => r.result === 'pass').length;
@@ -172,6 +184,30 @@ ${defects.length ? `<h2>Defects</h2>
 </table>` : ''}
 
 ${report.notes ? `<h2>Notes</h2><div>${esc(report.notes).replace(/\n/g, '<br/>')}</div>` : ''}
+
+${statutory ? `<h2>Record of maintenance</h2>
+<table class="meta">
+  <tr><td>Installation</td><td>${esc(panel ? `${panel.brand} ${panel.model ?? ''} — ${panel.name}`.trim() : site.name)}</td></tr>
+  <tr><td>Maintenance carried out</td><td>${esc(formatAuDate(report.serviceDate))}</td></tr>
+  <tr><td>Maintenance description</td><td>${esc(report.title)}</td></tr>
+  ${statutory.appliedStandard ? `<tr><td>Maintained to</td><td>${esc(statutory.appliedStandard)}</td></tr>` : ''}
+  <tr><td>Carried out by</td><td>${esc(report.technicianName)}${report.technicianLicence ? ` &middot; Licence ${esc(report.technicianLicence)}` : ''}</td></tr>
+  ${statutory.supervisorName ? `<tr><td>Under supervision of</td><td>${esc(statutory.supervisorName)}${statutory.supervisorLicenceNumber ? ` &middot; Licence ${esc(statutory.supervisorLicenceNumber)}` : ''}</td></tr>` : ''}
+  <tr><td>Complied with QDC MP 6.1</td><td>${statutory.qdcCompliance ? 'Yes' : 'No'}</td></tr>
+  <tr><td>In proper working order</td>
+      <td>${statutory.inProperWorkingOrder === null ? 'Not stated' : statutory.inProperWorkingOrder ? 'Yes' : 'No'}</td></tr>
+  ${defects.filter((d) => d.status === 'open').length
+    ? `<tr><td>Corrective action required</td><td>${defects.filter((d) => d.status === 'open').map((d) => `${esc(d.location)}: ${esc(d.description)}`).join('<br/>')}</td></tr>`
+    : ''}
+  ${defects.filter((d) => d.status === 'rectified').length
+    ? `<tr><td>Repairs made</td><td>${defects.filter((d) => d.status === 'rectified').map((d) => `${esc(formatAuDate(d.rectifiedAt))} — ${esc(d.location)}: ${esc(d.description)}`).join('<br/>')}</td></tr>`
+    : ''}
+  <tr><td>Hardcopy left on site</td><td>${statutory.hardcopyLeftOnSite ? 'Yes' : 'No'}</td></tr>
+</table>
+
+<div style="margin-top:10px;padding:9px 11px;background:#F4F6F8;border-left:3px solid #C92A2A;font-size:10px;line-height:1.5">
+  <strong>Certification.</strong> I certify that the matters stated in this record of maintenance are correct.
+</div>` : ''}
 
 <div class="sig">
   <div class="sigrow">

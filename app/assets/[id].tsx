@@ -34,6 +34,7 @@ const EVENT_ICON: Record<AssetEventKind, React.ComponentProps<typeof MaterialCom
   restored: 'play-circle-outline',
   'defect-raised': 'alert-circle-outline',
   'defect-cleared': 'check-decagram-outline',
+  'not-tested': 'help-circle-outline',
   moved: 'map-marker-outline',
   noted: 'note-text-outline',
 };
@@ -45,6 +46,7 @@ const EVENT_TONE: Partial<Record<AssetEventKind, 'pass' | 'fail' | 'warn'>> = {
   failed: 'fail',
   'defect-raised': 'fail',
   isolated: 'warn',
+  'not-tested': 'warn',
 };
 
 export default function AssetScreen() {

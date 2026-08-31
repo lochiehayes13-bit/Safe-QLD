@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS asset_event (
   id          TEXT PRIMARY KEY NOT NULL,
   assetId     TEXT NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
   /* installed, tested, passed, failed, cleaned, repaired, replaced, isolated,
-     restored, defect-raised, defect-cleared, moved, noted */
+     restored, defect-raised, defect-cleared, not-tested, moved, noted */
   kind        TEXT NOT NULL,
   occurredAt  TEXT NOT NULL,
   technician  TEXT,

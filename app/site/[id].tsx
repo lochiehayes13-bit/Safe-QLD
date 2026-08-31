@@ -114,12 +114,17 @@ export default function SiteScreen() {
         <Rowed gap={2}>
           <Button title="Start test sheet" onPress={startReport} loading={creating} style={{ flex: 1 }} />
           <Button
-            title="Import"
+            title="Run a routine"
             variant="secondary"
-            onPress={() => router.push({ pathname: '/import', params: { siteId: site.id } })}
+            onPress={() => router.push({ pathname: '/routine/run', params: { siteId: site.id } })}
             style={{ flex: 1 }}
           />
         </Rowed>
+        <Button
+          title="Import a panel configuration"
+          variant="secondary"
+          onPress={() => router.push({ pathname: '/import', params: { siteId: site.id } })}
+        />
 
         <H2>Browse</H2>
         <NavRow

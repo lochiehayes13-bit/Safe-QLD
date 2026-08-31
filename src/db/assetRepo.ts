@@ -41,6 +41,10 @@ export interface AssetRecord {
 export type AssetEventKind =
   | 'installed' | 'tested' | 'passed' | 'failed' | 'cleaned' | 'repaired'
   | 'replaced' | 'isolated' | 'restored' | 'defect-raised' | 'defect-cleared'
+  /* An attempt that could not be carried out. Distinct from a pass and from a
+     failure: it is a gap in coverage, and the reason is what makes it
+     defensible on the record. */
+  | 'not-tested'
   | 'moved' | 'noted';
 
 export interface AssetEvent {
