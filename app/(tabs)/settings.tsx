@@ -5,6 +5,7 @@ import { SimproClient, type SimproConfig } from '@/simpro/client';
 import { loadPrefs, savePrefs, DEFAULT_PREFS, type Prefs } from '@/app-prefs';
 import { clearExports, exportsSize } from '@/export/files';
 import { pendingSyncCount } from '@/db/opsRepo';
+import { flushQueue, pullFromSimpro, type SyncProgress } from '@/simpro/sync';
 import { formatBytes } from '@/share/pack';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
@@ -19,6 +20,8 @@ export default function SettingsScreen() {
   const [result, setResult] = useState<{ name: string; readable: boolean; total: number | null; error?: string }[] | null>(null);
   const [storage, setStorage] = useState(0);
   const [pending, setPending] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [progress, setProgress] = useState<SyncProgress | null>(null);
 
   useEffect(() => {
     void loadPrefs().then(setPrefs);
@@ -76,6 +79,48 @@ export default function SettingsScreen() {
       Alert.alert('Connection failed', e instanceof Error ? e.message : String(e));
     } finally {
       setTesting(false);
+    }
+  };
+
+  const configFor = (): SimproConfig => ({
+    buildDomain: prefs.simproDomain,
+    companyId: prefs.simproCompanyId,
+    clientId: prefs.simproClientId,
+    proxyUrl: prefs.simproProxyUrl || undefined,
+  });
+
+  const runPull = async () => {
+    setSyncing(true);
+    setProgress(null);
+    try {
+      const r = await pullFromSimpro(configFor(), setProgress);
+      const lines = [
+        `${r.sitesAdded} sites added, ${r.sitesUpdated} updated`,
+        `${r.jobsAdded + r.jobsUpdated} jobs synced`,
+      ];
+      if (r.errors.length) lines.push('', ...r.errors.slice(0, 5));
+      Alert.alert('Sync complete', lines.join('\n'));
+    } catch (e) {
+      Alert.alert('Sync failed', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSyncing(false);
+      setProgress(null);
+    }
+  };
+
+  const runFlush = async () => {
+    setSyncing(true);
+    try {
+      const r = await flushQueue(configFor());
+      setPending(await pendingSyncCount());
+      Alert.alert(
+        'Queue sent',
+        `${r.sent} sent${r.failed ? `, ${r.failed} failed and will retry` : ''}. ${r.remaining} still waiting.`,
+      );
+    } catch (e) {
+      Alert.alert('Could not send', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -148,6 +193,27 @@ export default function SettingsScreen() {
 
         <View style={{ height: t.space(3) }} />
         <Button title="Test connection" variant="secondary" onPress={test} loading={testing} />
+        <View style={{ height: t.space(2) }} />
+        <Rowed gap={2}>
+          <Button title="Pull sites and jobs" style={{ flex: 1 }} onPress={runPull} loading={syncing} />
+          <Button
+            title={pending ? `Send ${pending}` : 'Send queue'}
+            variant="secondary"
+            style={{ flex: 1 }}
+            onPress={runFlush}
+            loading={syncing}
+            disabled={!pending}
+          />
+        </Rowed>
+        {progress ? (
+          <Txt size="xs" tone="muted" style={{ marginTop: t.space(2) }}>
+            {progress.stage} {progress.total ? `${progress.done} of ${progress.total}` : ''}
+          </Txt>
+        ) : null}
+        <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
+          A pull fills in blanks and adds records. It never overwrites something you typed on site — the person standing
+          in the building knows better than the office record.
+        </Txt>
       </Card>
 
       {result ? (
