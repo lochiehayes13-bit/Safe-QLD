@@ -2,6 +2,7 @@ import { ASSET_TYPES, SYSTEM_LABELS, assetTypeById, type SystemKind } from '@/se
 import { DEFECT_LIBRARY, SEVERITY_LABEL, defectByCode } from '@/seed/defectLibrary';
 import { FREQUENCY_LABEL, SERVICE_ROUTINES, SOURCE_LABEL } from '@/seed/serviceRoutines';
 import { CATEGORY_LABEL } from '@/seed/catalogueCategories';
+import { CATALOGUE_CHUNKS, CATALOGUE_SIZE } from '@/seed/catalogue/index';
 import { OCCUPIER_STATEMENT_INSTALLATIONS, SYSTEM_TO_INSTALLATION } from '@/domain/qldCompliance';
 
 /**
@@ -161,5 +162,51 @@ describe('occupier statement mapping', () => {
     for (const system of Object.keys(SYSTEM_TO_INSTALLATION)) {
       expect(SYSTEM_LABELS[system as SystemKind]).toBeTruthy();
     }
+  });
+});
+
+describe('bundled catalogue chunks', () => {
+  it('reports a size that matches what the chunks actually hold', () => {
+    // The seed version key is built from this number. If it drifts from the
+    // real total, the app compares against a version it will never reach and
+    // either re-seeds on every launch or never re-seeds at all.
+    const actual = CATALOGUE_CHUNKS.reduce((n, load) => n + load().length, 0);
+    expect(actual).toBe(CATALOGUE_SIZE);
+  });
+
+  it('gives every row a part number and a brand, which the seeder requires', () => {
+    // seedCatalogue skips a row missing either, silently. A chunk full of them
+    // would seed as zero and look like a load failure.
+    for (const load of CATALOGUE_CHUNKS) {
+      for (const item of load()) {
+        expect(typeof item.partNumber === 'string' && item.partNumber.trim().length > 0).toBe(true);
+        expect(typeof item.brand === 'string' && item.brand.trim().length > 0).toBe(true);
+      }
+    }
+  });
+
+  it('keeps brand and part number unique across the whole catalogue', () => {
+    // The table has a unique index on the pair, so duplicates would overwrite
+    // each other and the seeded count would not match the bundle.
+    const seen = new Set<string>();
+    const dupes: string[] = [];
+    for (const load of CATALOGUE_CHUNKS) {
+      for (const item of load()) {
+        const key = `${item.brand.toLowerCase()} ${item.partNumber.toLowerCase()}`;
+        if (seen.has(key)) dupes.push(`${item.brand} ${item.partNumber}`);
+        seen.add(key);
+      }
+    }
+    expect(dupes).toEqual([]);
+  });
+
+  it('labels every category present in the bundle', () => {
+    const unlabelled = new Set<string>();
+    for (const load of CATALOGUE_CHUNKS) {
+      for (const item of load()) {
+        if (item.category && !CATEGORY_LABEL[item.category]) unlabelled.add(item.category);
+      }
+    }
+    expect([...unlabelled]).toEqual([]);
   });
 });
