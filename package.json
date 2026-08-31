@@ -1,0 +1,70 @@
+{
+  "name": "safe-qld",
+  "version": "0.1.0",
+  "main": "expo-router/entry",
+  "private": true,
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "expo lint"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~57.0.18",
+    "expo-camera": "~57.0.4",
+    "expo-clipboard": "~57.0.1",
+    "expo-constants": "~57.0.16",
+    "expo-document-picker": "~57.0.1",
+    "expo-file-system": "~57.0.6",
+    "expo-haptics": "~57.0.2",
+    "expo-image-picker": "~57.0.14",
+    "expo-linking": "~57.0.8",
+    "expo-print": "~57.0.1",
+    "expo-router": "~57.0.17",
+    "expo-sharing": "~57.0.16",
+    "expo-splash-screen": "~57.0.8",
+    "expo-sqlite": "~57.0.2",
+    "expo-status-bar": "~57.0.1",
+    "expo-system-ui": "~57.0.3",
+    "pako": "^3.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-reanimated": "4.5.1",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "~4.26.0",
+    "react-native-svg": "15.15.4"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/pako": "^2.0.4",
+    "@types/react": "~19.2.2",
+    "jest": "^30.5.0",
+    "jest-expo": "^57.0.5",
+    "typescript": "~6.0.3"
+  },
+  "jest": {
+    "preset": "jest-expo",
+    "setupFilesAfterEnv": [],
+    "testMatch": [
+      "**/__tests__/**/*.test.ts",
+      "**/__tests__/**/*.test.tsx"
+    ],
+    "transformIgnorePatterns": [
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg))"
+    ],
+    "moduleNameMapper": {
+      "^@/(.*)$": "<rootDir>/src/$1"
+    },
+    "collectCoverageFrom": [
+      "src/calc/**/*.ts",
+      "src/share/**/*.ts",
+      "src/export/**/*.ts"
+    ]
+  }
+}

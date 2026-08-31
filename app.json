@@ -1,0 +1,84 @@
+{
+  "expo": {
+    "name": "Safe QLD",
+    "slug": "safe-qld",
+    "version": "0.1.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "scheme": "safeqld",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0B0E13"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.safeqld.app",
+      "infoPlist": {
+        "UIFileSharingEnabled": true,
+        "LSSupportsOpeningDocumentsInPlace": true,
+        "NSCameraUsageDescription": "Take photos of defects and equipment to attach to service reports.",
+        "NSPhotoLibraryUsageDescription": "Attach existing photos to defect records and service reports."
+      }
+    },
+    "android": {
+      "package": "com.safeqld.app",
+      "edgeToEdgeEnabled": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png",
+        "backgroundColor": "#0B0E13"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": [
+            "DEFAULT",
+            "BROWSABLE"
+          ],
+          "data": [
+            {
+              "scheme": "content",
+              "mimeType": "*/*"
+            }
+          ]
+        }
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Safe QLD uses the camera to photograph defects and equipment for service reports."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Safe QLD attaches photos to defect records and service reports."
+        }
+      ],
+      "expo-splash-screen"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
