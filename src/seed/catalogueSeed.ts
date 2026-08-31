@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { catalogueCount, seedCatalogue, type CatalogueSeedItem } from '@/db/catalogueRepo';
+import { catalogueCount, seedCatalogue } from '@/db/catalogueRepo';
+import { CATALOGUE_CHUNKS, CATALOGUE_SIZE } from './catalogue/index';
 
 /**
  * Loads the bundled catalogue into SQLite.
@@ -9,10 +10,15 @@ import { catalogueCount, seedCatalogue, type CatalogueSeedItem } from '@/db/cata
  * the pickers that pull a part number into a form. Two consequences shape this
  * file:
  *
- * It is required lazily, not imported. A top-level import makes Hermes
- * materialise the whole array on every launch, including the overwhelmingly
- * common one where the catalogue is already seeded and nothing needs reading.
- * Behind a function, a normal start never touches it.
+ * Nothing is required until it is needed. Metro inlines an imported JSON file
+ * into the bundle, so a top-level import makes Hermes materialise every row on
+ * every launch, including the overwhelmingly common one where the catalogue is
+ * already seeded and nothing reads it.
+ *
+ * It is seeded a chunk at a time. Each chunk is required, written and released
+ * before the next is touched, so peak memory is one chunk rather than the whole
+ * catalogue — which matters on the phone doing this for the first time, on a
+ * job, alongside everything else.
  *
  * It seeds off the startup path. Writing thousands of rows takes long enough to
  * be felt, and nothing on the first screen needs a part number.
@@ -21,17 +27,12 @@ import { catalogueCount, seedCatalogue, type CatalogueSeedItem } from '@/db/cata
 const VERSION_KEY = 'safeqld.catalogue.seededVersion';
 
 /**
- * Bump when the bundled catalogue changes in a way the item count alone would
+ * Bump when the bundled catalogue changes in a way the row count alone would
  * not reveal — a re-classification, a corrected supplier name, a merge that
  * replaces as many rows as it adds. The count catches growth; this catches
  * everything else.
  */
-const CATALOGUE_REVISION = 5;
-
-function bundled(): CatalogueSeedItem[] {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  return require('./catalogue.json') as CatalogueSeedItem[];
-}
+const CATALOGUE_REVISION = 6;
 
 export async function seedCatalogueIfNeeded(): Promise<{ seeded: boolean; count: number }> {
   const [storedRaw, existing] = await Promise.all([
@@ -39,8 +40,7 @@ export async function seedCatalogueIfNeeded(): Promise<{ seeded: boolean; count:
     catalogueCount(),
   ]);
 
-  const items = bundled();
-  const version = `${CATALOGUE_REVISION}:${items.length}`;
+  const version = `${CATALOGUE_REVISION}:${CATALOGUE_SIZE}`;
 
   // Re-seed when the bundle changed, or when the table is empty despite the
   // flag (a reinstall, or storage cleared out from under us).
@@ -48,7 +48,11 @@ export async function seedCatalogueIfNeeded(): Promise<{ seeded: boolean; count:
     return { seeded: false, count: existing };
   }
 
-  const written = await seedCatalogue(items);
+  let written = 0;
+  for (const chunk of CATALOGUE_CHUNKS) {
+    written += await seedCatalogue(chunk());
+  }
+
   await AsyncStorage.setItem(VERSION_KEY, version);
   return { seeded: true, count: written };
 }
@@ -77,5 +81,5 @@ export function startCatalogueSeed(): Promise<{ seeded: boolean; count: number }
 
 /** How many items ship with this build, for the Settings readout. */
 export function bundledCatalogueSize(): number {
-  return bundled().length;
+  return CATALOGUE_SIZE;
 }

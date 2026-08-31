@@ -2,8 +2,11 @@
 """Pull harvested supplier catalogues out of a workflow journal into a seed file.
 
 The harvest runs as a background workflow whose results land in journal.jsonl.
-This turns those results into src/seed/catalogue.json, which the app bundles and
-loads into SQLite on first run.
+This turns those results into data/catalogue.json, the working copy every
+harvest merges into. scripts/chunk-catalogue.py then splits that into the files
+under src/seed/catalogue/ that the app actually bundles — the working copy is
+not imported anywhere, so editing it alone changes nothing until the chunks are
+regenerated.
 
 Rows without a part number, or whose part number is obviously a placeholder, are
 dropped rather than shipped -- a fabricated part number sends someone to order
@@ -19,7 +22,7 @@ from fire_catalogue import canonical_brand, canonical_supplier
 # and a later run's richer record for the same part should win over an earlier
 # sparse one rather than duplicating it.
 ARGS = [a for a in sys.argv[1:]]
-OUT = Path(ARGS.pop()) if ARGS and ARGS[-1].endswith(".json") else Path("src/seed/catalogue.json")
+OUT = Path(ARGS.pop()) if ARGS and ARGS[-1].endswith(".json") else Path("data/catalogue.json")
 WF_DIRS = [Path(a) for a in ARGS]
 
 VALID_CATEGORIES = {
