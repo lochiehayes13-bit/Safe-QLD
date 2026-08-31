@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { getDb } from '@/db';
 import { seedReferenceData } from '@/db/assetRepo';
+import { seedCatalogueIfNeeded } from '@/seed/catalogueSeed';
 import { useTheme } from '@/theme';
 import { Banner, Txt } from '@/components/ui';
 
@@ -24,6 +25,9 @@ export default function RootLayout() {
     let cancelled = false;
     getDb()
       .then(seedReferenceData)
+      // The catalogue is thousands of rows, so it only re-seeds when the
+      // bundled harvest actually changed.
+      .then(seedCatalogueIfNeeded)
       .then(() => {
         if (!cancelled) setReady(true);
       })

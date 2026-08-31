@@ -48,18 +48,14 @@
     "@types/pako": "^2.0.4",
     "@types/react": "~19.2.2",
     "jest": "^30.5.0",
-    "jest-expo": "^57.0.5",
+    "ts-jest": "^29.4.12",
     "typescript": "~6.0.3"
   },
   "jest": {
-    "preset": "jest-expo",
-    "setupFilesAfterEnv": [],
+    "preset": "ts-jest",
+    "testEnvironment": "node",
     "testMatch": [
-      "**/__tests__/**/*.test.ts",
-      "**/__tests__/**/*.test.tsx"
-    ],
-    "transformIgnorePatterns": [
-      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg))"
+      "**/__tests__/**/*.test.ts"
     ],
     "moduleNameMapper": {
       "^@/(.*)$": "<rootDir>/src/$1"
@@ -67,7 +63,23 @@
     "collectCoverageFrom": [
       "src/calc/**/*.ts",
       "src/share/**/*.ts",
-      "src/export/**/*.ts"
-    ]
+      "src/export/**/*.ts",
+      "src/domain/**/*.ts",
+      "src/parsers/**/*.ts"
+    ],
+    "transform": {
+      "^.+\\.tsx?$": [
+        "ts-jest",
+        {
+          "tsconfig": {
+            "module": "commonjs",
+            "esModuleInterop": true,
+            "resolveJsonModule": true,
+            "strict": true,
+            "skipLibCheck": true
+          }
+        }
+      ]
+    }
   }
 }
