@@ -207,9 +207,16 @@ const REAL = '/tmp/ffpreader/data/input/QWP 16.02.24.ffp';
 const describeReal = existsSync(REAL) ? describe : describe.skip;
 
 describeReal('against a real site configuration', () => {
-  const text = readFileSync(REAL, 'latin1');
-  const parsed = parseFfp(text);
-  const panel = parsed.panels[0]!;
+  // Read in beforeAll, not in the describe body: Jest executes a describe
+  // callback even when it is skipped, so a top-level read here fails
+  // collection on any machine without the sample file.
+  let text: string;
+  let panel: ReturnType<typeof parseFfp>['panels'][number];
+
+  beforeAll(() => {
+    text = readFileSync(REAL, 'latin1');
+    panel = parseFfp(text).panels[0]!;
+  });
 
   it('detects the format', () => {
     expect(isFfp(text)).toBe(true);
