@@ -17,6 +17,9 @@
  * finding.
  */
 
+import { inflate } from 'pako';
+import { isZip, likelyConfigEntry, readZip } from './zipRead';
+
 export type Container =
   | 'zip'
   | 'sqlite'
@@ -53,6 +56,13 @@ export interface FileProbe {
   head: string[];
   /** What this suggests about building a parser. */
   assessment: string;
+  /**
+   * For a container, the probe of the file inside it.
+   *
+   * Saying "unpack it first" and then not doing so leaves the reader exactly
+   * where they started, when the interesting answer is one step away.
+   */
+  inner?: { name: string; probe: FileProbe };
 }
 
 const MAGIC: { bytes: number[]; container: Container; note: string }[] = [
@@ -307,7 +317,33 @@ export function decodeForProbe(bytes: Uint8Array, encoding: FileProbe['encoding'
   return s;
 }
 
-export function probeFile(bytes: Uint8Array, sampleLines = 40): FileProbe {
+/**
+ * Opens a container one level down, where that can be done safely.
+ *
+ * One level only. A container nested inside a container is either an unusual
+ * vendor choice worth a human looking at, or an archive bomb, and neither is
+ * worth unwrapping automatically.
+ */
+function unwrap(bytes: Uint8Array, container: Container, sampleLines: number):
+  { name: string; probe: FileProbe } | undefined {
+  try {
+    if (container === 'zip' && isZip(bytes)) {
+      const entry = likelyConfigEntry(readZip(bytes));
+      if (!entry) return undefined;
+      return { name: entry.name, probe: probeFile(entry.bytes, sampleLines, false) };
+    }
+    if (container === 'gzip') {
+      return { name: '(decompressed)', probe: probeFile(inflate(bytes), sampleLines, false) };
+    }
+  } catch {
+    // A container that will not open is still worth reporting as a container;
+    // the outer probe already says what it is.
+    return undefined;
+  }
+  return undefined;
+}
+
+export function probeFile(bytes: Uint8Array, sampleLines = 40, unwrapContainers = true): FileProbe {
   for (const { bytes: sig, container, note } of MAGIC) {
     if (startsWith(bytes, sig)) {
       const base: Omit<FileProbe, 'assessment'> = {
@@ -322,7 +358,14 @@ export function probeFile(bytes: Uint8Array, sampleLines = 40): FileProbe {
         repeatedTokens: [],
         head: [],
       };
-      return { ...base, assessment: assess(base) };
+      const inner = unwrapContainers ? unwrap(bytes, container, sampleLines) : undefined;
+      return {
+        ...base,
+        inner,
+        assessment: inner
+          ? `${assess(base)} Opened it: the largest entry is "${inner.name}". ${inner.probe.assessment}`
+          : assess(base),
+      };
     }
   }
 

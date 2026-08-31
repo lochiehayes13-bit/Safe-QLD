@@ -1,5 +1,7 @@
 import { existsSync, readFileSync } from 'fs';
 import { decodeForProbe, probeFile } from '@/parsers/probe';
+import { createZip, utf8Bytes } from '@/export/zip';
+import { gzip } from 'pako';
 
 /**
  * Characterising an unknown configuration file.
@@ -165,5 +167,47 @@ describeReal('against a real Ampac configuration', () => {
     expect(p.repeatedTokens.length).toBeGreaterThan(0);
     expect(p.lineCount).toBeGreaterThan(1000);
     expect(p.assessment).toMatch(/workable/i);
+  });
+});
+
+describe('opening a container', () => {
+  it('probes the config inside a zip rather than stopping at the wrapper', () => {
+    // "Unpack it first" leaves the reader where they started when the
+    // interesting answer is one step away.
+    const body = Array.from({ length: 50 }, (_, i) => `${i}\tDEVICE ${i}\tSMOKE\tZONE 1`).join('\n');
+    const zip = createZip([
+      { name: 'manifest.txt', data: utf8Bytes('v1') },
+      { name: 'site.cfg', data: utf8Bytes(body) },
+    ]);
+    const p = probeFile(zip);
+    expect(p.container).toBe('zip');
+    expect(p.inner?.name).toBe('site.cfg');
+    expect(p.inner?.probe.delimiter?.name).toBe('tab');
+    expect(p.assessment).toMatch(/site\.cfg/);
+  });
+
+  it('probes inside a gzip', () => {
+    const body = Array.from({ length: 30 }, (_, i) => `${i},DEVICE ${i},SMOKE`).join('\n');
+    const p = probeFile(gzip(utf8Bytes(body)));
+    expect(p.container).toBe('gzip');
+    expect(p.inner?.probe.delimiter?.name).toBe('comma');
+  });
+
+  it('does not unwrap a second level', () => {
+    // A container inside a container is either an unusual vendor choice worth
+    // a human looking at, or an archive bomb.
+    const innerZip = createZip([{ name: 'deep.txt', data: utf8Bytes('x') }]);
+    const outer = createZip([{ name: 'inner.zip', data: innerZip }]);
+    const p = probeFile(outer);
+    expect(p.inner?.probe.container).toBe('zip');
+    expect(p.inner?.probe.inner).toBeUndefined();
+  });
+
+  it('still reports the container when it will not open', () => {
+    const broken = Uint8Array.from([0x50, 0x4b, 0x03, 0x04, ...Array(40).fill(0)]);
+    const p = probeFile(broken);
+    expect(p.container).toBe('zip');
+    expect(p.inner).toBeUndefined();
+    expect(p.assessment).toMatch(/unpack/i);
   });
 });
