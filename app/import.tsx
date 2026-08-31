@@ -6,7 +6,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   FIELD_SPECS, PANEL_CATALOGUE, classifyFile, importTabular, previewTabular,
-  type ColumnMapping, type FieldKey, type TabularPreview,
+  type ColumnMapping, type FieldKey, type PanelParser, type TabularPreview,
 } from '@/parsers';
 import { decodePack, PackError } from '@/share/pack';
 import { fromBase64 } from '@/export/zip';
@@ -61,6 +61,12 @@ export default function ImportScreen() {
         return;
       }
 
+      // A panel format we read directly needs no column mapping.
+      if (kind.kind === 'native' && kind.parser?.parse) {
+        await importNative(kind.parser.parse(raw, asset.name), asset.name);
+        return;
+      }
+
       if (kind.kind === 'unknown') {
         Alert.alert(
           'Not a recognised file',
@@ -84,6 +90,22 @@ export default function ImportScreen() {
     } finally {
       setBusy(false);
     }
+  };
+
+  /** Writes a natively parsed vendor configuration straight in. */
+  const importNative = async (parsed: ReturnType<NonNullable<PanelParser['parse']>>, fileName: string) => {
+    const targetSite = siteId ?? (await createSite({ name: parsed.siteName || fileName })).id;
+    const res = await importParsedConfig(targetSite, parsed, 'config-import');
+    const panel = parsed.panels[0];
+    Alert.alert(
+      'Configuration imported',
+      [
+        `${res.pointCount.toLocaleString()} devices, ${res.zoneCount.toLocaleString()} zones`,
+        panel?.causeEffect.length ? `${panel.causeEffect.length.toLocaleString()} cause and effect rules` : null,
+        ...parsed.warnings,
+      ].filter(Boolean).join('\n\n'),
+    );
+    router.replace({ pathname: '/site/[id]', params: { id: targetSite } });
   };
 
   const importPack = async (file: File, name: string) => {

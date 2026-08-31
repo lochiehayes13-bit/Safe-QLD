@@ -1,9 +1,11 @@
 import type { PanelBrand, ParsedConfig } from '@/domain/types';
 import { importTabular, previewTabular } from './tabular';
+import { isFfp, parseFfp } from './ampacFfp';
 
 export * from './csv';
 export * from './deviceType';
 export * from './tabular';
+export * from './ampacFfp';
 
 /**
  * Panel parser registry.
@@ -51,10 +53,13 @@ export const PANEL_CATALOGUE: PanelParser[] = [
     id: 'ampac-firefinder',
     brand: 'ampac',
     brandLabel: 'Ampac',
-    models: ['FireFinder', 'FireFinder PLUS', 'EvacUElite'],
-    status: 'planned',
-    extensions: ['.ff', '.ffp', '.mdb', '.xml'],
-    howToExport: 'Export the device and zone list from the Ampac configuration tool as CSV, then import it here.',
+    models: ['FireFinder PLUS', 'FireFinder', 'EvacUElite'],
+    status: 'native',
+    extensions: ['.ffp'],
+    howToExport:
+      'Open the site in Configuration Manager PLUS and take the .ffp project file. Zones, loops, devices and the cause-and-effect matrix are all read directly — no export step.',
+    sniff: (text) => isFfp(text),
+    parse: (text) => parseFfp(text),
   },
   {
     id: 'vigilant-mx',
@@ -149,7 +154,10 @@ export function classifyFile(fileName: string, head: string): { kind: ImportKind
   if (head.startsWith('SQLD')) return { kind: 'pack' };
 
   for (const p of PANEL_CATALOGUE) {
-    if (p.status !== 'planned' && p.sniff?.(head, fileName)) return { kind: 'native', parser: p };
+    if (p.status === 'planned' || !p.parse) continue;
+    // Content first — techs rename files constantly — then the extension.
+    if (p.sniff?.(head, fileName)) return { kind: 'native', parser: p };
+    if (p.extensions.some((ext) => lower.endsWith(ext))) return { kind: 'native', parser: p };
   }
 
   if (/\.(csv|tsv|tab|txt|prn)$/.test(lower)) return { kind: 'tabular' };
