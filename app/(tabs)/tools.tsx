@@ -24,13 +24,31 @@ const CALCULATORS: ToolDef[] = [
     href: '/tools/battery',
     icon: 'car-battery',
     title: 'FIP battery calculator',
-    body: 'Standby capacity to AS 1670.1, with the 72 h and monitored 24 h cases, alarm de-rating and ageing.',
+    body: 'Standby capacity with the 72 h and monitored 24 h cases, alarm de-rating, charger checks and a baseline data block.',
   },
   {
     href: '/tools/vesda',
     icon: 'air-filter',
     title: 'VESDA battery calculator',
-    body: 'Aspirating detection sizing, where the constantly running aspirator dominates standby draw.',
+    body: 'Aspirating sizing, where the constantly running aspirator dominates standby and the supply is loaded 24/7.',
+  },
+  {
+    href: '/tools/voltdrop',
+    icon: 'flash-outline',
+    title: 'Cable volt drop',
+    body: 'Whether the device at the far end still sees enough voltage, and the smallest conductor that gets it there.',
+  },
+  {
+    href: '/tools/ohms',
+    icon: 'omega',
+    title: 'Electrical',
+    body: "Ohm's law from any two knowns, single and three phase power, and battery runtime.",
+  },
+  {
+    href: '/tools/converter',
+    icon: 'swap-horizontal',
+    title: 'Unit converter',
+    body: 'kPa, bar, psi and metres of head at once — plus flow, volume, temperature, power and mass.',
   },
   {
     href: '/tools/resistor',
@@ -41,20 +59,35 @@ const CALCULATORS: ToolDef[] = [
   {
     href: '/tools/dipswitch',
     icon: 'toggle-switch-outline',
-    title: 'Dipswitch calculator',
-    body: 'Switch pattern to device address per protocol, including reversed banks and XPERT cards.',
+    title: 'Device address',
+    body: 'DIP switches, Apollo XPERT cards and rotary dials, with the traps each protocol carries.',
   },
   {
     href: '/tools/eol',
     icon: 'resistor-nodes',
     title: 'End-of-line reference',
-    body: 'Common EOL values and what a conventional zone reads at normal, alarm and fault.',
+    body: 'EOL values by panel and circuit, with the published state boundaries where they exist.',
+  },
+];
+
+const REFERENCE: ToolDef[] = [
+  {
+    href: '/catalogue',
+    icon: 'package-variant-closed',
+    title: 'Parts catalogue',
+    body: 'Part numbers and electrical specs harvested from supplier catalogues and datasheets.',
   },
   {
-    href: '/tools/voltdrop',
-    icon: 'flash-outline',
-    title: 'Cable volt drop',
-    body: 'Voltage at the far end of a loop or sounder circuit, so devices still operate in alarm.',
+    href: '/tools/routines',
+    icon: 'clipboard-list-outline',
+    title: 'Service routines',
+    body: 'What each routine covers, what counts as a pass, and where the requirement comes from.',
+  },
+  {
+    href: '/tools/defects',
+    icon: 'alert-circle-outline',
+    title: 'Defect library',
+    body: 'Coded defects with their standard wording, client wording and rectification.',
   },
 ];
 
@@ -70,6 +103,33 @@ export default function ToolsScreen() {
       <H2>Calculators</H2>
       <View style={{ gap: t.space(2.5) }}>
         {CALCULATORS.map((tool) => (
+          <Card key={tool.href} onPress={() => router.push(tool.href as never)}>
+            <Rowed gap={3} align="flex-start">
+              <View
+                style={{
+                  width: 42,
+                  height: 42,
+                  borderRadius: t.radius.md,
+                  backgroundColor: t.color.surfaceAlt,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <MaterialCommunityIcons name={tool.icon} size={22} color={t.color.accentText} />
+              </View>
+              <View style={{ flex: 1, gap: 3 }}>
+                <Txt weight="700" size="md">{tool.title}</Txt>
+                <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{tool.body}</Txt>
+              </View>
+              <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
+            </Rowed>
+          </Card>
+        ))}
+      </View>
+
+      <H2>Reference</H2>
+      <View style={{ gap: t.space(2.5) }}>
+        {REFERENCE.map((tool) => (
           <Card key={tool.href} onPress={() => router.push(tool.href as never)}>
             <Rowed gap={3} align="flex-start">
               <View
