@@ -66,8 +66,12 @@ const TYPE_CODES: Record<string, TypeCode> = {
   ISO: { name: 'Switch Input (Disable)', type: 'module-input' },
   MON: { name: 'Monitor', type: 'module-input' },
   ZMU: { name: 'Zone Monitor Unit', type: 'module-input' },
-  '8-LPRS': { name: '8 x Loop Responder', type: 'module-input' },
-  '1-LPRS': { name: '1 x Loop Responder', type: 'module-input' },
+  // The device picker shows these as a channel count next to "LPRS" — an
+  // 8-way and a 1-way loop responder. How the count is spelled in the file is
+  // not legible from the icon, so only the bare mnemonic is claimed; a variant
+  // that does not match is reported as unrecognised, which is the right
+  // outcome for a key nobody has actually seen.
+  LPRS: { name: 'Loop Responder', type: 'module-input' },
   SPR: { name: 'Sprinkler Input', type: 'sprinkler-flow' },
   FSW: { name: 'Flow Switch', type: 'sprinkler-flow' },
   // A pressure switch, but the file does not say which pressure — a sprinkler
