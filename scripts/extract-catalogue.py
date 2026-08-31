@@ -132,9 +132,38 @@ def main():
             if prev is None or _score(row) > _score(prev):
                 seen[key] = row
 
-    rows = sorted(seen.values(), key=lambda x: (x["brand"].lower(), x["category"], x["partNumber"]))
+    # Merge into whatever is already there rather than replacing it. Not every
+    # supplier arrives through a workflow journal -- some come from a vendor's
+    # own product API via its own script -- and a re-run of this extractor must
+    # not delete rows it did not produce.
+    existing = {}
+    if OUT.exists():
+        try:
+            for r in json.loads(OUT.read_text(encoding="utf-8")):
+                pn, brand = r.get("partNumber"), r.get("brand")
+                if pn and brand:
+                    existing[(brand.strip().lower(), pn.strip().lower())] = r
+        except (ValueError, OSError) as e:
+            print(f"warning: could not read existing {OUT} ({e}); writing fresh")
+
+    kept = 0
+    for k, row in seen.items():
+        prev = existing.get(k)
+        if prev is None or _score(row) > _score(prev):
+            existing[k] = row
+        else:
+            kept += 1
+
+    rows = sorted(existing.values(),
+                  key=lambda x: (x["brand"].lower(), x.get("category") or "", x["partNumber"]))
+    # Absent and null are the same row to the seeder, and nulls were two thirds
+    # of the file. Strip them so the bundle carries data rather than padding.
+    slim = [{k: v for k, v in r.items() if v is not None} for r in rows]
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(rows, indent=0, ensure_ascii=False), encoding="utf-8")
+    OUT.write_text(json.dumps(slim, ensure_ascii=False, separators=(",", ":")) + "\n",
+                   encoding="utf-8")
+    if kept:
+        print(f"kept {kept} existing rows that were richer than this harvest's")
 
     by_brand = {}
     for x in rows:
@@ -144,7 +173,7 @@ def main():
     print(f"suppliers harvested: {len(suppliers)}")
     for b, n in sorted(by_brand.items(), key=lambda kv: -kv[1])[:25]:
         print(f"  {n:>5}  {b}")
-    with_current = sum(1 for x in rows if x["quiescentMa"] is not None or x["alarmMa"] is not None)
+    with_current = sum(1 for x in rows if x.get("quiescentMa") is not None or x.get("alarmMa") is not None)
     print(f"items carrying a current figure: {with_current}")
     return 0
 
