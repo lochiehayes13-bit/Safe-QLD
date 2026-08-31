@@ -12,8 +12,12 @@ the wrong thing.
 import json, sys, re, os
 from pathlib import Path
 
-WF_DIR = Path(sys.argv[1]) if len(sys.argv) > 1 else None
-OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("src/seed/catalogue.json")
+# Accepts several workflow directories: the harvest ran in more than one pass,
+# and a later run's richer record for the same part should win over an earlier
+# sparse one rather than duplicating it.
+ARGS = [a for a in sys.argv[1:]]
+OUT = Path(ARGS.pop()) if ARGS and ARGS[-1].endswith(".json") else Path("src/seed/catalogue.json")
+WF_DIRS = [Path(a) for a in ARGS]
 
 VALID_CATEGORIES = {
     "detector","mcp","panel","module","sounder","strobe","sounder-strobe","aspirating",
@@ -65,20 +69,22 @@ def clean(s, limit=400):
     return s[:limit] if s else None
 
 def main():
-    if not WF_DIR or not WF_DIR.exists():
-        print(f"workflow dir not found: {WF_DIR}", file=sys.stderr)
-        return 1
-
-    journal = WF_DIR / "journal.jsonl"
-    if not journal.exists():
-        print(f"no journal at {journal}", file=sys.stderr)
+    journals = []
+    for d in WF_DIRS:
+        j = d / "journal.jsonl"
+        if j.exists():
+            journals.append(j)
+        else:
+            print(f"no journal at {j}", file=sys.stderr)
+    if not journals:
+        print("no workflow journals found", file=sys.stderr)
         return 1
 
     seen = {}          # (brand.lower, partNumber.lower) -> row
     suppliers = []
     dropped = 0
 
-    for line in journal.open():
+    for line in _lines(journals):
         try:
             d = json.loads(line)
         except json.JSONDecodeError:
@@ -141,6 +147,11 @@ def main():
     with_current = sum(1 for x in rows if x["quiescentMa"] is not None or x["alarmMa"] is not None)
     print(f"items carrying a current figure: {with_current}")
     return 0
+
+def _lines(journals):
+    for j in journals:
+        for line in j.open():
+            yield line
 
 def _score(row):
     """Prefer the record that carries more usable detail."""
