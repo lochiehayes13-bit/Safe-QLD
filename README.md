@@ -57,7 +57,7 @@ volt drop, Ohm's law and power, unit conversion, resistor decoding, device
 addressing, and an end-of-line reference. Each shows its working and cites its
 source.
 
-**Parts.** 9,602 part numbers from seven suppliers, taken from their own
+**Parts.** 11,865 part numbers from every supplier Safe QLD buys from, taken from their own
 public product APIs and storefronts rather than transcribed from PDFs. Scan a
 tag or type a code and the app tries the asset register, then serials, then the
 catalogue. Where a distributor does not publish the manufacturer, the row says
@@ -69,6 +69,31 @@ occupier statement fills itself in from the site's own register and defect
 history, lists all 21 prescribed installations including the ones the building
 does not have, and tracks the ten working days to copy the Commissioner. Both
 say plainly that they are not the regulator's approved form.
+
+**Scheduling.** Every routine run is recorded, and the next one is counted from
+the *first* service at that site rather than the last — scheduling from the last
+completion lets drift accumulate, so a service done three weeks late becomes the
+new baseline and the app reports compliance while sliding out of tolerance. Each
+site lists what is due with its tolerance window; the home screen carries an
+overdue count across every site.
+
+**Purchase ordering.** A site's open defects become a parts order, built from
+the coded quote lines. Labour is excluded — it belongs on the quote, not on an
+order a supplier has to fill — and part numbers are never invented, because the
+right detector head depends on the panel and the protocol. Submitting queues it
+for Simpro rather than sending, so a basement with no signal cannot lose it.
+
+**Routing.** The day's jobs ordered by proximity, urgent work first regardless
+of distance, handing off to the phone's maps app for the actual navigation.
+Distances are straight-line and the screen says so.
+
+**Zone charts.** Generated from the configuration imported off that panel, so
+the chart cannot disagree with the panel. Zones carrying devices with no zone
+text, and devices reporting to a zone that is not in the table, are printed on
+the chart in red rather than hidden.
+
+**Sharing.** A site packs to a `.sqld` file carrying only normalised data and
+never the vendor's original — a real 1.67 MB configuration packs to 61 KB.
 
 **Coverage.** "Not tested" is recorded as its own result with a reason, never as
 a pass. A failure raises a defect and a pass closes the item; an inaccessible
@@ -144,7 +169,7 @@ spreadsheet reader.
 
 ## Testing
 
-354 tests, run without a native toolchain:
+468 tests, run without a native toolchain:
 
 ```bash
 npm test
@@ -153,6 +178,13 @@ npm test
 They cover the calculators against published worked examples and manufacturer
 address charts, the XLSX and ZIP writers, the share pack round-trip, timesheet
 arithmetic, baseline autofill, and the Queensland date arithmetic.
+
+The migrations are applied to a real SQLite engine, and every static SQL
+statement in the repositories is checked against the schema they build — a
+column that does not exist compiles perfectly and throws the first time a
+technician saves anything. Every route the app navigates to is checked to exist,
+because expo-router resolves those at runtime and a typo reads as a dead button
+rather than an error.
 
 They also assert the joins the seed data depends on. A routine check names the
 defect it raises and the asset type it applies to as plain strings; nothing at

@@ -161,5 +161,32 @@ describe('repositories against the schema', () => {
     expect(problems).toEqual([]);
   });
 
+  it('prepares every static SELECT without a bad column', () => {
+    // A column that does not exist throws when the query runs, not when it is
+    // written — so a screen nobody opened in testing fails the first time a
+    // technician does. prepare() resolves every column name without executing
+    // anything, which is exactly the check wanted here.
+    //
+    // Queries assembled at runtime are skipped: their fragments are not valid
+    // SQL on their own, and the pieces they interpolate are typed.
+    const problems: string[] = [];
+    const select = /(['"`])(SELECT[\s\S]*?)\1/gi;
+
+    for (const { file, text } of sources) {
+      select.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = select.exec(text))) {
+        const sql = m[2]!.trim();
+        if (sql.includes('${')) continue;
+        try {
+          db.prepare(sql);
+        } catch (e) {
+          problems.push(`${file}: ${(e as Error).message} — ${sql.replace(/\s+/g, ' ').slice(0, 90)}`);
+        }
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
   afterAll(() => db.close());
 });
