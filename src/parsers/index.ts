@@ -5,6 +5,7 @@ import { isNle, parseNle } from './kentecNle';
 import { isPci, parsePci } from './notifierPci';
 import { isPertronicUtil, parsePertronicUtil } from './pertronicUtil';
 import { isNcf, parseNcf } from './ncfSite';
+import { isVigilantBytes, parseVigilantBytes } from './vigilant';
 
 export * from './csv';
 export * from './deviceType';
@@ -15,6 +16,8 @@ export * from './kentecNle';
 export * from './notifierPci';
 export * from './pertronicUtil';
 export * from './ncfSite';
+export * from './vigilant';
+export * from './lineTags';
 export * from './sqliteRead';
 export * from './zipRead';
 
@@ -90,13 +93,20 @@ export const PANEL_CATALOGUE: PanelParser[] = [
     parse: (text) => parseFfp(text),
   },
   {
-    id: 'vigilant-mx',
+    id: 'vigilant-smartconfig',
     brand: 'vigilant',
     brandLabel: 'Vigilant',
-    models: ['F4000', 'MX4428', 'MX1', 'QE20'],
-    status: 'planned',
-    extensions: ['.mx1', '.cfg', '.dat', '.xml'],
-    howToExport: 'From the MX1 / F4000 configuration tool, print or export the point and zone list to CSV, then import it here.',
+    models: ['MX1', 'F4000', 'MX4428', 'FP1600', 'IO-NET'],
+    status: 'native',
+    // SmartConfig writes the site file and the template in the same format,
+    // so both import; the template is how this parser was built and tested.
+    extensions: ['.mx1', '.mxt', '.f4k', '.f4t', '.16t', '.ion', '.iot'],
+    howToExport:
+      'Take the SmartConfig site file. Zones, panel and equipment points, loop cards, circuits and the logic ' +
+      'equations are read directly. If the site was saved with "Compress Files When Saving" ticked, untick it and ' +
+      'save again — the compressed form is not readable.',
+    sniffBytes: (bytes) => isVigilantBytes(bytes),
+    parseBytes: (bytes, fileName) => parseVigilantBytes(bytes, fileName),
   },
   {
     id: 'notifier-pci',
@@ -129,7 +139,7 @@ export const PANEL_CATALOGUE: PanelParser[] = [
     brandLabel: 'Pertronic',
     models: ['F220', 'F120', 'F100'],
     status: 'native',
-    extensions: ['.util'],
+    extensions: ['.util', '.f220cfg'],
     howToExport:
       'Take the .util project file from the Pertronic configuration tool. Loops, devices, zones, output groups and ' +
       'the logic blocks are all read directly, and spare addresses are marked as spare rather than imported as devices.',
@@ -154,19 +164,23 @@ export const PANEL_CATALOGUE: PanelParser[] = [
     id: 'simplex',
     brand: 'simplex',
     brandLabel: 'Simplex',
-    models: ['4100ES', '4100U', '4010', 'Simplex networks'],
+    models: ['4100ES', '4100U', '4010ES', '4007ES', '4100ES-S1'],
     status: 'planned',
-    extensions: ['.sdb', '.bak', '.zip'],
-    howToExport: 'Use the panel programmer report output for the point list, saved as CSV or tab-delimited text.',
+    extensions: ['.sdb4100u', '.dbf'],
+    howToExport:
+      'The job file is a variant of an Access database and is not read yet. In the ES Panel Programmer use ' +
+      'File > Export > "Export User Points to Text File", save as CSV, and import that.',
   },
   {
     id: 'siemens',
     brand: 'siemens',
     brandLabel: 'Siemens',
-    models: ['Cerberus PRO'],
+    models: ['Cerberus PRO', 'FS720'],
     status: 'planned',
-    extensions: ['.xml', '.cdb'],
-    howToExport: 'Export the detector and zone list from the Siemens engineering tool to CSV.',
+    extensions: ['.fsc', '.xml'],
+    howToExport:
+      'In Cerberus Engineering Tool open the site, select the Detection task card, then File > CSV export. ' +
+      'That is a flat per-device table and imports through the column mapper.',
   },
   {
     id: 'fusion',

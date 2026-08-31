@@ -2,6 +2,7 @@ import type {
   CauseEffectRule, CauseKind, Loop, ParsedConfig, ParsedPanel, Point, Zone,
 } from '@/domain/types';
 import { normaliseDeviceType } from './deviceType';
+import { parseTagLine } from './lineTags';
 import { effectKindFromLabel } from './effectKind';
 
 /**
@@ -28,52 +29,8 @@ import { effectKindFromLabel } from './effectKind';
 
 const PARSER_ID = 'notifier-pci@1';
 
-interface PciTag {
-  name: string;
-  attrs: Record<string, string>;
-  selfClosing: boolean;
-  closing: boolean;
-}
-
-const ENTITIES: Record<string, string> = {
-  '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'",
-};
-
-/**
- * Decodes the five XML entities and leaves anything else alone.
- *
- * `&vbCrLf` is deliberately untouched. It is not an entity — it is a fragment
- * of Visual Basic that ended up inside a string — and quietly turning it into
- * a newline would be inventing content that the panel never held.
- */
-function decodeEntities(s: string): string {
-  return s.replace(/&(amp|lt|gt|quot|apos);/g, (m) => ENTITIES[m] ?? m);
-}
-
-/** Reads one line as a tag, or returns undefined when it is not one. */
-export function parsePciLine(line: string): PciTag | undefined {
-  const trimmed = line.trim();
-  if (!trimmed.startsWith('<') || !trimmed.endsWith('>')) return undefined;
-
-  if (trimmed.startsWith('</')) {
-    const name = trimmed.slice(2, -1).trim();
-    return name ? { name, attrs: {}, selfClosing: false, closing: true } : undefined;
-  }
-
-  const selfClosing = trimmed.endsWith('/>');
-  const body = trimmed.slice(1, selfClosing ? -2 : -1);
-  const nameMatch = body.match(/^([A-Za-z_][\w.-]*)/);
-  if (!nameMatch) return undefined;
-
-  const attrs: Record<string, string> = {};
-  // Attributes are written `Name = "value"`, spaces around the equals. Values
-  // are always quoted, which is what makes a line scan safe.
-  const re = /([A-Za-z_][\w.-]*)\s*=\s*"([^"]*)"/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(body))) attrs[m[1]!] = decodeEntities(m[2]!);
-
-  return { name: nameMatch[1]!, attrs, selfClosing, closing: false };
-}
+/** One line of a .pci file, read as a tag. Shared with the Vigilant reader. */
+export const parsePciLine = parseTagLine;
 
 export function isPci(text: string): boolean {
   const head = text.slice(0, 400);

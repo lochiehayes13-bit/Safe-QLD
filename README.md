@@ -169,7 +169,7 @@ spreadsheet reader.
 
 ## Testing
 
-660 tests, run without a native toolchain:
+696 tests, run without a native toolchain:
 
 ```bash
 npm test
@@ -204,9 +204,15 @@ overflow page — its widest row is 893 bytes against a 989-byte threshold — s
 an error in the overflow arithmetic would have passed every test that used only
 real data, and then quietly corrupted the first large site that came along.
 
+The Vigilant parser is the exception on samples: Tyco publishes the SmartConfig
+installers without a login, and they carry 44 real configuration files between
+them. Those are the vendor's files rather than ours so they are not committed
+either, but they are what the parser was built and checked against — all 86
+template files across both installers parse without error.
+
 ## Reading panel configurations
 
-Six vendor formats are read directly, without an export step.
+Seven vendor formats are read directly, without an export step.
 
 | Format | Panel | What comes across |
 | --- | --- | --- |
@@ -214,6 +220,7 @@ Six vendor formats are read directly, without an export step.
 | `.nle` | Kentec / Incite Taktis | zones, loops, devices, panel I/O, cause and effect |
 | `.pci` | Notifier NFS | zones, ten loops, devices, the equations behind the matrix |
 | `.util` | Pertronic F-series | zones, loops, devices, output groups, logic blocks |
+| `.mx1` `.f4k` | Vigilant MX1, F4000/MX4428 | zones, cards, circuits, panel points, logic equations |
 | `.ncf` | brand unconfirmed | site and zones only |
 | `.sqld` | Safe QLD share pack | everything |
 
@@ -236,6 +243,15 @@ quietly importing less than it appears to:
 - **Fusion `.sts`** unpacks cleanly — a zlib stream behind a twelve-byte
   header — and contains a device table with no text in it at all. There is
   nothing there to name a device with.
+- **Vigilant** files are Windows-1252, not UTF-8; 30 of the 44 configuration
+  files the vendor ships publicly fail a strict UTF-8 decode on a curly
+  apostrophe. And SmartConfig pre-creates every addressable slot — 999 zones,
+  127 responder cards — so a reader that cannot tell a slot from a device
+  reports every building as having 999 zones. Only what is named or referenced
+  is imported. Any record type the reader does not recognise is reported by
+  name and count rather than dropped, because the vendor's own templates carry
+  no loop devices, so that table has never been seen here and is not going to
+  be guessed at.
 
 An unrecognised file is not simply refused. It is probed: container, encoding,
 delimiter, record shapes, repeated vocabulary, and whether the bytes have any
