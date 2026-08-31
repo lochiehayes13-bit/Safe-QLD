@@ -4,7 +4,11 @@ import { Stack, useLocalSearchParams } from 'expo-router';
 import { getSite, listPanels, listZones, queryPoints } from '@/db/repo';
 import type { Panel, Site, Zone } from '@/domain/types';
 import { zoneSheet } from '@/export/sheets';
-import { shareFile, writeXlsx } from '@/export/files';
+import { shareFile, writePdf, writeXlsx } from '@/export/files';
+import { buildZoneChart } from '@/domain/zoneChart';
+import { zoneChartHtml } from '@/export/zoneChart';
+import { loadPrefs } from '@/app-prefs';
+import { nowIso } from '@/db';
 import { useTheme } from '@/theme';
 import { Button, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
 
@@ -22,6 +26,7 @@ export default function ZonesScreen() {
   const [zones, setZones] = useState<ZoneWithCount[]>([]);
   const [includeUnused, setIncludeUnused] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [charting, setCharting] = useState(false);
 
   useEffect(() => {
     if (!siteId) return;
@@ -62,6 +67,38 @@ export default function ZonesScreen() {
     }
   };
 
+  /**
+   * Prints the zone chart for the panel door.
+   *
+   * Built from the configuration imported off this panel, so it cannot
+   * disagree with it — which is the point. The monthly routine checks the chart
+   * at the panel is legible and matches the installed zones; when it does not,
+   * this is the fix, printed on site rather than requested from an office.
+   */
+  const printChart = async () => {
+    const panel = panels.find((p) => p.id === activePanel);
+    if (!panel || !site) return;
+    setCharting(true);
+    try {
+      const [prefs, pts] = await Promise.all([
+        loadPrefs(),
+        queryPoints({ panelId: panel.id, includeUnused: true, limit: 100000 }),
+      ]);
+      // Always read the full zone table here rather than the filtered list on
+      // screen: a chart that quietly matched a display toggle would be wrong in
+      // a way nobody would notice until it mattered.
+      const allZones = await listZones(panel.id, true);
+      const chart = buildZoneChart(allZones, pts, includeUnused);
+      const html = zoneChartHtml({
+        site, panel, chart, companyName: prefs.companyName, generatedAt: nowIso(),
+      });
+      const file = await writePdf(`zone-chart-${panel.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`, html);
+      await shareFile(file, 'Zone chart');
+    } finally {
+      setCharting(false);
+    }
+  };
+
   return (
     <>
       <Stack.Screen options={{ title: site ? `${site.name} — zones` : 'Zones' }} />
@@ -80,7 +117,10 @@ export default function ZonesScreen() {
               tone={includeUnused ? 'warn' : 'default'}
               onPress={() => setIncludeUnused((v) => !v)}
             />
-            <Button title="Export" variant="ghost" compact onPress={exportZones} loading={exporting} />
+            <Rowed gap={1}>
+              <Button title="Zone chart" variant="ghost" compact onPress={printChart} loading={charting} />
+              <Button title="Export" variant="ghost" compact onPress={exportZones} loading={exporting} />
+            </Rowed>
           </Rowed>
           <Txt size="sm" tone="muted">{zones.length} zone{zones.length === 1 ? '' : 's'}</Txt>
         </View>
