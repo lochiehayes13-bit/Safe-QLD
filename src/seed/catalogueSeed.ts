@@ -26,7 +26,7 @@ const VERSION_KEY = 'safeqld.catalogue.seededVersion';
  * replaces as many rows as it adds. The count catches growth; this catches
  * everything else.
  */
-const CATALOGUE_REVISION = 3;
+const CATALOGUE_REVISION = 4;
 
 function bundled(): CatalogueSeedItem[] {
   // eslint-disable-next-line @typescript-eslint/no-var-requires

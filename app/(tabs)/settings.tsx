@@ -5,6 +5,7 @@ import { SimproClient, type SimproConfig } from '@/simpro/client';
 import { loadPrefs, savePrefs, DEFAULT_PREFS, type Prefs } from '@/app-prefs';
 import { clearExports, exportsSize } from '@/export/files';
 import { pendingSyncCount } from '@/db/opsRepo';
+import { bundledCatalogueSize, startCatalogueSeed } from '@/seed/catalogueSeed';
 import { flushQueue, pullFromSimpro, type SyncProgress } from '@/simpro/sync';
 import { formatBytes } from '@/share/pack';
 import { useTheme } from '@/theme';
@@ -22,11 +23,18 @@ export default function SettingsScreen() {
   const [pending, setPending] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [progress, setProgress] = useState<SyncProgress | null>(null);
+  // Null until seeding settles, so a first launch shows "loading" rather than
+  // an alarming zero against the bundled figure.
+  const [catalogue, setCatalogue] = useState<number | null>(null);
+  const bundled = bundledCatalogueSize();
 
   useEffect(() => {
     void loadPrefs().then(setPrefs);
     void SimproClient.hasSecret().then(setHasSecret);
     void pendingSyncCount().then(setPending);
+    void startCatalogueSeed()
+      .then(({ count }) => setCatalogue(count))
+      .catch(() => setCatalogue(0));
     try {
       setStorage(exportsSize());
     } catch {
@@ -246,6 +254,13 @@ export default function SettingsScreen() {
         <Rowed style={{ justifyContent: 'space-between' }}>
           <Txt size="sm">Waiting to sync</Txt>
           <Txt size="sm" tone={pending ? 'warn' : 'muted'}>{pending} record{pending === 1 ? '' : 's'}</Txt>
+        </Rowed>
+        <Divider />
+        <Rowed style={{ justifyContent: 'space-between' }}>
+          <Txt size="sm">Parts catalogue</Txt>
+          <Txt size="sm" tone={catalogue === null ? 'muted' : catalogue < bundled ? 'warn' : 'muted'}>
+            {catalogue === null ? 'loading…' : `${catalogue.toLocaleString()} of ${bundled.toLocaleString()}`}
+          </Txt>
         </Rowed>
         <View style={{ height: t.space(3) }} />
         <Button
