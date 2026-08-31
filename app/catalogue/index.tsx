@@ -7,6 +7,7 @@ import {
   CATEGORY_LABEL, catalogueBrands, catalogueCategories, catalogueCount, queryCatalogue,
   type CatalogueItem,
 } from '@/db/catalogueRepo';
+import { startCatalogueSeed } from '@/seed/catalogueSeed';
 import { useTheme } from '@/theme';
 import { Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
 
@@ -27,6 +28,9 @@ export default function CatalogueScreen() {
   const [brands, setBrands] = useState<{ brand: string; count: number }[]>([]);
   const [categories, setCategories] = useState<{ category: string; count: number }[]>([]);
   const [total, setTotal] = useState(0);
+  // Seeding starts at launch but runs alongside the app, so on the first run
+  // after an install this screen can arrive before the parts do.
+  const [seeding, setSeeding] = useState(true);
 
   useEffect(() => {
     const h = setTimeout(() => setDebounced(search), 200);
@@ -34,8 +38,20 @@ export default function CatalogueScreen() {
   }, [search]);
 
   useEffect(() => {
-    void catalogueBrands().then(setBrands);
-    void catalogueCount().then(setTotal);
+    let cancelled = false;
+    startCatalogueSeed()
+      .catch(() => {})
+      .finally(() => {
+        if (cancelled) return;
+        setSeeding(false);
+        void catalogueBrands().then(setBrands);
+        void catalogueCount().then(setTotal);
+        void load();
+      });
+    return () => { cancelled = true; };
+    // load is intentionally not a dependency: this runs once, when seeding
+    // settles, and the filter effect below owns every later reload.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -114,11 +130,13 @@ export default function CatalogueScreen() {
           removeClippedSubviews
           ListEmptyComponent={
             <EmptyState
-              title={total === 0 ? 'Catalogue not loaded' : 'Nothing matched'}
+              title={seeding ? 'Loading the catalogue' : total === 0 ? 'Catalogue not loaded' : 'Nothing matched'}
               body={
-                total === 0
-                  ? 'The parts catalogue loads on first run. If this stays empty, the bundled data is missing from this build.'
-                  : 'Try the part number on its own, or clear the brand filter.'
+                seeding
+                  ? 'Thousands of parts are being written to this device. It happens once, after an install or an update.'
+                  : total === 0
+                    ? 'The parts catalogue loads on first run. If this stays empty, the bundled data is missing from this build.'
+                    : 'Try the part number on its own, or clear the brand filter.'
               }
             />
           }
