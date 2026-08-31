@@ -137,6 +137,23 @@ describe('service routines', () => {
     }
   });
 
+  it('raises a coded defect from every check that can fail on its own', () => {
+    // A check with pass/fail criteria and no defect code records a failure on
+    // the asset timeline and raises nothing — no rectification wording, nothing
+    // on the outstanding-works list. The five-yearly routines shipped this way:
+    // a hose bursting on its pressure test produced no defect at all.
+    const gaps: string[] = [];
+    for (const r of SERVICE_ROUTINES) {
+      for (const t of r.tests) {
+        // A check that only records a measurement has nothing to declare
+        // failed, so it needs no code.
+        if (t.measurementKey && !t.failCriteria && !t.passCriteria) continue;
+        if (!t.defectCode) gaps.push(`${r.id}/${t.id}: ${t.label}`);
+      }
+    }
+    expect(gaps).toEqual([]);
+  });
+
   it('records where every requirement comes from', () => {
     // The app promises never to blur a standard, a manufacturer instruction and
     // an internal procedure. That promise is only kept if each one says which.

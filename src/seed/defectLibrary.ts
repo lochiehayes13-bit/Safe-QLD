@@ -648,6 +648,114 @@ export const DEFECT_LIBRARY: DefectCode[] = [
     quoteItems: [{ description: 'Blanking plates / escutcheon', unit: 'lot', qtyPerDefect: 1 }, REPLACE_LABOUR],
     photoRequired: true,
   },
+  // Defects that only a long-interval activity finds. Without these, a hose that
+  // bursts on its five-yearly pressure test, or pipework found packed with
+  // corrosion product, records a failed check and raises nothing — which is the
+  // one outcome the five-yearly exists to produce.
+  {
+    code: 'HYD-BST-002', system: 'hydrant', component: 'Booster', defect: 'Assembly defective on test',
+    severity: 'critical',
+    reportWording: 'Booster assembly failed on test: an inlet, non-return valve or connection did not perform, so the brigade could not boost the system as intended.',
+    clientWording: 'The fire brigade booster connection did not work properly when tested. The brigade relies on it to pressurise the system.',
+    rectification: 'Repair or replace the failed component, retest the assembly under flow, and confirm the connection type matches what the attending brigade carries.',
+    quoteItems: [{ description: 'Booster inlet or valve components', unit: 'lot', qtyPerDefect: 1 }, REPLACE_LABOUR, TEST_LABOUR],
+    photoRequired: true,
+  },
+  {
+    code: 'SPR-PIP-001', system: 'sprinkler', component: 'Pipework', defect: 'Internal obstruction or corrosion',
+    severity: 'critical',
+    reportWording: 'Internal inspection found obstruction, scale or corrosion product in the sprinkler pipework, restricting flow to the heads it serves.',
+    clientWording: 'The inside of the sprinkler pipework has built up material that would restrict water reaching the sprinklers.',
+    rectification: 'Establish the cause before cleaning — recurrence usually means water quality or microbiologically influenced corrosion, and flushing alone will not hold. Flush or replace the affected sections and re-inspect.',
+    quoteItems: [{ description: 'Pipework flush or section replacement', unit: 'lot', qtyPerDefect: 1 }, REPLACE_LABOUR],
+    photoRequired: true,
+  },
+  {
+    code: 'SPR-HD-004', system: 'sprinkler', component: 'Sprinkler head', defect: 'Sample failed laboratory test',
+    severity: 'critical',
+    reportWording: 'Heads submitted from the required sample failed laboratory testing, which calls the remaining installed heads of that batch and age into question.',
+    clientWording: 'Sprinkler heads taken for testing did not pass. Heads of the same age and type across the building may need replacing.',
+    rectification: 'Follow the standard on what a failed sample requires — commonly a wider sample or replacement of the affected population. Do not treat this as a single-head defect.',
+    quoteItems: [{ description: 'Replacement sprinkler heads', unit: 'ea', qtyPerDefect: 1 }, REPLACE_LABOUR, TEST_LABOUR],
+    photoRequired: true,
+  },
+  {
+    code: 'SPR-VLV-003', system: 'sprinkler', component: 'Alarm valve', defect: 'Defective on overhaul',
+    severity: 'critical',
+    reportWording: 'Alarm valve found defective on overhaul: seats, seals or the clapper were not serviceable, so the valve would not have operated or alarmed reliably.',
+    clientWording: 'The main sprinkler alarm valve was found worn internally and would not have raised the alarm reliably.',
+    rectification: 'Replace the seats and seals, reassemble to the manufacturer instructions, and prove the alarm end to end through to monitoring.',
+    quoteItems: [{ description: 'Alarm valve service kit', unit: 'ea', qtyPerDefect: 1 }, REPLACE_LABOUR, TEST_LABOUR],
+    photoRequired: true,
+  },
+  {
+    code: 'PMP-CTL-001', system: 'pump', component: 'Pump controller', defect: 'Sequence or changeover fault',
+    severity: 'critical',
+    reportWording: 'Pump controller did not complete its start sequence, changeover to the alternate supply, or signal an alarm output as designed.',
+    clientWording: 'The fire pump controller did not follow its correct sequence when tested, so the pump may not start or swap supplies when needed.',
+    rectification: 'Fault-find the controller against the manufacturer sequence, repair, and re-prove every start condition, the changeover and each alarm output.',
+    quoteItems: [{ description: 'Controller components', unit: 'lot', qtyPerDefect: 1 }, REPLACE_LABOUR, TEST_LABOUR],
+    photoRequired: true,
+  },
+  // Failures that had no code and so raised nothing. Brigade signalling is the
+  // worst of them: a path left isolated means nobody is called, and it was
+  // recording a failed check and stopping there.
+  {
+    code: 'DET-PWR-001', system: 'detection', component: 'Mains supply', defect: 'Not present or not secure',
+    // High, not critical: the system runs on standby, so it is not inoperable —
+    // but the clock is now running against the battery.
+    severity: 'high',
+    reportWording: 'Mains supply to the fire indicator panel was not present, or was not secured against inadvertent switching. The system is running on standby power.',
+    clientWording: 'Mains power to the fire panel is off or can be switched off by accident. The system is running on battery, which will not last.',
+    rectification: 'Restore the supply and secure the isolator against inadvertent operation. Where it was off, establish for how long and check the batteries recovered.',
+    quoteItems: [{ description: 'Supply repair', unit: 'lot', qtyPerDefect: 1 }, REPLACE_LABOUR],
+    photoRequired: true,
+  },
+  {
+    code: 'DET-ASE-001', system: 'detection', component: 'Alarm signalling equipment', defect: 'Path isolated or not in service',
+    severity: 'critical',
+    reportWording: 'The alarm signalling path to the monitoring service was isolated or out of service, so an alarm at this panel would not have summoned the brigade.',
+    clientWording: 'The connection that calls the fire brigade was switched off. An alarm would not have reached them.',
+    rectification: 'Restore the path, confirm with the monitoring service that signals are being received, and raise an impairment record for the period it was out.',
+    quoteItems: [TEST_LABOUR],
+    photoRequired: true,
+  },
+  {
+    code: 'DET-ASE-002', system: 'detection', component: 'Alarm signalling equipment', defect: 'Signal not received on test',
+    severity: 'critical',
+    reportWording: 'An alarm signal transmitted on test was not received by the monitoring service, so the brigade would not be summoned by an alarm at this panel.',
+    clientWording: 'A test alarm did not reach the monitoring company, so the fire brigade would not be called.',
+    rectification: 'Fault-find the path end to end — panel output, dialler or IP path, and the monitoring account — then retest and obtain confirmation of receipt.',
+    quoteItems: [{ description: 'Signalling equipment repair', unit: 'lot', qtyPerDefect: 1 }, TEST_LABOUR],
+    photoRequired: true,
+  },
+  {
+    code: 'SPR-SUP-001', system: 'sprinkler', component: 'Water supply', defect: 'Pressure below requirement',
+    severity: 'critical',
+    reportWording: 'Static or running pressure at the installation was below the requirement for the system, so the sprinklers would not perform to their design density.',
+    clientWording: 'Water pressure to the sprinkler system is below what it needs to work as designed.',
+    rectification: 'Establish whether the shortfall is in the supply, a partly closed valve or an obstruction, and correct it. Retest and record both static and running pressures.',
+    quoteItems: [{ description: 'Supply investigation and repair', unit: 'lot', qtyPerDefect: 1 }, TEST_LABOUR],
+    photoRequired: true,
+  },
+  {
+    code: 'ASD-DET-003', system: 'aspirating', component: 'Aspirating detector', defect: 'Failed smoke test or transport time exceeded',
+    severity: 'critical',
+    reportWording: 'Smoke introduced at the end sampling point did not produce an alarm, or did so outside the permitted transport time, so the system would not detect within its design response.',
+    clientWording: 'Smoke put into the far end of the sampling pipe did not reach the detector, or took too long to.',
+    rectification: 'Check the pipework for blockage, leaks and disconnection along its full run, clean or replace the filter, then retest transport time from the end sampling point.',
+    quoteItems: [{ description: 'Filter and pipework repair', unit: 'lot', qtyPerDefect: 1 }, REPLACE_LABOUR, TEST_LABOUR],
+    photoRequired: true,
+  },
+  {
+    code: 'PAS-DMP-001', system: 'passive', component: 'Fire damper', defect: 'Failed to release or reinstate',
+    severity: 'high',
+    reportWording: 'Fire damper did not release on test, or did not reinstate afterwards, so the penetration it protects would not be closed in a fire.',
+    clientWording: 'A fire damper did not close when tested. It is meant to seal a duct so fire and smoke cannot spread through it.',
+    rectification: 'Free or replace the release mechanism, prove release and reinstatement, and confirm the blade seats fully closed.',
+    quoteItems: [{ description: 'Damper release mechanism', unit: 'ea', qtyPerDefect: 1 }, REPLACE_LABOUR, TEST_LABOUR],
+    photoRequired: true,
+  },
 ];
 
 /** Index for fast lookup by code. */
