@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push supersedes an in-flight run on the same branch.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck, tests and bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # The Expo dependency tree carries a pre-existing react/react-dom peer
+      # conflict, so a plain `npm ci` cannot resolve it.
+      - name: Install
+        run: npm ci --legacy-peer-deps
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test -- --ci
+
+      # Bundling is the check that catches what typecheck cannot: a missing
+      # native peer dependency compiles fine and then fails to start.
+      - name: Bundle for Android
+        run: npx expo export --platform android --output-dir dist
