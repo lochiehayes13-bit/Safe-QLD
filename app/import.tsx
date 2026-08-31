@@ -9,6 +9,7 @@ import {
   type ColumnMapping, type FieldKey, type PanelParser, type TabularPreview,
 } from '@/parsers';
 import { decodePack, PackError } from '@/share/pack';
+import { probeFile, type FileProbe } from '@/parsers/probe';
 import { fromBase64 } from '@/export/zip';
 import { createSite, importParsedConfig, listSites } from '@/db/repo';
 import type { PanelBrand, Site } from '@/domain/types';
@@ -37,6 +38,7 @@ export default function ImportScreen() {
   const [siteId, setSiteId] = useState<string | undefined>(params.siteId);
   const [newSiteName, setNewSiteName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [unknown, setUnknown] = useState<{ name: string; probe: FileProbe } | null>(null);
 
   React.useEffect(() => {
     void listSites().then((s) => {
@@ -68,10 +70,12 @@ export default function ImportScreen() {
       }
 
       if (kind.kind === 'unknown') {
-        Alert.alert(
-          'Not a recognised file',
-          'Safe QLD reads Safe QLD share packs and delimited device lists (CSV, TSV, tab-separated text). Export a device or point list from the panel software as CSV and try that.',
-        );
+        // Say what the file appears to be rather than only that it was not
+        // understood. A technician who has just pulled a config off a panel we
+        // do not read yet is holding the one thing that would let us read it,
+        // and "unsupported" gives them no reason to send it on.
+        const probe = probeFile(new Uint8Array(await file.bytes()));
+        setUnknown({ name: asset.name, probe });
         return;
       }
 
@@ -177,6 +181,14 @@ export default function ImportScreen() {
     <>
       <Stack.Screen options={{ title: 'Import' }} />
       <Screen>
+        {unknown ? (
+          <UnknownFile
+            name={unknown.name}
+            probe={unknown.probe}
+            onDismiss={() => setUnknown(null)}
+          />
+        ) : null}
+
         {!preview ? (
           <>
             <Button
@@ -285,5 +297,68 @@ export default function ImportScreen() {
         )}
       </Screen>
     </>
+  );
+}
+
+/**
+ * A file we cannot read yet, described rather than dismissed.
+ *
+ * The technician holding it has just pulled a configuration off a panel this
+ * build has no parser for — which makes it the single most useful thing anyone
+ * could send us, and "unsupported" gives them no reason to. So the screen says
+ * what the file appears to be, whether a parser could realistically be built
+ * from it, and asks for it.
+ */
+function UnknownFile({
+  name, probe, onDismiss,
+}: {
+  name: string;
+  probe: FileProbe;
+  onDismiss: () => void;
+}) {
+  const t = useTheme();
+  const kb = probe.byteLength < 1024 * 1024
+    ? `${Math.round(probe.byteLength / 1024)} KB`
+    : `${(probe.byteLength / 1024 / 1024).toFixed(1)} MB`;
+
+  return (
+    <Card>
+      <Rowed align="flex-start" gap={2}>
+        <MaterialCommunityIcons name="file-question-outline" size={22} color={t.color.warn} />
+        <View style={{ flex: 1 }}>
+          <Txt weight="700">No parser for this file yet</Txt>
+          <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{name} · {kb}</Txt>
+        </View>
+      </Rowed>
+
+      <View style={{ marginVertical: t.space(2.5) }}><Divider /></View>
+
+      <Txt size="sm" style={{ lineHeight: 19 }}>{probe.containerNote}</Txt>
+      <Txt size="sm" tone="muted" style={{ marginTop: t.space(2), lineHeight: 19 }}>{probe.assessment}</Txt>
+
+      {probe.textual ? (
+        <Rowed gap={2} wrap style={{ marginTop: t.space(2.5) }}>
+          <Chip label={probe.encoding} />
+          <Chip label={`${probe.lineCount.toLocaleString()} lines`} />
+          {probe.delimiter ? <Chip label={`${probe.delimiter.name}-separated`} /> : null}
+          {probe.sectionMarkers.length ? <Chip label={`${probe.sectionMarkers.length} section shapes`} /> : null}
+        </Rowed>
+      ) : null}
+
+      <View style={{ marginTop: t.space(3) }}>
+        <Banner
+          tone="info"
+          title="Send this file to the office"
+          body="A real configuration file is what makes a parser possible at all — the Ampac one was built from two of them. Nothing here is uploaded anywhere; this is a description, not a transfer."
+        />
+      </View>
+
+      <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
+        In the meantime, export a device or point list from the panel software as CSV and import
+        that — it works for every panel today.
+      </Txt>
+
+      <Button title="Close" variant="secondary" onPress={onDismiss} style={{ marginTop: t.space(3) }} />
+    </Card>
   );
 }
