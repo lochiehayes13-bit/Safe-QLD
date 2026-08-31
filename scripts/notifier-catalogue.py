@@ -17,6 +17,9 @@ this API, so those fields stay null rather than being guessed at.
 import json, re, sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from fire_catalogue import BAD_PART, JUNK_NAME, classify, clean
+
 SUPPLIER = "Honeywell — Notifier Australia"
 BASE = "https://buildings.honeywell.com"
 
@@ -89,41 +92,6 @@ PATH = [
     ("accessories", ("accessory", None)),
 ]
 
-# Honeywell's merchandising path is unreliable on its own: a keychain sits under
-# control-panels, and gas controllers under the same. The product's own name is
-# much better evidence, so it is read before the path is trusted. Ordered, most
-# specific first -- "detector test kit" is a tool, not a detector.
-NAME_RULES = [
-    (r"\btest (kit|gas|lamp|magnet)|\bdetector tester|\btest pole|removal tool|\btester\b", ("tool", "Test equipment")),
-    (r"\bkeychain|\blanyard|\bsticker|\bbrochure|\bposter\b", ("other", "Merchandise")),
-    (r"\btraining\b|\bcourse\b|\bclassroom\b|\bsoftware licen[cs]e", ("other", "Service or licence")),
-    (r"\bback ?box|\bmounting (box|block|bracket|kit|plate|chassis)|\bchassis\b|\bsurface box|\benclosure|\bcabinet|\bbackbox|\bdoor kit|\btrim ring|\bblank(ing)? plate", ("accessory", "Enclosure or mounting")),
-    (r"\bcable\b|\bwiring loom|\bharness\b", ("cable", None)),
-    (r"\bsampling pipe|\bpipe fitting|\bcapillary|\bair sampling point", ("aspirating", "Pipework")),
-    (r"\baspirat|\bvesda|\bfaast\b|\bstratos\b", ("aspirating", None)),
-    (r"\bbeam detector|\breflector\b|\bosid\b", ("beam", None)),
-    (r"\b(gas|oxygen|toxic|lel|voc|pid|combustible) (detector|sensor|monitor)|\bgas detection|\bexplosion proof|\bsensepoint|\btouchpoint|\bsearchpoint|\bimpulse\b|\braevert|\bareara?e\b|\bmultirae|\bminirae|\bultrarae", ("other", "Gas detection")),
-    (r"\bmanual call point|\bpull station|\bbreak ?glass|\bmcp\b", ("mcp", None)),
-    (r"\bisolator\b", ("isolator", None)),
-    (r"\b(monitor|control|relay|input|output|zone|interface|network|loop) module\b|\bmodule,|\bncm-|\bnotifier network", ("module", None)),
-    (r"\bdetector base|\b(relay|isolator|sounder|standard|conventional|addressable|low ?profile) base\b|\bbase,? (standard|relay|isolator|sounder)|\bmounting base|\bb\d{3}[a-z]*\b base", ("base", None)),
-    (r"\bduct (detector|housing|smoke)", ("detector", "Duct")),
-    (r"\b(photo|photoelectric|optical|ionisation|ionization|multi-?criteria|multi-?sensor|heat|thermal|flame|smoke) (detector|sensor|alarm)|\bdetector,? (photo|heat|smoke|multi)", ("detector", None)),
-    (r"\bdetector\b|\bdetection head\b", ("detector", None)),
-    (r"\b(sounder|horn|speaker|loudspeaker) ?/? ?(strobe|beacon)|\bcombination strobe|\baudible (and|&) visual|\bsounder ?\+ ?(strobe|beacon)", ("sounder-strobe", None)),
-    (r"\bstrobe\b|\bbeacon\b|\bvisual (alarm|indicator|signal)", ("strobe", None)),
-    (r"\bsounder\b|\bhorn\b|\bbell\b|\b(loud)?speaker\b|\bsiren\b", ("sounder", None)),
-    (r"\bbatter(y|ies)\b|\bsla\b|\b\d+ ?ah\b", ("battery", None)),
-    (r"\bpower supply|\bcharger\b|\bpsu\b|\btransformer\b", ("power-supply", None)),
-    (r"\bannunciator|\bkeypad\b|\bmimic (panel|display)|\brepeater\b|\bdisplay,? ", ("ancillary", "Annunciator")),
-    (r"\b(control|fire alarm|releasing|addressable|conventional) panel\b|\bfacp\b|\bpanel,? ", ("panel", None)),
-]
-NAME_RULES = [(re.compile(p, re.I), v) for p, v in NAME_RULES]
-
-# SKU descriptions are sometimes just the category word, which makes a useless
-# name. Fall back to the product family name in that case.
-JUNK_NAME = re.compile(r"^(accessor(y|ies)|parts?( & accessories)?|spares?|other|misc(ellaneous)?|n/?a)$", re.I)
-
 # A product record lists every platform the device works with. NOTIFIER is the
 # one sold here, so it wins; otherwise take the first named brand.
 BRAND_PREF = ["NOTIFIER", "Xtralis", "System Sensor", "Morley-IAS", "KAC",
@@ -133,8 +101,18 @@ BRAND_CASE = {"NOTIFIER": "Notifier"}
 
 # Services and training are not parts.
 SKIP_PATH = re.compile(r"training-services|/services/", re.I)
-BAD_PART = re.compile(r"^(n/?a|tbc|tba|unknown|various|contact|-+|\?+)$", re.I)
-TAG = re.compile(r"<[^>]+>")
+
+
+def category_of(leaf, brandpath, text):
+    """Leaf category is per-SKU and the most precise signal Honeywell gives, so
+    it wins outright. Everything else goes to the shared classifier, with the
+    merchandising path as a last resort."""
+    if leaf and leaf in LEAF:
+        return LEAF[leaf]
+    for frag, cat in PATH:
+        if frag in (brandpath or ""):
+            return classify(text, fallback=cat)
+    return classify(text)
 
 
 def brand_of(spec_raw):
@@ -150,27 +128,6 @@ def brand_of(spec_raw):
         if pref in names:
             return BRAND_CASE.get(pref, pref)
     return BRAND_CASE.get(names[0], names[0]) if names else "Notifier"
-
-
-def category_of(leaf, brandpath, text):
-    if leaf and leaf in LEAF:
-        return LEAF[leaf]
-    for pat, cat in NAME_RULES:
-        if pat.search(text or ""):
-            return cat
-    for frag, cat in PATH:
-        if frag in (brandpath or ""):
-            return cat
-    return ("other", None)
-
-
-def clean(text):
-    if not text:
-        return None
-    t = TAG.sub(" ", str(text))
-    t = re.sub(r"&nbsp;?", " ", t)
-    t = re.sub(r"\s+", " ", t).strip()
-    return t or None
 
 
 def main(products_path, skus_path, out_path):
