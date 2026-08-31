@@ -94,3 +94,52 @@ export async function dueAtSite(siteId: string, todayIso: string): Promise<Routi
 
   return sortByUrgency(out);
 }
+
+export interface SiteDue extends RoutineDue {
+  siteId: string;
+  siteName: string;
+}
+
+/**
+ * Routines that have lapsed, across every site.
+ *
+ * Deliberately only reports routines with a history that has since lapsed. A
+ * site that has never had a given routine recorded would otherwise contribute
+ * one "never recorded" row per routine — across a book of sites that is
+ * hundreds of rows of nothing happening, and it would bury the handful that
+ * genuinely lapsed. Those still show on the site's own list, where they mean
+ * something.
+ */
+export async function lapsedEverywhere(todayIso: string, limit = 200): Promise<SiteDue[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<HistoryRow & { siteId: string; siteName: string }>(
+    `SELECT r.siteId                AS siteId,
+            s.name                  AS siteName,
+            r.routineId             AS routineId,
+            MIN(r.completedAt)      AS firstCompletedAt,
+            MAX(r.completedAt)      AS lastCompletedAt,
+            COUNT(*)                AS completedCount
+     FROM routine_run r JOIN site s ON s.id = r.siteId
+     GROUP BY r.siteId, r.routineId`,
+  );
+
+  const out: SiteDue[] = [];
+  for (const row of rows) {
+    const routine = SERVICE_ROUTINES.find((x) => x.id === row.routineId);
+    if (!routine) continue;
+    const due = routineDue(
+      {
+        routineId: routine.id,
+        frequency: routine.frequency,
+        firstCompletedAt: row.firstCompletedAt,
+        lastCompletedAt: row.lastCompletedAt,
+        completedCount: row.completedCount,
+      },
+      todayIso,
+    );
+    if (due.state !== 'overdue' && due.state !== 'due') continue;
+    out.push({ ...due, siteId: row.siteId, siteName: row.siteName });
+  }
+
+  return sortByUrgency(out).slice(0, limit) as SiteDue[];
+}

@@ -5,6 +5,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { listSiteSummaries, listDefects, defectsAwaitingNotice, type SiteSummary } from '@/db/repo';
 import { listJobs, listImpairments, listPromises, pendingSyncCount, restockNeeded, impairmentElapsedMs, type ImpairmentRecord, type JobRecord, type Promise_ } from '@/db/opsRepo';
 import { queryAssets, recurringFailures, type RecurringFailure } from '@/db/assetRepo';
+import { lapsedEverywhere } from '@/db/routineRunRepo';
 import type { Defect } from '@/domain/types';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme, type Theme } from '@/theme';
@@ -29,10 +30,11 @@ export default function TodayScreen() {
   const [dueAssets, setDueAssets] = useState(0);
   const [recurring, setRecurring] = useState<RecurringFailure[]>([]);
   const [notices, setNotices] = useState<Defect[]>([]);
+  const [lapsed, setLapsed] = useState(0);
 
   const load = useCallback(async () => {
     const today = new Date().toISOString().slice(0, 10);
-    const [j, s, d, imp, pr, rs, pc, due, rec, nt] = await Promise.all([
+    const [j, s, d, imp, pr, rs, pc, due, rec, nt, lap] = await Promise.all([
       listJobs({ limit: 50 }),
       listSiteSummaries(),
       listDefects(),
@@ -43,10 +45,12 @@ export default function TodayScreen() {
       queryAssets({ dueBefore: today, limit: 500 }),
       recurringFailures(undefined, 3),
       defectsAwaitingNotice(),
+      lapsedEverywhere(new Date().toISOString()),
     ]);
     setJobs(j); setSites(s); setDefects(d); setImpairments(imp);
     setPromises(pr); setRestock(rs.length); setPending(pc);
     setDueAssets(due.length); setRecurring(rec); setNotices(nt);
+    setLapsed(lap.filter((x) => x.state === 'overdue').length);
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
@@ -68,6 +72,7 @@ export default function TodayScreen() {
         <Pill label="Urgent" value={urgentJobs.length} tone={urgentJobs.length ? 'fail' : 'muted'} onPress={() => router.push('/work/jobs')} />
         <Pill label="Open defects" value={openDefects.length} tone={criticalDefects.length ? 'fail' : openDefects.length ? 'warn' : 'muted'} onPress={() => router.push('/work/defects')} />
         <Pill label="Today" value={todaysJobs.length} tone={todaysJobs.length ? 'accent' : 'muted'} onPress={() => router.push('/work/jobs')} />
+        <Pill label="Overdue" value={lapsed} tone={lapsed ? 'fail' : 'muted'} onPress={() => router.push('/work/due')} />
         <Pill label="Assets due" value={dueAssets} tone={dueAssets ? 'warn' : 'muted'} />
       </Rowed>
 
