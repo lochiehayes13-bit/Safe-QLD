@@ -21,7 +21,7 @@ NAME_RULES = [
     (r"\btest (kit|gas|lamp|magnet)|\bdetector tester|\btest pole|removal tool|\btester\b", ("tool", "Test equipment")),
     (r"\bkeychain|\blanyard|\bhi-?vis|\bsafety vest\b|\bwarden cap\b", ("other", "Merchandise")),
     (r"\btraining\b|\bcourse\b|\bclassroom\b|\bsoftware licen[cs]e", ("other", "Service or licence")),
-    (r"\bback ?box|\bmounting (box|block|bracket|kit|plate|chassis)|\bchassis\b|\bsurface box|\benclosure|\bcabinet|\bbackbox|\bdoor kit|\btrim ring|\bblank(ing)? plate", ("accessory", "Enclosure or mounting")),
+    (r"\bback ?box|\bsurface mount box\b|\bmount(ing)? (box|block|bracket|kit|plate|chassis)|\bchassis\b|\bsurface box|\benclosure|\bcabinet|\bbackbox|\bdoor kit|\btrim ring|\bblank(ing)? plate", ("accessory", "Enclosure or mounting")),
     (r"\bcable (gland|tie|clip|entry|cleat|marker)\b|\bp-?clip\b|\bcable saddle\b", ("accessory", "Cable fixing")),
     (r"\b(fire ?rated|twin core|multicore|screened|elv|data|ribbon) cable\b|\bfire ?rated .*\bcore\b|\bcable,? \d|\bcable roll\b|\bwiring loom\b|\bharness\b", ("cable", None)),
     (r"\bsampling pipe|\bpipe fitting|\bcapillary|\bair sampling point", ("aspirating", "Pipework")),
@@ -34,18 +34,18 @@ NAME_RULES = [
     (r"\bdetector base|\b(relay|isolator|sounder|standard|conventional|addressable|low ?profile) base\b|\bbase,? (standard|relay|isolator|sounder)|\bmounting base|\bb\d{3}[a-z]*\b base", ("base", None)),
     (r"\bduct (detector|housing|smoke)", ("detector", "Duct")),
     (r"\b(photo|photoelectric|optical|ionisation|ionization|multi-?criteria|multi-?sensor|heat|thermal|flame|smoke) (detector|sensor|alarm)|\bdetector,? (photo|heat|smoke|multi)", ("detector", None)),
-    # A fire distributor also sells the mechanical supply chain that goes with
-    # the systems -- pipe and fittings, tools, fixings. On FlameStop that is
-    # nearly half the catalogue, so leaving it unclassified would make the
-    # category filter useless on the largest supplier we carry.
+    # Fixed suppression: aerosol, kitchen wet chemical, gas flooding. Not an
+    # extinguisher and not a sprinkler, and it reads as neither.
+    (r"\bstat-?x\b|\baerosol (generator|suppress)|\bwet chemical\b|\bkitchen suppression\b|\bsuppression (cylinder|system|skid)\b|\b(fm-?200|novec|inergen|argonite)\b|\bactuator head\b|\bagent storage\b", ("suppression", None)),
     (r"\bfire collar\b|\bretrofit collar\b|\bfire damper\b|\bfire (batt|pillow|mastic|sealant|wrap|sleeve)\b|\bpenetration seal|\bintumescent\b", ("passive", None)),
     (r"\b(drill|masonry) bit\b|\bhole ?saw\b|\bjab saw\b|\bcutting (blade|disc|wheel)\b|\bridgid\b|\bhand tool\b|\bspanner\b|\bwrench\b|\bpliers\b|\bscrewdriver\b|\bthreading machine\b|\bpipe (cutter|vice|threader)\b", ("tool", None)),
     (r"\b(hex ?)?(bolt|nut|screw|rivet)s?\b|\bself ?drilling\b|\bthreaded rod\b|\bdyna ?bolt\b|\banchor\b|\bstrut\b|\bunistrut\b|\bchannel (end cap|nut|bracket)\b|\bangle bracket\b|\bbeam clamp\b", ("accessory", "Fixings")),
-    (r"\breducing (bush|socket|tee|elbow|nipple|coupling)\b|\bhex nipple\b|\bend cap\b|\b(concentric|eccentric) reducer\b|\bmechanical tee\b|\bgrooved (coupling|fitting)\b|\bpear band\b|\bschedule \d+ .*pipe\b|\b(gal|galvanised|black|copper|cpvc) pipe\b|\bpipe x \d|\bflange\b|\by ?type strainer\b|\by strainer\b|\bbutterfly valve\b|\bgate valve\b|\bnon ?return valve\b|\bball valve\b|\bvalve (gasket|washer|seat)\b", ("pipe", None)),
+    (r"\b\d+ ?(mm|nb) ?bsp\b|\bbsp (male|female|thread)\b|\badapt[oe]r\b.{0,30}\bbsp\b|\breducing (bush|socket|tee|elbow|nipple|coupling)\b|\bhex nipple\b|\bend cap\b|\b(concentric|eccentric) reducer\b|\bmechanical tee\b|\bgrooved (coupling|fitting)\b|\bpear band\b|\bschedule \d+ .*pipe\b|\b(gal|galvanised|black|copper|cpvc) pipe\b|\bpipe x \d|\bflange\b|\by ?type strainer\b|\by strainer\b|\bbutterfly valve\b|\bgate valve\b|\bnon ?return valve\b|\bball valve\b|\bvalve (gasket|washer|seat)\b", ("pipe", None)),
     (r"\bnozzle\b|\bstandpipe\b|\bhose (coupling|adaptor|adapter|reel swivel)\b|\blay ?flat hose\b", ("hydrant", "Hose fittings")),
     (r"\bmixer amplifier\b|\bpa amplifier\b|\bwireless (microphone|uhf)\b|\bpaging microphone\b|\bpublic address\b", ("ewis", "Public address")),
-    # Passive and mechanical protection. A distributor's catalogue is mostly
-    # this, where a panel manufacturer's is none of it.
+    # Passive and mechanical protection, and the mechanical supply chain that
+    # goes with it -- pipe and fittings, tools, fixings. On a distributor this
+    # is most of the catalogue; on a panel manufacturer it is none of it.
     # The whole unit first, so a complete extinguisher is not filed as a spare
     # part for one.
     (r"\bfire extinguisher\b|\bextinguisher\b|\bfire blanket\b", ("extinguisher", None)),
@@ -54,9 +54,9 @@ NAME_RULES = [
     (r"\bhose ?reel\b|\blay ?flat hose\b", ("hose-reel", None)),
     (r"\bhydrant\b|\bstorz\b|\blandin ?g valve\b|\bbooster (assembly|inlet|cabinet)", ("hydrant", None)),
     (r"\bsprinkler\b|\bflow switch\b|\btamper switch\b|\balarm valve\b|\bdeluge\b", ("sprinkler", None)),
-    (r"\bexit sign\b|\bemergency (light|luminaire|exit)|\bspitfire\b|\brecess adaptor\b", ("emergency-lighting", None)),
-    (r"\bsign\b|\bsignage\b|\blabel\b|\bwarning sign", ("signage", None)),
-    (r"\bfire blanket\b|\bfire door\b|\bdoor (holder|closer|release)\b|\bmag ?lock\b", ("ancillary", "Door hardware")),
+    (r"\bexit (sign|light|luminaire)\b|\bemergency (light|luminaire|exit)\b|\bspitfire\b|\brecess adaptor\b|\bbatten fitting\b", ("emergency-lighting", None)),
+    (r"\bsign\b|\bsignage\b|\blabel\b|\bwarning sign|\bdo not (obstruct|block|use)\b|\bkeep (clear|shut|locked)\b|\bpointing arrow\b|\blettering on\b", ("signage", None)),
+    (r"\bfire door\b|\bdoor (holder|closer|release)\b|\bmag ?lock\b", ("ancillary", "Door hardware")),
     (r"\bwarden intercom|\bwip (phone|point|handset)\b|\bhandset\b", ("wip", None)),
     (r"\bevacuation (panel|system)\b|\bewis\b|\bmecp\b|\bemergency warning\b", ("ewis", None)),
     (r"\bdetector\b|\bdetection head\b", ("detector", None)),
@@ -166,3 +166,77 @@ def classify(text, categories=(), body=None, fallback=("other", None)):
             if pat.search(body):
                 return cat
     return fallback
+
+
+# Brands that arrive under more than one name. Keyed lowercase; the value is the
+# spelling to keep. Only aliases we are sure of -- a product line belonging to
+# its maker, or the same name in different case. A supplier's own name is never
+# merged into a manufacturer here: rows recorded under a distributor mean the
+# manufacturer was not published, and folding them into a real brand would
+# assert something nobody told us.
+BRAND_ALIASES = {
+    "vigilant": "Vigilant",
+    "vesda": "Xtralis",
+    "vesda by xtralis": "Xtralis",
+    "hochiki ekho": "Hochiki",
+    "sti": "Safety Technology International",
+    "fireray": "FFE",
+    "afp": "Notifier",
+}
+
+
+def canonical_brand(brand):
+    if not brand:
+        return brand
+    return BRAND_ALIASES.get(brand.strip().lower(), brand.strip())
+
+
+# Suppliers arrive named however the harvest that found them described itself --
+# sometimes a whole sentence ("Multi-brand harvest: Nittan Europe, FFE ...").
+# This is the field a technician filters on, so it has to be a name. Where one
+# harvest genuinely covered several suppliers the brand column still carries the
+# manufacturer, so nothing is lost by naming the harvest for its principal.
+SUPPLIER_ALIASES = {
+    "ampac (halma) australia": "Ampac",
+    "brooks australia pty ltd (brooks.com.au)": "Brooks Australia",
+    "brooks australia": "Brooks Australia",
+    "honeywell \u2014 notifier australia": "Notifier",
+    "notifier / honeywell (honeywell building automation \u2014 notifier brand, australia/nz)": "Notifier",
+    "simplex / johnson controls": "Simplex",
+    "tyco / vigilant (johnson controls fire detection, australia & new zealand)": "Vigilant",
+    "xtralis vesda (honeywell), apollo fire detectors, hochiki europe": "Xtralis, Apollo and Hochiki",
+    "one stop fire shop (bowen hills qld) and eversafe extinguisher / eversafe fire & safety (morningside qld)":
+        "One Stop Fire Shop and Eversafe",
+    "fire protection technologies (fire-protection.com.au) / lpg fire australia (lpgfire.com.au) / fire emt (fireemt.com.au)":
+        "Fire Protection Technologies, LPG Fire and Fire EMT",
+    "pertronic industries": "Pertronic",
+    # These two harvests genuinely spanned many manufacturers with no single
+    # supplier behind them. Naming the first one in the list would assert a
+    # sourcing relationship that does not exist; the brand column already
+    # carries the manufacturer for every row.
+    "multi-brand harvest: nittan europe, ffe (fireray/talentum/proreact/sensis), system sensor (honeywell), vimpex, fike, kla":
+        "Various manufacturers",
+    "australian ewis/ows equipment survey \u2014 australian monitor (amber technology), quest engineering, toa, plus evacu8 soluti":
+        "Various EWIS manufacturers",
+}
+
+# Anything not named above is trimmed rather than dropped: a leading "Multi-brand
+# harvest:" or a trailing parenthetical is noise, but the name in front of it is
+# still the useful part.
+_SUPPLIER_PREFIX = re.compile(r"^[^:]{0,40}harvest[^:]{0,20}:\s*", re.I)
+_SUPPLIER_TAIL = re.compile(r"\s*[\u2014-]\s.*$|\s*\([^)]*\)\s*$")
+
+
+def canonical_supplier(supplier):
+    if not supplier:
+        return supplier
+    raw = " ".join(str(supplier).split())
+    named = SUPPLIER_ALIASES.get(raw.lower())
+    if named:
+        return named
+    trimmed = _SUPPLIER_PREFIX.sub("", raw)
+    trimmed = _SUPPLIER_TAIL.sub("", trimmed).strip(" ,/")
+    # Still a sentence: keep the first named party rather than a paragraph.
+    if len(trimmed) > 48:
+        trimmed = re.split(r"\s*(?:,|/| and )\s*", trimmed)[0].strip()
+    return trimmed[:48] or raw[:48]

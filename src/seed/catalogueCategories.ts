@@ -31,6 +31,7 @@ export const CATEGORY_LABEL: Record<string, string> = {
   cable: 'Cable',
   pipe: 'Pipe and fittings',
   passive: 'Passive fire',
+  suppression: 'Suppression systems',
   ancillary: 'Ancillary',
   tool: 'Tools',
   accessory: 'Accessories',

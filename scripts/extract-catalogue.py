@@ -12,6 +12,9 @@ the wrong thing.
 import json, sys, re, os
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from fire_catalogue import canonical_brand, canonical_supplier
+
 # Accepts several workflow directories: the harvest ran in more than one pass,
 # and a later run's richer record for the same part should win over an earlier
 # sparse one rather than duplicating it.
@@ -36,6 +39,23 @@ def num(v):
         return f if f == f and abs(f) < 1e7 else None   # reject NaN and nonsense
     except (TypeError, ValueError):
         return None
+
+# Nothing on a detection loop draws an amp, let alone ten. A figure past this is
+# a unit confusion -- amps recorded as milliamps -- and it would silently treble
+# a battery calculation rather than fail. Note that a quiescent current larger
+# than the alarm current is NOT an error: an aspirator's fan runs constantly and
+# a door holder is energised in standby and released in alarm, which is why the
+# battery calculator takes the two separately in the first place.
+MAX_PLAUSIBLE_MA = 10_000
+
+def current_ma(v, part, field, dropped):
+    f = num(v)
+    if f is None:
+        return None
+    if f < 0 or f > MAX_PLAUSIBLE_MA:
+        dropped.append(f"{part}: {field}={f} mA is outside anything a loop device draws")
+        return None
+    return f
 
 # Harvesters name brands inconsistently once a supplier resells several
 # platforms -- "Brooks", "Brooks (Panasonic/EBL FireTracker)" and
@@ -83,6 +103,7 @@ def main():
     seen = {}          # (brand.lower, partNumber.lower) -> row
     suppliers = []
     dropped = 0
+    implausible = []
 
     for line in _lines(journals):
         try:
@@ -117,8 +138,8 @@ def main():
                 "subcategory": clean(p.get("subcategory"), 80) or platform,
                 "description": clean(p.get("description"), 600),
                 "voltage": clean(p.get("voltage"), 60),
-                "quiescentMa": num(p.get("quiescentMa")),
-                "alarmMa": num(p.get("alarmMa")),
+                "quiescentMa": current_ma(p.get("quiescentMa"), part, "quiescentMa", implausible),
+                "alarmMa": current_ma(p.get("alarmMa"), part, "alarmMa", implausible),
                 "protocol": clean(p.get("protocol"), 60),
                 "dbAt1m": num(p.get("dbAt1m")),
                 "ipRating": clean(p.get("ipRating"), 30),
@@ -154,7 +175,19 @@ def main():
         else:
             kept += 1
 
-    rows = sorted(existing.values(),
+    for r in existing.values():
+        r["brand"] = canonical_brand(r.get("brand"))
+        r["supplier"] = canonical_supplier(r.get("supplier"))
+
+    # Canonicalising can collide two rows onto one key; keep the richer.
+    collapsed = {}
+    for r in existing.values():
+        k = (r["brand"].strip().lower(), r["partNumber"].strip().lower())
+        prev = collapsed.get(k)
+        if prev is None or _score(r) > _score(prev):
+            collapsed[k] = r
+
+    rows = sorted(collapsed.values(),
                   key=lambda x: (x["brand"].lower(), x.get("category") or "", x["partNumber"]))
     # Absent and null are the same row to the seeder, and nulls were two thirds
     # of the file. Strip them so the bundle carries data rather than padding.
@@ -170,6 +203,12 @@ def main():
         by_brand[x["brand"]] = by_brand.get(x["brand"], 0) + 1
 
     print(f"wrote {len(rows)} items to {OUT}  ({dropped} dropped)")
+    if implausible:
+        # Never silent: a current thrown away without a word looks identical to
+        # one that was never published.
+        print(f"{len(implausible)} current figure(s) discarded as implausible:")
+        for line in implausible[:20]:
+            print(f"  {line}")
     print(f"suppliers harvested: {len(suppliers)}")
     for b, n in sorted(by_brand.items(), key=lambda kv: -kv[1])[:25]:
         print(f"  {n:>5}  {b}")

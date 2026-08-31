@@ -18,7 +18,7 @@ import json, re, sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from fire_catalogue import BAD_PART, JUNK_NAME, classify, clean
+from fire_catalogue import BAD_PART, JUNK_NAME, canonical_brand, classify, clean
 
 SUPPLIER = "Honeywell — Notifier Australia"
 BASE = "https://buildings.honeywell.com"
@@ -170,7 +170,7 @@ def main(products_path, skus_path, out_path):
                 name = name[:117].rstrip() + "…"
 
             row = {
-                "partNumber": pn, "name": name, "brand": brand, "supplier": SUPPLIER,
+                "partNumber": pn, "name": name, "brand": canonical_brand(brand), "supplier": SUPPLIER,
                 "category": cat, "subcategory": sub or (d.get("cat") if d.get("cat") else None),
                 "description": desc if desc != name else pdesc,
                 "voltage": None, "quiescentMa": None, "alarmMa": None, "protocol": None,

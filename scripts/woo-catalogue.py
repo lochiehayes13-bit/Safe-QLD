@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from fire_catalogue import BAD_PART, TAG, classify, clean
+from fire_catalogue import BAD_PART, TAG, canonical_brand, classify, clean
 
 # Only tokens that cannot mean anything else. "Sensor", "Advanced" and "Global
 # Fire" were tried and matched ordinary words in product descriptions, which is
@@ -86,7 +86,7 @@ def main(src, supplier, out):
         rows[pn.lower()] = {
             "partNumber": pn,
             "name": name,
-            "brand": brand or supplier,
+            "brand": canonical_brand(brand) if brand else supplier,
             "supplier": supplier,
             "category": cat,
             "subcategory": sub or (cats[0] if cats else None),
