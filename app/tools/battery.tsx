@@ -13,6 +13,8 @@ import {
   type Issue,
   type LoadItem,
 } from '@/calc/battery';
+import { DevicePicker } from '@/components/DevicePicker';
+import type { CatalogueItem } from '@/db/catalogueRepo';
 import { useTheme } from '@/theme';
 import {
   Banner, Button, Card, Divider, Field, H2, Label, ResultBlock, Rowed, Screen, Segmented, Txt,
@@ -53,6 +55,8 @@ export default function BatteryCalculatorScreen() {
   const [psuCharge, setPsuCharge] = useState('');
   const [tempC, setTempC] = useState('');
   const [showWhy, setShowWhy] = useState(false);
+  // Which load row the catalogue picker is filling, if any.
+  const [pickingFor, setPickingFor] = useState<string | null>(null);
 
   const result = useMemo(
     () =>
@@ -74,6 +78,25 @@ export default function BatteryCalculatorScreen() {
 
   const update = (id: string, patch: Partial<LoadItem>) =>
     setLoads((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+
+  /**
+   * Fills a load row from the catalogue.
+   *
+   * The quantity is left alone — the tech has already set how many there are,
+   * and overwriting it would be the wrong kind of helpful.
+   */
+  const applyDevice = (item: CatalogueItem) => {
+    if (!pickingFor) return;
+    update(pickingFor, {
+      label: `${item.brand} ${item.partNumber}`,
+      standbyMa: item.quiescentMa ?? 0,
+      alarmMa: item.alarmMa ?? item.quiescentMa ?? 0,
+      note: item.alarmMa === null || item.alarmMa === undefined
+        ? 'Alarm current not published — standby figure used. Confirm against the datasheet.'
+        : `From ${item.brand} datasheet · ${item.confidence} confidence`,
+    });
+    setPickingFor(null);
+  };
 
   const errors = result.issues.filter((i) => i.level === 'error');
   const warnings = result.issues.filter((i) => i.level === 'warning');
@@ -157,6 +180,7 @@ export default function BatteryCalculatorScreen() {
             load={l}
             onChange={(patch) => update(l.id, patch)}
             onRemove={() => setLoads((prev) => prev.filter((x) => x.id !== l.id))}
+            onPickDevice={() => setPickingFor(l.id)}
           />
         ))}
 
@@ -317,6 +341,11 @@ export default function BatteryCalculatorScreen() {
           Standard battery sizes offered: {STANDARD_SLA_AH.join(', ')} Ah. Always confirm the result against the current
           standard and the panel manufacturer's own data before relying on it.
         </Txt>
+        <DevicePicker
+          visible={pickingFor !== null}
+          onClose={() => setPickingFor(null)}
+          onPick={applyDevice}
+        />
       </Screen>
     </>
   );
@@ -326,10 +355,12 @@ function LoadRow({
   load,
   onChange,
   onRemove,
+  onPickDevice,
 }: {
   load: LoadItem;
   onChange: (patch: Partial<LoadItem>) => void;
   onRemove: () => void;
+  onPickDevice: () => void;
 }) {
   const t = useTheme();
   return (
@@ -371,9 +402,12 @@ function LoadRow({
         </View>
       </Rowed>
       {load.note ? <Txt size="xs" tone="faint" style={{ marginTop: 6 }}>{load.note}</Txt> : null}
-      <Txt size="xs" tone="faint" style={{ marginTop: 6 }}>
-        Subtotal {(load.quantity * load.standbyMa).toFixed(1)} mA standby · {(load.quantity * load.alarmMa).toFixed(1)} mA alarm
-      </Txt>
+      <Rowed style={{ justifyContent: 'space-between', marginTop: 6 }}>
+        <Txt size="xs" tone="faint" style={{ flex: 1 }}>
+          Subtotal {(load.quantity * load.standbyMa).toFixed(1)} mA standby · {(load.quantity * load.alarmMa).toFixed(1)} mA alarm
+        </Txt>
+        <Button title="From catalogue" variant="ghost" compact onPress={onPickDevice} />
+      </Rowed>
     </Card>
   );
 }

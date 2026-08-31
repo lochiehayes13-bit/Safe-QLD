@@ -5,6 +5,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   createReport, deleteSite, getSite, listDefects, listPanels, listReports, queryPoints,
 } from '@/db/repo';
+import { createBaseline, listBaselines } from '@/db/baselineRepo';
 import type { Defect, Panel, ServiceReport, Site } from '@/domain/types';
 import { PANEL_CATALOGUE } from '@/parsers';
 import { useTheme } from '@/theme';
@@ -132,6 +133,16 @@ export default function SiteScreen() {
           title="Zones"
           subtitle="Zone list with device counts"
           onPress={() => router.push({ pathname: '/site/zones', params: { siteId: site.id } })}
+        />
+        <NavRow
+          icon="clipboard-text-outline"
+          title="Baseline data"
+          subtitle="Commissioning record, filled from this site's own data"
+          onPress={async () => {
+            const existing = await listBaselines(site.id);
+            const rec = existing[0] ?? (await createBaseline(site.id));
+            router.push({ pathname: '/baseline/[id]', params: { id: rec.id } });
+          }}
         />
         <NavRow
           icon="table-large"
