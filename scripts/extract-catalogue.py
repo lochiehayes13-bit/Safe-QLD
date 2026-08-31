@@ -33,6 +33,32 @@ def num(v):
     except (TypeError, ValueError):
         return None
 
+# Harvesters name brands inconsistently once a supplier resells several
+# platforms -- "Brooks", "Brooks (Panasonic/EBL FireTracker)" and
+# "Brooks (Ei Electronics platform)" are all Brooks. Collapsing them keeps the
+# brand filter usable; the platform detail moves to subcategory where it is
+# still visible but not fragmenting the list.
+BRAND_QUALIFIER = re.compile(r"\s*\(([^)]*)\)\s*$")
+
+def split_brand(raw):
+    """Returns (canonical brand, platform qualifier or None)."""
+    if not raw:
+        return None, None
+    b = str(raw).strip()
+    qualifier = None
+    m = BRAND_QUALIFIER.search(b)
+    if m:
+        qualifier = m.group(1).strip() or None
+        b = BRAND_QUALIFIER.sub("", b).strip()
+    # "Ampac / Apollo" means an Apollo device sold by Ampac; the manufacturer
+    # is the useful half for a technician looking up a datasheet.
+    if "/" in b:
+        left, _, right = b.partition("/")
+        left, right = left.strip(), right.strip()
+        if left and right:
+            b, qualifier = right, qualifier or f"via {left}"
+    return (b or None), qualifier
+
 def clean(s, limit=400):
     if s is None: return None
     s = str(s).strip()
@@ -68,7 +94,7 @@ def main():
 
         for p in products:
             part = clean(p.get("partNumber"), 80)
-            brand = clean(p.get("brand"), 80)
+            brand, platform = split_brand(clean(p.get("brand"), 80))
             if not part or not brand or BAD_PART.match(part):
                 dropped += 1
                 continue
@@ -82,7 +108,7 @@ def main():
                 "brand": brand,
                 "supplier": clean(r.get("supplier"), 120),
                 "category": cat,
-                "subcategory": clean(p.get("subcategory"), 80),
+                "subcategory": clean(p.get("subcategory"), 80) or platform,
                 "description": clean(p.get("description"), 600),
                 "voltage": clean(p.get("voltage"), 60),
                 "quiescentMa": num(p.get("quiescentMa")),

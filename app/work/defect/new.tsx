@@ -11,6 +11,7 @@ import {
   type DefectCode, type Severity,
 } from '@/seed/defectLibrary';
 import type { Site } from '@/domain/types';
+import { useDraft } from '@/hooks/useDraft';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
 
@@ -30,21 +31,47 @@ export default function NewDefectScreen() {
   const [search, setSearch] = useState('');
   const [system, setSystem] = useState<SystemKind | null>(null);
   const [component, setComponent] = useState<string | null>(null);
-  const [selected, setSelected] = useState<DefectCode | null>(null);
-  const [location, setLocation] = useState(params.location ?? '');
-  const [extra, setExtra] = useState('');
-  const [photos, setPhotos] = useState<string[]>([]);
-  const [severity, setSeverity] = useState<Severity | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
-  const [siteId, setSiteId] = useState<string | undefined>(params.siteId);
   const [saving, setSaving] = useState(false);
 
+  /**
+   * Everything the user actually typed lives in a draft, so a lock screen, a
+   * phone call or a low-memory kill costs nothing. Keyed by asset or site so
+   * two half-written defects never overwrite each other.
+   */
+  const draft = useDraft(`defect:new:${params.assetId ?? params.siteId ?? 'unassigned'}`, {
+    code: null as string | null,
+    location: params.location ?? '',
+    extra: '',
+    photos: [] as string[],
+    severity: null as Severity | null,
+    siteId: params.siteId as string | undefined,
+  });
+  const d = draft.value;
+  const selected = d.code ? (DEFECT_LIBRARY.find((x) => x.code === d.code) ?? null) : null;
+
+  const setLocation = (v: string) => draft.setValue((p) => ({ ...p, location: v }));
+  const setExtra = (v: string) => draft.setValue((p) => ({ ...p, extra: v }));
+  const setSeverity = (v: Severity) => draft.setValue((p) => ({ ...p, severity: v }));
+  const setSiteId = (v: string | undefined) => draft.setValue((p) => ({ ...p, siteId: v }));
+  const setPhotos = (fn: (prev: string[]) => string[]) =>
+    draft.setValue((p) => ({ ...p, photos: fn(p.photos) }));
+  const setSelected = (v: DefectCode | null) =>
+    draft.setValue((p) => ({ ...p, code: v?.code ?? null }));
+
+  const location = d.location;
+  const extra = d.extra;
+  const photos = d.photos;
+  const severity = d.severity;
+  const siteId = d.siteId;
+
   React.useEffect(() => {
-    void listSites().then((s) => {
-      setSites(s);
-      if (!siteId && s.length === 1) setSiteId(s[0]!.id);
+    void listSites().then((list) => {
+      setSites(list);
+      if (!siteId && list.length === 1) setSiteId(list[0]!.id);
     });
-  }, [siteId]);
+    // Only runs once the draft has loaded, so a recovered site choice wins.
+  }, [siteId, draft.ready]);
 
   const systems = useMemo(
     () => [...new Set(DEFECT_LIBRARY.map((d) => d.system))],
@@ -58,11 +85,10 @@ export default function NewDefectScreen() {
     [system, component],
   );
 
-  const pick = (d: DefectCode) => {
-    setSelected(d);
-    setSeverity(d.severity);
-    setSystem(d.system);
-    setComponent(d.component);
+  const pick = (code: DefectCode) => {
+    draft.setValue((p) => ({ ...p, code: code.code, severity: code.severity }));
+    setSystem(code.system);
+    setComponent(code.component);
     setSearch('');
   };
 
@@ -77,7 +103,7 @@ export default function NewDefectScreen() {
     const result = fromCamera
       ? await ImagePicker.launchCameraAsync({ quality: 0.6 })
       : await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
-    if (!result.canceled && result.assets[0]) setPhotos((p) => [...p, result.assets[0]!.uri]);
+    if (!result.canceled && result.assets[0]) setPhotos((prev) => [...prev, result.assets[0]!.uri]);
   };
 
   const save = async () => {
@@ -117,6 +143,7 @@ export default function NewDefectScreen() {
         });
       }
 
+      await draft.discard();
       router.back();
     } catch (e) {
       Alert.alert('Could not save', e instanceof Error ? e.message : String(e));
@@ -129,6 +156,14 @@ export default function NewDefectScreen() {
     <>
       <Stack.Screen options={{ title: 'Raise defect' }} />
       <Screen>
+        {draft.recovered ? (
+          <Banner
+            tone="info"
+            title="Picked up where you left off"
+            body="This defect was still being written when the app last closed. Nothing was lost."
+          />
+        ) : null}
+
         {!selected ? (
           <>
             <Field
