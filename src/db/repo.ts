@@ -177,13 +177,13 @@ export async function queryPoints(q: PointQuery): Promise<Point[]> {
     LIMIT ? OFFSET ?`;
   args.push(q.limit ?? 2000, q.offset ?? 0);
 
-  const rows = await db.getAllAsync<Point & { unused: number }>(sql, ...args);
+  const rows = await db.getAllAsync<Omit<Point, 'unused'> & { unused: number }>(sql, ...args);
   return rows.map((r) => ({ ...r, unused: toBool(r.unused) }));
 }
 
 export async function listZones(panelId: string, includeUnused = false): Promise<Zone[]> {
   const db = await getDb();
-  const rows = await db.getAllAsync<Zone & { unused: number }>(
+  const rows = await db.getAllAsync<Omit<Zone, 'unused'> & { unused: number }>(
     `SELECT * FROM zone WHERE panelId = ? ${includeUnused ? '' : 'AND unused = 0'} ORDER BY number`,
     panelId,
   );
