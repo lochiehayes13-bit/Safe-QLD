@@ -5,6 +5,8 @@ import {
   SECTION_6_FREQUENCIES,
   addWorkingDays,
   commissionerCopyDueAt,
+  commissionerDaysRemaining,
+  workingDaysBetween,
   criticalNoticeDueAt,
   frequencySpec,
   isQldCriticalDefect,
@@ -249,5 +251,46 @@ describe('reference data integrity', () => {
 
   it('has certification wording to sign against', () => {
     expect(CERTIFICATION_STATEMENT).toContain('certify');
+  });
+});
+
+describe('working days between two dates', () => {
+  it('counts only weekdays', () => {
+    // Monday 31 Aug 2026 to Monday 7 Sep 2026 is five working days.
+    expect(workingDaysBetween('2026-08-31', '2026-09-07')).toBe(5);
+  });
+
+  it('is zero for the same day', () => {
+    expect(workingDaysBetween('2026-08-31', '2026-08-31')).toBe(0);
+  });
+
+  it('does not count the weekend a span lands in', () => {
+    // Friday to the following Monday is one working day, not three.
+    expect(workingDaysBetween('2026-09-04', '2026-09-07')).toBe(1);
+  });
+
+  it('goes negative once the target is behind', () => {
+    expect(workingDaysBetween('2026-09-07', '2026-08-31')).toBe(-5);
+  });
+
+  it('returns null rather than a number for an unparseable date', () => {
+    expect(workingDaysBetween('', '2026-08-31')).toBeNull();
+    expect(workingDaysBetween('2026-08-31', 'not a date')).toBeNull();
+  });
+});
+
+describe('time left to copy the Commissioner', () => {
+  it('is the full ten working days on the day of signing', () => {
+    expect(commissionerDaysRemaining('2026-08-31', '2026-08-31')).toBe(10);
+  });
+
+  it('counts down as working days pass', () => {
+    // Signed Monday, now the Friday of the same week: four days gone.
+    expect(commissionerDaysRemaining('2026-08-31', '2026-09-04')).toBe(6);
+  });
+
+  it('goes negative once the statement is late, rather than clamping at zero', () => {
+    // The deadline is 14 Sep; a week past it is five working days late.
+    expect(commissionerDaysRemaining('2026-08-31', '2026-09-21')).toBe(-5);
   });
 });

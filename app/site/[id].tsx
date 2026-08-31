@@ -6,6 +6,7 @@ import {
   createReport, deleteSite, getSite, listDefects, listPanels, listReports, queryPoints,
 } from '@/db/repo';
 import { createBaseline, listBaselines } from '@/db/baselineRepo';
+import { createOccupierStatement, listOccupierStatements } from '@/db/occupierRepo';
 import type { Defect, Panel, ServiceReport, Site } from '@/domain/types';
 import { PANEL_CATALOGUE } from '@/parsers';
 import { useTheme } from '@/theme';
@@ -160,6 +161,19 @@ export default function SiteScreen() {
           title="Cause & effect"
           subtitle="Matrix of causes against the outputs they operate"
           onPress={() => router.push({ pathname: '/site/cause-effect', params: { siteId: site.id } })}
+        />
+        <NavRow
+          icon="file-certificate-outline"
+          title="Occupier statement"
+          subtitle="Annual declaration, filled from this site's own register and defects"
+          onPress={async () => {
+            const existing = await listOccupierStatements(site.id);
+            const rec = existing[0] ?? (await createOccupierStatement(site.id, {
+              premisesName: site.name,
+              premisesAddress: site.address ?? '',
+            }));
+            router.push({ pathname: '/occupier/[id]', params: { id: rec.id } });
+          }}
         />
         <NavRow
           icon="alert-octagon-outline"

@@ -122,6 +122,27 @@ export function addWorkingDays(iso: string, days: number): string | null {
 }
 
 /**
+ * Working days from one date to another, negative when the target is in the
+ * past. Weekends only; public holidays are not modelled, so treat the count as
+ * the optimistic case rather than a guarantee.
+ */
+export function workingDaysBetween(fromIso: string, toIso: string): number | null {
+  const from = parseDate(fromIso);
+  const to = parseDate(toIso);
+  if (!from || !to) return null;
+  const forward = to >= from;
+  const [start, end] = forward ? [from, to] : [to, from];
+  let count = 0;
+  const cursor = new Date(start);
+  while (cursor < end) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    const dow = cursor.getUTCDay();
+    if (dow !== 0 && dow !== 6) count++;
+  }
+  return forward ? count : -count;
+}
+
+/**
  * The scheduled date of the nth occurrence.
  *
  * Counted from the anchor — the initial scheduled activity — and never from the
@@ -402,4 +423,38 @@ export function occupierStatementIssues(rows: OccupierStatementRow[]): string[] 
     }
   }
   return issues;
+}
+
+/**
+ * The prescribed installations each of our system kinds belongs to.
+ *
+ * The statement's list is fixed by regulation and does not line up with how a
+ * technician thinks about a site: our "detection" covers both the detection
+ * system and its exit signs on some jobs, and "passive" covers three separate
+ * lines on the statement. Mapping only what is unambiguous means a prefill
+ * proposes rather than asserts — the occupier still ticks the list.
+ */
+export const SYSTEM_TO_INSTALLATION: Record<string, string> = {
+  detection: 'Fire detection and alarm systems',
+  ews: 'Emergency warning and intercommunication systems',
+  aspirating: 'Fire detection and alarm systems',
+  sprinkler: 'Sprinklers',
+  hydrant: 'Fire hydrants (including boosters)',
+  'hose-reel': 'Fire hose reels',
+  extinguisher: 'Fire extinguishers',
+  'emergency-lighting': 'Emergency lighting',
+  gas: 'Special automatic fire suppression systems',
+  door: 'Fire doorsets',
+};
+
+/**
+ * How many working days remain to give the Commissioner a copy.
+ *
+ * Negative once the deadline has passed, so a caller can say "three days late"
+ * with the same arithmetic it uses to say "three days left".
+ */
+export function commissionerDaysRemaining(signedIso: string, todayIso: string): number | null {
+  const due = commissionerCopyDueAt(signedIso);
+  if (!due) return null;
+  return workingDaysBetween(todayIso, due);
 }

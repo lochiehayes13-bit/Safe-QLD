@@ -372,3 +372,37 @@ ALTER TABLE defect ADD COLUMN interimMeasures TEXT;
 ALTER TABLE defect ADD COLUMN extentOfImpairment TEXT;
 CREATE INDEX IF NOT EXISTS idx_defect_notice ON defect(noticeIssuedAt, raisedAt DESC);
 `;
+
+/**
+ * v5 — the occupier statement.
+ *
+ * Queensland's Building Fire Safety Regulation makes the occupier, not the
+ * contractor, responsible for lodging an annual statement. We produce it, they
+ * sign it, and a copy goes to the Commissioner within ten working days. The
+ * rows are held as JSON because the statement is always read and written whole
+ * and the installation list is prescribed, so there is nothing to join to.
+ */
+export const MIGRATION_V5 = `
+CREATE TABLE IF NOT EXISTS occupier_statement (
+  id                TEXT PRIMARY KEY NOT NULL,
+  siteId            TEXT NOT NULL REFERENCES site(id) ON DELETE CASCADE,
+  occupierName      TEXT NOT NULL DEFAULT '',
+  occupierPhone     TEXT NOT NULL DEFAULT '',
+  premisesName      TEXT NOT NULL DEFAULT '',
+  premisesAddress   TEXT NOT NULL DEFAULT '',
+  periodStart       TEXT NOT NULL DEFAULT '',
+  periodEnd         TEXT NOT NULL DEFAULT '',
+  /* JSON array of OccupierStatementRow, one per prescribed installation. */
+  rows              TEXT NOT NULL DEFAULT '[]',
+  signedBy          TEXT NOT NULL DEFAULT '',
+  signedPosition    TEXT NOT NULL DEFAULT '',
+  signature         TEXT,
+  signedAt          TEXT,
+  /* When the copy actually went to the Commissioner, against the ten working
+     days the signing date starts running. */
+  sentToCommissionerAt TEXT,
+  createdAt         TEXT NOT NULL,
+  updatedAt         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_occupier_site ON occupier_statement(siteId, periodEnd DESC);
+`;

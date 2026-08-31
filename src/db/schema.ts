@@ -5,7 +5,7 @@
  * an app already installed on a tech's phone upgrades cleanly.
  */
 
-import { MIGRATION_V3, MIGRATION_V4 } from './schemaV3';
+import { MIGRATION_V3, MIGRATION_V4, MIGRATION_V5 } from './schemaV3';
 
 export const SCHEMA_VERSION = 4;
 
@@ -257,4 +257,7 @@ export const MIGRATIONS: string[] = [
 
   // v4 — Queensland statutory fields on a defect
   MIGRATION_V4,
+
+  // v5 — the annual occupier statement
+  MIGRATION_V5,
 ];
