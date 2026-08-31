@@ -400,6 +400,11 @@ export async function coverageGaps(siteId?: string, limit = 300): Promise<Covera
   if (siteId) args.push(siteId);
   args.push(limit);
 
+  // `reason` is a bare column beside MAX(occurredAt), which SQLite defines as
+  // taking its value from the same row the maximum came from — so the reason
+  // shown is the most recent one, not an arbitrary one. That guarantee holds
+  // while there is exactly one min()/max() in the query; COUNT(*) alongside is
+  // fine. Adding a second MAX would silently break it.
   return db.getAllAsync<CoverageGap>(
     `SELECT e.assetId AS assetId,
             COALESCE(NULLIF(a.name,''), a.assetTypeId) AS assetName,

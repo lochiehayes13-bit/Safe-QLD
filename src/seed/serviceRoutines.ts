@@ -304,7 +304,10 @@ export const SERVICE_ROUTINES: ServiceRoutine[] = [
       {
         id: 'ext-s-03', section: 'Condition', label: 'Pressure within range', assetTypeId: 'extinguisher',
         whatToDo: 'Read the gauge, or weigh where the type has no gauge.',
-        measurementKey: 'Gauge reading',
+        // Two different measurements depending on the extinguisher: a gauged
+        // unit gives a pressure, a CO2 unit is weighed. Naming both beats an
+        // unlabelled number that nobody can interpret a year later.
+        measurementKey: 'Gauge reading or mass', measurementUnit: 'kPa or kg',
         defectCode: 'EXT-EXT-001', sourceKind: 'standard',
       },
       {
