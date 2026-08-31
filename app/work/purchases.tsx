@@ -1,7 +1,8 @@
 import React, { useCallback, useState } from 'react';
-import { FlatList, View } from 'react-native';
+import { Alert, FlatList, View } from 'react-native';
 import { Stack, useFocusEffect } from 'expo-router';
 import { listPurchaseRequests, setPurchaseStatus, type PurchaseRequest } from '@/db/opsRepo';
+import { queuePurchaseOrder } from '@/simpro/sync';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
 import { Button, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
@@ -13,6 +14,39 @@ export default function PurchasesScreen() {
 
   const load = useCallback(async () => setItems(await listPurchaseRequests()), []);
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+
+  /**
+   * Sends a request to the office.
+   *
+   * Queued rather than sent: a technician in a basement has no signal, and a
+   * parts order lost to that is the failure this app exists to avoid. It leaves
+   * with the next sync from Settings.
+   *
+   * The status only moves once the queue has actually accepted it. Marking a
+   * request submitted and then failing to queue it would leave a request nobody
+   * is working on and nobody knows is stuck.
+   */
+  const submit = async (item: PurchaseRequest) => {
+    try {
+      await queuePurchaseOrder({
+        jobId: item.jobId,
+        notes: item.notes,
+        lines: item.lines.map((l) => ({
+          partNumber: l.partNumber,
+          description: l.description,
+          quantity: l.quantity,
+        })),
+      });
+      await setPurchaseStatus(item.id, 'submitted');
+      void load();
+      Alert.alert(
+        'Queued for the office',
+        'It goes out with the next Simpro sync. Nothing is lost if you are out of signal.',
+      );
+    } catch (e) {
+      Alert.alert('Could not queue it', e instanceof Error ? e.message : String(e));
+    }
+  };
 
   return (
     <>
@@ -56,7 +90,7 @@ export default function PurchasesScreen() {
                   title="Submit to office"
                   compact
                   style={{ marginTop: t.space(2.5) }}
-                  onPress={async () => { await setPurchaseStatus(item.id, 'submitted'); void load(); }}
+                  onPress={() => void submit(item)}
                 />
               ) : null}
             </Card>
