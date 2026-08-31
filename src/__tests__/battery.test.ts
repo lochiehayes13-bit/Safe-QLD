@@ -6,6 +6,7 @@ import {
   L_DESIGN,
   L_IN_SERVICE,
   nextStandardSize,
+  STANDARD_SLA_AH,
   totalCurrents,
   type LoadItem,
 } from '@/calc/battery';
@@ -203,7 +204,8 @@ describe('nextStandardSize', () => {
   it('rounds up to a real battery size', () => {
     expect(nextStandardSize(16)).toBe(17);
     expect(nextStandardSize(17)).toBe(17);
-    expect(nextStandardSize(17.01)).toBe(24);
+    // Was 24 while 18 Ah was missing from the list of standard sizes.
+    expect(nextStandardSize(17.01)).toBe(18);
     expect(nextStandardSize(0.5)).toBe(1.2);
   });
 
@@ -247,5 +249,28 @@ describe('appendixFFields', () => {
     expect(f.find((x) => x.item === '14f')?.value).toBe('24 h');
     expect(f.find((x) => x.item === '14g')?.value).toBe('30 min');
     expect(f.find((x) => x.item === '14b')?.value).toContain('17 Ah');
+  });
+});
+
+describe('standard battery sizes', () => {
+  it('is sorted and free of duplicates', () => {
+    const arr = [...STANDARD_SLA_AH];
+    expect(arr).toEqual([...new Set(arr)].sort((a, b) => a - b));
+  });
+
+  it('carries 18 Ah, which several one-loop cabinets top out at', () => {
+    expect(STANDARD_SLA_AH).toContain(18);
+  });
+
+  it('rounds up to the next real size rather than skipping one', () => {
+    // 17.4 Ah used to round to 24 Ah because 18 was missing from the list —
+    // a size that then fails the cabinet fit this same calculator checks.
+    expect(nextStandardSize(17.4)).toBe(18);
+    expect(nextStandardSize(17)).toBe(17);
+    expect(nextStandardSize(66)).toBe(75);
+  });
+
+  it('has nothing above the largest listed size', () => {
+    expect(nextStandardSize(500)).toBeNull();
   });
 });

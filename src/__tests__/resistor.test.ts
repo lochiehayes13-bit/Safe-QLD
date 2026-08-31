@@ -3,6 +3,9 @@ import {
   E24,
   E48,
   E96,
+  E192,
+  TOLERANCE_COLOURS,
+  colourSpec,
   decodeBands,
   encodeBands,
   formatOhms,
@@ -65,8 +68,18 @@ describe('decodeBands', () => {
     expect(r.error).toContain('digit');
   });
 
-  it('rejects an orange tolerance band, which has no tolerance value', () => {
+  it('accepts an orange tolerance band, which is ±0.05%', () => {
+    // This test previously asserted the opposite, because orange had been left
+    // without a tolerance value in the colour table.
     const r = decodeBands(['brown', 'black', 'red', 'orange'], 4);
+    expect(r.ok).toBe(true);
+    expect(r.tolerancePct).toBe(0.05);
+  });
+
+  it('rejects a tolerance band whose colour really has no tolerance', () => {
+    // White carries a digit and a multiplier but no tolerance, in any revision
+    // of the table.
+    const r = decodeBands(['brown', 'black', 'red', 'white'], 4);
     expect(r.ok).toBe(false);
   });
 
@@ -204,5 +217,98 @@ describe('colour table integrity', () => {
         expect(c.multiplier).toBeCloseTo(10 ** c.digit, 6);
       }
     }
+  });
+});
+
+describe('tolerance bands', () => {
+  // These three were missing or wrong and nothing caught it: the decoder read
+  // a 5-band resistor with an orange or yellow tolerance band as undecodable,
+  // and reported grey as five times looser than it is.
+  it.each([
+    ['brown', 1],
+    ['red', 2],
+    ['orange', 0.05],
+    ['yellow', 0.02],
+    ['green', 0.5],
+    ['blue', 0.25],
+    ['violet', 0.1],
+    ['grey', 0.01],
+    ['gold', 5],
+    ['silver', 10],
+    ['none', 20],
+  ])('%s is ±%s%%', (colour, tolerance) => {
+    expect(colourSpec(colour as BandColour)?.tolerance).toBe(tolerance);
+  });
+
+  it('offers every tolerance colour in the picker', () => {
+    // Eleven colours carry a tolerance; two of them were absent from this list
+    // because they had no value set.
+    expect(TOLERANCE_COLOURS).toHaveLength(11);
+    expect(TOLERANCE_COLOURS).toContain('orange');
+    expect(TOLERANCE_COLOURS).toContain('yellow');
+  });
+});
+
+describe('E192 and the series derived from it', () => {
+  it('has 192 values, all three digits, strictly increasing', () => {
+    expect(E192).toHaveLength(192);
+    expect(E192[0]).toBe(100);
+    expect(E192[E192.length - 1]).toBe(988);
+    for (let i = 1; i < E192.length; i++) {
+      expect(E192[i]!).toBeGreaterThan(E192[i - 1]!);
+      expect(E192[i]!).toBeLessThan(1000);
+    }
+  });
+
+  it('contains E96, which contains E48', () => {
+    expect(E96).toHaveLength(96);
+    expect(E48).toHaveLength(48);
+    for (const v of E96) expect(E192).toContain(v);
+    for (const v of E48) expect(E96).toContain(v);
+  });
+
+  it('reproduces the E96 values this file shipped before E192 was added', () => {
+    // Guards the transcription: if a digit of E192 is wrong, the derived E96
+    // stops matching the table that was already in use and verified.
+    const shipped = [
+      100, 102, 105, 107, 110, 113, 115, 118, 121, 124, 127, 130,
+      133, 137, 140, 143, 147, 150, 154, 158, 162, 165, 169, 174,
+      178, 182, 187, 191, 196, 200, 205, 210, 215, 221, 226, 232,
+      237, 243, 249, 255, 261, 267, 274, 280, 287, 294, 301, 309,
+      316, 324, 332, 340, 348, 357, 365, 374, 383, 392, 402, 412,
+      422, 432, 442, 453, 464, 475, 487, 499, 511, 523, 536, 549,
+      562, 576, 590, 604, 619, 634, 649, 665, 681, 698, 715, 732,
+      750, 768, 787, 806, 825, 845, 866, 887, 909, 931, 953, 976,
+    ];
+    expect(E96).toEqual(shipped);
+  });
+
+  it('finds E192 values the coarser series do not carry', () => {
+    expect(isPreferredValue(1010, 'E192')).toBe(true);
+    expect(isPreferredValue(1010, 'E96')).toBe(false);
+  });
+});
+
+describe('nearest preferred value is nearest by ratio', () => {
+  it('does not bias upward on a wide gap', () => {
+    // Between E6's 10 and 15, the ratio midpoint is 12.25 — so 12 belongs to
+    // 10, not 15. Linear distance calls it for 15 and is wrong.
+    expect(nearestPreferred(12, 'E6')).toBe(10);
+  });
+
+  it('still picks the obvious neighbour', () => {
+    expect(nearestPreferred(14, 'E6')).toBe(15);
+    expect(nearestPreferred(4700, 'E24')).toBe(4700);
+  });
+
+  it('crosses a decade boundary when the closer value is on the other side', () => {
+    expect(nearestPreferred(9.9, 'E12')).toBe(10);
+    expect(nearestPreferred(97, 'E12')).toBe(100);
+  });
+
+  it('refuses a nonsense input rather than returning a number', () => {
+    expect(nearestPreferred(0, 'E24')).toBeNull();
+    expect(nearestPreferred(-5, 'E24')).toBeNull();
+    expect(nearestPreferred(Number.NaN, 'E24')).toBeNull();
   });
 });

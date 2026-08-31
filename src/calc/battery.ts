@@ -40,9 +40,18 @@ export const TA_DEFAULT = 0.5;
 export const TEMP_MIN_C = 15;
 export const TEMP_MAX_C = 30;
 
-/** Common Australian VRLA sizes. A 24 V system is always two 12 V units in series. */
+/**
+ * Common Australian VRLA sizes. A 24 V system is always two 12 V units in
+ * series.
+ *
+ * 18 Ah matters more than its neighbours suggest: it is the largest battery
+ * several one-loop cabinets will physically take, and omitting it made a 17.4 Ah
+ * requirement round to 24 Ah — a size that then fails the cabinet-fit check the
+ * same calculator applies. A gap in this list does not produce a smaller
+ * answer, it produces a wrong one.
+ */
 export const STANDARD_SLA_AH = [
-  1.2, 2.3, 3.2, 4.5, 7, 9, 12, 17, 24, 26, 33, 40, 50, 65, 100,
+  1.2, 2.3, 3.2, 4.5, 7, 9, 12, 17, 18, 24, 26, 33, 38, 40, 50, 65, 75, 100,
 ] as const;
 
 /**

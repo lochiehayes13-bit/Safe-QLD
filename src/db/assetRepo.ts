@@ -171,9 +171,22 @@ export async function getAsset(id: string): Promise<AssetRecord | null> {
   return row ? hydrate(row) : null;
 }
 
+/**
+ * Finds an asset by the code printed on its tag.
+ *
+ * Matched case-insensitively and with surrounding whitespace ignored: a scanner
+ * returns exactly what is encoded, and a tag printed years ago may not match
+ * today's convention on case. An exact match would send a technician standing
+ * in front of the right device to a "not found".
+ */
 export async function getAssetByCode(code: string): Promise<AssetRecord | null> {
+  const trimmed = code.trim();
+  if (!trimmed) return null;
   const db = await getDb();
-  const row = await db.getFirstAsync<AssetRow>('SELECT * FROM asset WHERE code = ?', code);
+  const row = await db.getFirstAsync<AssetRow>(
+    'SELECT * FROM asset WHERE code IS NOT NULL AND UPPER(code) = UPPER(?) LIMIT 1',
+    trimmed,
+  );
   return row ? hydrate(row) : null;
 }
 

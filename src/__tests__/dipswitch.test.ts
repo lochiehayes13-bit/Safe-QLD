@@ -186,3 +186,31 @@ describe('protocol catalogue', () => {
     }
   });
 });
+
+describe('protocol table integrity', () => {
+  it('never lets a protocol allow an address past its own loop capacity', () => {
+    // The bug this catches: three Pertronic panels shared one entry, so the
+    // smallest of them advertised the largest one's ceiling and would hand out
+    // an address its panel cannot poll.
+    for (const p of PROTOCOLS) {
+      expect(p.maxAddress).toBeLessThanOrEqual(p.maxDevicesPerLoop);
+    }
+  });
+
+  it('does not fold panels with different capacities into one label', () => {
+    const f220 = PROTOCOLS.find((p) => p.id === 'pertronic_f220');
+    const f100a = PROTOCOLS.find((p) => p.id === 'pertronic_f100a');
+    expect(f220?.maxAddress).toBe(159);
+    expect(f100a?.maxAddress).toBe(99);
+    expect(f220?.label).not.toContain('F100A');
+  });
+
+  it('does not claim a fixed meaning for the Hochiki eighth switch', () => {
+    // It is not part of the address on any device, which is the part worth
+    // stating; what it actually does differs between bases and modules.
+    const hochiki = PROTOCOLS.find((p) => p.id === 'hochiki_esp');
+    expect(hochiki?.switchCount).toBe(7);
+    expect(hochiki?.physicalSwitchCount).toBe(8);
+    expect(hochiki?.notes).toMatch(/depends on the device|varies by device/i);
+  });
+});

@@ -31,12 +31,12 @@ export const COLOURS: ColourSpec[] = [
   { colour: 'black',  label: 'Black',  hex: '#1A1A1A', needsOutline: true, digit: 0, multiplier: 1,      tcr: 250 },
   { colour: 'brown',  label: 'Brown',  hex: '#8B4513', digit: 1, multiplier: 10,      tolerance: 1,    tcr: 100 },
   { colour: 'red',    label: 'Red',    hex: '#D32F2F', digit: 2, multiplier: 100,     tolerance: 2,    tcr: 50 },
-  { colour: 'orange', label: 'Orange', hex: '#F57C00', digit: 3, multiplier: 1e3,                      tcr: 15 },
-  { colour: 'yellow', label: 'Yellow', hex: '#FBC02D', digit: 4, multiplier: 1e4,                      tcr: 25 },
+  { colour: 'orange', label: 'Orange', hex: '#F57C00', digit: 3, multiplier: 1e3,  tolerance: 0.05, tcr: 15 },
+  { colour: 'yellow', label: 'Yellow', hex: '#FBC02D', digit: 4, multiplier: 1e4,  tolerance: 0.02, tcr: 25 },
   { colour: 'green',  label: 'Green',  hex: '#388E3C', digit: 5, multiplier: 1e5,     tolerance: 0.5,  tcr: 20 },
   { colour: 'blue',   label: 'Blue',   hex: '#1976D2', digit: 6, multiplier: 1e6,     tolerance: 0.25, tcr: 10 },
   { colour: 'violet', label: 'Violet', hex: '#7B1FA2', digit: 7, multiplier: 1e7,     tolerance: 0.1,  tcr: 5 },
-  { colour: 'grey',   label: 'Grey',   hex: '#757575', digit: 8, multiplier: 1e8,     tolerance: 0.05, tcr: 1 },
+  { colour: 'grey',   label: 'Grey',   hex: '#757575', digit: 8, multiplier: 1e8,     tolerance: 0.01, tcr: 1 },
   { colour: 'white',  label: 'White',  hex: '#F5F5F5', needsOutline: true, digit: 9, multiplier: 1e9 },
   { colour: 'gold',   label: 'Gold',   hex: '#C9A227', multiplier: 0.1,  tolerance: 5 },
   { colour: 'silver', label: 'Silver', hex: '#B0BEC5', multiplier: 0.01, tolerance: 10 },
@@ -201,39 +201,69 @@ export const E24 = [
   10, 11, 12, 13, 15, 16, 18, 20, 22, 24, 27, 30,
   33, 36, 39, 43, 47, 51, 56, 62, 68, 75, 82, 91,
 ];
-export const E96 = [
-  100, 102, 105, 107, 110, 113, 115, 118, 121, 124, 127, 130,
-  133, 137, 140, 143, 147, 150, 154, 158, 162, 165, 169, 174,
-  178, 182, 187, 191, 196, 200, 205, 210, 215, 221, 226, 232,
-  237, 243, 249, 255, 261, 267, 274, 280, 287, 294, 301, 309,
-  316, 324, 332, 340, 348, 357, 365, 374, 383, 392, 402, 412,
-  422, 432, 442, 453, 464, 475, 487, 499, 511, 523, 536, 549,
-  562, 576, 590, 604, 619, 634, 649, 665, 681, 698, 715, 732,
-  750, 768, 787, 806, 825, 845, 866, 887, 909, 931, 953, 976,
+/**
+ * E192, the full three-digit table. E96 is every second value and E48 every
+ * fourth, so those are derived here rather than restated — a second copy is a
+ * second thing to get wrong, and the tests assert the containment holds.
+ */
+export const E192 = [
+  100, 101, 102, 104, 105, 106, 107, 109, 110, 111, 113, 114,
+  115, 117, 118, 120, 121, 123, 124, 126, 127, 129, 130, 132,
+  133, 135, 137, 138, 140, 142, 143, 145, 147, 149, 150, 152,
+  154, 156, 158, 160, 162, 164, 165, 167, 169, 172, 174, 176,
+  178, 180, 182, 184, 187, 189, 191, 193, 196, 198, 200, 203,
+  205, 208, 210, 213, 215, 218, 221, 223, 226, 229, 232, 234,
+  237, 240, 243, 246, 249, 252, 255, 258, 261, 264, 267, 271,
+  274, 277, 280, 284, 287, 291, 294, 298, 301, 305, 309, 312,
+  316, 320, 324, 328, 332, 336, 340, 344, 348, 352, 357, 361,
+  365, 370, 374, 379, 383, 388, 392, 397, 402, 407, 412, 417,
+  422, 427, 432, 437, 442, 448, 453, 459, 464, 470, 475, 481,
+  487, 493, 499, 505, 511, 517, 523, 530, 536, 542, 549, 556,
+  562, 569, 576, 583, 590, 597, 604, 612, 619, 626, 634, 642,
+  649, 657, 665, 673, 681, 690, 698, 706, 715, 723, 732, 741,
+  750, 759, 768, 777, 787, 796, 806, 816, 825, 835, 845, 856,
+  866, 876, 887, 898, 909, 920, 931, 942, 953, 965, 976, 988,
 ];
+/** E96 is every second E192 value. */
+export const E96 = E192.filter((_, i) => i % 2 === 0);
 /** E48 is every second E96 value. */
 export const E48 = E96.filter((_, i) => i % 2 === 0);
 
-export type ESeries = 'E6' | 'E12' | 'E24' | 'E48' | 'E96';
+export type ESeries = 'E6' | 'E12' | 'E24' | 'E48' | 'E96' | 'E192';
 
-const SERIES: Record<ESeries, number[]> = { E6, E12, E24, E48, E96 };
+const SERIES: Record<ESeries, number[]> = { E6, E12, E24, E48, E96, E192 };
+
+/** Series whose table is three significant digits rather than two. */
+function isThreeDigit(series: ESeries): boolean {
+  return series === 'E48' || series === 'E96' || series === 'E192';
+}
 
 /** True when a value is a preferred value in the given series. */
 export function isPreferredValue(ohms: number, series: ESeries): boolean {
   const base = SERIES[series];
-  // Normalise into the series' own decade: E6/E12/E24 are 2-digit, E48/E96 3-digit.
-  const digits = series === 'E48' || series === 'E96' ? 3 : 2;
+  // Normalise into the series' own decade: E6/E12/E24 are 2-digit, the rest 3.
+  const digits = isThreeDigit(series) ? 3 : 2;
   const target = normaliseMantissa(ohms, digits);
   if (target === null) return false;
   return base.some((v) => Math.abs(v - target) < 0.5);
 }
 
-/** Nearest preferred value in a series, in ohms. */
+/**
+ * Nearest preferred value in a series, in ohms.
+ *
+ * Nearest is measured on a log scale, not a linear one, because that is what
+ * the preferred-number system means by nearest: the series is a geometric
+ * progression, so each step is a constant *ratio*. Linear distance biases every
+ * answer upward — between 100 and 110, linear picks the midpoint 105 as a tie,
+ * where the ratio midpoint is 104.9, and the bias grows with the gap. The two
+ * disagree on a small but real fraction of inputs.
+ */
 export function nearestPreferred(ohms: number, series: ESeries): number | null {
   if (!Number.isFinite(ohms) || ohms <= 0) return null;
   const base = SERIES[series];
-  const digits = series === 'E48' || series === 'E96' ? 3 : 2;
+  const digits = isThreeDigit(series) ? 3 : 2;
   const decade = Math.floor(Math.log10(ohms)) - (digits - 1);
+  const targetLog = Math.log10(ohms);
   let best: number | null = null;
   let bestErr = Infinity;
   // Check the decade below and above too, so a value near a decade boundary
@@ -241,7 +271,7 @@ export function nearestPreferred(ohms: number, series: ESeries): number | null {
   for (const d of [decade - 1, decade, decade + 1]) {
     for (const v of base) {
       const candidate = v * 10 ** d;
-      const err = Math.abs(candidate - ohms);
+      const err = Math.abs(Math.log10(candidate) - targetLog);
       if (err < bestErr) {
         bestErr = err;
         best = candidate;

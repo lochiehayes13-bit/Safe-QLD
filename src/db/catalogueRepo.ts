@@ -73,6 +73,8 @@ export const CATEGORY_LABEL: Record<string, string> = {
   signage: 'Signage',
   'emergency-lighting': 'Emergency lighting',
   cable: 'Cable',
+  pipe: 'Pipe and fittings',
+  passive: 'Passive fire',
   ancillary: 'Ancillary',
   tool: 'Tools',
   accessory: 'Accessories',

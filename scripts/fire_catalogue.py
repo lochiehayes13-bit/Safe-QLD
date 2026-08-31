@@ -34,9 +34,23 @@ NAME_RULES = [
     (r"\bdetector base|\b(relay|isolator|sounder|standard|conventional|addressable|low ?profile) base\b|\bbase,? (standard|relay|isolator|sounder)|\bmounting base|\bb\d{3}[a-z]*\b base", ("base", None)),
     (r"\bduct (detector|housing|smoke)", ("detector", "Duct")),
     (r"\b(photo|photoelectric|optical|ionisation|ionization|multi-?criteria|multi-?sensor|heat|thermal|flame|smoke) (detector|sensor|alarm)|\bdetector,? (photo|heat|smoke|multi)", ("detector", None)),
+    # A fire distributor also sells the mechanical supply chain that goes with
+    # the systems -- pipe and fittings, tools, fixings. On FlameStop that is
+    # nearly half the catalogue, so leaving it unclassified would make the
+    # category filter useless on the largest supplier we carry.
+    (r"\bfire collar\b|\bretrofit collar\b|\bfire damper\b|\bfire (batt|pillow|mastic|sealant|wrap|sleeve)\b|\bpenetration seal|\bintumescent\b", ("passive", None)),
+    (r"\b(drill|masonry) bit\b|\bhole ?saw\b|\bjab saw\b|\bcutting (blade|disc|wheel)\b|\bridgid\b|\bhand tool\b|\bspanner\b|\bwrench\b|\bpliers\b|\bscrewdriver\b|\bthreading machine\b|\bpipe (cutter|vice|threader)\b", ("tool", None)),
+    (r"\b(hex ?)?(bolt|nut|screw|rivet)s?\b|\bself ?drilling\b|\bthreaded rod\b|\bdyna ?bolt\b|\banchor\b|\bstrut\b|\bunistrut\b|\bchannel (end cap|nut|bracket)\b|\bangle bracket\b|\bbeam clamp\b", ("accessory", "Fixings")),
+    (r"\breducing (bush|socket|tee|elbow|nipple|coupling)\b|\bhex nipple\b|\bend cap\b|\b(concentric|eccentric) reducer\b|\bmechanical tee\b|\bgrooved (coupling|fitting)\b|\bpear band\b|\bschedule \d+ .*pipe\b|\b(gal|galvanised|black|copper|cpvc) pipe\b|\bpipe x \d|\bflange\b|\by ?type strainer\b|\by strainer\b|\bbutterfly valve\b|\bgate valve\b|\bnon ?return valve\b|\bball valve\b|\bvalve (gasket|washer|seat)\b", ("pipe", None)),
+    (r"\bnozzle\b|\bstandpipe\b|\bhose (coupling|adaptor|adapter|reel swivel)\b|\blay ?flat hose\b", ("hydrant", "Hose fittings")),
+    (r"\bmixer amplifier\b|\bpa amplifier\b|\bwireless (microphone|uhf)\b|\bpaging microphone\b|\bpublic address\b", ("ewis", "Public address")),
     # Passive and mechanical protection. A distributor's catalogue is mostly
     # this, where a panel manufacturer's is none of it.
-    (r"\bfire extinguisher\b|\bextinguisher\b|\bco2 \d|\bdry chemical powder\b|\bfoam \d+ ?l\b", ("extinguisher", None)),
+    # The whole unit first, so a complete extinguisher is not filed as a spare
+    # part for one.
+    (r"\bfire extinguisher\b|\bextinguisher\b|\bfire blanket\b", ("extinguisher", None)),
+    (r"\b(hose|handle|valve|cylinder|neck|dip tube|gauge|sling|bracket|o.?ring)\b.{0,40}\b(dcp|abe|co2|extinguisher)\b|\b(dcp|abe|co2)\b.{0,40}\b(hose|handle|valve|cylinder|neck|dip tube|gauge)\b|\bdip tube\b|\bneck ?o.? ?ring\b", ("extinguisher", "Spares")),
+    (r"\bco2 \d|\bdry chemical powder\b|\bfoam \d+ ?l\b|\b\d+(\.\d+)? ?kg (dcp|abe|be|co2)\b", ("extinguisher", None)),
     (r"\bhose ?reel\b|\blay ?flat hose\b", ("hose-reel", None)),
     (r"\bhydrant\b|\bstorz\b|\blandin ?g valve\b|\bbooster (assembly|inlet|cabinet)", ("hydrant", None)),
     (r"\bsprinkler\b|\bflow switch\b|\btamper switch\b|\balarm valve\b|\bdeluge\b", ("sprinkler", None)),
@@ -97,12 +111,21 @@ CATEGORY_HINTS = [
     ("power suppl", ("power-supply", None)),
     ("test", ("tool", "Test equipment")),
     ("cabl", ("cable", None)),
+    ("pipe", ("pipe", None)),
+    ("fitting", ("pipe", None)),
+    ("reducing", ("pipe", None)),
+    ("valve", ("pipe", None)),
+    ("fire collar", ("passive", None)),
+    ("tool", ("tool", None)),
+    ("drill", ("tool", None)),
+    ("bracket", ("accessory", "Fixings")),
+    ("bolt", ("accessory", "Fixings")),
+    ("screw", ("accessory", "Fixings")),
     ("fire rated", ("cable", None)),
     ("panel", ("panel", None)),
     ("detector", ("detector", None)),
     ("cover", ("accessory", "Cover")),
     ("accessor", ("accessory", None)),
-    ("fitting", ("accessory", "Fittings")),
 ]
 CATEGORY_HINTS.sort(key=lambda kv: -len(kv[0]))
 

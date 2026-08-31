@@ -68,7 +68,7 @@ export const PROTOCOLS: Protocol[] = [
     physicalSwitchCount: 8,
     methods: ['dip', 'programmer'],
     maxDevicesPerLoop: 127,
-    notes: 'The DIL block has eight switches but only the first seven set the address. Switch 8 controls whether the base LED flashes on poll. Unlike Apollo, 127 is valid.',
+    notes: 'The DIL block has eight switches but only the first seven set the address. What the eighth does depends on the device — on some bases it controls the LED, on some modules it disables monitoring — so check that device\u2019s own documentation rather than assuming. Unlike Apollo, 127 is valid.',
   },
   {
     id: 'simplex_idnet',
@@ -112,11 +112,23 @@ export const PROTOCOLS: Protocol[] = [
   },
   {
     id: 'pertronic_f220',
-    label: 'Pertronic F220 / F120A / F100A',
+    label: 'Pertronic F220 / F120A',
     minAddress: 1, maxAddress: 159, switchCount: null,
     methods: ['rotary'],
     maxDevicesPerLoop: 159,
     notes: 'Rotary decade addressing, not Apollo — a common misconception.',
+  },
+  {
+    id: 'pertronic_f100a',
+    label: 'Pertronic F100A',
+    minAddress: 1, maxAddress: 99, switchCount: null,
+    methods: ['rotary'],
+    maxDevicesPerLoop: 99,
+    // Split from the F220 entry, which asserted one ceiling for three panels.
+    // The lower figure is the safe one to be unsure with: too low costs a
+    // second look at the manual, too high hands out an address the panel
+    // cannot poll and sends someone hunting a fault that is not there.
+    notes: 'Listed separately from the F220 and F120A because the smaller panel does not carry their loop capacity. Confirm the ceiling for your firmware against the panel manual before addressing above 99.',
   },
   {
     id: 'tyco_mx',
@@ -275,7 +287,7 @@ export function validateAddress(address: number, protocol: Protocol, method: Add
   if (protocol.id === 'hochiki_esp') {
     issues.push({
       level: 'warning',
-      message: 'The DIL block has eight switches but only 1 to 7 set the address. Switch 8 sets whether the base LED flashes on poll — including it in the sum puts the address 128 too high.',
+      message: 'The DIL block has eight switches but only 1 to 7 set the address — including the eighth in the sum puts the address 128 too high. What the eighth switch does varies by device (LED behaviour on some bases, monitoring on some modules), so read it off that device\u2019s documentation.',
     });
     if (address >= 1 && address <= 127) {
       issues.push({
