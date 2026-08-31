@@ -3,6 +3,12 @@ import { Tabs } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '@/theme';
 
+/**
+ * Five tabs, ordered by how often a technician reaches for them.
+ *
+ * Everything else is reachable from Today's action grid rather than being
+ * crammed into the bar — a tab bar with nine items is a menu, not navigation.
+ */
 export default function TabsLayout() {
   const t = useTheme();
   return (
@@ -15,9 +21,9 @@ export default function TabsLayout() {
         tabBarStyle: {
           backgroundColor: t.color.bgElevated,
           borderTopColor: t.color.border,
-          height: 62,
-          paddingBottom: 8,
-          paddingTop: 6,
+          height: 64,
+          paddingBottom: 9,
+          paddingTop: 7,
         },
         tabBarActiveTintColor: t.color.accentText,
         tabBarInactiveTintColor: t.color.textFaint,
@@ -27,21 +33,29 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
+          title: 'Today',
+          headerShown: false,
+          tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name="home-variant-outline" color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        name="sites"
+        options={{
           title: 'Sites',
-          tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name="office-building-marker" color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name="office-building-marker-outline" color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="tools"
         options={{
           title: 'Tools',
-          tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name="calculator-variant" color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name="calculator-variant-outline" color={color} size={size} />,
         }}
       />
       <Tabs.Screen
-        name="reports"
+        name="work"
         options={{
-          title: 'Reports',
+          title: 'Work',
           tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name="clipboard-check-outline" color={color} size={size} />,
         }}
       />

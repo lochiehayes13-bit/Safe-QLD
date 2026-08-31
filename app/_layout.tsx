@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { getDb } from '@/db';
+import { seedReferenceData } from '@/db/assetRepo';
 import { useTheme } from '@/theme';
 import { Banner, Txt } from '@/components/ui';
 
@@ -22,6 +23,7 @@ export default function RootLayout() {
   useEffect(() => {
     let cancelled = false;
     getDb()
+      .then(seedReferenceData)
       .then(() => {
         if (!cancelled) setReady(true);
       })
@@ -71,14 +73,10 @@ export default function RootLayout() {
           }}
         >
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="site/[id]" options={{ title: 'Site' }} />
           <Stack.Screen name="site/new" options={{ title: 'New site', presentation: 'modal' }} />
-          <Stack.Screen name="site/points" options={{ title: 'Points' }} />
-          <Stack.Screen name="site/zones" options={{ title: 'Zones' }} />
-          <Stack.Screen name="site/cause-effect" options={{ title: 'Cause & effect' }} />
-          <Stack.Screen name="site/defects" options={{ title: 'Defects' }} />
-          <Stack.Screen name="report/[id]" options={{ title: 'Test sheet' }} />
           <Stack.Screen name="import" options={{ title: 'Import', presentation: 'modal' }} />
+          <Stack.Screen name="impairment/new" options={{ title: 'Declare impairment', presentation: 'modal' }} />
+          <Stack.Screen name="work/defect/new" options={{ title: 'Raise defect', presentation: 'modal' }} />
         </Stack>
       </SafeAreaProvider>
     </GestureHandlerRootView>
