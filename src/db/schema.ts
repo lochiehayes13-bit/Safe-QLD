@@ -5,7 +5,9 @@
  * an app already installed on a tech's phone upgrades cleanly.
  */
 
-export const SCHEMA_VERSION = 2;
+import { MIGRATION_V3 } from './schemaV3';
+
+export const SCHEMA_VERSION = 3;
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -249,4 +251,7 @@ export const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS idx_cat_category ON catalogue_item(category);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_cat_unique ON catalogue_item(brand, partNumber);
   `,
+
+  // v3 — universal asset, test and defect engines
+  MIGRATION_V3,
 ];
