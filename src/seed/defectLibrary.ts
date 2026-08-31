@@ -34,6 +34,12 @@ export interface DefectCode {
   rectification?: string;
   quoteItems?: QuoteItem[];
   photoRequired?: boolean;
+  /**
+   * Where the requirement comes from. Kept explicit so the app never presents a
+   * company procedure as though it were a standard, or the reverse.
+   */
+  sourceKind?: 'standard' | 'manufacturer' | 'qdc' | 'ncc' | 'legislation' | 'internal';
+  sourceRef?: string;
 }
 
 const REPLACE_LABOUR: QuoteItem = { description: 'Labour — remove and replace', unit: 'hr', qtyPerDefect: 0.5 };
