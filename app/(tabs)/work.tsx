@@ -43,6 +43,7 @@ export default function WorkScreen() {
       title: 'On the tools',
       rows: [
         { label: 'Jobs', sub: 'Scheduled and outstanding work', icon: 'clipboard-list-outline', href: '/work/jobs', badge: counts.jobs },
+        { label: "Today's run", sub: 'Jobs ordered by how close they are, urgent first', icon: 'map-marker-path', href: '/work/route' },
         { label: 'Impairments', sub: 'Systems currently out of service', icon: 'alert-octagon-outline', href: '/work/impairments', badge: counts.impairments, tone: counts.impairments ? 'fail' : undefined },
         { label: 'Defects', sub: 'Raised, quoted and outstanding', icon: 'alert-circle-outline', href: '/work/defects', badge: counts.defects, tone: counts.defects ? 'warn' : undefined },
         { label: 'Promises', sub: "Things you said you'd come back for", icon: 'hand-back-right-outline', href: '/work/promises', badge: counts.promises },
