@@ -1,50 +1,18 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Linking, View } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SimproClient, type SimproConfig } from '@/simpro/client';
+import { loadPrefs, savePrefs, DEFAULT_PREFS, type Prefs } from '@/app-prefs';
 import { clearExports, exportsSize } from '@/export/files';
 import { pendingSyncCount } from '@/db/opsRepo';
 import { formatBytes } from '@/share/pack';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
 
-const PREFS_KEY = 'safeqld.prefs';
-
-interface Prefs {
-  technicianName: string;
-  technicianLicence: string;
-  vehicleRego: string;
-  companyName: string;
-  simproDomain: string;
-  simproCompanyId: string;
-  simproClientId: string;
-  simproProxyUrl: string;
-}
-
-const DEFAULTS: Prefs = {
-  technicianName: '',
-  technicianLicence: '',
-  vehicleRego: '',
-  companyName: 'Safe QLD Pty Ltd',
-  simproDomain: 'safeqld.simprosuite.com',
-  simproCompanyId: '',
-  simproClientId: '',
-  simproProxyUrl: '',
-};
-
-export async function loadPrefs(): Promise<Prefs> {
-  try {
-    const raw = await AsyncStorage.getItem(PREFS_KEY);
-    return raw ? { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Prefs>) } : DEFAULTS;
-  } catch {
-    return DEFAULTS;
-  }
-}
 
 export default function SettingsScreen() {
   const t = useTheme();
-  const [prefs, setPrefs] = useState<Prefs>(DEFAULTS);
+  const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
   const [secret, setSecret] = useState('');
   const [hasSecret, setHasSecret] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -66,7 +34,7 @@ export default function SettingsScreen() {
   const update = useCallback((patch: Partial<Prefs>) => {
     setPrefs((prev) => {
       const next = { ...prev, ...patch };
-      void AsyncStorage.setItem(PREFS_KEY, JSON.stringify(next));
+      void savePrefs(next);
       return next;
     });
   }, []);
