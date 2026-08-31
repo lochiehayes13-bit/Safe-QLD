@@ -7,6 +7,10 @@ import {
 } from '@/db/repo';
 import { createBaseline, listBaselines } from '@/db/baselineRepo';
 import { createOccupierStatement, listOccupierStatements } from '@/db/occupierRepo';
+import { configTotals, siteToConfig } from '@/share/siteToConfig';
+import { encodePack, formatBytes } from '@/share/pack';
+import { shareFile, writePack } from '@/export/files';
+import { nowIso } from '@/db';
 import type { Defect, Panel, ServiceReport, Site } from '@/domain/types';
 import { PANEL_CATALOGUE } from '@/parsers';
 import { useTheme } from '@/theme';
@@ -24,6 +28,7 @@ export default function SiteScreen() {
   const [defects, setDefects] = useState<Defect[]>([]);
   const [pointCount, setPointCount] = useState(0);
   const [creating, setCreating] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -95,6 +100,41 @@ export default function SiteScreen() {
   const openDefects = defects.filter((d) => d.status === 'open');
   const criticalDefects = openDefects.filter((d) => d.severity === 'critical');
 
+  /**
+   * Packs this site for another technician.
+   *
+   * The pack carries the normalised data the app holds — zones, points, loops,
+   * cause and effect — and never the vendor's original file, so sharing one
+   * does not redistribute a customer's proprietary configuration. Until now the
+   * app could open a pack but never make one, which meant no pack could exist.
+   */
+  const sharePack = async () => {
+    if (!site) return;
+    setSharing(true);
+    try {
+      const config = await siteToConfig(site);
+      const totals = configTotals(config);
+      if (!totals.panels) {
+        Alert.alert('Nothing to share', 'This site has no panel data yet. Import a device list first.');
+        return;
+      }
+      const bytes = encodePack({
+        meta: { app: 'Safe QLD', siteName: site.name, createdAt: nowIso() },
+        config,
+      });
+      const file = writePack(`${site.name}`, bytes);
+      await shareFile(
+        file,
+        `${site.name} — ${totals.panels} panel${totals.panels === 1 ? '' : 's'}, ` +
+        `${totals.points} devices (${formatBytes(bytes.byteLength)})`,
+      );
+    } catch (e) {
+      Alert.alert('Could not build the pack', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSharing(false);
+    }
+  };
+
   return (
     <>
       <Stack.Screen options={{ title: site.name }} />
@@ -121,11 +161,21 @@ export default function SiteScreen() {
             style={{ flex: 1 }}
           />
         </Rowed>
-        <Button
-          title="Import a panel configuration"
-          variant="secondary"
-          onPress={() => router.push({ pathname: '/import', params: { siteId: site.id } })}
-        />
+        <Rowed gap={2}>
+          <Button
+            title="Import a configuration"
+            variant="secondary"
+            onPress={() => router.push({ pathname: '/import', params: { siteId: site.id } })}
+            style={{ flex: 1 }}
+          />
+          <Button
+            title="Share this site"
+            variant="secondary"
+            onPress={sharePack}
+            loading={sharing}
+            style={{ flex: 1 }}
+          />
+        </Rowed>
 
         <H2>Browse</H2>
         <NavRow
