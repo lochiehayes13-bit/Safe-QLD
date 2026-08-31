@@ -72,6 +72,12 @@ const CALCULATORS: ToolDef[] = [
 
 const REFERENCE: ToolDef[] = [
   {
+    href: '/scan',
+    icon: 'qrcode-scan',
+    title: 'Scan a tag',
+    body: 'Read an asset tag, device label or part barcode and open what it belongs to.',
+  },
+  {
     href: '/catalogue',
     icon: 'package-variant-closed',
     title: 'Parts catalogue',

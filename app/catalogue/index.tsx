@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, Pressable, ScrollView, TextInput, View } from 'react-native';
-import { Stack, router } from 'expo-router';
+import { Stack, router, useLocalSearchParams } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
@@ -20,8 +20,11 @@ import { Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
  */
 export default function CatalogueScreen() {
   const t = useTheme();
-  const [search, setSearch] = useState('');
-  const [debounced, setDebounced] = useState('');
+  // The scanner sends an unrecognised code here so the search is already run
+  // rather than needing to be retyped from a ladder.
+  const { q } = useLocalSearchParams<{ q?: string }>();
+  const [search, setSearch] = useState(q ?? '');
+  const [debounced, setDebounced] = useState(q ?? '');
   const [brand, setBrand] = useState<string>();
   const [category, setCategory] = useState<string>();
   const [items, setItems] = useState<CatalogueItem[]>([]);
