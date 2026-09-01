@@ -284,21 +284,36 @@ export function classifyBytes(fileName: string, bytes: Uint8Array): { kind: Impo
   const head = decodeHead(bytes);
   const byText = classifyFile(fileName, head);
 
+  /*
+   * Recognised and unreadable, checked before anything gives up.
+   *
+   * It has to come before the binary guard below, and that ordering was wrong
+   * for a while. Every format in the catalogue marked unreadable is binary — a
+   * password-protected Access database is the case that matters — so binary
+   * content with a few accidental commas in it hit the guard, returned unknown,
+   * and never reached this loop at all. A technician picking the .accdb export
+   * VeriFire actually produces was told the app did not recognise it, and went
+   * and fetched the same file again. It is recognised; it is encrypted, and
+   * saying so is the useful answer.
+   *
+   * Still after the content sniffs, because a file whose extension belongs to
+   * one vendor and whose contents belong to another should be read as what it
+   * is.
+   */
+  if (byText.kind === 'unknown' || byText.kind === 'tabular') {
+    for (const p of PANEL_CATALOGUE) {
+      if (p.status === 'unreadable' && p.extensions.some((ext) => lower.endsWith(ext))) {
+        return { kind: 'unreadable', parser: p };
+      }
+    }
+  }
+
   // The tabular fallback matches on nothing more than a few commas or tabs
   // among the first lines, which binary content supplies by accident. Sending
   // a binary file to the column mapper gives the technician a screen of
   // mojibake to map; sending it on as unknown gets it probed, which is the one
   // answer that might actually help.
   if (byText.kind === 'tabular' && !plausiblyText(head)) return { kind: 'unknown' };
-  if (byText.kind !== 'unknown') return byText;
-
-  // Recognised and unreadable is a better answer than unknown: it saves the
-  // technician going and fetching the same file again.
-  for (const p of PANEL_CATALOGUE) {
-    if (p.status === 'unreadable' && p.extensions.some((ext) => lower.endsWith(ext))) {
-      return { kind: 'unreadable', parser: p };
-    }
-  }
 
   return byText;
 }
