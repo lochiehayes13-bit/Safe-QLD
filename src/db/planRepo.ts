@@ -2,6 +2,7 @@ import { getDb, nowIso } from './index';
 import { routineById } from '@/seed/serviceRoutines';
 import { routineDue } from '@/domain/schedule';
 import {
+  NOT_COUNTED_ASSET_TYPES,
   calendarMonthWindow,
   planWork,
   qldDate,
@@ -19,7 +20,7 @@ import {
  * `@/domain/workPlan`, which imports nothing from here and can therefore be
  * tested. This file does four queries, joins them, and hands the result over.
  *
- * Three things it has to be honest about while doing that, because each one is
+ * Four things it has to be honest about while doing that, because each one is
  * a place where the database knows less than it appears to:
  *
  *  - **A site with no asset rows is unknown, not empty.** The register is built
@@ -34,6 +35,11 @@ import {
  *  - **Only routines with a recorded history can be scheduled.** The schedule
  *    is anchored to the first service, so a routine never carried out at a site
  *    has no anchor to count from. The same reasoning the overdue list uses.
+ *  - **A register row is not always a device to be walked.** The asset table is
+ *    a tree and it keeps what has been taken out, so a plain COUNT(*) charges
+ *    the removed detector, the loop it hung off and the panel above it as
+ *    though each were a device. Both exclusions are applied here, against the
+ *    list the planner publishes, so the reasoning stays in the tested module.
  */
 
 export interface BuildPlanOptions {
@@ -73,22 +79,52 @@ interface PositionRow {
 interface HistoryRow {
   siteId: string;
   routineId: string;
+  /** Denormalised onto the run, so a retired routine still reads as something. */
+  routineLabel: string;
   firstCompletedAt: string;
   lastCompletedAt: string;
   completedCount: number;
 }
 
+const NOT_COUNTED_TYPE_IDS = Object.keys(NOT_COUNTED_ASSET_TYPES);
+
+/**
+ * `t.id NOT IN ()` is a syntax error, not an empty exclusion, so the clause is
+ * only written when there is something to exclude.
+ */
+const NOT_COUNTED_CLAUSE = NOT_COUNTED_TYPE_IDS.length
+  ? `AND t.id NOT IN (${NOT_COUNTED_TYPE_IDS.map(() => '?').join(', ')})`
+  : '';
+
 export async function buildWorkPlan(options: BuildPlanOptions = {}): Promise<WorkPlan> {
-  const db = await getDb();
-  const today = qldDate(options.now ?? nowIso()) ?? nowIso().slice(0, 10);
+  const asked = options.now ?? nowIso();
+  const today = qldDate(asked);
+  if (!today) {
+    // Falling back to nowIso().slice(0, 10) here would plan from a different
+    // date than the caller asked for, and would do it by slicing a UTC instant
+    // — the exact day-early bug qldDate exists to prevent. The planner already
+    // knows how to say "that is not a date I can read"; let it say so.
+    return planWork([], [], { today: asked });
+  }
   const window = calendarMonthWindow(today, options.monthOffset ?? 1);
+
+  const db = await getDb();
 
   const [siteRows, assetRows, positionRows, historyRows] = await Promise.all([
     db.getAllAsync<SiteRow>('SELECT id, name, suburb, postcode FROM site'),
+    // Only what is still there and still a device. `removed` and
+    // `decommissioned` rows are kept so a site's history reads correctly, and
+    // counting them would charge a technician for walking detectors that came
+    // out in 2019. The excluded types are panels, loops, sampling points and
+    // sprinkler heads, whose minutes the planner charges somewhere else — its
+    // list, its reasons, and a test holds it against the type catalogue.
     db.getAllAsync<AssetCountRow>(
       `SELECT a.siteId AS siteId, t.system AS system, COUNT(*) AS count
        FROM asset a JOIN asset_type t ON a.assetTypeId = t.id
+       WHERE a.status NOT IN ('removed', 'decommissioned')
+         ${NOT_COUNTED_CLAUSE}
        GROUP BY a.siteId, t.system`,
+      NOT_COUNTED_TYPE_IDS,
     ),
     // Newest job per site that carries a position. A site visited last week is
     // a better guide to where it is than one visited in 2019, and either is
@@ -101,6 +137,7 @@ export async function buildWorkPlan(options: BuildPlanOptions = {}): Promise<Wor
     db.getAllAsync<HistoryRow>(
       `SELECT siteId,
               routineId,
+              MAX(routineLabel) AS routineLabel,
               MIN(completedAt) AS firstCompletedAt,
               MAX(completedAt) AS lastCompletedAt,
               COUNT(*)         AS completedCount
@@ -147,7 +184,11 @@ export async function buildWorkPlan(options: BuildPlanOptions = {}): Promise<Wor
         siteId: row.siteId,
         siteName: siteNames.get(row.siteId),
         routineId: row.routineId,
-        frequency: 'annual',
+        // The label is what the technician's own run recorded; it is a
+        // description, not a schedule. The frequency is left undefined on
+        // purpose — putting a plausible one here would print "Annual" on the
+        // one list the office acts on, for a routine nothing can date.
+        routineLabel: row.routineLabel || undefined,
         reason: 'unknown-routine',
         detail: `A service is recorded against routine "${row.routineId}", which this version of the app `
           + 'does not hold. Nothing here knows how often it falls due, so it cannot be planned.',

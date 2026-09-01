@@ -1,5 +1,5 @@
 import { defectByCode } from '@/seed/defectLibrary';
-import { isMaterial, labourNeededFor, partsNeededFor } from '@/domain/partsNeeded';
+import { labourNeededFor, partsNeededFor } from '@/domain/partsNeeded';
 import { GST, roundCents, type LabourRate } from '@/domain/rates';
 import type { Defect } from '@/domain/types';
 

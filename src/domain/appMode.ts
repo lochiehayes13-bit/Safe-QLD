@@ -592,6 +592,16 @@ export const DESTINATIONS: readonly Destination[] = [
       + 'that has to be read on site rather than in an office.',
   },
   {
+    route: '/occupier', file: 'app/occupier/index.tsx', tab: 'work', section: 'Records',
+    label: 'Occupier statements', modes: BOTH, openedFrom: ['/work'],
+    blurb: 'Every occupier statement across every site, ordered by what is closest to being late.',
+    terms: ['occupier', 'statement', 'commissioner', 'annual statement', 'schedule 2', 'declaration'],
+    keptBecause:
+      'A statement signed and never sent looks, from the site screen, exactly like one that was '
+      + 'sent — both are signed. Across 897 sites nobody notices until somebody asks, and the '
+      + 'technician who did the work is often the one who can chase it.',
+  },
+  {
     route: '/work/reports', file: 'app/work/reports.tsx', tab: 'work', section: 'Records',
     label: 'Test sheets', modes: BOTH, openedFrom: ['/', '/work'],
     blurb: 'Every service report on this device, newest first.',

@@ -186,8 +186,12 @@ export const COMMISSIONER_LODGEMENT = {
 // All date arithmetic is anchored to UTC midnight and all dates are ISO
 // yyyy-mm-dd. Queensland is UTC+10 with no daylight saving, so a local calendar
 // day maps cleanly onto a UTC day as long as nothing here ever constructs a
-// date from a local-time clock. Display formatting is d/m/yyyy and belongs to
-// the export layer, not here.
+// date from a local-time clock.
+//
+// Every date this module returns as a *value* is ISO, because the caller has to
+// compare and store it. Every date this module writes into a *sentence* is
+// d/m/yyyy, because those sentences are read by an occupier standing next to a
+// fire panel and this app prints one date format.
 // ---------------------------------------------------------------------------
 
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})/;
@@ -204,6 +208,19 @@ function parseIsoDate(iso: string | undefined): Date | undefined {
 
 function toIso(d: Date): string {
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * d/m/yyyy, which is the only date format this app prints.
+ *
+ * Held here rather than taken from the export layer because the sentences this
+ * module builds — "the copy went late", "signing late does not restart the ten
+ * days" — are read by a person, and a person reading "2026-04-30" on a
+ * Queensland form has to stop and work out which number is the month.
+ */
+export function formatAuDate(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.slice(0, 10));
+  return m ? `${Number(m[3])}/${Number(m[2])}/${m[1]}` : iso;
 }
 
 /**
@@ -688,7 +705,17 @@ export function renderDeclaration(values: DeclarationValues): string {
 // Queensland public holidays and business days
 // ---------------------------------------------------------------------------
 
-export type HolidayScope = 'statewide' | 'brisbane-area';
+/**
+ * Where a holiday is appointed.
+ *
+ * 'district' is for a holiday the caller handed in rather than one this module
+ * knows: a show holiday or a special holiday appointed for one local government
+ * area. It is kept distinct from 'brisbane-area' because holidaysApplied is
+ * printed as the working behind a deadline, and a document that describes the
+ * Toowoomba show holiday as a Brisbane one is wrong in a way a reader would
+ * have no way to catch.
+ */
+export type HolidayScope = 'statewide' | 'brisbane-area' | 'district';
 
 /** Where the act is to be done, for the "in the place" limb of business day. */
 export type Locality = 'brisbane-area' | 'elsewhere-in-queensland' | 'unknown';
@@ -925,9 +952,9 @@ export function addQldBusinessDays(
   if (!inCoverage(startIso)) {
     return {
       ...base,
-      reason: `Queensland public holidays are only known here for ${HOLIDAY_COVERAGE.from} to `
-        + `${HOLIDAY_COVERAGE.to}, and ${startIso} is outside that. Count the business days against the state's `
-        + 'published holiday dates rather than trusting a figure from here.',
+      reason: `Queensland public holidays are only known here for ${formatAuDate(HOLIDAY_COVERAGE.from)} to `
+        + `${formatAuDate(HOLIDAY_COVERAGE.to)}, and ${formatAuDate(startIso)} is outside that. Count the business `
+        + "days against the state's published holiday dates rather than trusting a figure from here.",
     };
   }
 
@@ -950,9 +977,9 @@ export function addQldBusinessDays(
     if (!inCoverage(iso)) {
       return {
         ...base,
-        reason: `Counting ${days} business days from ${startIso} runs past ${HOLIDAY_COVERAGE.to}, beyond the `
-          + 'holiday dates Queensland has appointed. No date is given rather than one that assumes next decade\'s '
-          + 'holidays.',
+        reason: `Counting ${days} business days from ${formatAuDate(startIso)} runs past `
+          + `${formatAuDate(HOLIDAY_COVERAGE.to)}, beyond the holiday dates Queensland has appointed. No date is `
+          + "given rather than one that assumes next decade's holidays.",
       };
     }
     if (isWeekend(cursor)) {
@@ -962,7 +989,7 @@ export function addQldBusinessDays(
 
     const district = districtHolidays.get(iso);
     if (district) {
-      applied.push({ date: iso, name: district, scope: 'brisbane-area', sourceId: 'qld-show-holidays' });
+      applied.push({ date: iso, name: district, scope: 'district', sourceId: 'qld-show-holidays' });
       continue;
     }
 
@@ -1037,19 +1064,27 @@ export function qldBusinessDaysBetween(
   fromIso: string,
   toIsoDate: string,
   options: BusinessDayOptions = {},
-): { days?: number; reason?: string; caveats: string[] } {
+): { days?: number; reason?: string; caveats: string[]; legalRef: string; sourceIds: SourceId[] } {
+  // Cited like every other answer here. A screen that prints "three days late"
+  // is making a statutory claim, and the definition it rests on is not this
+  // app's — it is schedule 1 of the Acts Interpretation Act.
+  const legalRef = 'Acts Interpretation Act 1954 (Qld), sch 1 (business day)';
+  const sourceIds: SourceId[] = ['acts-interpretation', 'qld-public-holidays'];
   const from = parseIsoDate(fromIso);
   const to = parseIsoDate(toIsoDate);
   if (!from || !to) {
-    return { reason: 'One of the dates could not be read, so no count is possible.', caveats: [] };
+    return {
+      reason: 'One of the dates could not be read, so no count is possible.',
+      caveats: [], legalRef, sourceIds,
+    };
   }
   const forward = to >= from;
   const [start, end] = forward ? [from, to] : [to, from];
   if (!inCoverage(toIso(start)) || !inCoverage(toIso(end))) {
     return {
-      reason: `Queensland public holidays are only known here for ${HOLIDAY_COVERAGE.from} to `
-        + `${HOLIDAY_COVERAGE.to}, and this range falls outside that.`,
-      caveats: [],
+      reason: `Queensland public holidays are only known here for ${formatAuDate(HOLIDAY_COVERAGE.from)} to `
+        + `${formatAuDate(HOLIDAY_COVERAGE.to)}, and this range falls outside that.`,
+      caveats: [], legalRef, sourceIds,
     };
   }
 
@@ -1072,7 +1107,12 @@ export function qldBusinessDaysBetween(
     days: forward ? count : -count,
     caveats: options.districtHolidays?.length
       ? []
-      : ['District show and special holidays are not accounted for, so the real count may be one or two lower.'],
+      : [
+        'District show and special holidays are appointed per local government area and are not accounted for, '
+        + 'so the true number of business days in this range may be one or two fewer than the count shown.',
+      ],
+    legalRef,
+    sourceIds,
   };
 }
 
@@ -1267,8 +1307,25 @@ export function commissionerCopyDeadline(input: CommissionerCopyInput): Commissi
     );
   } else if (signed && anchorDate && toIso(signed) > anchorDate) {
     caveats.unshift(
-      `The statement was signed on ${toIso(signed)}, after it was required on ${anchorDate}. Signing late does `
-      + 'not restart the ten business days.',
+      `The statement was signed on ${formatAuDate(toIso(signed))}, after it was required on `
+      + `${formatAuDate(anchorDate)}. Signing late does not restart the ten business days.`,
+    );
+  } else if (signed && anchorDate && toIso(signed) < anchorDate) {
+    // The one place this module can hand back a date *later* than a naive one,
+    // so it says so rather than letting the silence read as certainty. Section
+    // 55A(3) hangs the clock on the day the statement was required, and MP 6.1
+    // A2(b)(ii) fixes that at the anniversary — an occupier who signs in
+    // January is not required to lodge until ten business days after April. It
+    // is the reading the words support, but it is a reading, and everywhere
+    // else here an unknown pushes the date earlier rather than later.
+    const fromSignature = addQldBusinessDays(toIso(signed), COMMISSIONER_COPY_BUSINESS_DAYS, options);
+    caveats.unshift(
+      `The statement was signed on ${formatAuDate(toIso(signed))}, before it was required on `
+      + `${formatAuDate(anchorDate)}, and section 55A(3) counts from the day it was required rather than from the `
+      + 'signature — so signing early does not shorten the ten business days. This is the one deadline here that '
+      + 'is later than the cautious answer'
+      + `${fromSignature.date ? `, which would be ${formatAuDate(fromSignature.date)}` : ''}. `
+      + 'If the copy can go now, send it now.',
     );
   }
 
@@ -1551,8 +1608,9 @@ export function checkOccupierStatement(
           field: item.name,
           formRef: `${item.ref}, column 4`,
           legalRef: 'Building Fire Safety Regulation 2008 (Qld) s 54(4)',
-          message: `${item.name}: rectified on ${toIso(rectified)}, which is after the one month s 54(4) allows `
-            + `(${deadline.due}${deadline.approximate ? ', taken from the notice date and so up to a day late' : ''}). `
+          message: `${item.name}: rectified on ${formatAuDate(toIso(rectified))}, which is after the one month `
+            + `s 54(4) allows (${formatAuDate(deadline.due)}`
+            + `${deadline.approximate ? ', taken from the notice date and so up to a day late' : ''}). `
             + 'The statement is still true; the delay wants a reasonable excuse recorded against it.',
           blocking: false,
         });
@@ -1635,7 +1693,8 @@ export function checkOccupierStatement(
       field: 'signedDate',
       formRef: 'Schedule 2, declaration',
       legalRef: 'QDC MP 6.1, Schedule 2',
-      message: `Signed on ${toIso(signed)}, before the period it covers ends on ${toIso(periodEnd)}. The `
+      message: `Signed on ${formatAuDate(toIso(signed))}, before the period it covers ends on `
+        + `${formatAuDate(toIso(periodEnd))}. The `
         + 'declaration speaks of maintenance during the period covered, so part of what is being declared has not '
         + 'happened yet.',
       blocking: false,
@@ -1679,7 +1738,8 @@ export function checkOccupierStatement(
         field: 'sentToCommissionerDate',
         formRef: 'Not a Schedule 2 field',
         legalRef: deadline.legalRef,
-        message: `The copy went to the commissioner on ${toIso(sent)}, after the ${deadline.due} deadline. Ten `
+        message: `The copy went to the commissioner on ${formatAuDate(toIso(sent))}, after the `
+          + `${formatAuDate(deadline.due)} deadline. Ten `
           + 'business days is the whole of it, and the maximum penalty for missing it is 20 penalty units.',
         blocking: false,
       });
@@ -1691,10 +1751,11 @@ export function checkOccupierStatement(
       formRef: 'Not a Schedule 2 field',
       legalRef: deadline.legalRef,
       message: late
-        ? `No copy recorded as given to the commissioner, and the ${deadline.due} deadline has passed. The copy is `
-          + 'still owed; send it and record the date.'
-        : `A copy has to reach the commissioner by ${deadline.due}, being ten business days after the statement `
-          + `was required${deadline.basis === 'signature-fallback' ? ' (counted from the signature — see caveats)' : ''}.`,
+        ? `No copy recorded as given to the commissioner, and the ${formatAuDate(deadline.due)} deadline has passed. `
+          + 'The copy is still owed; send it and record the date.'
+        : `A copy has to reach the commissioner by ${formatAuDate(deadline.due)}, being ten business days after `
+          + 'the statement was required'
+          + `${deadline.basis === 'signature-fallback' ? ' (counted from the signature — see caveats)' : ''}.`,
       blocking: false,
     });
   }
@@ -1721,8 +1782,14 @@ export interface ApprovedFormClaim {
   statement: string;
   /** Which Schedule 2 fields are not completed, named. */
   missingFields: { formRef: string; label: string; why: string }[];
-  /** Which Schedule 2 rows have not been addressed at all. */
-  unaddressedInstallations: { formRef: string; name: string }[];
+  /**
+   * Which Schedule 2 rows are not finished, and what is missing from each.
+   *
+   * The `why` is not decoration. "Sprinklers have not been addressed" sends an
+   * occupier back to a row that looks filled in; "the rectification date is
+   * blank" sends them to the box.
+   */
+  unaddressedInstallations: { formRef: string; name: string; why: string }[];
   /**
    * Fields the app carries that Schedule 2 does not print. These improve the
    * document and cannot disqualify it, so they are reported separately rather
@@ -1817,19 +1884,66 @@ export function approvedFormClaim(statement: FilledOccupierStatement): ApprovedF
     if (item && row.installed !== undefined && !answered.has(item.row)) answered.set(item.row, row);
   }
 
-  const unaddressed: { formRef: string; name: string }[] = [];
+  const unaddressed: { formRef: string; name: string; why: string }[] = [];
   for (const item of SCHEDULE_2_INSTALLATIONS) {
     const row = answered.get(item.row);
     if (!row) {
-      unaddressed.push({ formRef: item.ref, name: item.name });
+      unaddressed.push({
+        formRef: item.ref,
+        name: item.name,
+        why: 'The row is not on this statement at all. Footnote 2 deletes an installation the building does not '
+          + 'have, which is an answer; leaving the row off is not.',
+      });
       continue;
     }
+    // A row struck out under footnote 2 is finished: the schedule deletes it
+    // rather than asking its columns.
     if (!row.installed) continue;
-    // An installation marked as present with nothing in column 2 or column 3 is
-    // not addressed — the row is on the page but two of its three answers are
-    // not, and a form printed like that is a form with holes in it.
-    if (!filled(row.nominatedStandard) || row.criticalDefectNoticeIssued === undefined) {
-      unaddressed.push({ formRef: item.ref, name: item.name });
+
+    // An installation marked as present is addressed only once every box the
+    // schedule rules against it carries something. Each of the four below is an
+    // empty box on a document about to declare that "every field the schedule
+    // sets out has been completed", so a hole here does not make the claim
+    // weaker — it makes it untrue.
+    if (!filled(row.nominatedStandard)) {
+      unaddressed.push({
+        formRef: item.ref,
+        name: item.name,
+        why: 'Column 2 nominates no Australian Standard or maintenance requirement.',
+      });
+      continue;
+    }
+    if (row.criticalDefectNoticeIssued === undefined) {
+      unaddressed.push({
+        formRef: item.ref,
+        name: item.name,
+        why: 'Column 3 asks Yes or No — whether a critical defect notice was issued during the period — and is '
+          + 'blank.',
+      });
+      continue;
+    }
+    if (row.criticalDefectNoticeIssued && !filled(row.rectificationDate)) {
+      // The worst of them to get wrong, and the one the old test suite let
+      // through: the row says a critical defect notice was issued and column 4
+      // does not say the defect was ever fixed. Calling that document the
+      // statutory statement puts a declaration over an installation that may
+      // still be inoperable.
+      unaddressed.push({
+        formRef: item.ref,
+        name: item.name,
+        why: 'Column 3 says a critical defect notice was issued during the period and column 4 gives no date of '
+          + 'rectification.',
+      });
+      continue;
+    }
+    if (item.detailsRequired && !filled(row.details)) {
+      // Column 1 of this row is not a name, it is a name and a blank: the
+      // schedule prints "Other features (provide details)".
+      unaddressed.push({
+        formRef: item.ref,
+        name: item.name,
+        why: 'The row is marked as installed and column 1 asks for details of what it covers, which are not given.',
+      });
     }
   }
 
@@ -1874,9 +1988,16 @@ export function approvedFormClaim(statement: FilledOccupierStatement): ApprovedF
     );
   }
   if (unaddressed.length) {
+    // A row can now be unaddressed for four different reasons, so where there
+    // are few enough to read the sentence says which. Past a handful the
+    // document is a blank form and the list of names is the useful thing; the
+    // reasons are still on every entry for a screen to show against the row.
+    const detailed = unaddressed.length <= 3;
     parts.push(
       `${unaddressed.length} of the twenty-one installations ${unaddressed.length === 1 ? 'has' : 'have'} not been `
-      + `addressed: ${unaddressed.map((u) => u.name).join('; ')}`,
+      + `addressed: ${unaddressed
+        .map((u) => (detailed ? `${u.name} — ${u.why.replace(/\.$/, '')}` : u.name))
+        .join('; ')}`,
     );
   }
 

@@ -8,6 +8,7 @@ import {
   ESTIMATE_CAVEAT,
   UNPLANNABLE_REASON_LABEL,
   formatHours,
+  formatPlanDate,
   planHeadline,
   type PlannedDay,
   type PlannedVisit,
@@ -221,14 +222,31 @@ export default function WorkPlanScreen() {
   );
 }
 
+/**
+ * How much of the book the plan could see at all.
+ *
+ * "October looks quiet" means nothing without this. A site with no asset
+ * register cannot be sized and a site with no suburb cannot be batched, and
+ * both drop out of the month — so the count of each is shown above the month
+ * rather than left in the database where nobody reads it.
+ */
 function CoverageNote({ coverage }: { coverage: PlanCoverage }) {
   const missingAssets = coverage.sites - coverage.sitesWithAssets;
-  if (!coverage.sites || missingAssets <= 0) return null;
+  const missingLocality = coverage.sites - coverage.sitesWithLocality;
+  if (!coverage.sites || (missingAssets <= 0 && missingLocality <= 0)) return null;
+
+  const gaps = [
+    missingAssets > 0 ? `${missingAssets} have no asset register, so a visit to them cannot be sized` : null,
+    missingLocality > 0 ? `${missingLocality} have neither a suburb nor a postcode, so they cannot be batched` : null,
+  ].filter(Boolean).join('. ');
+
   return (
     <Banner
       tone="warn"
-      title={`${missingAssets} of ${coverage.sites} sites have no asset register`}
-      body="A visit to one of those cannot be sized, so it is left out of the plan rather than given an invented half day. A quiet month may only mean a thin register."
+      title={`Of ${coverage.sites} sites, ${Math.max(missingAssets, missingLocality)} are not fully plannable`}
+      body={`${gaps}. Those sites are left out of the month rather than given an invented half day or an arbitrary `
+        + `date, and they are listed below with the reason. A quiet month may only mean a thin register. `
+        + `${coverage.routinesWithHistory} site-and-routine pairs have a service recorded to schedule from.`}
     />
   );
 }
@@ -364,8 +382,12 @@ function UnplannedSection({ plan }: { plan: WorkPlan }) {
               <View style={{ flex: 1 }}>
                 <Txt size="sm" weight="600">{item.siteName ?? item.siteId}</Txt>
                 <Txt size="xs" tone="muted">
-                  {item.routineLabel ?? item.routineId} · {FREQUENCY_LABEL[item.frequency]}
-                  {item.latestSafeDate ? ` · in tolerance until ${item.latestSafeDate.slice(8, 10)}/${item.latestSafeDate.slice(5, 7)}/${item.latestSafeDate.slice(0, 4)}` : ''}
+                  {item.routineLabel ?? item.routineId}
+                  {/* Not every unplanned row has a frequency. One whose routine
+                      this build does not hold has none, and printing a guess
+                      here is printing it on the list the office acts on. */}
+                  {' · '}{item.frequency ? FREQUENCY_LABEL[item.frequency] : 'Frequency unknown'}
+                  {item.latestSafeDate ? ` · in tolerance until ${formatPlanDate(item.latestSafeDate)}` : ''}
                 </Txt>
               </View>
             </Rowed>

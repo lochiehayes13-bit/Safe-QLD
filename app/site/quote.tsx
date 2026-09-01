@@ -6,7 +6,8 @@ import { createQuote, nextQuoteSeq, setQuoteStatus } from '@/db/quoteRepo';
 import { loadRateCard, type StoredRateCard } from '@/db/rateCardRepo';
 import {
   DEFAULT_EXCLUSIONS, DEFAULT_VALIDITY_DAYS, UNPRICEABLE_REASON, buildQuoteLines,
-  expiryFor, formatQuoteReference, lineAmountCents, quoteTotals, scopeLinesFor, weakestConfidence,
+  expiryFor, formatQuoteReference, lineAmountCents, qldDate, quoteTotals, scopeLinesFor,
+  weakestConfidence,
   type MaterialPrice, type PriceSource, type Quote, type QuoteLine,
 } from '@/domain/quote';
 import { effectiveRateCard, formatCents, parseCents, selectRate } from '@/domain/rates';
@@ -55,6 +56,20 @@ export default function SiteQuoteScreen() {
   const [contactName, setContactName] = useState('');
   const [scopeNote, setScopeNote] = useState('');
   const [busy, setBusy] = useState(false);
+  /**
+   * The quote as it was saved, kept beside the one on screen.
+   *
+   * The document a client signs has to carry the number the office will invoice
+   * against and the date the price holds good until, and neither exists until
+   * the quote is saved. Printing the preview after issuing produced a PDF
+   * stamped "draft" with an empty quotation number on the acceptance block.
+   *
+   * The signature is what the screen looked like when it was saved. If anything
+   * has moved since, the saved quote is no longer what is on screen and the
+   * preview is printed instead — it is honest about being a draft, where a
+   * numbered document showing different figures would not be.
+   */
+  const [saved, setSaved] = useState<{ quote: Quote; signature: string } | null>(null);
 
   const load = useCallback(async () => {
     if (!siteId) return;
@@ -177,8 +192,21 @@ export default function SiteQuoteScreen() {
   const totals = useMemo(() => quoteTotals(draft), [draft]);
   const confidence = weakestConfidence(built.lines);
 
+  const signature = useMemo(() => JSON.stringify({
+    lines: draft.lines,
+    unpriceable: draft.unpriceable,
+    discountCents: draft.discountCents,
+    discountReason: draft.discountReason,
+    validityDays: draft.validityDays,
+    contactName: draft.contactName,
+    scopeNote: draft.scopeNote,
+  }), [draft]);
+  const printable = saved && saved.signature === signature ? saved.quote : draft;
+
   const warnings = useMemo(() => {
-    const out = [...totals.warnings];
+    // The build's own refusals first: a price or a rate that was offered and
+    // not used looks identical to one nobody supplied unless it says so.
+    const out = [...built.warnings, ...totals.warnings];
     if (!labour.rate && built.lines.some((l) => l.section === 'labour')) {
       out.push(`${labour.note} The hours are on the quote but not priced.`);
     }
@@ -192,10 +220,17 @@ export default function SiteQuoteScreen() {
       out.push('This site has no client name against it, so the quote has nobody to be addressed to.');
     }
     return out;
-  }, [totals.warnings, labour, built.lines, discountUnreadable, validityDays, site?.clientName]);
+  }, [totals.warnings, built.warnings, labour, built.lines, discountUnreadable, validityDays,
+    site?.clientName]);
 
   const save = async (issue: boolean) => {
-    if (!site || !siteId) return;
+    if (!siteId) return;
+    if (!site) {
+      // Silently doing nothing on a press reads as a broken button, and the
+      // technician presses it again on the way out of the plant room.
+      Alert.alert('Site not loaded', 'This site could not be read, so there is nothing to quote against.');
+      return;
+    }
     if (!built.lines.length) {
       Alert.alert('Nothing to quote', 'Tick at least one defect that carries priced work.');
       return;
@@ -220,6 +255,7 @@ export default function SiteQuoteScreen() {
         reference: reference ?? '',
       });
       if (issue) quote = await setQuoteStatus(quote.id, 'issued');
+      setSaved({ quote, signature });
 
       Alert.alert(
         issue ? 'Quote issued' : 'Draft saved',
@@ -228,9 +264,9 @@ export default function SiteQuoteScreen() {
           `${formatCents(totals.totalCents)} including GST.`,
           quote.expiresAt ? `Holds good until ${formatAuDate(quote.expiresAt)}.` : null,
           totals.incomplete ? 'Some work on this site is not covered by it — see the warnings.' : null,
+          'The PDF now prints this saved quote, with its number on the acceptance block.',
         ].filter(Boolean).join('\n\n'),
       );
-      await load();
     } catch (e) {
       Alert.alert('Could not save the quote', e instanceof Error ? e.message : String(e));
     } finally {
@@ -239,16 +275,22 @@ export default function SiteQuoteScreen() {
   };
 
   const makePdf = async () => {
-    if (!site) return;
+    if (!site) {
+      Alert.alert('Site not loaded', 'This site could not be read, so there is nothing to quote against.');
+      return;
+    }
     setBusy(true);
     try {
       const html = quoteDocumentHtml({
-        quote: draft,
+        quote: printable,
         companyName: prefs.companyName,
         scopeItems: scopeLinesFor(chosen),
         asAt: new Date().toISOString(),
       });
-      const file = await writePdf(`Quote ${site.name} ${new Date().toISOString().slice(0, 10)}`, html);
+      // The Queensland date in the file name, not the UTC one: a quote made at
+      // eight on a Brisbane morning would otherwise file under yesterday.
+      const day = qldDate(new Date().toISOString()) ?? '';
+      const file = await writePdf(`Quote ${printable.reference || site.name} ${day}`.trim(), html);
       const shared = await shareFile(file, 'Quotation');
       if (!shared) Alert.alert('Saved', `Written to ${file.name}. Sharing is not available on this device.`);
     } catch (e) {
@@ -531,6 +573,13 @@ export default function SiteQuoteScreen() {
             <Button title="Produce the PDF" onPress={makePdf} loading={busy} />
             <Button title="Save as a draft" variant="secondary" onPress={() => void save(false)} loading={busy} />
             <Button title="Save and issue" variant="secondary" onPress={() => void save(true)} loading={busy} />
+            <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
+              {printable === draft
+                ? 'The PDF prints what is on this screen, marked as a draft and without a number, '
+                  + 'until the quote is saved.'
+                : `The PDF prints the saved quote ${printable.reference || 'you issued'}, not the `
+                  + 'screen. Change anything above and it goes back to printing a draft.'}
+            </Txt>
             <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
               Issuing starts the clock on the price and locks the quote. Anything that changes after
               that is a new quote with its own number — the client is holding this one.

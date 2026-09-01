@@ -78,7 +78,13 @@ export default function OutboundScreen() {
   }, [sites]);
 
   const send = useCallback(async (run: RoutineRun) => {
-    if (!plan) return;
+    /*
+     * The plan in state belongs to whichever run was opened last. Opening a
+     * second run while the first is still loading would otherwise send one
+     * run's results against the other's job, and there is no undo for that in
+     * Simpro — so this refuses rather than guessing which one was meant.
+     */
+    if (!plan || plan.run.runId !== run.id) return;
     setSending(true);
     try {
       const prefs = await loadPrefs();

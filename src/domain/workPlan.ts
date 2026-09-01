@@ -128,8 +128,10 @@ export interface PlanWindow {
 /**
  * A whole calendar month, `offset` months from the one containing the date.
  *
- * Offset 1 — next month — is the default, because the month being planned is
- * almost never the one being worked. The office books October during September.
+ * The offset defaults to 0 — the month the date is in — because that is the
+ * only answer this function can give without guessing what the caller meant.
+ * `defaultPlanWindow` is the one that opinionates, and it asks for next month,
+ * because the office books October during September.
  */
 export function calendarMonthWindow(anyDateIso: string, offset = 0): PlanWindow | undefined {
   const d = parseIsoDate(anyDateIso);
@@ -169,8 +171,12 @@ export function workingDaysIn(window: PlanWindow, holidays: string[] = [], notBe
   let cursor = window.from.slice(0, 10);
   const end = window.to.slice(0, 10);
   if (!parseIsoDate(cursor) || !parseIsoDate(end)) return out;
-  // A month is 31 iterations at most; the guard is against a malformed window.
-  for (let i = 0; i < 400 && cursor <= end; i++) {
+  // The loop is bounded by the window's own length rather than by a round
+  // number. A fixed cap silently returns half a window when somebody plans a
+  // quarter, and a plan that is quietly short of days is a plan that quietly
+  // reports "no room left" for work there was room for.
+  const span = daysBetween(cursor, end) ?? -1;
+  for (let i = 0; i <= span && cursor <= end; i++) {
     if (
       !isWeekend(cursor) &&
       !excluded.has(cursor) &&
@@ -212,11 +218,16 @@ const PRACTICE = 'Safe QLD field practice — an estimate from experience, not a
 /**
  * Minutes per asset, by system.
  *
- * Every entry is an estimate. The detection and occupant-warning figures happen
- * to line up with the only published per-device times found — a North American
- * trade calculator built around NFPA 72, which is a different standard in a
- * different country and is therefore recorded as corroboration at low
- * confidence rather than as a source. The rest are Safe QLD's own.
+ * Every entry is an estimate. Only one of them has anything published behind it
+ * at all: the detection figure of six minutes is the same number a North
+ * American trade test-time calculator gives for a smoke detector, which is a
+ * different standard in a different country and is therefore recorded as
+ * corroboration at low confidence rather than as a source. The occupant-warning
+ * figure deliberately does NOT match it — that calculator says three minutes for
+ * a speaker or a strobe and this table says four, because a sound pressure
+ * reading is part of the Australian job — and the entry says so rather than
+ * letting a citation imply agreement it does not have. The rest are Safe QLD's
+ * own with nothing published behind them.
  *
  * Electrical and structure assets sit at zero deliberately. They are recorded
  * on a site because they matter to the building, not because a fire routine
@@ -232,17 +243,20 @@ export const PER_ASSET_MINUTES: Record<SystemKind, AssetMinutes> = {
   },
   ews: {
     system: 'ews', minutesPerAsset: 4, confidence: 'low',
-    source: `${PRACTICE}; the same US calculator lists 3 min per speaker or strobe`,
+    source: `${PRACTICE}. The same US calculator lists 3 min per speaker or strobe; this figure is a `
+      + 'minute above it and is not derived from it',
     sourceUrl: 'https://www.firetechs.net/library/forms/PMACalculator.htm',
     note: 'Sound pressure readings on a sample push this up on a large site.',
   },
   aspirating: {
     system: 'aspirating', minutesPerAsset: 25, confidence: 'low', source: PRACTICE,
-    note: 'Per detector unit, not per sampling hole: airflow, filter and transport time.',
+    note: 'Per detector unit, not per sampling hole: airflow, filter and transport time. The sampling '
+      + 'points are in NOT_COUNTED_ASSET_TYPES for exactly that reason.',
   },
   sprinkler: {
     system: 'sprinkler', minutesPerAsset: 8, confidence: 'low', source: PRACTICE,
-    note: 'Registers hold valve sets and flow switches rather than heads; heads are a visual sweep.',
+    note: 'Per valve set or flow switch. Heads are a visual sweep and are in NOT_COUNTED_ASSET_TYPES; '
+      + 'charging eight minutes each would make a 400 head building a fifty hour visit.',
   },
   hydrant: { system: 'hydrant', minutesPerAsset: 12, confidence: 'low', source: PRACTICE },
   'hose-reel': { system: 'hose-reel', minutesPerAsset: 8, confidence: 'low', source: PRACTICE },
@@ -268,6 +282,30 @@ export const PER_ASSET_MINUTES: Record<SystemKind, AssetMinutes> = {
   },
 };
 
+/**
+ * Asset types this module does NOT charge a per-asset figure for.
+ *
+ * The rates above are per *device*, and the register is not only devices. It is
+ * a tree — site, level, panel, loop, then the detectors hanging off it — and a
+ * plain count of rows in a system charges the loop as though it were a detector
+ * and the sampling hole as though it were an aspirating unit. On a 400 head
+ * sprinkler building that arithmetic produces a fifty hour visit, which the
+ * planner then refuses as larger than a day, and a real site drops out of a real
+ * month because of a counting error.
+ *
+ * Nothing here is excluded on a hunch. Every entry names the figure that already
+ * covers the work, so no minutes go missing — they are charged somewhere else.
+ * The tests hold this list against the shipped asset type catalogue, so a new
+ * type has to be considered rather than quietly costed at its system's rate.
+ */
+export const NOT_COUNTED_ASSET_TYPES: Record<string, string> = {
+  fip: 'The panel is the routine. Its work is the systemMinutes in FREQUENCY_EFFORT, not a device walk.',
+  loop: 'A loop is wiring, not a device. Everything on it is counted individually.',
+  'ews-panel': 'Same as the fire indicator panel: charged as panel minutes, not as a device.',
+  'sampling-point': 'The aspirating figure is per detector unit and already covers its sampling network.',
+  'sprinkler-head': 'Heads are a visual sweep from the floor, not an eight minute item each.',
+};
+
 export interface FrequencyEffort {
   frequency: Frequency;
   /**
@@ -277,6 +315,9 @@ export interface FrequencyEffort {
   assetCoverage: number;
   /** Panel and paperwork minutes for this routine, before any device walk. */
   systemMinutes: number;
+  /** Where the two figures above came from. Carried in the data, not a comment. */
+  source: string;
+  confidence: EstimateConfidence;
 }
 
 /**
@@ -290,26 +331,27 @@ export interface FrequencyEffort {
  * Nothing here is transcribed from a schedule table.
  */
 export const FREQUENCY_EFFORT: Record<Frequency, FrequencyEffort> = {
-  monthly: { frequency: 'monthly', assetCoverage: 0, systemMinutes: 30 },
-  quarterly: { frequency: 'quarterly', assetCoverage: 0, systemMinutes: 30 },
-  'six-monthly': { frequency: 'six-monthly', assetCoverage: 0.25, systemMinutes: 45 },
-  annual: { frequency: 'annual', assetCoverage: 1, systemMinutes: 60 },
-  'five-yearly': { frequency: 'five-yearly', assetCoverage: 1, systemMinutes: 90 },
-  'ten-yearly': { frequency: 'ten-yearly', assetCoverage: 1, systemMinutes: 90 },
-  commissioning: { frequency: 'commissioning', assetCoverage: 1, systemMinutes: 120 },
-};
-
-export const EFFORT_PROVENANCE = {
-  source: PRACTICE,
-  confidence: 'low' as EstimateConfidence,
-  statement: ESTIMATE_CAVEAT,
+  monthly: { frequency: 'monthly', assetCoverage: 0, systemMinutes: 30, source: PRACTICE, confidence: 'low' },
+  quarterly: { frequency: 'quarterly', assetCoverage: 0, systemMinutes: 30, source: PRACTICE, confidence: 'low' },
+  'six-monthly': { frequency: 'six-monthly', assetCoverage: 0.25, systemMinutes: 45, source: PRACTICE, confidence: 'low' },
+  annual: { frequency: 'annual', assetCoverage: 1, systemMinutes: 60, source: PRACTICE, confidence: 'low' },
+  'five-yearly': { frequency: 'five-yearly', assetCoverage: 1, systemMinutes: 90, source: PRACTICE, confidence: 'low' },
+  'ten-yearly': { frequency: 'ten-yearly', assetCoverage: 1, systemMinutes: 90, source: PRACTICE, confidence: 'low' },
+  commissioning: { frequency: 'commissioning', assetCoverage: 1, systemMinutes: 120, source: PRACTICE, confidence: 'low' },
 };
 
 /**
  * Getting on site, finding the contact, isolating monitoring, and the paperwork
  * at the end of it. Charged once per visit however many routines are done.
+ * Safe QLD's own figure, like everything else in this section.
  */
-export const VISIT_OVERHEAD_MINUTES = 45;
+export const VISIT_OVERHEAD = {
+  minutes: 45,
+  source: PRACTICE,
+  confidence: 'low' as EstimateConfidence,
+};
+
+export const VISIT_OVERHEAD_MINUTES = VISIT_OVERHEAD.minutes;
 
 export interface HoursEstimate {
   /** Estimated hours, to the nearest quarter hour. */
@@ -351,6 +393,12 @@ function roundQuarterHours(minutes: number): number {
  * point of the function returning something optional — a site nobody has
  * registered could be a cupboard or a hospital, and a plausible half day is a
  * worse answer than no answer.
+ *
+ * The same refusal applies one level down. Where a routine walks a system the
+ * register holds nothing for, the walk is named in `notCosted` and the estimate
+ * marks itself partial rather than costing it at nothing: a detection annual is
+ * only ever due at a site because a detection service was recorded there, so
+ * zero registered detectors is a gap in the register, not an empty building.
  */
 export function estimateVisitHours(
   assetCounts: SystemCount[] | undefined,
@@ -359,8 +407,16 @@ export function estimateVisitHours(
   if (!assetCounts) return undefined;
 
   const counts = new Map<string, number>();
+  // A count that is not a whole number of assets is not a count. Rolling it in
+  // as zero would quietly shrink the visit, which is the direction that hurts:
+  // the day gets booked and the technician runs out of it.
+  const unreadable = new Set<string>();
   for (const row of assetCounts) {
-    counts.set(row.system, (counts.get(row.system) ?? 0) + (Number.isFinite(row.count) ? row.count : 0));
+    if (!Number.isFinite(row.count) || row.count < 0 || !Number.isInteger(row.count)) {
+      unreadable.add(row.system);
+      continue;
+    }
+    counts.set(row.system, (counts.get(row.system) ?? 0) + row.count);
   }
 
   const basis: string[] = [`Attendance overhead ${VISIT_OVERHEAD_MINUTES} min`];
@@ -379,7 +435,7 @@ export function estimateVisitHours(
       if (!notCosted.includes(label)) notCosted.push(label);
       continue;
     }
-    minutes += effort.systemMinutes;
+    minutes += effort.systemMinutes + VISIT_OVERHEAD_MINUTES;
     basis.push(
       `${FREQUENCY_LABEL[routine.frequency]} ${systemLabel(routine.system)} — `
       + `${effort.systemMinutes} min at the panel and on the record`,
@@ -396,10 +452,25 @@ export function estimateVisitHours(
       if (!notCosted.includes(label)) notCosted.push(label);
       continue;
     }
-    const count = counts.get(system) ?? 0;
     if (fraction === 0 || rate.minutesPerAsset === 0) continue;
+    if (unreadable.has(system)) {
+      const label = `${systemLabel(system).toLowerCase()} assets (the count did not read as a whole number)`;
+      if (!notCosted.includes(label)) notCosted.push(label);
+      continue;
+    }
+    const count = counts.get(system) ?? 0;
     if (count === 0) {
-      basis.push(`No ${systemLabel(system).toLowerCase()} assets registered, so no device walk is counted`);
+      // A routine is due against this system and the register holds nothing for
+      // it. That is a contradiction, not an empty building: a detection annual
+      // exists here because a detection service was recorded here. Costing the
+      // walk at nothing would size a hospital as an hour and three quarters, so
+      // the walk is named as uncosted and the estimate admits it understates.
+      const label = `${systemLabel(system).toLowerCase()} devices (none registered, but the routine walks them)`;
+      if (!notCosted.includes(label)) notCosted.push(label);
+      basis.push(
+        `No ${systemLabel(system).toLowerCase()} assets registered, so the device walk could not be sized `
+        + '— the visit is longer than this figure',
+      );
       continue;
     }
     const walk = Math.round(count * rate.minutesPerAsset * fraction);
@@ -514,8 +585,10 @@ export interface ClusterResult {
  * Locality first: same suburb and postcode is one cluster, because that is how
  * the work is handed out. A site carrying a suburb but no postcode is folded
  * into that suburb's cluster only when the book knows exactly one postcode for
- * the name — Springfield exists in 4300 and in 4870, and guessing which is how
- * a technician ends up eight hundred kilometres from the job.
+ * the name — Australia Post lists a Springfield in Queensland at 4300, next to
+ * Ipswich, and another at 4871 in the far north, and guessing which is how a
+ * technician ends up over a thousand kilometres from the job.
+ * https://auspost.com.au/postcode/springfield (checked 1/9/2026)
  *
  * Straight-line proximity is the fallback, used only where a site has no
  * locality at all, and every cluster reports which method produced it. The two
@@ -682,7 +755,12 @@ export interface UnplannedItem {
   siteName?: string;
   routineId: string;
   routineLabel?: string;
-  frequency: Frequency;
+  /**
+   * Absent where nothing knows it. A routine this build does not hold has no
+   * frequency, and writing a plausible one here would put "Annual" in front of
+   * an office clerk on the one list they act on. Undefined is the answer.
+   */
+  frequency?: Frequency;
   reason: UnplannableReason;
   /** Said in full, because this list is what the office acts on. */
   detail: string;
@@ -1087,7 +1165,22 @@ export function planWork(routines: PlanRoutine[], sites: PlanSite[], options: Pl
   for (const [siteId, items] of perSite) {
     const site = siteById.get(siteId)!;
     const cluster = clusterBySite.get(siteId);
-    if (!cluster) continue;
+    if (!cluster) {
+      // Every site is either clustered or returned as unclustered, so nothing
+      // should reach here. Reported rather than skipped anyway: a `continue`
+      // in this position is how a site disappears out of a month with no row
+      // anywhere saying it did.
+      for (const { routine, feasible } of items) {
+        reject(
+          routine,
+          'no-locality-or-position',
+          `${site.siteName} came back from the grouping step in neither a cluster nor the unclustered `
+          + 'list. That is a fault in this app, not in the site record — report it.',
+          feasible.latestSafeDate,
+        );
+      }
+      continue;
+    }
     for (const visit of groupIntoVisits(items)) {
       const hours = estimateVisitHours(
         site.assetCounts,

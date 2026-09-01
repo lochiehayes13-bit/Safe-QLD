@@ -8,6 +8,7 @@ import {
   keyIdentity, planOutboundWork,
   type CompletedRoutineRun, type OutboundDefect, type OutboundPlan, type OutboundResult,
 } from '@/domain/outboundWork';
+import { RUN_WINDOW_HOURS, belongsToRun, latestPerSubject, runWindow } from '@/domain/runWindow';
 
 /**
  * Assembling what goes back to the office, out of what the phone actually holds.
@@ -33,18 +34,6 @@ import {
  * reported. That lives in `outbound_accepted` and is written the moment an item
  * is taken.
  */
-
-/**
- * How far either side of a run's completion an asset event is treated as part
- * of it.
- *
- * Six hours. A routine service is recorded when the technician finishes, and
- * the events it wrote are minutes to a few hours old; a separate attendance at
- * the same site on the same day is the case this is guarding against, and the
- * two are rarely inside six hours of each other. Widening it to a day would
- * report a morning call-out as part of the afternoon's annual.
- */
-export const RUN_EVENT_WINDOW_HOURS = 6;
 
 interface EventRow {
   assetId: string;
@@ -118,11 +107,10 @@ export async function recordAccepted(input: {
  */
 export async function resultsForRun(run: RoutineRun): Promise<OutboundResult[]> {
   const db = await getDb();
-  const centre = Date.parse(run.completedAt);
-  if (!Number.isFinite(centre)) return [];
-  const span = RUN_EVENT_WINDOW_HOURS * 3_600_000;
-  const from = new Date(centre - span).toISOString();
-  const to = new Date(centre + span).toISOString();
+  // The window narrows what SQL has to scan; `latestPerSubject` then decides
+  // which event stands, on the instants rather than on the order rows arrived.
+  const window = runWindow(run.completedAt, RUN_WINDOW_HOURS);
+  if (!window) return [];
 
   const rows = await db.getAllAsync<EventRow>(
     `SELECT e.assetId, e.kind, e.occurredAt, e.summary, e.detail
@@ -132,18 +120,18 @@ export async function resultsForRun(run: RoutineRun): Promise<OutboundResult[]> 
         AND e.occurredAt BETWEEN ? AND ?
         AND e.kind IN ('passed','failed','not-tested')
       ORDER BY e.occurredAt ASC`,
-    [run.siteId, from, to],
+    [run.siteId, window.from, window.to],
   );
   if (!rows.length) return [];
 
-  const latest = new Map<string, EventRow>();
-  for (const row of rows) latest.set(row.assetId, row);
+  const latest = latestPerSubject(rows, (r) => r.assetId, (r) => r.occurredAt);
 
   const assets = await queryAssets({ siteId: run.siteId });
   const byId = new Map(assets.map((a) => [a.id, a]));
 
   const out: OutboundResult[] = [];
-  for (const [assetId, row] of latest) {
+  for (const row of latest) {
+    const assetId = row.assetId;
     const outcome = outcomeOf(row.kind);
     if (!outcome) continue;
     const asset = byId.get(assetId);
@@ -198,14 +186,8 @@ export function toOutboundDefect(d: Defect, sentToOfficeAt?: string): OutboundDe
  * raised on a call-out that morning belongs to the call-out.
  */
 export async function defectsForRun(run: RoutineRun): Promise<Defect[]> {
-  const centre = Date.parse(run.completedAt);
-  if (!Number.isFinite(centre)) return [];
-  const span = RUN_EVENT_WINDOW_HOURS * 3_600_000;
   const all = await listDefects(run.siteId);
-  return all.filter((d) => {
-    const at = Date.parse(d.raisedAt);
-    return Number.isFinite(at) && Math.abs(at - centre) <= span;
-  });
+  return all.filter((d) => belongsToRun(d.raisedAt, run.completedAt));
 }
 
 export interface RunPlan {

@@ -17,6 +17,7 @@ import {
   checkOccupierStatement,
   citeSources,
   commissionerCopyDeadline,
+  formatAuDate,
   firstStatementDue,
   nextStatementDue,
   passiveMaintenance,
@@ -388,12 +389,41 @@ describe('holidays this app cannot apply, and what it says about them', () => {
   });
 
   it('promises that a holiday it failed to apply can only move the real deadline later', () => {
-    // The one guarantee that makes the answer safe to work to. Every holiday
-    // this module cannot know about adds a day; none of them takes one away.
+    // The one guarantee that makes the answer safe to work to, and it is a
+    // property rather than a flag: hand the count a holiday it did not know
+    // about and the date it gives can only move later, never earlier. Assert
+    // the property, because a test that only reads the flag would still pass
+    // if the arithmetic underneath it started skipping days it should not.
     for (const from of ['2025-04-16', '2026-08-10', '2026-12-22', '2027-12-20']) {
-      expect(addQldBusinessDays(from, 10).noLaterThanStatutory).toBe(true);
+      const known = addQldBusinessDays(from, 10);
+      expect(known.noLaterThanStatutory).toBe(true);
+      expect(known.date).toBeDefined();
+      // Every weekday in the window, one at a time, as a holiday this module
+      // could not have known about.
+      const cursor = new Date(`${from}T00:00:00Z`);
+      for (let i = 0; i < 20; i++) {
+        cursor.setUTCDate(cursor.getUTCDate() + 1);
+        const iso = cursor.toISOString().slice(0, 10);
+        const withExtra = addQldBusinessDays(from, 10, {
+          districtHolidays: [{ date: iso, name: 'A district show holiday this module cannot look up' }],
+        });
+        expect(withExtra.date).toBeDefined();
+        expect(withExtra.date! >= known.date!).toBe(true);
+      }
     }
     expect(addQldBusinessDays('2026-08-10', 5).caveats.join(' ')).toMatch(/never late/i);
+  });
+
+  it('does not describe a district holiday it was handed as a Brisbane one', () => {
+    // holidaysApplied is printed as the working behind a statutory deadline. A
+    // document that calls the Toowoomba show holiday a Brisbane-area holiday is
+    // wrong in a way the reader has no way to catch.
+    const count = addQldBusinessDays('2026-08-10', 5, {
+      locality: 'elsewhere-in-queensland',
+      districtHolidays: [{ date: '2026-08-13', name: 'Toowoomba Royal Agricultural Show' }],
+    });
+    expect(count.holidaysApplied[0]?.scope).toBe('district');
+    expect(count.holidaysApplied.some((h) => h.scope === 'brisbane-area')).toBe(false);
   });
 });
 
@@ -401,7 +431,10 @@ describe('refusing to count what it does not know', () => {
   it('will not count from a date before the published holiday table starts', () => {
     const count = addQldBusinessDays('2024-12-01', 10);
     expect(count.date).toBeUndefined();
-    expect(count.reason).toContain(HOLIDAY_COVERAGE.from);
+    // d/m/yyyy in the sentence, ISO in the constant. The occupier reads the
+    // sentence and this app prints one date format.
+    expect(count.reason).toContain(formatAuDate(HOLIDAY_COVERAGE.from));
+    expect(count.reason).toContain('1/1/2025');
     expect(count.reason).toMatch(/outside that/);
   });
 
@@ -410,7 +443,8 @@ describe('refusing to count what it does not know', () => {
     // confident wrong deadline gets printed on a statutory document.
     const count = addQldBusinessDays('2029-12-20', 10);
     expect(count.date).toBeUndefined();
-    expect(count.reason).toContain(HOLIDAY_COVERAGE.to);
+    expect(count.reason).toContain(formatAuDate(HOLIDAY_COVERAGE.to));
+    expect(count.reason).toContain('31/12/2029');
   });
 
   it('refuses an unreadable date, an impossible date and a negative count', () => {
@@ -427,6 +461,15 @@ describe('refusing to count what it does not know', () => {
     expect(qldBusinessDaysBetween('2025-05-06', '2025-04-16').days).toBe(-10);
     expect(qldBusinessDaysBetween('2025-05-06', '2025-05-06').days).toBe(0);
     expect(qldBusinessDaysBetween('2020-01-01', '2020-01-20').reason).toMatch(/outside that/);
+  });
+
+  it('cites the definition a business day count rests on, both ways and when it refuses', () => {
+    // A screen that says "three days late" is making a statutory claim, and the
+    // definition it rests on is not this app's.
+    const forward = qldBusinessDaysBetween('2025-04-16', '2025-05-06');
+    expect(forward.legalRef).toMatch(/Acts Interpretation Act 1954/);
+    expect(citeSources(forward.sourceIds).map((c) => c.id)).toContain('acts-interpretation');
+    expect(qldBusinessDaysBetween('2020-01-01', '2020-01-20').sourceIds).toEqual(forward.sourceIds);
   });
 
   it('has a holiday table that agrees with itself', () => {
@@ -462,6 +505,28 @@ describe("the ten business days to give the commissioner a copy", () => {
     expect(early.anchorDate).toBe('2025-04-16');
     expect(early.basis).toBe('statutory');
     expect(late.caveats[0]).toMatch(/Signing late does not restart/);
+  });
+
+  it('warns that an early signature is the one deadline here later than the cautious answer', () => {
+    // Everywhere else in this module an unknown pushes the date earlier, which
+    // is what makes a date safe to work to. This is the exception: an occupier
+    // who signs in January is not required to lodge until ten business days
+    // after the April anniversary, so the deadline printed is months later than
+    // counting from the signature. That reading is right on the words of
+    // s 55A(3), and it is still the one answer here that can be late if a
+    // regulator reads it the other way — so it is said out loud.
+    const early = commissionerCopyDeadline({
+      previousStatementDate: '2025-04-16',
+      signedDate: '2026-01-05',
+    });
+    expect(early.due).toBe('2026-04-30');
+    expect(early.anchorDate).toBe('2026-04-16');
+    expect(early.caveats[0]).toMatch(/signing early does not shorten/i);
+    // And it names the cautious date rather than leaving the reader to work it
+    // out: ten business days from the signature is 19 January 2026.
+    expect(addQldBusinessDays('2026-01-05', 10).date).toBe('2026-01-19');
+    expect(early.caveats[0]).toContain('19/1/2026');
+    expect(early.caveats[0]).toContain('5/1/2026');
   });
 
   it('takes a required-preparation date over anything else when the caller knows it', () => {
@@ -683,7 +748,9 @@ describe('checking a filled statement against the Regulation', () => {
     const issues = checkOccupierStatement(completeStatement(), '2026-04-20');
     const issue = about(issues, 'sentToCommissionerDate')[0];
     expect(issue?.legalRef).toContain('s 55A(3)');
-    expect(issue?.message).toContain('2026-04-30');
+    // 30/4/2026, never 4/30/2026 and never the ISO the arithmetic runs on.
+    expect(issue?.message).toContain('30/4/2026');
+    expect(issue?.message).not.toContain('2026-04-30');
   });
 
   it('says plainly when the copy went late', () => {
@@ -691,7 +758,8 @@ describe('checking a filled statement against the Regulation', () => {
       sentToCommissionerDate: '2026-05-11',
     }), '2026-05-12');
     const issue = about(issues, 'sentToCommissionerDate')[0];
-    expect(issue?.message).toMatch(/after the 2026-04-30 deadline/);
+    expect(issue?.message).toMatch(/after the 30\/4\/2026 deadline/);
+    expect(issue?.message).toContain('11/5/2026');
     expect(issue?.message).toMatch(/20 penalty units/);
   });
 
@@ -807,6 +875,76 @@ describe('whether the document can honestly call itself the statutory statement'
     expect(claim.isSchedule2Form).toBe(false);
     expect(claim.unaddressedInstallations.map((u) => u.name)).toEqual(['Sprinklers']);
     expect(claim.unaddressedInstallations[0]?.formRef).toBe('Schedule 2, row 20');
+  });
+
+  it('will not call the form complete over a critical defect notice with no rectification date', () => {
+    // The worst hole the claim could paper over. Column 3 says a critical
+    // defect notice was issued, column 4 does not say the defect was ever
+    // fixed, and the claim sentence says in terms that every field the schedule
+    // sets out has been completed. Printing that over this document declares a
+    // statement complete while an installation may still be inoperable.
+    const claim = approvedFormClaim(completeStatement({
+      criticalDefectNoticesAttached: true,
+      rows: completeRows({ Sprinklers: { criticalDefectNoticeIssued: true } }),
+    }));
+    expect(claim.isSchedule2Form).toBe(false);
+    expect(claim.unaddressedInstallations.map((u) => u.name)).toEqual(['Sprinklers']);
+    expect(claim.unaddressedInstallations[0]?.why).toMatch(/column 4 gives no date of rectification/i);
+    expect(claim.statement).toMatch(/no date of rectification/i);
+
+    // Fill column 4 and the same statement is the form.
+    expect(approvedFormClaim(completeStatement({
+      criticalDefectNoticesAttached: true,
+      rows: completeRows({
+        Sprinklers: { criticalDefectNoticeIssued: true, rectificationDate: '2026-02-24' },
+      }),
+    })).isSchedule2Form).toBe(true);
+  });
+
+  it('will not call the form complete over an "Other features" row with no details written in', () => {
+    // Column 1 of that row is not a name, it is a name and a blank: the
+    // schedule prints "Other features (provide details)". A tick with nothing
+    // after it tells a reader nothing, and checkOccupierStatement already
+    // blocks it — the claim has to agree, or the two halves of this module
+    // disagree about the same document.
+    const statement = completeStatement({
+      rows: completeRows({ 'Other features (provide details)': { details: '' } }),
+    });
+    const claim = approvedFormClaim(statement);
+    expect(claim.isSchedule2Form).toBe(false);
+    expect(claim.unaddressedInstallations.map((u) => u.name)).toEqual(['Other features (provide details)']);
+    expect(claim.unaddressedInstallations[0]?.why).toMatch(/details/i);
+    expect(canSignAsSchedule2(statement, '2026-04-20')).toBe(false);
+  });
+
+  it('never claims the form over a document checkOccupierStatement is still blocking on a row', () => {
+    // The two functions answer different questions and are meant to. But a row
+    // the schedule prints and nobody filled in is a hole on the page, so on
+    // rows they cannot come apart: whenever a row blocks, the claim must fail.
+    const holes: Partial<FilledInstallationRow>[] = [
+      { installed: undefined },
+      { nominatedStandard: '' },
+      { criticalDefectNoticeIssued: undefined },
+      { criticalDefectNoticeIssued: true },
+    ];
+    for (const hole of holes) {
+      const statement = completeStatement({
+        criticalDefectNoticesAttached: true,
+        rows: completeRows({ 'Fire hose reels': hole }),
+      });
+      expect(blocking(checkOccupierStatement(statement, '2026-04-20')).length).toBeGreaterThan(0);
+      expect(approvedFormClaim(statement).isSchedule2Form).toBe(false);
+    }
+  });
+
+  it('says which box is empty, not merely that a row is unfinished', () => {
+    // "Sprinklers have not been addressed" sends an occupier back to a row that
+    // looks filled in. "Column 2 nominates no standard" sends them to the box.
+    const claim = approvedFormClaim(completeStatement({
+      rows: completeRows({ Sprinklers: { nominatedStandard: '' } }),
+    }));
+    expect(claim.unaddressedInstallations[0]?.why).toMatch(/Column 2/);
+    expect(claim.statement).toContain('Sprinklers — Column 2');
   });
 
   it('counts a row struck out under footnote 2 as addressed', () => {

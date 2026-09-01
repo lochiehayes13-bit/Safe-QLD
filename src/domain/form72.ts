@@ -272,6 +272,94 @@ const isoDate = (s?: string): number | undefined => {
 /** Twelve months is the usual calibration interval for a test gauge. */
 export const CALIBRATION_MONTHS = 12;
 
+/** Where a device sits against the test date. */
+export type CalibrationState =
+  /** Nothing to judge — no serial number, so this is an empty slot on the form. */
+  | 'not-a-device'
+  | 'no-date'
+  | 'unreadable-date'
+  /** No test date yet, so there is nothing to measure the calibration against. */
+  | 'no-test-date'
+  | 'calibrated-after-test'
+  | 'out-of-calibration'
+  | 'in-calibration';
+
+export interface DeviceCalibration {
+  state: CalibrationState;
+  /** Months between calibration and test, where both are readable. */
+  monthsBefore?: number;
+  /** The Part C issue this raises, absent where it raises none. */
+  issue?: FormIssue;
+}
+
+/**
+ * One device, judged against the day it was used.
+ *
+ * Shared by the validation and by the screen rather than written twice. The
+ * screen needs to colour a single device card and the validation needs the list
+ * for the whole form, and when those two were separate implementations the
+ * screen quietly answered a narrower question — it flagged a gauge past twelve
+ * months and said nothing at all about one with no calibration date on it,
+ * which is the same unusable reading with less evidence behind it.
+ */
+export function deviceCalibration(
+  device: TestDevice,
+  testDate: string | undefined,
+): DeviceCalibration {
+  if (!device.serialNumber.trim()) return { state: 'not-a-device' };
+
+  if (!device.dateCalibrated) {
+    return {
+      state: 'no-date',
+      issue: {
+        part: 'C',
+        message: `${device.slot} (${device.serialNumber}) has no calibration date, so its readings `
+          + 'cannot be relied on.',
+        blocking: false,
+      },
+    };
+  }
+
+  const calAt = isoDate(device.dateCalibrated);
+  if (calAt === undefined) {
+    return {
+      state: 'unreadable-date',
+      issue: { part: 'C', message: `${device.slot} has an unreadable calibration date.`, blocking: false },
+    };
+  }
+
+  const testAt = isoDate(testDate);
+  if (testAt === undefined) return { state: 'no-test-date' };
+
+  if (calAt > testAt) {
+    return {
+      state: 'calibrated-after-test',
+      issue: {
+        part: 'C',
+        message: `${device.slot} was calibrated after the test date. One of the two dates is wrong.`,
+        blocking: false,
+      },
+    };
+  }
+
+  const monthsBefore = (testAt - calAt) / (1000 * 60 * 60 * 24 * 30.44);
+  if (monthsBefore > CALIBRATION_MONTHS) {
+    return {
+      state: 'out-of-calibration',
+      monthsBefore,
+      issue: {
+        part: 'C',
+        message: `${device.slot} (${device.serialNumber}) was last calibrated `
+          + `${Math.floor(monthsBefore)} months before the test. Every pressure recorded on this `
+          + 'form was read with it, and a gauge out of calibration makes all of them unusable.',
+        blocking: true,
+      },
+    };
+  }
+
+  return { state: 'in-calibration', monthsBefore };
+}
+
 /**
  * What the office sends back, and one thing it cannot see.
  *
@@ -302,39 +390,8 @@ export function validateForm72(form: Form72): FormIssue[] {
   }
 
   for (const d of form.devices) {
-    if (!d.serialNumber.trim()) continue;
-    if (!d.dateCalibrated) {
-      issues.push({
-        part: 'C',
-        message: `${d.slot} (${d.serialNumber}) has no calibration date, so its readings cannot be relied on.`,
-        blocking: false,
-      });
-      continue;
-    }
-    const calAt = isoDate(d.dateCalibrated);
-    if (calAt === undefined) {
-      issues.push({ part: 'C', message: `${d.slot} has an unreadable calibration date.`, blocking: false });
-      continue;
-    }
-    if (testAt === undefined) continue;
-    if (calAt > testAt) {
-      issues.push({
-        part: 'C',
-        message: `${d.slot} was calibrated after the test date. One of the two dates is wrong.`,
-        blocking: false,
-      });
-      continue;
-    }
-    const months = (testAt - calAt) / (1000 * 60 * 60 * 24 * 30.44);
-    if (months > CALIBRATION_MONTHS) {
-      issues.push({
-        part: 'C',
-        message: `${d.slot} (${d.serialNumber}) was last calibrated ${Math.floor(months)} months `
-          + 'before the test. Every pressure recorded on this form was read with it, and a gauge '
-          + 'out of calibration makes all of them unusable.',
-        blocking: true,
-      });
-    }
+    const state = deviceCalibration(d, form.testDate);
+    if (state.issue) issues.push(state.issue);
   }
 
   if (form.hydrostatic.result !== 'na') {

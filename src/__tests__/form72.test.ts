@@ -4,7 +4,9 @@ import {
   testerCopyKeepUntil, type Form72DocumentInput,
 } from '@/export/form72';
 import { MIGRATION_V12 } from '@/db/schemaForm72';
-import { emptyForm72, type Form72 } from '@/domain/form72';
+import {
+  deviceCalibration, emptyForm72, validateForm72, type Form72, type TestDevice,
+} from '@/domain/form72';
 
 /**
  * Form 72 as the document that gets handed over.
@@ -581,5 +583,76 @@ describe('the page itself', () => {
       }),
     }));
     expect(html).toContain('Held 1700 kPa for 120 minutes.<br />Weep at the level 3 landing valve.');
+  });
+});
+
+/**
+ * One device against the day it was used.
+ *
+ * Pulled out of the validation so the screen and the form ask the same
+ * question. When they were separate the screen answered a narrower one: it
+ * flagged a gauge past twelve months and said nothing at all about a gauge with
+ * no calibration date on it — the same unusable reading, with less evidence
+ * behind it, shown to a technician as though it were fine.
+ */
+describe('deviceCalibration', () => {
+  const gauge = (over: Partial<TestDevice> = {}): TestDevice => ({
+    slot: 'Gauge 1', serialNumber: 'G-1', dateCalibrated: '2026-01-15', ...over,
+  });
+
+  it('passes a gauge calibrated inside twelve months', () => {
+    const c = deviceCalibration(gauge(), '2026-07-03');
+    expect(c.state).toBe('in-calibration');
+    expect(c.issue).toBeUndefined();
+  });
+
+  it('blocks a gauge past twelve months, because every pressure was read with it', () => {
+    const c = deviceCalibration(gauge({ dateCalibrated: '2024-01-15' }), '2026-07-03');
+    expect(c.state).toBe('out-of-calibration');
+    expect(c.issue!.blocking).toBe(true);
+    expect(c.issue!.part).toBe('C');
+    expect(c.issue!.message).toContain('makes all of them unusable');
+  });
+
+  it('does not let a gauge with no calibration date pass silently', () => {
+    // The gap the screen used to have. No date is not the same as fine.
+    const c = deviceCalibration(gauge({ dateCalibrated: undefined }), '2026-07-03');
+    expect(c.state).toBe('no-date');
+    expect(c.issue!.message).toContain('cannot be relied on');
+  });
+
+  it('reports a calibration date after the test date rather than a negative age', () => {
+    const c = deviceCalibration(gauge({ dateCalibrated: '2027-01-01' }), '2026-07-03');
+    expect(c.state).toBe('calibrated-after-test');
+    expect(c.issue!.message).toContain('One of the two dates is wrong');
+  });
+
+  it('says nothing about calibration while there is no test date to judge against', () => {
+    // A form being filled in from the top has no test date yet, and colouring
+    // every gauge red until one is typed trains people to ignore the colour.
+    const c = deviceCalibration(gauge(), undefined);
+    expect(c.state).toBe('no-test-date');
+    expect(c.issue).toBeUndefined();
+  });
+
+  it('ignores an empty slot rather than reporting the form for having one', () => {
+    const c = deviceCalibration(gauge({ serialNumber: '  ' }), '2026-07-03');
+    expect(c.state).toBe('not-a-device');
+    expect(c.issue).toBeUndefined();
+  });
+
+  it('reports an unreadable date as unreadable rather than as out of calibration', () => {
+    const c = deviceCalibration(gauge({ dateCalibrated: 'last winter' }), '2026-07-03');
+    expect(c.state).toBe('unreadable-date');
+    expect(c.issue!.blocking).toBe(false);
+  });
+
+  it('agrees with the form-wide validation, which is the point of sharing it', () => {
+    const form = { ...emptyForm72({ id: 'f', siteId: 's', siteName: 'Site', now: '2026-07-03T00:00:00.000Z' }),
+      testDate: '2026-07-03',
+      devices: [gauge({ dateCalibrated: '2024-01-15' })] };
+    const fromForm = validateForm72(form).filter((i) => i.part === 'C');
+    expect(fromForm).toHaveLength(1);
+    expect(fromForm[0]).toEqual(deviceCalibration(form.devices[0]!, form.testDate).issue);
   });
 });

@@ -2,8 +2,9 @@ import {
   DEFAULT_EXCLUSIONS, DEFAULT_VALIDITY_DAYS, UNPRICEABLE_REASON, addDays, buildQuoteLines,
   canEdit, canTransition, editRefusal, expiryFor, formatQuoteReference, lapseStatus,
   lineAmountCents, pricingSources, qldDate, quoteTotals, scopeLinesFor, unpriceableDefects,
-  weakestConfidence, type PriceSource, type Quote, type QuoteLine,
+  unpriceableReason, weakestConfidence, type PriceSource, type Quote, type QuoteLine,
 } from '@/domain/quote';
+import { uncoveredDefects } from '@/domain/partsNeeded';
 import { quoteDocumentHtml } from '@/export/quoteDocument';
 import { formatCents, type LabourRate } from '@/domain/rates';
 import { defectByCode } from '@/seed/defectLibrary';
@@ -69,6 +70,8 @@ function defect(defectCode?: string, over: Partial<Defect> = {}): Defect {
 const FAILED_DETECTOR = 'DET-DET-001';
 /** A real library code that describes the work but supplies no priced items. */
 const OBSTRUCTED = 'DET-DET-006';
+/** A real library code whose only quote item is hours: a panel fault to trace. */
+const PANEL_FAULT = 'DET-FIP-001';
 
 const line = (over: Partial<QuoteLine> & Pick<QuoteLine, 'id' | 'section'>): QuoteLine => ({
   description: 'Line',
@@ -181,6 +184,39 @@ describe('building lines from defects', () => {
     expect(built.lines.filter((l) => l.section === 'labour').every((l) => l.unitCents === undefined)).toBe(true);
   });
 
+  it('says out loud that it refused a labour rate with no source, rather than only leaving it blank', () => {
+    // A refused rate and a rate nobody set look identical on the screen: both
+    // leave the hours unpriced. Only the warning says which happened, and only
+    // one of the two is something the technician can go and fix.
+    const built = buildQuoteLines({
+      defects: [defect(FAILED_DETECTOR)],
+      labourRate: labourRate(),
+    });
+    expect(built.warnings.join(' ')).toMatch(/nothing saying where it came from/i);
+  });
+
+  it('refuses a material price that is not a whole number of cents rather than printing it', () => {
+    // $89.505 formats as "$89.50.5" on the document, and it means dollars were
+    // multiplied out somewhere upstream. The line stays unpriced and says so.
+    const built = buildQuoteLines({
+      defects: [defect(FAILED_DETECTOR)],
+      materialPrices: [{ description: 'Replacement detector head', unitCents: 8_950.5, source: OFFICE }],
+    });
+    expect(built.lines.find((l) => /detector head/i.test(l.description))!.unitCents).toBeUndefined();
+    expect(built.warnings.join(' ')).toMatch(/not a whole number of cents/i);
+  });
+
+  it('refuses a material price of nothing rather than supplying the part free', () => {
+    // Zero is not a price. On a signed document it reads as included at no
+    // charge, and the client is entitled to read it that way.
+    const built = buildQuoteLines({
+      defects: [defect(FAILED_DETECTOR)],
+      materialPrices: [{ description: 'Replacement detector head', unitCents: 0, source: OFFICE }],
+    });
+    expect(built.lines.find((l) => /detector head/i.test(l.description))!.unitCents).toBeUndefined();
+    expect(built.warnings.join(' ')).toMatch(/above nought/i);
+  });
+
   it('gives a line the same id whichever defects are ticked on', () => {
     // The technician types a price against a line, then ticks one more defect.
     // A regenerated id would drop the price they just typed.
@@ -215,8 +251,23 @@ describe('defects that cannot be priced at all', () => {
     // partsNeeded calls a labour-only defect uncovered because a supplier
     // cannot ship labour. On a quote labour is exactly what is being sold, so
     // the same defect is fully covered and must not be reported as missed.
-    const labourOnly = defect(FAILED_DETECTOR);
+    // The defect has to be genuinely labour-only for this to test anything:
+    // against a defect that also needs a part, both answers are "covered" and
+    // the assertion would pass on either rule.
+    const code = defectByCode(PANEL_FAULT)!;
+    expect((code.quoteItems ?? []).every((q) => q.unit === 'hr')).toBe(true);
+
+    const labourOnly = defect(PANEL_FAULT);
+    expect(uncoveredDefects([labourOnly]).map((u) => u.reason)).toEqual(['labour-only']);
     expect(unpriceableDefects([labourOnly])).toHaveLength(0);
+  });
+
+  it('says the reason was not recorded rather than printing nothing for one it does not know', () => {
+    // The list is JSON on the quote row, so a build that has never heard of a
+    // reason can still be asked to print one. "undefined" on a client's copy
+    // is worse than saying plainly that nobody wrote the reason down.
+    expect(unpriceableReason('no-quote-lines')).toBe(UNPRICEABLE_REASON['no-quote-lines']);
+    expect(unpriceableReason('something-a-later-build-invented')).toMatch(/reason was not recorded/i);
   });
 
   it('warns on the total for every defect it could not price', () => {
@@ -499,6 +550,21 @@ describe('the state machine', () => {
     expect(canTransition(issued, 'expired').allowed).toBe(false);
   });
 
+  it('refuses to accept a quote with no date to check it against either', () => {
+    // "No date given" is not "it has not lapsed". Read as the second, a quote
+    // six months past its date is accepted at last year's prices by a caller
+    // that simply did not pass today in.
+    const check = canTransition(issued, 'accepted');
+    expect(check.allowed).toBe(false);
+    expect(check.reason).toMatch(/needs a date to check it against/i);
+  });
+
+  it('counts a single day of lapse as one day, not one days', () => {
+    // The refusal goes straight on the screen and into an email to a client.
+    const check = canTransition(issued, 'accepted', '2026-10-03');
+    expect(check.reason).toMatch(/lapsed 1 day ago/);
+  });
+
   it('refuses to expire a quote that has been accepted', () => {
     // Acceptance closed it. A date passing does not undo an agreement, and a
     // job in progress must not quietly stop being sold work.
@@ -582,6 +648,15 @@ describe("the scope in the client's words", () => {
     expect(scope[0]!.text).not.toBe(code.reportWording);
   });
 
+  it("falls back to the library's own words for a code with no client wording", () => {
+    // A panel fault carries no client wording, and a defect raised by picking
+    // the code can carry no typed description either. Dropped from the scope,
+    // the client is charged two hours for work the document never describes.
+    const scope = scopeLinesFor([defect(PANEL_FAULT, { description: '  ' })]);
+    expect(scope).toHaveLength(1);
+    expect(scope[0]!.text).toMatch(/Fire indicator panel/i);
+  });
+
   it("falls back to the technician's own description, never to nothing", () => {
     const scope = scopeLinesFor([defect(undefined, { description: 'Bell in the loading dock does not sound' })]);
     expect(scope[0]!.text).toBe('Bell in the loading dock does not sound');
@@ -637,6 +712,21 @@ describe('the document a client receives', () => {
     // A client who cannot see the discount does not know they were given one.
     expect(html).toContain('Goodwill on repeat work');
     expect(html).toContain('-$50.00');
+  });
+
+  it('calls an amount added to the price an addition and not a discount', () => {
+    // A negative discount adds to the subtotal. Printed as "Discount $50.00"
+    // the client reads fifty dollars off while the figure went fifty dollars
+    // up, and the column stops adding up in front of them.
+    const out = quoteDocumentHtml({
+      quote: quote({
+        lines: [line({ id: 'l1', section: 'labour', unit: 'hr', quantity: 1, unitCents: HOURLY_CENTS })],
+        discountCents: -5_000,
+        discountReason: 'Out of hours attendance',
+      }),
+    });
+    expect(out).toMatch(/Additional amount — Out of hours attendance/);
+    expect(out).not.toMatch(/Discount — Out of hours attendance/);
   });
 
   it('names a defect it could not price rather than leaving it off quietly', () => {

@@ -2,6 +2,7 @@ import {
   DEFAULT_PROXIMITY_RADIUS_KM,
   ESTIMATE_CAVEAT,
   FREQUENCY_EFFORT,
+  NOT_COUNTED_ASSET_TYPES,
   PER_ASSET_MINUTES,
   VISIT_OVERHEAD_MINUTES,
   calendarMonthWindow,
@@ -18,7 +19,7 @@ import {
   type PlanWindow,
 } from '@/domain/workPlan';
 import { SERVICE_ROUTINES } from '@/seed/serviceRoutines';
-import { SYSTEM_LABELS } from '@/seed/assetTypes';
+import { ASSET_TYPES, SYSTEM_LABELS } from '@/seed/assetTypes';
 
 /**
  * Planning a month of work.
@@ -122,6 +123,16 @@ describe('working days', () => {
     expect(days).toHaveLength(21);
   });
 
+  it('does not quietly stop counting partway through a long window', () => {
+    // A window longer than a month is legitimate, and a loop capped at a round
+    // number returns half of one. A plan short of days reports "no room left"
+    // for work there was room for, which is indistinguishable from a full book.
+    const year = workingDaysIn({ from: '2026-01-01', to: '2026-12-31', label: '2026' });
+    expect(year[0]).toBe('2026-01-01');
+    expect(year[year.length - 1]).toBe('2026-12-31'); // a Thursday
+    expect(year).toHaveLength(261); // 2026 has 261 weekdays
+  });
+
   it('never plans into the past', () => {
     const days = workingDaysIn(OCTOBER, [], '2026-10-20');
     expect(days[0]).toBe('2026-10-20');
@@ -138,12 +149,53 @@ describe('estimating how long a visit takes', () => {
   });
 
   it('separates an empty register from an unknown one', () => {
-    // An empty array means somebody looked and there is nothing there; that is
-    // a real answer and it costs the attendance overhead.
+    // An empty array means somebody looked. It still returns a figure rather
+    // than undefined, which is the distinction the optional return exists for.
     const estimate = estimateVisitHours([], [{ system: 'detection', frequency: 'annual' }]);
     expect(estimate).toBeDefined();
     expect(estimate!.minutes).toBe(VISIT_OVERHEAD_MINUTES + FREQUENCY_EFFORT.annual.systemMinutes);
     expect(estimate!.basis.some((b) => /no fire detection assets registered/i.test(b))).toBe(true);
+  });
+
+  it("will not size a device walk at nothing because the register holds none of that system", () => {
+    // A detection annual is only ever due at a site because a detection service
+    // was recorded there. Zero registered detectors is a hole in the register,
+    // not an empty building, and costing the walk at nought books a hospital as
+    // an hour and three quarters — the day is then a day short in the field.
+    const estimate = estimateVisitHours(
+      [{ system: 'extinguisher', count: 30 }],
+      [{ system: 'detection', frequency: 'annual' }],
+    )!;
+    expect(estimate.partial).toBe(true);
+    expect(estimate.notCosted.some((n) => /fire detection devices/i.test(n))).toBe(true);
+  });
+
+  it('does not call a monthly partial just because nothing is registered', () => {
+    // A monthly never walks the devices, so an empty detection register takes
+    // nothing away from the figure and the estimate is complete as it stands.
+    const estimate = estimateVisitHours([], [{ system: 'detection', frequency: 'monthly' }])!;
+    expect(estimate.partial).toBe(false);
+    expect(estimate.notCosted).toEqual([]);
+  });
+
+  it('refuses a count that is not a whole number of assets rather than reading it as none', () => {
+    // A NaN or a negative arrives from a bad import or a hand-edited row.
+    // Folding it in as zero shrinks the visit, and short is the direction that
+    // costs a day: the work is booked and the technician runs out of hours.
+    const nan = estimateVisitHours(
+      [{ system: 'detection', count: Number.NaN }],
+      [{ system: 'detection', frequency: 'annual' }],
+    )!;
+    expect(nan.partial).toBe(true);
+    expect(nan.notCosted.some((n) => /whole number/i.test(n))).toBe(true);
+
+    const negative = estimateVisitHours(
+      [{ system: 'detection', count: -5 }],
+      [{ system: 'detection', frequency: 'annual' }],
+    )!;
+    // The old arithmetic added it straight through and took half an hour off.
+    expect(negative.minutes).toBeGreaterThanOrEqual(VISIT_OVERHEAD_MINUTES);
+    expect(negative.partial).toBe(true);
   });
 
   it('walks the devices on a yearly and does not on a monthly', () => {
@@ -216,6 +268,19 @@ describe('estimating how long a visit takes', () => {
     }
   });
 
+  it('carries a source and a confidence on every frequency effort figure as well', () => {
+    // The per-asset minutes are not the only estimate in the module. How much
+    // of a site a monthly touches is a bigger lever on the total than any
+    // single device rate, and it has to say where it came from in the data.
+    for (const [frequency, effort] of Object.entries(FREQUENCY_EFFORT)) {
+      expect(effort.frequency).toBe(frequency);
+      expect(effort.source.length).toBeGreaterThan(10);
+      expect(['low', 'medium', 'high']).toContain(effort.confidence);
+      expect(effort.assetCoverage).toBeGreaterThanOrEqual(0);
+      expect(effort.assetCoverage).toBeLessThanOrEqual(1);
+    }
+  });
+
   it('costs every frequency the shipped routines actually use', () => {
     // The routine list and the effort table are edited separately. A frequency
     // with no effort behind it silently plans as an empty visit.
@@ -226,6 +291,30 @@ describe('estimating how long a visit takes', () => {
   it('costs every system the shipped routines actually use', () => {
     const missing = [...new Set(SERVICE_ROUTINES.map((r) => r.system))].filter((s) => !PER_ASSET_MINUTES[s]);
     expect(missing).toEqual([]);
+  });
+
+  it('names a real asset type, with a written reason, in every exclusion', () => {
+    // The register is a tree and the rates are per device. A loop charged as a
+    // detector, or a sampling hole charged as a whole aspirating unit, turns a
+    // real building into a fifty hour visit — which the planner then refuses as
+    // larger than a day, and the site quietly falls out of the month. This list
+    // is what stops that, so a renamed type id must break here rather than
+    // silently stop excluding anything.
+    const known = new Set(ASSET_TYPES.map((t) => t.id));
+    for (const [id, why] of Object.entries(NOT_COUNTED_ASSET_TYPES)) {
+      expect(known.has(id)).toBe(true);
+      // Not "excluded": excluded, and here is the figure that covers it.
+      expect(why.length).toBeGreaterThan(20);
+    }
+  });
+
+  it('excludes only types whose system would otherwise charge them per device', () => {
+    // An exclusion against a system costed at zero minutes would be noise, and
+    // noise in a list like this is how a real exclusion gets deleted later.
+    for (const id of Object.keys(NOT_COUNTED_ASSET_TYPES)) {
+      const type = ASSET_TYPES.find((t) => t.id === id)!;
+      expect(PER_ASSET_MINUTES[type.system].minutesPerAsset).toBeGreaterThan(0);
+    }
   });
 });
 

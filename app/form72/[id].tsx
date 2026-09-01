@@ -7,8 +7,8 @@ import {
   type Form72Patch, type StoredForm72,
 } from '@/db/form72Repo';
 import {
-  CALIBRATION_MONTHS, PART_RESULT_LABEL, elevationHeadKpa, frictionalLossKpa, overloadCheck,
-  validateForm72,
+  CALIBRATION_MONTHS, PART_RESULT_LABEL, deviceCalibration, elevationHeadKpa, frictionalLossKpa,
+  overloadCheck, validateForm72,
   type BoosterTest, type FlowDeviceKind, type FlowRow, type FormIssue, type HydrostaticTest,
   type PartResult, type SprinklerFlowTest, type SprinklerHydrostatic, type SprinklerTestPoint,
   type TestDevice,
@@ -557,14 +557,6 @@ function PartC({ form, locked, patch }: PartProps) {
     devices: devices.map((d, n) => (n === i ? { ...d, ...p } : d)),
   });
 
-  const staleAt = (d: TestDevice): boolean => {
-    if (!d.dateCalibrated || !form.testDate) return false;
-    const cal = Date.parse(d.dateCalibrated);
-    const test = Date.parse(form.testDate);
-    if (!Number.isFinite(cal) || !Number.isFinite(test)) return false;
-    const months = (test - cal) / (1000 * 60 * 60 * 24 * 30.44);
-    return months > CALIBRATION_MONTHS;
-  };
 
   return (
     <View style={{ gap: 12 }}>
@@ -589,11 +581,27 @@ function PartC({ form, locked, patch }: PartProps) {
         </View>
       </Card>
 
-      {devices.map((d, i) => (
+      {devices.map((d, i) => {
+        /*
+         * The same judgement the validation makes, not a second one. When the
+         * screen had its own it answered a narrower question: it flagged a
+         * gauge past twelve months and said nothing at all about one with no
+         * calibration date, which is the same unusable reading with less
+         * evidence behind it.
+         */
+        const cal = deviceCalibration(d, form.testDate);
+        return (
         <Card key={`${d.slot}-${i}`}>
           <Rowed>
             <Txt weight="700" style={{ flex: 1 }}>{d.slot || `Device ${i + 1}`}</Txt>
-            {staleAt(d) ? <Chip label="Out of calibration" tone="fail" /> : null}
+            {cal.issue ? (
+              <Chip
+                label={cal.state === 'out-of-calibration' ? 'Out of calibration'
+                  : cal.state === 'no-date' ? 'No calibration date'
+                    : cal.state === 'calibrated-after-test' ? 'Date conflict' : 'Unreadable date'}
+                tone={cal.issue.blocking ? 'fail' : 'warn'}
+              />
+            ) : null}
             {!locked ? (
               <Pressable onPress={() => patch({ devices: devices.filter((_, n) => n !== i) })}>
                 <MaterialCommunityIcons name="trash-can-outline" size={20} color={t.color.textFaint} />
@@ -608,11 +616,13 @@ function PartC({ form, locked, patch }: PartProps) {
             placeholder="2026-01-15"
             editable={!locked}
           />
-          {staleAt(d) ? (
+          {cal.issue ? (
             <Banner
-              tone="fail"
-              title={`Calibrated ${auDate(d.dateCalibrated)}, more than ${CALIBRATION_MONTHS} months before this test`}
-              body="Every pressure on this form was read with a gauge that was out of calibration on the day. The figures cannot be relied on."
+              tone={cal.issue.blocking ? 'fail' : 'warn'}
+              title={cal.state === 'out-of-calibration'
+                ? `Calibrated ${auDate(d.dateCalibrated)}, more than ${CALIBRATION_MONTHS} months before this test`
+                : 'This gauge cannot be relied on'}
+              body={cal.issue.message}
             />
           ) : null}
           <Field label="Certificate" value={d.calibrationCertificate ?? ''} onChangeText={(v) => setDevice(i, { calibrationCertificate: v })} editable={!locked} />
@@ -629,7 +639,8 @@ function PartC({ form, locked, patch }: PartProps) {
             onPress={locked ? undefined : () => setDevice(i, { digitalReader: !d.digitalReader })}
           />
         </Card>
-      ))}
+        );
+      })}
 
       {!locked ? (
         <Button
