@@ -1,3 +1,7 @@
+import { DatabaseSync } from 'node:sqlite';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PANEL_CATALOGUE, classifyBytes, classifyFile, parserForBrand } from '@/parsers';
 
 /**
@@ -77,9 +81,39 @@ describe('binary content', () => {
   });
 
   it('is still classified where a parser recognises its signature', () => {
-    // The guard above must not swallow a format that is genuinely readable.
-    const withSignature = PANEL_CATALOGUE.filter((p) => p.sniffBytes);
-    expect(withSignature.length).toBeGreaterThan(0);
+    /*
+     * The other half of the guard above, and this used to assert only that the
+     * catalogue holds at least one signature — which it would have gone on
+     * doing against a classifier that answered "unknown" for every binary file,
+     * the exact thing it exists to rule out.
+     *
+     * So it classifies a real one. A Loop Explorer site file is a SQLite
+     * database: binary, and full of accidental commas once there is any text in
+     * it, which is what makes it the case worth testing rather than a
+     * hypothetical one.
+     */
+    const bytes = kentecDatabase();
+    const out = classifyBytes('site.nle', bytes);
+    expect(out.kind).toBe('native-binary');
+    expect(out.parser?.id).toBe('kentec-taktis');
+  });
+
+  it('recognises it by its signature rather than by its name', () => {
+    /*
+     * A technician renaming a file is routine, and the extension is then a lie.
+     * Binary signatures are exact, which is why they are asked first — so the
+     * answer must not move when the name does.
+     */
+    const bytes = kentecDatabase();
+    for (const name of ['site.nle', 'site.bin', 'copy of site (2)', '']) {
+      expect([name, classifyBytes(name, bytes).parser?.id]).toEqual([name, 'kentec-taktis']);
+    }
+  });
+
+  it('has signatures to be recognised by', () => {
+    // The pair above are only meaningful while the catalogue actually carries
+    // byte signatures; without one they would be testing the extension.
+    expect(PANEL_CATALOGUE.filter((p) => p.sniffBytes).length).toBeGreaterThan(0);
   });
 });
 
@@ -194,3 +228,28 @@ describe('what it does with nothing', () => {
     expect(() => classifyBytes('', bytes('anything'))).not.toThrow();
   });
 });
+
+/**
+ * A Loop Explorer site file, as far as recognising one goes.
+ *
+ * Three table names is the whole signature, and the text carries commas
+ * deliberately: binary content producing commas by accident is what the
+ * tabular fallback used to trip over.
+ */
+let sqliteDir: string | undefined;
+let sqliteCount = 0;
+afterAll(() => { if (sqliteDir) rmSync(sqliteDir, { recursive: true, force: true }); });
+
+function kentecDatabase(): Uint8Array {
+  sqliteDir ??= mkdtempSync(join(tmpdir(), 'classify-'));
+  // A fresh file each call: DatabaseSync opens an existing one rather than
+  // replacing it, and the second CREATE TABLE then throws.
+  const path = join(sqliteDir, `site-${sqliteCount++}.nle`);
+  const db = new DatabaseSync(path);
+  db.exec('CREATE TABLE Node (NodeKey INTEGER PRIMARY KEY, NodeName TEXT)');
+  db.exec('CREATE TABLE SubDevices (SubDeviceKey INTEGER PRIMARY KEY)');
+  db.exec('CREATE TABLE Zones (ZoneKey INTEGER PRIMARY KEY)');
+  db.exec("INSERT INTO Node (NodeName) VALUES ('PANEL 1, LEVEL 2, EAST RISER, PLANT')");
+  db.close();
+  return new Uint8Array(readFileSync(path));
+}
