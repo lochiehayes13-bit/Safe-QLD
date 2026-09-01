@@ -1,4 +1,5 @@
 import { SYSTEM_COLUMNS, SYSTEM_LABEL, type RegisterSystem } from '@/parsers/assetRegister';
+import { letterheaded } from './letterhead';
 import { formatAuDate } from './sheets';
 
 /**
@@ -215,7 +216,10 @@ export function routineServiceReportHtml(input: RoutineReportInput): string {
     ? `<img src="${esc(input.technicianSignature)}" alt="" />`
     : '';
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8" /><style>${CSS}</style></head><body>
+  return letterheaded({
+    title: `Routine Service Report — ${input.site.name ?? 'Safe QLD'}`,
+    css: CSS,
+    body: `
     ${input.jobNumber ? `<div class="jobno">Customer Job No. ${esc(input.jobNumber)}</div>` : ''}
     <div class="parties">
       ${partyTable('Customer Details', input.customer)}
@@ -242,8 +246,8 @@ export function routineServiceReportHtml(input: RoutineReportInput): string {
           <div class="sigline">Signature</div>
         </div>
       </div>
-    </div>
-  </body></html>`;
+    </div>`,
+  });
 }
 
 /**
