@@ -65,6 +65,7 @@
       "**/__tests__/**/*.test.ts"
     ],
     "moduleNameMapper": {
+      "^expo-secure-store$": "<rootDir>/src/__mocks__/expo-secure-store.ts",
       "^@/(.*)$": "<rootDir>/src/$1"
     },
     "collectCoverageFrom": [
