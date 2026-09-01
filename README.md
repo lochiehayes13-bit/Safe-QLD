@@ -23,7 +23,7 @@ matching how panels present themselves, with a toggle for commissioning work.
 
 **Assets.** One engine covers detectors, panels, pumps, extinguishers,
 emergency lights, hydrants, sprinklers, fire doors and passive penetrations —
-32 types across 14 systems. They differ only in their type definition and
+33 types across 14 systems. They differ only in their type definition and
 attributes, so a new class of equipment is data rather than code. Every asset
 carries a timeline, which is what makes "why does this keep failing?"
 answerable: three failures on one detector is a location problem, not three
@@ -37,7 +37,7 @@ Running a routine resolves the site's assets by system, answers each check
 against each one, writes the result onto the asset's timeline and raises the
 coded defect for anything that failed.
 
-**Defects.** A coded library of 76 defects. Pick system, component and defect
+**Defects.** A coded library of 87 defects. Pick system, component and defect
 and the app supplies the severity, the formal report wording, the plain-English
 client wording, the rectification and the quote lines. Free text stays for what
 only the person standing in front of it knows.
