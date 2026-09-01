@@ -21,6 +21,19 @@ afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
 
 let counter = 0;
 
+interface CeDetail {
+  key: number;
+  addressType: number;
+  zone?: number;
+  loop?: number;
+  address?: number;
+  sub?: number;
+  /** A point on the panel itself rather than on a loop. */
+  localIo?: number;
+  ioModule?: number;
+  ioChannel?: number;
+}
+
 interface Fixture {
   /** Zones beyond the placeholders. */
   zones?: [number, string][];
@@ -28,8 +41,8 @@ interface Fixture {
   devices?: { key: number; type: number; loop: number; address: number; fitted?: number }[];
   subs?: { key: number; device: number; sub: number; zone: number; text: string; subType?: number }[];
   localIo?: { number: number; zone: number; text: string; output: number }[];
-  causes?: { key: number; addressType: number; zone?: number; loop?: number; address?: number; sub?: number }[];
-  effects?: { key: number; addressType: number; zone?: number; loop?: number; address?: number; sub?: number }[];
+  causes?: CeDetail[];
+  effects?: CeDetail[];
   rules?: [number, string][];
   loops?: number;
 }
@@ -103,7 +116,7 @@ function buildNle(f: Fixture = {}): Uint8Array {
       db.exec(`INSERT INTO ${t} (ActionCEKey, AddressType, ZoneNumber, LoopNumber, DeviceAddress, SubDeviceNumber,
                LocalIONumber, IOModuleNumber, IOChannelNumber)
                VALUES (${r.key}, ${r.addressType}, ${r.zone ?? 0}, ${r.loop ?? 0}, ${r.address ?? 0},
-                       ${r.sub ?? 0}, 0, 0, 0)`);
+                       ${r.sub ?? 0}, ${r.localIo ?? 0}, ${r.ioModule ?? 0}, ${r.ioChannel ?? 0})`);
     }
   };
   detail('ActionCECauseDetail', f.causes ?? []);
@@ -288,6 +301,89 @@ describe('cause and effect', () => {
     const c = parseNle(buildNle({ ...SITE, causes: [], effects: [] }));
     expect(c.warnings.join(' ')).toMatch(/no cause or effect detail/i);
     expect(c.panels[0]!.causeEffect.every((r) => r.effects.length === 0)).toBe(true);
+  });
+});
+
+/**
+ * An effect that is not on a loop.
+ *
+ * Half of what a panel drives is on the panel: its own I/O points and the
+ * channels of a bolted-on I/O module. The matrix has to name those, and the
+ * name is what somebody reads while standing in front of the board deciding
+ * whether the commissioned logic matches what the building does. A target that
+ * cannot be resolved must say so rather than borrow a name from something else.
+ */
+describe('naming a cause or effect that is not on a loop', () => {
+  const targets = (f: Fixture) => parseNle(buildNle(f)).panels[0]!.causeEffect
+    .flatMap((r) => r.effects.map((e) => e.effectLabel.split(' → ')[1]!));
+
+  const base: Fixture = {
+    ...SITE,
+    rules: [[1, 'Plant shutdown']],
+    causes: [{ key: 1, addressType: 4, zone: 15 }],
+  };
+
+  it('names a point on the panel itself', () => {
+    expect(targets({ ...base, effects: [{ key: 1, addressType: 0, localIo: 7 }] }))
+      .toEqual(['Panel I/O 7']);
+  });
+
+  it('names a channel of an I/O module by both numbers', () => {
+    // Module and channel together, because either alone is ambiguous on a
+    // panel with more than one module.
+    expect(targets({ ...base, effects: [{ key: 1, addressType: 0, ioModule: 2, ioChannel: 5 }] }))
+      .toEqual(['I/O module 2 channel 5']);
+  });
+
+  it('says it could not resolve one rather than naming something else', () => {
+    /*
+     * A row with nothing in any address field. Falling back to a zone or a
+     * loop point here would put a real device's name against a rule that does
+     * not drive it — which reads exactly like commissioned logic and is not.
+     */
+    expect(targets({ ...base, effects: [{ key: 1, addressType: 0 }] }))
+      .toEqual(['unresolved target']);
+  });
+
+  it('prefers the zone name where the row is a zone', () => {
+    // The first branch, checked beside the others so the order is pinned.
+    expect(targets({ ...base, effects: [{ key: 1, addressType: 4, zone: 9, localIo: 7 }] }))
+      .toEqual(['Zone 9']);
+  });
+});
+
+describe('an address the tool reserved but nothing was fitted to', () => {
+  it('is recorded as unused rather than dropped', () => {
+    /*
+     * A Device row with no SubDevice is an address Loop Explorer set aside and
+     * nobody put a device on. Dropping it loses the fact that the address is
+     * taken — the next technician programmes over it — and counting it as a
+     * device inflates the panel with things nobody can go and test. It is kept,
+     * and marked.
+     */
+    const c = parseNle(buildNle({
+      ...SITE,
+      devices: [...SITE.devices!, { key: 9, type: 213, loop: 1, address: 44 }],
+    }));
+    const point = c.panels[0]!.points.find((p) => p.pointRef === 'L1D44')!;
+
+    expect(point.unused).toBe(true);
+    expect(point.text).toBe('');
+    // The type key is still recorded, because it is what the address was set
+    // aside for and the only clue to what belongs there.
+    expect(point.deviceTypeRaw).toContain('213');
+    expect(point.deviceType).toBe('unknown');
+  });
+
+  it('does not count it among the devices in service', () => {
+    const withReserved = parseNle(buildNle({
+      ...SITE,
+      devices: [...SITE.devices!, { key: 9, type: 213, loop: 1, address: 44 }],
+    })).panels[0]!.points;
+    const without = parseNle(buildNle(SITE)).panels[0]!.points;
+
+    expect(withReserved.filter((p) => !p.unused)).toHaveLength(without.filter((p) => !p.unused).length);
+    expect(withReserved.length).toBe(without.length + 1);
   });
 });
 
