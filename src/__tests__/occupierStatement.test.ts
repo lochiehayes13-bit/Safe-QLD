@@ -447,6 +447,25 @@ describe('refusing to count what it does not know', () => {
     expect(count.reason).toContain('31/12/2029');
   });
 
+  it('counts from the first day the table covers, and refuses the day before it', () => {
+    /*
+     * Both ends of the published table are covered days. Excluding its own
+     * first day refuses a count the app can make correctly, and telling an
+     * occupier the deadline is unknown when it is knowable is the same fault
+     * as inventing one, pointing the other way.
+     */
+    expect(addQldBusinessDays(HOLIDAY_COVERAGE.from, 10).date).toBeDefined();
+    expect(addQldBusinessDays('2024-12-31', 10).date).toBeUndefined();
+  });
+
+  it('counts from the last day the table covers, so long as the count lands inside it', () => {
+    // The final day of coverage is a day the table knows about. Counting
+    // forward from it runs off the end, which is the refusal above — so this
+    // asks for a count that stays inside.
+    expect(addQldBusinessDays(HOLIDAY_COVERAGE.to, 0).date).toBe(HOLIDAY_COVERAGE.to);
+    expect(addQldBusinessDays('2030-01-01', 0).date).toBeUndefined();
+  });
+
   it('refuses an unreadable date, an impossible date and a negative count', () => {
     expect(addQldBusinessDays('the 16th', 10).reason).toMatch(/not a date/);
     expect(addQldBusinessDays('2026-02-30', 10).reason).toMatch(/not a date/);
@@ -505,6 +524,23 @@ describe("the ten business days to give the commissioner a copy", () => {
     expect(early.anchorDate).toBe('2025-04-16');
     expect(early.basis).toBe('statutory');
     expect(late.caveats[0]).toMatch(/Signing late does not restart/);
+  });
+
+  it('says neither early nor late for a statement signed on the day it was required', () => {
+    /*
+     * The occupier who signs on their anniversary. Both caveats hang off the
+     * same comparison against that date, and either being a day out puts a
+     * warning about signing late — or about signing early, which is the one
+     * caveat here saying the deadline may be later than a regulator would
+     * allow — on a statement that was signed exactly on time.
+     */
+    const onTime = commissionerCopyDeadline({
+      previousStatementDate: '2025-04-16',
+      signedDate: '2026-04-16',
+    });
+    expect(onTime.anchorDate).toBe('2026-04-16');
+    expect(onTime.caveats.some((c) => /Signing late does not restart/.test(c))).toBe(false);
+    expect(onTime.caveats.some((c) => /signing early does not shorten/i.test(c))).toBe(false);
   });
 
   it('warns that an early signature is the one deadline here later than the cautious answer', () => {
@@ -632,6 +668,25 @@ describe('checking a filled statement against the Regulation', () => {
     expect(issue?.formRef).toBe('Schedule 2, header');
   });
 
+  it('treats a header field of spaces as blank, because on the page it is', () => {
+    /*
+     * The one a blank-string check misses. A technician taps into a field,
+     * hits the space bar and moves on, and the statement then has nothing
+     * blocking it while printing an empty line where the building's name goes.
+     *
+     * Both header fields are held, because a statement that names a building
+     * without saying where it is cannot be matched to a premises on file — and
+     * a statement naming neither cannot be matched to anything.
+     */
+    expect(blocking(checkOccupierStatement(completeStatement({ occupierName: '   ' }))))
+      .not.toEqual([]);
+    expect(about(checkOccupierStatement(completeStatement({ buildingName: ' ' })), 'buildingNameAndAddress')[0]?.blocking)
+      .toBe(true);
+    expect(about(checkOccupierStatement(completeStatement({ buildingAddress: '\t ' })), 'buildingNameAndAddress')[0]?.blocking)
+      .toBe(true);
+    expect(canSignAsSchedule2(completeStatement({ occupierName: '   ' }), '2026-04-20')).toBe(false);
+  });
+
   it('treats a row nobody answered as unanswered, not as a No', () => {
     // Footnote 2 says to delete an installation the building does not have,
     // which is an answer. A blank row is not, and the difference matters: a
@@ -685,6 +740,41 @@ describe('checking a filled statement against the Regulation', () => {
       }),
     }), '2026-04-20');
     expect(blocking(issues)).toEqual([]);
+  });
+
+  it('counts a rectification on the last day of the month as inside it', () => {
+    /*
+     * Section 54(4) gives a month. The last day of it is a compliant day, and
+     * a comparison a day out puts a s 54(4) note on a statement that complied
+     * — an occupier reading "after the one month allowed" against work done on
+     * time.
+     *
+     * Maintenance 10 February, so the month runs to 10 March.
+     */
+    const onTheDay = checkOccupierStatement(completeStatement({
+      criticalDefectNoticesAttached: true,
+      rows: completeRows({
+        Sprinklers: {
+          criticalDefectNoticeIssued: true,
+          maintenanceDate: '2026-02-10',
+          rectificationDate: '2026-03-10',
+        },
+      }),
+    }), '2026-04-20');
+    expect(about(onTheDay, 'Sprinklers').find((i) => i.legalRef.includes('s 54(4)'))).toBeUndefined();
+
+    const dayAfter = checkOccupierStatement(completeStatement({
+      criticalDefectNoticesAttached: true,
+      rows: completeRows({
+        Sprinklers: {
+          criticalDefectNoticeIssued: true,
+          maintenanceDate: '2026-02-10',
+          rectificationDate: '2026-03-11',
+        },
+      }),
+    }), '2026-04-20');
+    expect(about(dayAfter, 'Sprinklers').find((i) => i.legalRef.includes('s 54(4)'))?.blocking)
+      .toBe(false);
   });
 
   it('notices a rectification that took longer than the month section 54(4) allows, without blocking it', () => {
@@ -768,6 +858,23 @@ describe('checking a filled statement against the Regulation', () => {
     const issue = about(issues, 'signedDate').find((i) => i.message.includes('before the period'));
     expect(issue?.blocking).toBe(false);
     expect(issue?.message).toMatch(/has not happened yet/);
+  });
+
+  it('says nothing about a statement signed the day its period ends', () => {
+    /*
+     * The declaration speaks of maintenance during the period covered, so
+     * signing before the period ends declares work that has not happened. The
+     * last day of the period is not before it — an occupier who signs on the
+     * final day is declaring a period that has run, and telling them part of
+     * it has not happened yet is wrong and would be argued with.
+     */
+    const onTheDay = checkOccupierStatement(completeStatement({ signedDate: '2026-04-15' }), '2026-04-20');
+    expect(about(onTheDay, 'signedDate').find((i) => i.message.includes('before the period')))
+      .toBeUndefined();
+
+    const dayBefore = checkOccupierStatement(completeStatement({ signedDate: '2026-04-14' }), '2026-04-20');
+    expect(about(dayBefore, 'signedDate').find((i) => i.message.includes('before the period')))
+      .toBeDefined();
   });
 
   it('does not block on a missing period, because Schedule 2 has no box for one', () => {
