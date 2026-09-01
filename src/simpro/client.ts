@@ -207,9 +207,33 @@ export class SimproClient {
    * onto a phone over mobile data is rarely what anyone wanted.
    */
   async listAll<T>(path: string, query: Record<string, string | number> = {}, maxRecords = 5000): Promise<T[]> {
+    return (await this.listAllPaged<T>(path, query, maxRecords)).items;
+  }
+
+  /**
+   * The same read, saying whether it stopped early.
+   *
+   * `listAll` returns a bare array, so a caller cannot tell a complete list
+   * from one cut off at `maxRecords` — and for one caller that difference
+   * decides whether a service gets posted twice. Reading a job's notes to find
+   * the markers this app wrote is a "have I already sent this" question, and a
+   * truncated read answers it with a set that looks complete and is not: the
+   * marker sits on note 240 of 300, is not in the first 200, and the send goes
+   * out again.
+   *
+   * So truncation is reported rather than inferred. A caller that must be
+   * certain can refuse; a caller pulling a list to show on a screen can carry
+   * on, which is why `listAll` still exists and still returns an array.
+   */
+  async listAllPaged<T>(
+    path: string,
+    query: Record<string, string | number> = {},
+    maxRecords = 5000,
+  ): Promise<{ items: T[]; truncated: boolean }> {
     const pageSize = 250;
     const out: T[] = [];
     let page = 1;
+    let truncated = false;
 
     for (;;) {
       const { data, total } = await this.request<T[]>('GET', path, {
@@ -218,12 +242,21 @@ export class SimproClient {
       if (!Array.isArray(data) || data.length === 0) break;
       out.push(...data);
 
-      if (out.length >= maxRecords) break;
+      if (out.length >= maxRecords) {
+        /*
+         * More only where the server said so, or where this page was full and
+         * so there is very likely another. A full last page on a collection
+         * that happens to end exactly there reports truncated when it is not,
+         * which costs a caller caution rather than correctness.
+         */
+        truncated = total !== null ? out.length < total : data.length === pageSize;
+        break;
+      }
       if (total !== null && out.length >= total) break;
       if (data.length < pageSize) break;
       page++;
     }
-    return out;
+    return { items: out, truncated };
   }
 
   /** Confirms credentials work and reports which endpoints this key may read. */

@@ -46,6 +46,12 @@ import {
 export interface SimproPoster {
   request: SimproClient['request'];
   listAll: SimproClient['listAll'];
+  /**
+   * Optional so a caller can supply a minimal stub, but where it exists it is
+   * preferred — it is the only form that says whether the read was complete,
+   * and completeness is the whole question here.
+   */
+  listAllPaged?: SimproClient['listAllPaged'];
 }
 
 /**
@@ -124,9 +130,31 @@ async function readMarkers(
   maxNotesRead = 200,
 ): Promise<{ keys?: Set<string>; error?: string }> {
   try {
-    const notes = await client.listAll<RawJobNote>(
-      `jobs/${jobId}/notes/`, { columns: 'ID,Subject,Note' }, maxNotesRead,
-    );
+    /*
+     * A truncated read is not an answer to this question.
+     *
+     * The keys are read to decide whether this app already sent the work. A cut
+     * at maxNotesRead gives a set that looks complete and is not — the marker
+     * sits on note 240 of a busy job's 300, is not in the first 200, and the
+     * service is posted a second time. An empty set says "this is not there";
+     * a partial one says nothing, and must not be allowed to say the first.
+     */
+    const read = client.listAllPaged
+      ? await client.listAllPaged<RawJobNote>(
+        `jobs/${jobId}/notes/`, { columns: 'ID,Subject,Note' }, maxNotesRead,
+      )
+      : { items: await client.listAll<RawJobNote>(
+        `jobs/${jobId}/notes/`, { columns: 'ID,Subject,Note' }, maxNotesRead,
+      ), truncated: false };
+
+    if (read.truncated) {
+      return {
+        error: `This job has more than ${maxNotesRead} notes, so its existing Safe QLD references `
+          + 'could not all be read. A duplicate cannot be ruled out from the server.',
+      };
+    }
+
+    const notes = read.items;
     const keys = new Set<string>();
     for (const note of notes) {
       for (const key of keysInNoteText(`${note.Subject ?? ''}\n${note.Note ?? ''}`)) keys.add(key);

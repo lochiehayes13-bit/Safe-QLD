@@ -955,3 +955,82 @@ describe('sendOutboundPlan', () => {
     expect([...(keys ?? [])]).toEqual([plan.items[1]!.key]);
   });
 });
+
+/**
+ * A truncated read of a job's notes is not an answer.
+ *
+ * The markers are read to decide whether this app already sent the work. A read
+ * cut off at the note limit gives a set that looks complete and is not — the
+ * marker sits on note 240 of a busy job's 300, is not in the first 200, and the
+ * service goes out a second time. That is the one failure the whole key scheme
+ * exists to prevent, defeated by a paging limit nobody was told about.
+ */
+describe('reading a job that has more notes than the limit', () => {
+  const jobNote = (text: string) => ({ Subject: '', Note: text });
+
+  const posterWith = (opts: {
+    truncated: boolean;
+    notes: { Subject: string; Note: string }[];
+  }) => {
+    const posted: unknown[] = [];
+    const client = {
+      request: async (_m: string, _p: string, o?: { body?: unknown }) => {
+        posted.push(o?.body);
+        return { data: {} as never, total: null };
+      },
+      listAll: async <T,>(): Promise<T[]> => opts.notes as unknown as T[],
+      listAllPaged: async <T,>(): Promise<{ items: T[]; truncated: boolean }> =>
+        ({ items: opts.notes as unknown as T[], truncated: opts.truncated }),
+    };
+    return { client, posted };
+  };
+
+  it('reports the check as unavailable rather than as clean', async () => {
+    const { client } = posterWith({ truncated: true, notes: [jobNote('nothing here')] });
+    const plan = planOutboundWork(run(), [pass('1')], []);
+    const report = await sendOutboundPlan(client as never, plan);
+
+    expect(report.remoteCheck).toBe('unavailable');
+    expect(report.remoteCheckError).toContain('duplicate could not be ruled out');
+  });
+
+  it('says the job has too many notes, so somebody can act on it', async () => {
+    const { client } = posterWith({ truncated: true, notes: [] });
+    const plan = planOutboundWork(run(), [pass('1')], []);
+    const report = await sendOutboundPlan(client as never, plan);
+    expect(report.outcomes.length).toBeGreaterThan(0);
+    expect(report.remoteCheckError).toBeDefined();
+  });
+
+  it('still sends, because the work is not lost over an uncertain check', async () => {
+    /*
+     * The alternative is refusing to send a real service because a job is
+     * chatty, and a service stuck on a phone is a worse outcome than a
+     * duplicate note somebody can delete.
+     */
+    const { client, posted } = posterWith({ truncated: true, notes: [] });
+    const plan = planOutboundWork(run(), [pass('1')], []);
+    const report = await sendOutboundPlan(client as never, plan);
+    expect(report.sent).toBeGreaterThan(0);
+    expect(posted.length).toBeGreaterThan(0);
+  });
+
+  it('treats a complete read as the answer it is', async () => {
+    const { client } = posterWith({ truncated: false, notes: [] });
+    const plan = planOutboundWork(run(), [pass('1')], []);
+    const report = await sendOutboundPlan(client as never, plan);
+    expect(report.remoteCheck).toBe('checked');
+    expect(report.remoteCheckError).toBeUndefined();
+  });
+
+  it('recognises its own marker in a complete read and skips the duplicate', async () => {
+    const plan = planOutboundWork(run(), [pass('1')], []);
+    const { client } = posterWith({
+      truncated: false,
+      notes: [jobNote(plan.items[0]!.payload.note)],
+    });
+    const report = await sendOutboundPlan(client as never, plan);
+    expect(report.skipped).toBeGreaterThan(0);
+    expect(report.sent).toBe(0);
+  });
+});
