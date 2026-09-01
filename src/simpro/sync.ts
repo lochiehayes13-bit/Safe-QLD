@@ -1,6 +1,6 @@
 import { SimproClient, SimproError, type SimproConfig } from './client';
 import { SimproResources } from './resources';
-import { assessIncremental, newestChange, planIncremental, type SyncResource } from './incremental';
+import { assessIncremental, nextWatermark, planIncremental, type SyncResource } from './incremental';
 import { readSyncState, writeSyncState } from './watermark';
 import { createSite, listSites, updateSite } from '@/db/repo';
 import { saveRateCard } from '@/db/rateCardRepo';
@@ -147,11 +147,15 @@ export async function pullFromSimpro(
     await writeSyncState({
       resource: 'sites',
       lastSyncedAt: startedAt,
-      // From the records rather than the clock: a phone running fast would
-      // otherwise skip everything written in the gap, silently and for good.
-      lastChangeSeenAt: newestChange(remoteSites as unknown as Record<string, unknown>[])
-        ?? (siteMode === 'full' ? startedAt : siteState.lastChangeSeenAt),
-      lastRecordCount: siteMode === 'full' ? remoteSites.length : siteState.lastRecordCount,
+      // From the records rather than the clock, and unchanged where an
+      // incremental pull learned nothing. See nextWatermark, which is where
+      // that rule is written down and tested.
+      ...nextWatermark(
+        remoteSites as unknown as Record<string, unknown>[],
+        siteMode,
+        startedAt,
+        siteState,
+      ),
       mode: siteMode,
     }, startedAt);
   }
@@ -181,9 +185,12 @@ export async function pullFromSimpro(
       await writeSyncState({
         resource: 'jobs',
         lastSyncedAt: startedAt,
-        lastChangeSeenAt: newestChange(remoteJobs as unknown as Record<string, unknown>[])
-          ?? (outcome.mode === 'full' ? startedAt : jobState.lastChangeSeenAt),
-        lastRecordCount: outcome.mode === 'full' ? remoteJobs.length : jobState.lastRecordCount,
+        ...nextWatermark(
+          remoteJobs as unknown as Record<string, unknown>[],
+          outcome.mode,
+          startedAt,
+          jobState,
+        ),
         mode: outcome.mode,
       }, startedAt);
     }

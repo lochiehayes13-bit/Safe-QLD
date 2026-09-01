@@ -193,3 +193,51 @@ export function describeStaleness(state: SyncState, now: Date): Staleness {
     label: `Last synced ${days} days ago — the office copy has almost certainly moved on.`,
   };
 }
+
+/**
+ * Where the next sync starts, and what it counts against.
+ *
+ * The rule this expresses decides whether records get silently skipped, and it
+ * was written inline in sync.ts — which imports the database and so cannot be
+ * loaded by a test at all. Twice, once for sites and once for jobs. It is one
+ * function here because the two must not drift, and because a rule about data
+ * loss should be somewhere it can be argued with.
+ *
+ * Three cases, three different right answers:
+ *
+ * **The records carry a newest change.** Use it. This is the ordinary path and
+ * the whole reason the watermark is taken from the server's own timestamps
+ * rather than from the phone: a handset running five minutes fast would ask
+ * next time for changes since a moment in the future, and everything written in
+ * that gap is skipped permanently.
+ *
+ * **A full pull whose records carry no timestamp at all.** Fall back to when
+ * this sync started. The clock is a poor anchor for the reason above, but a
+ * full pull has just seen everything, so starting the next window at that
+ * moment loses nothing that existed — and the alternative, leaving the
+ * watermark empty, means pulling everything again forever.
+ *
+ * **An incremental pull that returned nothing.** Keep the previous watermark
+ * exactly. This is the case that has to be got right: advancing it to now, on a
+ * pull that learned nothing, moves the window past records nobody has looked
+ * at. Nothing would ever report it — the next sync simply asks for a later
+ * slice and the skipped records are never mentioned again.
+ *
+ * The record count follows the same shape, because a count from an incremental
+ * pull is a count of what changed rather than of what exists, and
+ * assessIncremental compares against it to decide whether a filter was honoured.
+ * Overwriting the full-sync count with an incremental one would make the next
+ * filtered response look plausible however much it returned.
+ */
+export function nextWatermark(
+  records: Array<Record<string, unknown>>,
+  mode: 'full' | 'incremental',
+  startedAt: string,
+  previous: Pick<SyncState, 'lastChangeSeenAt' | 'lastRecordCount'>,
+): Pick<SyncState, 'lastChangeSeenAt' | 'lastRecordCount'> {
+  return {
+    lastChangeSeenAt:
+      newestChange(records) ?? (mode === 'full' ? startedAt : previous.lastChangeSeenAt),
+    lastRecordCount: mode === 'full' ? records.length : previous.lastRecordCount,
+  };
+}

@@ -1,5 +1,6 @@
 import {
-  assessIncremental, describeStaleness, newestChange, planIncremental, type SyncState,
+  assessIncremental, describeStaleness, newestChange, nextWatermark, planIncremental,
+  type SyncState,
 } from '@/simpro/incremental';
 
 /**
@@ -86,6 +87,72 @@ describe('anchoring the next sync', () => {
     expect(newestChange([{ ID: 1 }, { ID: 2 }])).toBeUndefined();
     expect(newestChange([])).toBeUndefined();
     expect(newestChange([{ DateModified: 'sometime last week' }])).toBeUndefined();
+  });
+});
+
+describe('where the next sync starts from', () => {
+  /*
+   * This rule decides whether records get silently skipped, and it was written
+   * inline in sync.ts — twice — where nothing can load it to test it, because
+   * that module imports the database.
+   */
+  const previous = { lastChangeSeenAt: '2026-08-20T00:00:00.000Z', lastRecordCount: 900 };
+  const STARTED = '2026-08-22T03:00:00.000Z';
+
+  it('anchors on the newest record, whatever the phone thinks the time is', () => {
+    const out = nextWatermark(
+      [{ DateModified: '2026-08-21T08:30:00Z' }, { DateModified: '2026-08-21T09:45:00Z' }],
+      'incremental', STARTED, previous,
+    );
+    expect(out.lastChangeSeenAt).toBe('2026-08-21T09:45:00.000Z');
+  });
+
+  it('keeps the old watermark when an incremental pull returned nothing', () => {
+    /*
+     * The case that must not be got wrong. Advancing to now on a pull that
+     * learned nothing moves the window past records nobody has looked at, and
+     * nothing would ever report it — the next sync just asks for a later slice
+     * and those records are never mentioned again.
+     */
+    const out = nextWatermark([], 'incremental', STARTED, previous);
+    expect(out.lastChangeSeenAt).toBe(previous.lastChangeSeenAt);
+    expect(out.lastChangeSeenAt).not.toBe(STARTED);
+  });
+
+  it('keeps it too when the records came back carrying no readable timestamp', () => {
+    // Records with no DateModified teach nothing about where to start next.
+    const out = nextWatermark(
+      [{ ID: 1 }, { DateModified: 'sometime last week' }], 'incremental', STARTED, previous,
+    );
+    expect(out.lastChangeSeenAt).toBe(previous.lastChangeSeenAt);
+  });
+
+  it('uses the start of a full pull when its records carry no timestamp', () => {
+    /*
+     * A full pull has just seen everything, so starting the next window there
+     * loses nothing that existed. Leaving it empty would mean pulling
+     * everything again forever.
+     */
+    const out = nextWatermark([{ ID: 1 }], 'full', STARTED, previous);
+    expect(out.lastChangeSeenAt).toBe(STARTED);
+  });
+
+  it('counts what exists on a full pull and keeps the old count on an incremental one', () => {
+    /*
+     * assessIncremental compares a filtered response against this number to
+     * decide whether the filter was honoured. Overwriting the full-sync count
+     * with an incremental one makes the next filtered response look plausible
+     * however much it returns.
+     */
+    expect(nextWatermark([{ ID: 1 }, { ID: 2 }], 'full', STARTED, previous).lastRecordCount).toBe(2);
+    expect(nextWatermark([{ ID: 1 }, { ID: 2 }], 'incremental', STARTED, previous).lastRecordCount)
+      .toBe(900);
+  });
+
+  it('does not go backwards from a first sync that has no previous watermark', () => {
+    const fresh = { lastChangeSeenAt: undefined, lastRecordCount: 0 };
+    expect(nextWatermark([], 'incremental', STARTED, fresh).lastChangeSeenAt).toBeUndefined();
+    expect(nextWatermark([], 'full', STARTED, fresh).lastChangeSeenAt).toBe(STARTED);
   });
 });
 
