@@ -13,6 +13,7 @@ import {
   trendMeasurements,
   type MeasurementPoint,
   type MeasurementSeries,
+  FLAT_PERCENT_PER_YEAR, MINIMUM_SPAN_DAYS,
 } from '@/domain/measurementTrend';
 
 /**
@@ -370,6 +371,49 @@ describe('trendMeasurements — the trend itself', () => {
     const trend = trendMeasurements(series({ points: yearly([700, 699, 698, 697]) }));
     expect(trend.direction).toBe('flat');
     expect(trend.interpretation).toBe('stable');
+  });
+
+  it('draws the line between steady and declining where it says it does', () => {
+    /*
+     * Under one per cent a year is steady; at one per cent it is a decline.
+     * That threshold is the whole judgement this module makes — below it the
+     * app says nothing and above it somebody gets told a hydrant is going, and
+     * a client gets quoted for it.
+     *
+     * Both sides are held so the number cannot be changed without deciding to.
+     * 700 kPa losing 6.3 a year is 0.9%; losing 7.7 is 1.1%.
+     */
+    const dropping = (percentPerYear: number) => trendMeasurements(series({
+      points: [0, 1, 2, 3].map((i) => ({
+        at: `${2020 + i}-03-01`,
+        value: 700 - (700 * percentPerYear / 100) * i,
+        unit: 'kPa',
+      })),
+    }));
+
+    expect(dropping(0.9).direction).toBe('flat');
+    expect(dropping(1.1).direction).toBe('falling');
+    expect(FLAT_PERCENT_PER_YEAR).toBe(1);
+  });
+
+  it('trends a series spanning exactly the minimum and refuses the day under it', () => {
+    /*
+     * Twenty-eight days is the shortest span a trend is offered for, because
+     * the shortest routine this app records runs monthly and anything closer
+     * together is one attendance retested. The last day of that is still a
+     * month, and refusing it throws away a real monthly history.
+     */
+    const overDays = (days: number) => trendMeasurements(series({
+      points: [0, Math.floor(days / 2), days].map((d) => ({
+        at: new Date(Date.parse('2026-01-01T00:00:00Z') + d * 86_400_000).toISOString().slice(0, 10),
+        value: 700 - d,
+        unit: 'kPa',
+      })),
+    }));
+
+    expect(overDays(MINIMUM_SPAN_DAYS).status).toBe('trend');
+    expect(overDays(MINIMUM_SPAN_DAYS - 1).status).toBe('no-time-span');
+    expect(MINIMUM_SPAN_DAYS).toBe(28);
   });
 
   it('warns that identical readings may be a test that stops at its target', () => {
