@@ -35,6 +35,8 @@ export default function SettingsScreen() {
   const [hasAi, setHasAi] = useState(false);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ name: string; readable: boolean; total: number | null; error?: string }[] | null>(null);
+  /** What the last connection attempt actually established, kept beside the endpoint list. */
+  const [verdict, setVerdict] = useState<{ ok: boolean; company: string | null; message: string } | null>(null);
   const [storage, setStorage] = useState(0);
   const [photos, setPhotos] = useState<StorageReport | null>(null);
   /*
@@ -148,9 +150,18 @@ export default function SettingsScreen() {
     setPullReport(null);
   };
 
+  /**
+   * One tap: authenticate, find the company, check what the key may read.
+   *
+   * This used to need two taps — the first only discovered the company ID and
+   * asked you to start again — and it reported one boolean for three quite
+   * different failures. `connect()` does the whole sequence against a client
+   * built with the ID it finds, and hands back which stage stopped it.
+   */
   const test = async () => {
     setTesting(true);
     setResult(null);
+    setVerdict(null);
     try {
       const config: SimproConfig = {
         buildDomain: prefs.simproDomain,
@@ -158,23 +169,23 @@ export default function SettingsScreen() {
         clientId: prefs.simproClientId,
         proxyUrl: prefs.simproProxyUrl || undefined,
       };
-      const client = new SimproClient(config);
+      const report = await new SimproClient(config).connect();
+      setResult(report.endpoints.length ? report.endpoints : null);
 
-      if (!prefs.simproCompanyId) {
-        const companies = await client.listCompanies();
-        if (companies.length) {
-          update({ simproCompanyId: String(companies[0]!.ID) });
-          Alert.alert('Company found', `Using "${companies[0]!.Name}" (ID ${companies[0]!.ID}). Run the test again to check endpoint access.`);
-          return;
-        }
-        Alert.alert('No companies returned', 'The credentials authenticated but no company was visible to them.');
-        return;
+      // Write back a company the app discovered, so the next launch skips the
+      // lookup — but never overwrite one that is already set and matching.
+      if (report.company && report.company.id !== prefs.simproCompanyId) {
+        update({ simproCompanyId: report.company.id });
       }
 
-      const report = await client.testConnection();
-      setResult(report.endpoints);
+      setVerdict({
+        ok: report.ready,
+        company: report.company?.name ?? null,
+        message: report.problem
+          ?? `Connected to ${report.company?.name ?? 'Simpro'}. Everything this app needs is readable.`,
+      });
     } catch (e) {
-      Alert.alert('Connection failed', e instanceof Error ? e.message : String(e));
+      setVerdict({ ok: false, company: null, message: e instanceof Error ? e.message : String(e) });
     } finally {
       setTesting(false);
     }
@@ -456,7 +467,7 @@ export default function SettingsScreen() {
       <Card>
         <Field label="Build domain" value={prefs.simproDomain} onChangeText={(v) => update({ simproDomain: v })} autoCapitalize="none" />
         <View style={{ height: t.space(2.5) }} />
-        <Field label="Company ID" value={prefs.simproCompanyId} onChangeText={(v) => update({ simproCompanyId: v })} keyboardType="numeric" hint="Leave blank and run the test — it will find it" />
+        <Field label="Company ID" value={prefs.simproCompanyId} onChangeText={(v) => update({ simproCompanyId: v })} keyboardType="numeric" hint="Already set for this build. Clear it and connect to look it up again." />
         <View style={{ height: t.space(2.5) }} />
         <Field label="Client ID" value={prefs.simproClientId} onChangeText={(v) => update({ simproClientId: v })} autoCapitalize="none" />
         <View style={{ height: t.space(2.5) }} />
@@ -499,7 +510,20 @@ export default function SettingsScreen() {
         ) : null}
 
         <View style={{ height: t.space(3) }} />
-        <Button title="Test connection" variant="secondary" onPress={test} loading={testing} />
+        <Button title="Connect to Simpro" onPress={test} loading={testing} />
+        {verdict ? (
+          <Rowed gap={2} style={{ marginTop: t.space(2), alignItems: 'flex-start' }}>
+            <MaterialCommunityIcons
+              name={verdict.ok ? 'check-circle' : 'alert-circle'}
+              size={18}
+              color={verdict.ok ? t.color.pass : t.color.fail}
+              style={{ marginTop: 1 }}
+            />
+            <Txt size="sm" tone={verdict.ok ? 'pass' : 'fail'} style={{ flex: 1, lineHeight: 19 }}>
+              {verdict.message}
+            </Txt>
+          </Rowed>
+        ) : null}
         <View style={{ height: t.space(2) }} />
         <Rowed gap={2}>
           <Button title="Pull sites and jobs" style={{ flex: 1 }} onPress={runPull} loading={syncing} />

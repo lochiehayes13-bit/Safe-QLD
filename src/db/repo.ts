@@ -45,14 +45,24 @@ export async function createSite(input: Partial<Site> & { name: string }): Promi
     clientName: input.clientName,
     siteRef: input.siteRef,
     notes: input.notes,
+    contactName: input.contactName,
+    contactEmail: input.contactEmail,
+    contactWorkPhone: input.contactWorkPhone,
+    contactMobile: input.contactMobile,
+    externalId: input.externalId,
+    externalSource: input.externalSource,
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
   await db.runAsync(
-    `INSERT INTO site (id,name,address,suburb,state,postcode,clientName,siteRef,notes,createdAt,updatedAt)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    `INSERT INTO site (id,name,address,suburb,state,postcode,clientName,siteRef,notes,
+                       contactName,contactEmail,contactWorkPhone,contactMobile,
+                       externalId,externalSource,createdAt,updatedAt)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     site.id, site.name, site.address ?? null, site.suburb ?? null, site.state ?? null,
     site.postcode ?? null, site.clientName ?? null, site.siteRef ?? null, site.notes ?? null,
+    site.contactName ?? null, site.contactEmail ?? null, site.contactWorkPhone ?? null,
+    site.contactMobile ?? null, site.externalId ?? null, site.externalSource ?? null,
     site.createdAt, site.updatedAt,
   );
   return site;
@@ -60,7 +70,9 @@ export async function createSite(input: Partial<Site> & { name: string }): Promi
 
 export async function updateSite(id: string, patch: Partial<Site>): Promise<void> {
   const db = await getDb();
-  const fields = ['name', 'address', 'suburb', 'state', 'postcode', 'clientName', 'siteRef', 'notes'] as const;
+  const fields = ['name', 'address', 'suburb', 'state', 'postcode', 'clientName', 'siteRef', 'notes',
+    'contactName', 'contactEmail', 'contactWorkPhone', 'contactMobile',
+    'externalId', 'externalSource'] as const;
   const sets: string[] = [];
   const vals: (string | null)[] = [];
   for (const f of fields) {

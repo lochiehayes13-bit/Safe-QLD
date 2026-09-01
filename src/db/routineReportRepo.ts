@@ -129,13 +129,24 @@ export async function buildRoutineReport(q: RoutineReportQuery): Promise<Routine
 
   return {
     jobNumber: q.jobNumber,
+    // The Contact, Mobile and Email rows print on every report and were blank
+    // on all of them, because the sync never asked Simpro for the site's
+    // primary contact. It holds one for most sites.
     customer: {
       name: site.clientName || site.name,
       address: [site.address, site.suburb, site.state, site.postcode].filter(Boolean).join(' '),
+      contact: site.contactName,
+      mobile: site.contactMobile,
+      email: site.contactEmail,
     },
     site: {
       name: site.name,
       address: [site.address, site.suburb, site.state, site.postcode].filter(Boolean).join(' '),
+      contact: site.contactName,
+      // Falls back to the work number: many sites give a landline and no
+      // mobile, and a blank row is worse than a number that reaches someone.
+      mobile: site.contactMobile ?? site.contactWorkPhone,
+      email: site.contactEmail,
     },
     workRequested: q.workRequested,
     datePerformed: q.to.slice(0, 10),

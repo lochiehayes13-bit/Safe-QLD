@@ -12,6 +12,7 @@ import { MIGRATION_V10 } from './schemaQuote';
 import { MIGRATION_V11 } from './schemaLibrary';
 import { MIGRATION_V12 } from './schemaForm72';
 import { MIGRATION_V13 } from './schemaOutbound';
+import { MIGRATION_V14 } from './schemaSimpro';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -286,6 +287,10 @@ export const MIGRATIONS: string[] = [
 
   // v13 — what the office has already accepted, so a retry cannot post twice
   MIGRATION_V13,
+
+  // v14 — the site contact the office already holds, so reports stop printing
+  // Contact, Mobile and Email as three permanently blank rows
+  MIGRATION_V14,
 ];
 
 /**

@@ -9,6 +9,13 @@ import { matchSiteByRefOrName } from '@/domain/siteNames';
 import type { Site } from '@/domain/types';
 
 /**
+ * Stamped on records this sync created, so a later pull updates them rather
+ * than adding a second copy. Sites also arrive from CSV imports and from
+ * technicians typing them on site, and those carry no external id at all.
+ */
+export const SIMPRO_SOURCE = 'simpro';
+
+/**
  * Pulling Simpro down and pushing field work back up.
  *
  * Two rules shape this. Nothing the technician did on site may be lost, so
@@ -117,6 +124,16 @@ export async function pullFromSimpro(
         if (!match.postcode && remote.postcode) patch.postcode = remote.postcode;
         if (!match.clientName && remote.customerName) patch.clientName = remote.customerName;
         if (!match.siteRef) patch.siteRef = `SIMPRO:${remote.id}`;
+        // The office's contact, which is what a report's Contact, Mobile and
+        // Email rows print. Filled only where blank, like everything else here.
+        if (!match.contactName && remote.contactName) patch.contactName = remote.contactName;
+        if (!match.contactEmail && remote.contactEmail) patch.contactEmail = remote.contactEmail;
+        if (!match.contactWorkPhone && remote.contactWorkPhone) patch.contactWorkPhone = remote.contactWorkPhone;
+        if (!match.contactMobile && remote.contactMobile) patch.contactMobile = remote.contactMobile;
+        if (!match.externalId) {
+          patch.externalId = remote.id;
+          patch.externalSource = SIMPRO_SOURCE;
+        }
         if (Object.keys(patch).length) {
           await updateSite(match.id, patch);
           result.sitesUpdated++;
@@ -130,6 +147,12 @@ export async function pullFromSimpro(
           postcode: remote.postcode,
           clientName: remote.customerName,
           siteRef: `SIMPRO:${remote.id}`,
+          contactName: remote.contactName,
+          contactEmail: remote.contactEmail,
+          contactWorkPhone: remote.contactWorkPhone,
+          contactMobile: remote.contactMobile,
+          externalId: remote.id,
+          externalSource: SIMPRO_SOURCE,
         });
         siteIdByExternal.set(remote.id, created.id);
         existing.push(created);

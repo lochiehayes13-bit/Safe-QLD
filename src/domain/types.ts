@@ -58,6 +58,20 @@ export interface Site {
   /** Free-form site/job reference used by the tech's employer. */
   siteRef?: string;
   notes?: string;
+  /**
+   * The site's own contact, as the office holds it.
+   *
+   * Reports print Contact, Mobile and Email rows, and until these existed
+   * there was nothing to put in them.
+   */
+  contactName?: string;
+  contactEmail?: string;
+  contactWorkPhone?: string;
+  contactMobile?: string;
+  /** The office system's own id for this site, where it came from one. */
+  externalId?: string;
+  /** Which system that id belongs to, e.g. 'simpro'. */
+  externalSource?: string;
   createdAt: string;
   updatedAt: string;
 }
