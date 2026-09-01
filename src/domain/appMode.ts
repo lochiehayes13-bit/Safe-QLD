@@ -286,7 +286,10 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/import', file: 'app/import.tsx', tab: 'sites', section: 'Your sites',
-    label: 'Import', modes: BOTH, openedFrom: ['/sites', '/site/[id]'],
+    // Also opened straight from Today while the device has no sites on it: the
+    // first thing a fresh install needs is this screen, and making somebody find
+    // it through the sites tab is how a phone stays empty.
+    label: 'Import', modes: BOTH, openedFrom: ['/', '/sites', '/site/[id]'],
     blurb: 'Reads a panel configuration or an asset register, and describes what it cannot parse rather than dismissing it.',
     terms: ['import', 'config', 'csv', 'panel file', 'register'],
   },

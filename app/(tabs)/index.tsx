@@ -71,6 +71,15 @@ export default function TodayScreen() {
   const t = useTheme();
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [sites, setSites] = useState<SiteSummary[]>([]);
+  /*
+   * Whether the first read has happened.
+   *
+   * Nought sites means one of two things and they need different screens: the
+   * database has not been read yet, or it has and there is nothing in it. Both
+   * were an empty list, so a fresh install and a slow first read looked the
+   * same — and the fresh install is the one that needs to be told what to do.
+   */
+  const [loaded, setLoaded] = useState(false);
   const [defects, setDefects] = useState<Defect[]>([]);
   const [impairments, setImpairments] = useState<ImpairmentRecord[]>([]);
   const [promises, setPromises] = useState<Promise_[]>([]);
@@ -96,7 +105,7 @@ export default function TodayScreen() {
       defectsAwaitingNotice(),
       lapsedEverywhere(new Date().toISOString()),
     ]);
-    setJobs(j); setSites(s); setDefects(d); setImpairments(imp);
+    setJobs(j); setSites(s); setDefects(d); setImpairments(imp); setLoaded(true);
     setPromises(pr); setRestock(rs.length); setPending(pc);
     setDueAssets(due.length); setRecurring(rec); setNotices(nt);
     setLapsed(lap.filter((x) => x.state === 'overdue').length);
@@ -117,6 +126,8 @@ export default function TodayScreen() {
       <QuickAsk />
 
       {impairments.map((imp) => <ImpairmentBanner key={imp.id} impairment={imp} />)}
+
+      {loaded && !sites.length ? <FirstRun /> : null}
 
       <Rowed gap={2} wrap>
         <Pill label="Urgent" value={urgentJobs.length} tone={urgentJobs.length ? 'fail' : 'muted'} onPress={() => router.push('/work/jobs')} />
@@ -195,6 +206,55 @@ function Greeting() {
         {new Date().toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' })}
       </Txt>
     </View>
+  );
+}
+
+/**
+ * What to do on a phone with nothing in it yet.
+ *
+ * A fresh install shows a grid of thirteen tiles and a row of noughts, which is
+ * correct and says nothing. The two things that turn it into somebody's round
+ * were written down in RUNNING.md, on a computer, which is not where the person
+ * holding the phone is.
+ *
+ * It goes as soon as there is a site, so it costs nothing after the first day —
+ * and it is deliberately two steps rather than a tour, because the second one
+ * is the one that matters and a list of six would bury it.
+ */
+function FirstRun() {
+  const t = useTheme();
+  return (
+    <Card>
+      <Rowed gap={2} align="center">
+        <MaterialCommunityIcons name="flag-outline" size={18} color={t.color.accentText} />
+        <Txt weight="700" style={{ flex: 1 }}>Nothing on this device yet</Txt>
+      </Rowed>
+      <Txt size="sm" tone="muted" style={{ marginTop: t.space(1.5), lineHeight: 20 }}>
+        Two things get it to look like your round. Neither needs signal.
+      </Txt>
+      <View style={{ height: t.space(2) }} />
+      <Card onPress={() => router.push('/settings')}>
+        <Txt size="sm" weight="700">1 · Say who you are</Txt>
+        <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+          Your name and licence number prefill every report, Form 72 and timesheet. Two minutes
+          here saves retyping them on every job.
+        </Txt>
+      </Card>
+      <View style={{ height: t.space(2) }} />
+      <Card onPress={() => router.push('/import')}>
+        <Txt size="sm" weight="700">2 · Import your register</Txt>
+        <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+          Sites, assets and their service history from a register export. The column-mapping step
+          shows what it read before anything is written, and it reports rows it could not read
+          rather than dropping them.
+        </Txt>
+      </Card>
+      <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
+        Everything else already works — the calculators, the standards library and the whole
+        reference need no account, no key and no signal. This notice goes when the first site
+        arrives.
+      </Txt>
+    </Card>
   );
 }
 
