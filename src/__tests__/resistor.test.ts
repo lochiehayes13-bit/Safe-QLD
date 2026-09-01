@@ -87,6 +87,44 @@ describe('decodeBands', () => {
     const r = decodeBands(['brown', 'black'], 4);
     expect(r.ok).toBe(false);
   });
+
+  it('rejects a multiplier band whose colour has no multiplier', () => {
+    /*
+     * "None" is a real band — it is the absence of a fourth stripe, meaning
+     * ±20% — and it carries no multiplier. In the multiplier position there is
+     * no value to read, and the wrong answer here is silent: a resistance is a
+     * number a technician sets a circuit up around.
+     */
+    const r = decodeBands(['brown', 'black', 'none', 'gold'], 4);
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('multiplier band');
+    // Named by its own label, so the message says which stripe to look at.
+    expect(r.error).toContain('None');
+  });
+
+  it('rejects a temperature coefficient band whose colour has no coefficient', () => {
+    // Gold and silver are multiplier and tolerance colours; neither appears in
+    // the six-band table's last position.
+    const r = decodeBands(['brown', 'black', 'black', 'red', 'brown', 'gold'], 6);
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('temperature coefficient');
+  });
+
+  it('says which band is wrong rather than that something is', () => {
+    /*
+     * Four different stripes can each be unreadable, and the whole use of this
+     * tool is that a person is holding the resistor. "Could not decode" sends
+     * them back to the start of a sequence they have already read once.
+     */
+    const messages = [
+      decodeBands(['gold', 'black', 'red', 'gold'], 4).error,
+      decodeBands(['brown', 'black', 'none', 'gold'], 4).error,
+      decodeBands(['brown', 'black', 'red', 'white'], 4).error,
+      decodeBands(['brown', 'black', 'black', 'red', 'brown', 'gold'], 6).error,
+    ];
+    expect(new Set(messages).size).toBe(4);
+    for (const m of messages) expect(m).toBeTruthy();
+  });
 });
 
 describe('formatOhms and shorthandOhms', () => {
@@ -101,6 +139,15 @@ describe('formatOhms and shorthandOhms', () => {
   ])('formats %i as %s / %s', (ohms, display, short) => {
     expect(formatOhms(ohms)).toBe(display);
     expect(shorthandOhms(ohms)).toBe(short);
+  });
+
+  it('prints a dash rather than NaN Ω', () => {
+    // Reached from a division somewhere upstream. "NaN kΩ" on a calculator
+    // screen reads as a value that was worked out.
+    for (const bad of [NaN, Infinity, -Infinity]) {
+      expect([bad, formatOhms(bad)]).toEqual([bad, '—']);
+      expect([bad, shorthandOhms(bad)]).toEqual([bad, '—']);
+    }
   });
 });
 
