@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { nowIso } from '@/db';
+import { qldIsoDay } from '@/domain/qldTime';
 import { Alert, Linking, Platform, View } from 'react-native';
 import { Stack, router } from 'expo-router';
 import * as Location from 'expo-location';
@@ -72,13 +74,15 @@ export default function RouteScreen() {
 
   useEffect(() => { if (start === 'here' && !here) void findMe(); }, [start, here, findMe]);
 
-  const today = new Date().toISOString().slice(0, 10);
+  // The Queensland calendar day. Between midnight and 10am a UTC day is
+  // yesterday's, and this company starts at seven.
+  const today = qldIsoDay(nowIso()) ?? '';
 
   const candidates = useMemo(
     () => jobs.filter((j) => {
       if (j.status === 'complete') return false;
       if (scope === 'open') return true;
-      return j.scheduledFor?.slice(0, 10) === today;
+      return qldIsoDay(j.scheduledFor ?? undefined) === today;
     }),
     [jobs, scope, today],
   );

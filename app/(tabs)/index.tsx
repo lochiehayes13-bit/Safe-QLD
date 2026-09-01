@@ -1,4 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
+import { nowIso } from '@/db';
+import { qldIsoDay } from '@/domain/qldTime';
 import { Pressable, ScrollView, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -91,7 +93,9 @@ export default function TodayScreen() {
   const [lapsed, setLapsed] = useState(0);
 
   const load = useCallback(async () => {
-    const today = new Date().toISOString().slice(0, 10);
+    // The Queensland calendar day. Between midnight and 10am a UTC day is
+    // yesterday's, and this company starts at seven.
+    const today = qldIsoDay(nowIso()) ?? '';
     const [j, s, d, imp, pr, rs, pc, due, rec, nt, lap] = await Promise.all([
       listJobs({ limit: 50 }),
       listSiteSummaries(),
@@ -115,8 +119,10 @@ export default function TodayScreen() {
 
   const openDefects = defects.filter((d) => d.status === 'open');
   const criticalDefects = openDefects.filter((d) => d.severity === 'critical');
-  const todayIso = new Date().toISOString().slice(0, 10);
-  const todaysJobs = jobs.filter((j) => j.scheduledFor?.slice(0, 10) === todayIso);
+  const todayIso = qldIsoDay(nowIso()) ?? '';
+  // Simpro's job date is an instant, so both sides are resolved the same way.
+  // Sliced, this screen showed yesterday's jobs every morning until ten.
+  const todaysJobs = jobs.filter((j) => qldIsoDay(j.scheduledFor ?? undefined) === todayIso);
   const urgentJobs = jobs.filter((j) => j.priority === 'urgent' && j.status !== 'complete');
   const nextJob = todaysJobs.find((j) => j.status !== 'complete') ?? jobs.find((j) => j.status !== 'complete');
 

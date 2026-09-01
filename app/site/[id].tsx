@@ -1,4 +1,5 @@
 import React, { useCallback, useState } from 'react';
+import { qldIsoDay } from '@/domain/qldTime';
 import { Alert, View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -69,7 +70,9 @@ export default function SiteScreen() {
         panelId: panels.length === 1 ? panels[0]!.id : undefined,
         title: `Service report — ${site.name}`,
         frequency: 'annual',
-        serviceDate: new Date().toISOString().slice(0, 10),
+        // The day the service is being carried out in Queensland, which is
+        // what the report is dated with and what it is later found by.
+        serviceDate: qldIsoDay(nowIso()) ?? '',
         status: 'draft',
       });
       router.push({ pathname: '/report/[id]', params: { id: report.id } });
@@ -335,7 +338,7 @@ export default function SiteScreen() {
               siteId: site.id,
               clientName: site.clientName ?? '',
               scopeLabel: site.name,
-              attendanceDate: nowIso().slice(0, 10),
+              attendanceDate: qldIsoDay(nowIso()) ?? '',
             }));
             router.push({ pathname: '/assessment/[id]', params: { id: rec.id } });
           }}

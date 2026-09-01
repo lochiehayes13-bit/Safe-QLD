@@ -57,7 +57,7 @@ export default function OccupierIndexScreen() {
   const load = useCallback(async () => {
     const [statements, sites] = await Promise.all([listOccupierStatements(), listSites()]);
     const bySite = new Map(sites.map((s) => [s.id, s]));
-    const today = nowIso().slice(0, 10);
+    const today = qldIsoDay(nowIso()) ?? '';
 
     setRows(statements.map((statement) => {
       const site = bySite.get(statement.siteId);

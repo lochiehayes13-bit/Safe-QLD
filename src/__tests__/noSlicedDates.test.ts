@@ -79,6 +79,20 @@ const SLICED = /\bformat[A-Za-z]*\([^)]*\.slice\(0,\s*10\)/;
  */
 const SLICED_INSTANT = /[A-Za-z_]+[Aa]t[!?]?\.slice\(0,\s*10\)/;
 
+/**
+ * Today, taken as the UTC day.
+ *
+ * Nine screens worked out what day it was this way. Between midnight and 10am
+ * that is yesterday, so the home screen listed yesterday's jobs, the route
+ * planner planned yesterday's run, and a service report was dated the day
+ * before the service — every morning until ten, which is the first three hours
+ * of this company's working day.
+ *
+ * `qldIsoDay(nowIso())` is the whole of the fix, and it is short enough that
+ * the slice will be written again by somebody in a hurry.
+ */
+const UTC_TODAY = /(?:new Date\(\)\.toISOString\(\)|nowIso\(\))\.slice\(0,\s*10\)/;
+
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
     if (SKIP.has(entry)) continue;
@@ -93,6 +107,10 @@ function offences(rule: RegExp): string[] {
   const found: string[] = [];
   for (const file of ROOTS.flatMap((r) => walk(r))) {
     readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
+      // A comment may quote the shape it is warning about, and one of them
+      // does. The rule is about what the app runs.
+      const code = line.trim();
+      if (code.startsWith('//') || code.startsWith('*') || code.startsWith('/*')) return;
       if (rule.test(line)) found.push(`${file}:${i + 1}`);
     });
   }
@@ -108,6 +126,20 @@ describe('dates handed to a formatter', () => {
 
   it('and no instant is sliced to its UTC day anywhere, formatter or not', () => {
     expect(offences(SLICED_INSTANT)).toEqual([]);
+  });
+
+  it('and nothing works out what day it is by slicing the clock', () => {
+    expect(offences(UTC_TODAY)).toEqual([]);
+  });
+
+  it('recognises the ways today was being taken in UTC', () => {
+    expect(UTC_TODAY.test('  const today = new Date().toISOString().slice(0, 10);')).toBe(true);
+    expect(UTC_TODAY.test('    const today = nowIso().slice(0, 10);')).toBe(true);
+    expect(UTC_TODAY.test('lapsedEverywhere(nowIso().slice(0,10))')).toBe(true);
+
+    // And leaves the fix alone, along with slicing something that is not now.
+    expect(UTC_TODAY.test("const today = qldIsoDay(nowIso()) ?? '';")).toBe(false);
+    expect(UTC_TODAY.test('const day = iso.slice(0, 10);')).toBe(false);
   });
 
   it('recognises an instant being sliced, and leaves the honest work alone', () => {

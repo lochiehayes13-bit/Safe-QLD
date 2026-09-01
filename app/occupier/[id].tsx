@@ -270,7 +270,7 @@ export default function OccupierStatementScreen() {
 
   const daysLeft = useMemo(() => {
     if (!deadline.due) return null;
-    const count = qldBusinessDaysBetween(nowIso().slice(0, 10), deadline.due);
+    const count = qldBusinessDaysBetween(qldIsoDay(nowIso()) ?? '', deadline.due);
     return count.days ?? null;
   }, [deadline.due]);
 

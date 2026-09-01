@@ -208,6 +208,45 @@ describe('ordering a list of them', () => {
   });
 });
 
+describe('what day the due list is judged against', () => {
+  /*
+   * Every caller hands routineDue the instant from nowIso() rather than a
+   * calendar date — the site due list, the cross-site due list and the home
+   * screen all do — and it was taking the first ten characters of it.
+   *
+   * So between midnight and 10am the whole due list was judged against
+   * yesterday, which is the first three hours of every working day here. An
+   * annual whose tolerance ran out overnight still reads as due rather than
+   * overdue, on the screen a technician opens at seven to find out what is
+   * outstanding.
+   */
+  const annual = {
+    routineId: 'det-annual', frequency: 'annual' as const,
+    firstCompletedAt: '2025-07-03', lastCompletedAt: '2025-07-03', completedCount: 1,
+  };
+
+  it('reads an instant as the Queensland day it is', () => {
+    // Scheduled 2026-07-03, so the two-month window closes on 2026-09-03.
+    // Half past seven on the morning of the fourth: the window has run.
+    expect(routineDue(annual, '2026-09-03T21:30:00.000Z').state).toBe('overdue');
+    // The same instant sliced is the third, which is the last compliant day.
+    expect(routineDue(annual, '2026-09-03').state).toBe('due');
+    // An afternoon on the third, where UTC and Queensland agree.
+    expect(routineDue(annual, '2026-09-03T04:30:00.000Z').state).toBe('due');
+  });
+
+  it('counts the days remaining from the same day it judges the state on', () => {
+    expect(routineDue(annual, '2026-09-03T21:30:00.000Z').daysUntilDue).toBe(-63);
+    expect(routineDue(annual, '2026-09-03T04:30:00.000Z').daysUntilDue).toBe(-62);
+  });
+
+  it('says nothing rather than guessing when it cannot read the day', () => {
+    // "1/9/2026" is the first of September here and the ninth of January to
+    // Date.parse, and a due list is not the place to pick one.
+    expect(routineDue(annual, '1/9/2026').state).toBe('not-scheduled');
+  });
+});
+
 describe('assessRunHistory', () => {
   const runs = (...dates: string[]) => dates.map((completedAt) => ({ completedAt }));
 

@@ -1,4 +1,6 @@
 import React, { useCallback, useState } from 'react';
+import { nowIso } from '@/db';
+import { qldIsoDay } from '@/domain/qldTime';
 import { FlatList, View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { listJobs, type JobRecord } from '@/db/opsRepo';
@@ -15,10 +17,13 @@ export default function JobsScreen() {
   const load = useCallback(async () => setJobs(await listJobs({ limit: 500 })), []);
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
-  const today = new Date().toISOString().slice(0, 10);
+  // The Queensland calendar day. Between midnight and 10am a UTC day is
+  // yesterday's, and this company starts at seven.
+  const today = qldIsoDay(nowIso()) ?? '';
   const shown = jobs.filter((j) => {
     if (filter === 'open') return j.status !== 'complete';
-    if (filter === 'today') return j.scheduledFor?.slice(0, 10) === today;
+    // Simpro's job date is an instant, so both sides are resolved the same way.
+    if (filter === 'today') return qldIsoDay(j.scheduledFor ?? undefined) === today;
     return true;
   });
 

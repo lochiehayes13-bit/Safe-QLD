@@ -115,7 +115,15 @@ export function routineDue(history: RoutineHistory, todayIso: string): RoutineDu
   if (!scheduledFor) return { ...base, state: 'not-scheduled' };
 
   const window = toleranceWindow(scheduledFor, frequency) ?? undefined;
-  const today = todayIso.slice(0, 10);
+  /*
+   * The Queensland day, because every caller hands this the instant from
+   * `nowIso()` rather than a calendar date — the site due list, the cross-site
+   * due list and the home screen all do. Sliced, the whole due list was judged
+   * against yesterday between midnight and 10am, which is the first three hours
+   * of every working day here.
+   */
+  const today = qldIsoDay(todayIso);
+  if (!today) return { ...base, state: 'not-scheduled' };
   const daysUntilDue = daysBetween(today, scheduledFor) ?? undefined;
 
   let state: DueState = 'upcoming';
