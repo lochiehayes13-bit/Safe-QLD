@@ -55,6 +55,17 @@ const toTaggable = (a: AssetRecord): TaggableAsset => ({
 const locationOf = (a: AssetRecord | undefined): string =>
   a ? [a.level, a.room].filter(Boolean).join(' · ') || a.locationNote || '' : '';
 
+/**
+ * A printer offset as typed.
+ *
+ * An empty field is no nudge. Anything else is handed on exactly as it parses,
+ * including NaN, because the sheet builder is where the refusal belongs and it
+ * says so in a warning the technician sees. Converting a bad value to 0 here
+ * would print a sheet that silently ignored the correction they just made and
+ * looked identical to the one that sent them to the drawer for more stock.
+ */
+const nudgeMm = (typed: string): number => (typed.trim() ? Number(typed.trim()) : 0);
+
 export default function LabelsScreen() {
   const t = useTheme();
   const [sites, setSites] = useState<Site[]>([]);
@@ -184,8 +195,11 @@ export default function LabelsScreen() {
       const sheet = buildLabelSheet(labels, {
         stock,
         startAt: parseInt(startAt, 10) || 1,
-        offsetXMm: offsetX ? parseFloat(offsetX) : 0,
-        offsetYMm: offsetY ? parseFloat(offsetY) : 0,
+        // Passed through as typed, NaN and all, rather than quietly turned into
+        // zero here: the sheet builder refuses an unreadable nudge out loud, and
+        // a technician who typed "1,5" needs to be told, not silently ignored.
+        offsetXMm: nudgeMm(offsetX),
+        offsetYMm: nudgeMm(offsetY),
         showOutlines: outlines,
       });
 
@@ -196,16 +210,22 @@ export default function LabelsScreen() {
 
       const file = await writePdf(`Asset labels - ${site.name}`, sheet.html);
       const shared = await shareFile(file, 'Asset labels');
+      // Every warning the builder raised, not just the barcode one. A start
+      // position it had to ignore or a nudge it could not read changes where
+      // the ink lands, and a technician who is not told assumes the correction
+      // took and throws away the sheet instead of the typo.
+      const otherWarnings = sheet.warnings.filter((w) => w !== sheet.barcode.reason);
       const lines = [
         `${sheet.printed} label${sheet.printed === 1 ? '' : 's'} on ${sheet.sheets} sheet${sheet.sheets === 1 ? '' : 's'} of ${stock.productCode}.`,
         sheet.barcode.rendered
           ? `Barcode: Code 39, ${sheet.barcode.narrowMm} mm narrow bar at ${sheet.barcode.ratio}:1.`
           : sheet.barcode.reason,
+        ...otherWarnings,
         ...sheet.omitted.map((o) => `Left off: ${o.tag} — ${o.reason}`),
         shared ? '' : `Written to ${file.name}. Sharing is not available on this device.`,
       ].filter(Boolean);
       setNote(lines.join('\n'));
-      if (sheet.omitted.length || !sheet.barcode.rendered) {
+      if (sheet.omitted.length || otherWarnings.length || !sheet.barcode.rendered) {
         Alert.alert('Sheet made, with notes', lines.join('\n\n'));
       }
     } catch (e) {
@@ -410,10 +430,13 @@ export default function LabelsScreen() {
                   />
                   <Rowed gap={2} align="flex-start" style={{ marginTop: t.space(3) }}>
                     <View style={{ flex: 1 }}>
-                      <Field label="Nudge right (mm)" value={offsetX} onChangeText={setOffsetX} keyboardType="numeric" />
+                      {/* Not a numeric keypad: it has no minus sign, and the whole
+                          point of this field is that a sheet printing low needs
+                          a negative number to bring it back up. */}
+                      <Field label="Nudge right (mm)" value={offsetX} onChangeText={setOffsetX} placeholder="0" />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Field label="Nudge down (mm)" value={offsetY} onChangeText={setOffsetY} keyboardType="numeric" />
+                      <Field label="Nudge down (mm)" value={offsetY} onChangeText={setOffsetY} placeholder="0" />
                     </View>
                   </Rowed>
                   <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5), lineHeight: 17 }}>

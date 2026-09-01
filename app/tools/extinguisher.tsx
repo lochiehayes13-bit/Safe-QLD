@@ -4,6 +4,7 @@ import { Stack } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   ALL_TYPES,
+  CONDITION_RULES,
   FIRE_CLASS_EXAMPLES,
   FIRE_CLASS_LABEL,
   PROFILES,
@@ -11,6 +12,7 @@ import {
   QLD_LICENSING_SOURCE,
   SUITABILITY_LABEL,
   adverseEnvironmentCaution,
+  assessCondition,
   checkCharge,
   chargeTolerance,
   citeSources,
@@ -23,6 +25,7 @@ import {
   typesForClass,
   weighingIsPrimaryCheck,
   type ClassSuitability,
+  type ConditionFinding,
   type Confidence,
   type ExtinguisherType,
   type FireClass,
@@ -30,6 +33,7 @@ import {
   type SourceId,
   type Suitability,
 } from '@/domain/extinguisher';
+import { qldDateOf } from '@/domain/measurementTrend';
 import { useTheme } from '@/theme';
 import {
   Banner, Card, Chip, Divider, EmptyState, Field, H2, Label, ResultBlock, Rowed, Screen, Segmented, StatTile, Txt,
@@ -39,9 +43,9 @@ import {
  * Extinguishers on site.
  *
  * Forty-three per cent of the assets Safe QLD services are on this screen, and
- * the three questions a technician actually has in front of a bracket are the
- * three tabs: what is this thing and what must it never be pointed at, when is
- * the next test on it, and is it still full.
+ * the four questions a technician actually has in front of a bracket are the
+ * four tabs: what is this thing and what must it never be pointed at, when is
+ * the next test on it, is it still full, and does what I can see condemn it.
  *
  * Every figure shows where it came from and how much that source is worth,
  * because the two things this screen is most likely to be used for — telling a
@@ -49,7 +53,18 @@ import {
  * out of test — are both arguments, and an argument needs a citation.
  */
 
-type Mode = 'type' | 'due' | 'weight';
+type Mode = 'type' | 'due' | 'weight' | 'condition';
+
+/**
+ * Today, in Queensland.
+ *
+ * Slicing an ISO timestamp is the obvious way to do this and it is wrong here:
+ * Brisbane is UTC+10 all year, so at seven in the morning on site the UTC date
+ * is still yesterday. Every due state on this screen is a string comparison
+ * against this date, so an hour of the working day where "today" is yesterday
+ * reports an extinguisher that fell due this morning as upcoming.
+ */
+const todayInQld = (): string => qldDateOf(Date.now());
 
 export default function ExtinguisherScreen() {
   const [mode, setMode] = useState<Mode>('type');
@@ -66,6 +81,7 @@ export default function ExtinguisherScreen() {
             { value: 'type', label: 'Type' },
             { value: 'due', label: 'Next due' },
             { value: 'weight', label: 'Weight' },
+            { value: 'condition', label: 'Condition' },
           ]}
         />
 
@@ -74,6 +90,7 @@ export default function ExtinguisherScreen() {
         {mode === 'type' ? <TypeView type={type} /> : null}
         {mode === 'due' ? <DueView type={type} /> : null}
         {mode === 'weight' ? <WeightView type={type} /> : null}
+        {mode === 'condition' ? <ConditionView type={type} /> : null}
       </Screen>
     </>
   );
@@ -331,7 +348,7 @@ function DueView({ type }: { type: ExtinguisherType }) {
   const [manufactured, setManufactured] = useState('');
   const [lastDone, setLastDone] = useState('');
 
-  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const today = useMemo(() => todayInQld(), []);
   const entered = manufactured.trim().length > 0 || lastDone.trim().length > 0;
 
   const result = useMemo(
@@ -463,15 +480,28 @@ function WeightView({ type }: { type: ExtinguisherType }) {
     [type, tare, gross, nominal, plateTolerance, entered],
   );
 
+  // Three answers, not two. Where the profile does not know whether this type
+  // carries a gauge, saying "the gauge is the primary check" is a confident
+  // instruction about a cylinder that may not have one.
+  const primary = weighingIsPrimaryCheck(type);
+
   return (
     <>
       <Banner
-        tone={weighingIsPrimaryCheck(type) ? 'warn' : 'info'}
-        title={weighingIsPrimaryCheck(type) ? 'The scale is the only check on this type' : 'The gauge is the primary check on this type'}
+        tone={primary === false ? 'info' : 'warn'}
+        title={
+          primary === true
+            ? 'The scale is the only check on this type'
+            : primary === false
+              ? 'The gauge is the primary check on this type'
+              : 'Whether this one has a gauge depends on the model'
+        }
         body={
-          weighingIsPrimaryCheck(type)
+          primary === true
             ? 'A carbon dioxide extinguisher carries no pressure gauge. Nothing but the mass says whether it is full.'
-            : 'This type has a gauge. Weighing is a second opinion on it, and worth taking — a unit that leaked and was re-pressurised with air still reads in the green.'
+            : primary === false
+              ? 'This type has a gauge. Weighing is a second opinion on it, and worth taking — a unit that leaked and was re-pressurised with air still reads in the green.'
+              : 'Look at the unit before deciding how to check it. This app does not know whether this type carries a gauge, and will not assume one is there.'
         }
       />
 
@@ -508,6 +538,11 @@ function WeightView({ type }: { type: ExtinguisherType }) {
             <Chip label={tolerance.confidence} tone={CONFIDENCE_TONE(tolerance.confidence)} />
           </Rowed>
           <Txt size="xl" weight="700" style={{ marginTop: 4 }}>±{tolerance.percentOfCharge}% of charge</Txt>
+          <Txt size="xs" tone={tolerance.origin === 'manufacturer-plate' ? 'accent' : 'muted'} weight="700" style={{ marginTop: 4 }}>
+            {tolerance.origin === 'manufacturer-plate'
+              ? "Read off this extinguisher's plate — the figure that governs"
+              : 'Held by this app, and not an Australian figure'}
+          </Txt>
           <Txt size="xs" tone="faint" style={{ marginTop: 4, lineHeight: 17 }}>{tolerance.caveat}</Txt>
         </Card>
       )}
@@ -549,6 +584,113 @@ function WeightView({ type }: { type: ExtinguisherType }) {
       )}
 
       <View style={{ height: t.space(2) }} />
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Does what I can see condemn it
+// ---------------------------------------------------------------------------
+
+const INSPECTED: { value: 'yes' | 'no'; label: string }[] = [
+  { value: 'yes', label: 'Inspected' },
+  { value: 'no', label: 'Not inspected' },
+];
+
+/**
+ * The condemn-or-repair decision, made in front of the bracket.
+ *
+ * This is the tab the module's condemnation rules exist for, and the reason it
+ * is a tab rather than a paragraph is that the answer a technician most needs
+ * is the one no screen wants to give: "undetermined". Pitting depth and dent
+ * severity are judgements, an uninspected asset is not a clean one, and both
+ * come back here as a question rather than a tick — which is the whole point of
+ * having the rules in the app instead of in somebody's head on a Friday.
+ */
+function ConditionView({ type }: { type: ExtinguisherType }) {
+  const t = useTheme();
+  const [inspected, setInspected] = useState<'yes' | 'no'>('yes');
+  const [ticked, setTicked] = useState<ConditionFinding[]>([]);
+
+  const rules = Object.values(CONDITION_RULES);
+  const toggle = (id: ConditionFinding) =>
+    setTicked((prev) => (prev.includes(id) ? prev.filter((f) => f !== id) : [...prev, id]));
+
+  const assessment = useMemo(
+    () => assessCondition({ type, findings: ticked, inspected: inspected === 'yes' }),
+    [type, ticked, inspected],
+  );
+
+  const tone = assessment.verdict === 'condemn' ? 'fail' : assessment.verdict === 'serviceable' ? 'pass' : 'warn';
+
+  return (
+    <>
+      <Segmented value={inspected} onChange={setInspected} options={INSPECTED} />
+
+      <ResultBlock
+        label="Verdict"
+        value={
+          assessment.verdict === 'condemn'
+            ? 'Condemn'
+            : assessment.verdict === 'serviceable'
+              ? 'Serviceable'
+              : 'Undetermined'
+        }
+        tone={tone}
+        detail={assessment.statement}
+      />
+
+      {assessment.needsJudgement.length ? (
+        <Banner
+          tone="warn"
+          title="A person has to decide these"
+          body="This app will not settle them from a checkbox. Decide on site, photograph it, and record the decision against the asset."
+        />
+      ) : null}
+
+      <H2>What was found</H2>
+      <Card>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.space(1.5) }}>
+          {rules.map((rule) => (
+            <Chip
+              key={rule.id}
+              label={rule.label}
+              selected={ticked.includes(rule.id)}
+              tone={rule.outcome === 'condemn' ? 'fail' : rule.outcome === 'judgement' ? 'warn' : 'accent'}
+              onPress={() => toggle(rule.id)}
+            />
+          ))}
+        </View>
+        <Divider />
+        <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
+          Red condemns the asset, amber is a judgement nobody can make from a form, blue is a defect the body survives.
+        </Txt>
+      </Card>
+
+      {[...assessment.condemning, ...assessment.needsJudgement, ...assessment.repairable].map((rule) => (
+        <Card key={rule.id}>
+          <Rowed gap={2}>
+            <Txt size="sm" weight="700" style={{ flex: 1 }}>{rule.label}</Txt>
+            <Chip
+              label={rule.outcome === 'condemn' ? 'Condemn' : rule.outcome === 'judgement' ? 'Judgement' : 'Repairable'}
+              tone={rule.outcome === 'condemn' ? 'fail' : rule.outcome === 'judgement' ? 'warn' : 'accent'}
+            />
+            <Chip label={rule.confidence} tone={CONFIDENCE_TONE(rule.confidence)} />
+          </Rowed>
+          <Txt size="xs" tone="muted" style={{ marginTop: 4, lineHeight: 17 }}>{rule.reason}</Txt>
+          <Txt size="xs" tone="accent" style={{ marginTop: 4, lineHeight: 17 }}>{rule.action}</Txt>
+        </Card>
+      ))}
+
+      {assessment.unrecognised.length ? (
+        <Banner
+          tone="warn"
+          title="A finding with no rule behind it"
+          body={`${assessment.unrecognised.join(', ')}. It has not been dropped — the asset is undetermined until a person rules on it and the finding is added to the rules.`}
+        />
+      ) : null}
+
+      <SourceList ids={assessment.sourceIds} />
     </>
   );
 }

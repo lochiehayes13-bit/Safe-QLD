@@ -705,8 +705,14 @@ function GapView() {
         />
       ) : result.known ? (
         <>
+          {/*
+            The label comes from the module, not from `basis`. On the floor the
+            limit has two ends and the figure reported is whichever end is in
+            question, so a screen guessing "worst point" would print the
+            smallest reading of a passing door under the wrong heading.
+          */}
           <ResultBlock
-            label={result.limit.basis === 'minimum' ? 'Least overlap' : result.limit.basis === 'mean' ? 'Mean' : 'Worst point'}
+            label={result.valueLabel}
             value={String(result.valueMm)}
             unit="mm"
             tone={result.within ? 'pass' : 'fail'}

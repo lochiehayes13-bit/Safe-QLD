@@ -99,20 +99,23 @@ export const LABEL_STOCKS: LabelStock[] = [
     labelWidthMm: 99.1, labelHeightMm: 38.1,
     columns: 2, rows: 7,
     columnGapMm: 2.5, rowGapMm: 0,
-    source: 'Avery Australia L7163 (99.1 x 38.1 mm, 14 per sheet): '
-      + 'https://www.averyproducts.com.au/product/removable-multi-purpose-labels-959046',
+    source: 'Avery 959004, L7163 format, 99.1 x 38.1 mm, 14 per sheet, as listed by Ink Station: '
+      + 'https://www.inkstation.com.au/1690/avery-959004-quick-peel-white-address-labels-with-sure-feed-'
+      + 'laser-14up-991-381mm-l7163-1400-labels-100-sheets-p-19469.html',
     confidence: 'medium',
-    note: 'Wider, so the barcode gets a bigger module and reads from further away. For plant rooms and boosters.',
+    note: 'Wider, so the barcode gets a bigger module and reads from further away. For plant rooms and boosters. '
+      + '959046 is the same L7163 format with removable adhesive, if a label has to come off again.',
   },
   {
     id: 'l7651',
     name: 'Avery L7651 — 65 per A4 sheet',
-    productCode: 'L7651 / 959005',
+    productCode: 'L7651 / 959071',
     pageWidthMm: 210, pageHeightMm: 297,
     labelWidthMm: 38.1, labelHeightMm: 21.2,
     columns: 5, rows: 13,
     columnGapMm: 2.5, rowGapMm: 0,
-    source: 'Avery L7651 (38.1 x 21.2 mm, 65 per sheet), as listed by Winc: '
+    source: 'Avery 959071, L7651 format, 38.1 x 21.2 mm, 65 per sheet — manufacturer code read off the '
+      + 'Winc listing itself: '
       + 'https://www.winc.com.au/main-catalogue-productdetail/avery-address-labels-with-quick-peel-for-laser-printers-38-1-x-21-2mm-6500-labels-l7651-/86716263',
     confidence: 'medium',
     note: 'Too narrow for a readable barcode at this tag length — these print the number only, and the sheet says so.',
@@ -149,10 +152,18 @@ export function stockLayout(stock: LabelStock): StockLayout {
  * space and starting with a bar, of which exactly three are wide.
  *
  * The table is the risky part of any barcode renderer — one transposed pattern
- * produces a symbol that scans as the wrong character — so the test file checks
- * every row for the structural invariants the symbology guarantees (nine
- * elements, three wide, two of them bars, all 44 patterns distinct) and then
- * decodes rendered symbols back to their input.
+ * produces a symbol that scans as the wrong character while looking perfect —
+ * so the test file rebuilds it character by character from the symbology's own
+ * construction (the five bars carry a two-of-five code with weights 1, 2, 4, 7
+ * and a parity position; the single wide space selects which block of ten
+ * characters is meant) and requires an exact match on every row.
+ *
+ * Checking only the structural invariants — nine elements, three wide, all 44
+ * distinct — is not enough and was tried: swapping the rows for "0" and "1"
+ * leaves the SET of patterns identical, so a set-equality test passes while
+ * every printed barcode encodes a different string from the number beside it.
+ * Round-tripping through the decoder does not catch it either, because the
+ * decoder reads the same table.
  */
 const CODE39: Record<string, string> = {
   '0': 'nnnwwnwnn', '1': 'wnnwnnnnw', '2': 'nnwwnnnnw', '3': 'wnwwnnnnn', '4': 'nnnwwnnnw',
@@ -175,26 +186,85 @@ export const CODE39_ALPHABET = Object.keys(CODE39).filter((c) => c !== CODE39_GU
 export const CODE39_PATTERNS: Readonly<Record<string, string>> = CODE39;
 
 /**
- * Minimum narrow element, below which a laser-printed symbol stops being
- * reliably readable by a phone camera in a dark riser cupboard.
+ * The dimensions the symbology fixes, held as data rather than as numbers in
+ * the code, so that every one of them carries where it came from.
  *
- * 0.19 mm (7.5 mil) is the common practical floor. The wide-to-narrow ratio
- * must be between 2.2:1 and 3.0:1 once the narrow element is under 0.508 mm
- * (0.020"), so 3:1 is preferred and 2.5:1 is the fallback when the label is
- * too narrow for it.
+ * These are not house preferences. They are the figures USS-39 states, in our
+ * own words: the smallest nominal narrow element it defines, the wide-to-narrow
+ * ratios it allows on either side of a 0.020" narrow element, the clear space
+ * it requires at each end, and the bar height it requires. Getting any of them
+ * wrong produces a symbol that looks right on paper and no-reads on site, which
+ * is indistinguishable from a printer fault and gets blamed on the phone.
  *
- * Source: AIM Uniform Symbology Specification USS-39, copy at
- * https://expresscorp.com/wp-content/uploads/2023/02/USS-39.pdf — a hosted
- * copy rather than AIM's own publication, so treated as medium confidence.
+ * The source is a hosted copy of the specification rather than AIM's own
+ * publication, so it is marked medium confidence: the figures are consistent
+ * with every secondary account of Code 39, but they have not been read out of
+ * a document AIM itself served.
  */
-export const MIN_NARROW_MM = 0.19;
-const PREFERRED_RATIO = 3;
-const FALLBACK_RATIO = 2.5;
-/** Ten narrow elements of clear space each side, per the specification. */
-const QUIET_ZONE_MODULES = 10;
-/** USS-39: bar height is at least 15% of symbol length, and never under 6.35 mm. */
-const MIN_BAR_HEIGHT_MM = 6.35;
-const BAR_HEIGHT_FRACTION = 0.15;
+export interface Code39Geometry {
+  /** Smallest nominal narrow element (the "X dimension") the specification defines. */
+  minNarrowMm: number;
+  /** Preferred wide-to-narrow ratio, allowed at any X. */
+  preferredRatio: number;
+  /** Fallback ratio, still inside the 2.2–3.0 band required below X = 0.508 mm. */
+  fallbackRatio: number;
+  /** Clear space at each end: the greater of ten narrow elements and this. */
+  quietZoneModules: number;
+  quietZoneMinMm: number;
+  /** Bar height: the greater of this fraction of the symbol length and the floor. */
+  barHeightFraction: number;
+  minBarHeightMm: number;
+  source: string;
+  confidence: StockConfidence;
+}
+
+export const CODE39_SPEC: Code39Geometry = {
+  minNarrowMm: 0.191,
+  preferredRatio: 3,
+  fallbackRatio: 2.5,
+  quietZoneModules: 10,
+  quietZoneMinMm: 2.54,
+  barHeightFraction: 0.15,
+  minBarHeightMm: 6.35,
+  source: 'AIM Uniform Symbology Specification USS-39: smallest nominal element 0.0075 in (0.191 mm); '
+    + 'wide-to-narrow ratio 2.0–3.0 at X of 0.020 in or larger and 2.2–3.0 below it; quiet zone the '
+    + 'greater of 10X and 0.10 in (2.54 mm) at each end; bar height the greater of 0.15 x symbol length '
+    + 'and 0.25 in (6.35 mm). Hosted copy at '
+    + 'https://expresscorp.com/wp-content/uploads/2023/02/USS-39.pdf',
+  confidence: 'medium',
+};
+
+/**
+ * The floor this module will not print below.
+ *
+ * It is the specification's smallest nominal narrow element, and nothing more.
+ * It is emphatically NOT a measured threshold for a phone camera in a dark
+ * riser cupboard — nobody here has measured that, and a symbol at the
+ * specification minimum may still read poorly off a tired toner cartridge.
+ * What it does mean is that a symbol this module agrees to draw is at least a
+ * conforming one; below it, it refuses.
+ */
+export const MIN_NARROW_MM = CODE39_SPEC.minNarrowMm;
+const PREFERRED_RATIO = CODE39_SPEC.preferredRatio;
+const FALLBACK_RATIO = CODE39_SPEC.fallbackRatio;
+const QUIET_ZONE_MODULES = CODE39_SPEC.quietZoneModules;
+const QUIET_ZONE_MIN_MM = CODE39_SPEC.quietZoneMinMm;
+const MIN_BAR_HEIGHT_MM = CODE39_SPEC.minBarHeightMm;
+const BAR_HEIGHT_FRACTION = CODE39_SPEC.barHeightFraction;
+
+/**
+ * The clear space at one end of the symbol.
+ *
+ * Ten narrow elements OR 2.54 mm, whichever is larger — and on the stock this
+ * app actually prints on, the second one wins. Ten modules of a 0.21 mm narrow
+ * element is 2.09 mm, which is short of what the specification asks for, and a
+ * short quiet zone is the most ordinary reason a perfectly formed barcode does
+ * not read. Sizing the symbol from the label width alone, as though the quiet
+ * zone always scaled with the module, quietly prints exactly that.
+ */
+function quietZoneMm(narrowMm: number): number {
+  return Math.max(QUIET_ZONE_MODULES * narrowMm, QUIET_ZONE_MIN_MM);
+}
 
 /** Total width of a symbol in narrow-element widths, including quiet zones. */
 export function code39WidthModules(characterCount: number, ratio: number): number {
@@ -205,6 +275,8 @@ export function code39WidthModules(characterCount: number, ratio: number): numbe
 export interface BarcodePlan {
   ratio: number;
   narrowMm: number;
+  /** Clear space at each end. Carried on the plan so the renderer cannot use a different one. */
+  quietZoneMm: number;
   widthMm: number;
   heightMm: number;
 }
@@ -213,10 +285,17 @@ export interface BarcodePlan {
  * Whether a barcode can honestly be printed in the space available.
  *
  * Returns undefined rather than shrinking the modules until it fits. A symbol
- * printed below the readable module width looks like a working barcode and
+ * printed below the specified module width looks like a working barcode and
  * scans like a smudge, and a technician who has learned that the barcodes on
  * these labels do not work stops trying to scan them — which loses the whole
  * point of the exercise for every label, not just the small ones.
+ *
+ * The quiet zone is the reason this is not one division. It is the greater of
+ * ten narrow elements and 2.54 mm, so at the module widths a 63.5 mm label
+ * allows, the fixed 2.54 mm wins and does NOT shrink with the module. Dividing
+ * the label width by a module count that assumes it does gives every symbol a
+ * quiet zone about half a millimetre short at each end — which is not visible,
+ * and is the most ordinary reason a well-formed barcode will not read.
  */
 export function planBarcode(
   dataLength: number,
@@ -225,12 +304,18 @@ export function planBarcode(
 ): BarcodePlan | undefined {
   const characters = dataLength + 2; // start and stop
   for (const ratio of [PREFERRED_RATIO, FALLBACK_RATIO]) {
-    const modules = code39WidthModules(characters, ratio);
-    const narrowMm = availableWidthMm / modules;
-    if (narrowMm < MIN_NARROW_MM) continue;
+    // Bars and inter-character gaps only; the quiet zones are added separately
+    // because they do not always scale with the module.
+    const barModules = code39WidthModules(characters, ratio) - QUIET_ZONE_MODULES * 2;
+    // Two candidates, because which quiet-zone rule binds depends on the answer.
+    // Take the scaling one only where it really is the larger of the two.
+    const scaling = availableWidthMm / (barModules + QUIET_ZONE_MODULES * 2);
+    const fixed = (availableWidthMm - QUIET_ZONE_MIN_MM * 2) / barModules;
+    const narrowMm = QUIET_ZONE_MODULES * scaling >= QUIET_ZONE_MIN_MM ? scaling : fixed;
+    if (!(narrowMm >= MIN_NARROW_MM)) continue;
     const heightMm = Math.max(MIN_BAR_HEIGHT_MM, availableWidthMm * BAR_HEIGHT_FRACTION);
     if (heightMm > availableHeightMm) continue;
-    return { ratio, narrowMm, widthMm: availableWidthMm, heightMm };
+    return { ratio, narrowMm, quietZoneMm: quietZoneMm(narrowMm), widthMm: availableWidthMm, heightMm };
   }
   return undefined;
 }
@@ -249,8 +334,9 @@ export function code39Svg(data: string, plan: BarcodePlan): string | undefined {
   }
 
   const { ratio, narrowMm, heightMm } = plan;
+  const quiet = plan.quietZoneMm ?? quietZoneMm(narrowMm);
   const rects: string[] = [];
-  let x = QUIET_ZONE_MODULES * narrowMm;
+  let x = quiet;
 
   for (let i = 0; i < characters.length; i += 1) {
     const pattern = CODE39[characters[i] as string];
@@ -266,7 +352,7 @@ export function code39Svg(data: string, plan: BarcodePlan): string | undefined {
     if (i < characters.length - 1) x += narrowMm; // inter-character gap
   }
 
-  const totalWidth = x + QUIET_ZONE_MODULES * narrowMm;
+  const totalWidth = x + quiet;
   return `<svg class="bc" width="${round(totalWidth)}mm" height="${round(heightMm)}mm" `
     + `viewBox="0 0 ${round(totalWidth)} ${round(heightMm)}" shape-rendering="crispEdges" `
     + `xmlns="http://www.w3.org/2000/svg"><g fill="#000">${rects.join('')}</g></svg>`;
@@ -372,9 +458,19 @@ export function buildLabelSheet(labels: LabelContent[], options: LabelSheetOptio
   const warnings: string[] = [];
   const omitted: OmittedLabel[] = [];
 
+  if (usableOffset(options.offsetXMm) === undefined || usableOffset(options.offsetYMm) === undefined) {
+    warnings.push(
+      'The printer nudge was not a number, so the sheet was laid out with no offset at all. '
+      + 'Type it again as millimetres — 1.5, or -2 to move up and left.',
+    );
+  }
+
   const startAt = Math.trunc(options.startAt ?? 1);
   let skip = startAt - 1;
-  if (startAt < 1 || startAt > layout.perSheet) {
+  // Number.isFinite, not a range test: a start position typed as text arrives
+  // here as NaN, every comparison against it is false, and a silent NaN would
+  // slip past a plain "outside 1 to 21" check and skip nothing without saying so.
+  if (!Number.isFinite(startAt) || startAt < 1 || startAt > layout.perSheet) {
     warnings.push(
       `Start position ${startAt} is outside the 1 to ${layout.perSheet} labels on a sheet of `
       + `${stock.productCode}. Started at the first label instead.`,
@@ -459,14 +555,29 @@ function renderLabel(
 </div>`;
 }
 
+/**
+ * A printer nudge, or nothing.
+ *
+ * A field the technician types into reaches here as whatever they typed, and
+ * "1.2.3" or an empty-looking string parses to NaN. NaN travels silently
+ * through the arithmetic and lands in the stylesheet as "left:NaNmm", which no
+ * browser honours — every label collapses to the top-left of the page and a
+ * whole sheet of stock goes in the bin. An unreadable nudge is treated as no
+ * nudge, and said out loud.
+ */
+function usableOffset(value: number | undefined): number | undefined {
+  if (value === undefined) return 0;
+  return Number.isFinite(value) ? value : undefined;
+}
+
 function renderSheet(
   cells: string[],
   stock: LabelStock,
   layout: StockLayout,
   options: LabelSheetOptions,
 ): string {
-  const dx = options.offsetXMm ?? 0;
-  const dy = options.offsetYMm ?? 0;
+  const dx = usableOffset(options.offsetXMm) ?? 0;
+  const dy = usableOffset(options.offsetYMm) ?? 0;
   const boxes: string[] = [];
 
   for (let i = 0; i < cells.length; i += 1) {

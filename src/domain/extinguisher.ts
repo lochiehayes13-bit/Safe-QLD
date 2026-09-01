@@ -1,4 +1,4 @@
-import { scheduledDate, type Frequency } from '@/domain/qldCompliance';
+import { frequencySpec, scheduledDate, type Frequency } from '@/domain/qldCompliance';
 import { parseImpreciseDate, type ImpreciseDate } from '@/parsers/assetRegister';
 
 /**
@@ -135,14 +135,16 @@ export const SOURCES: Record<SourceId, Source> = {
   },
   'co2-ten-year-claim': {
     id: 'co2-ten-year-claim',
-    what: 'The competing claim that carbon dioxide extinguishers are hydrostatically tested at ten years, on the gas-cylinder basis rather than the AS 1851 five-yearly basis',
-    ref: 'Trade guidance on Australian extinguisher testing requirements, citing AS 2030.5 cylinder testing at a certified test station',
-    url: 'https://skylareducation.edu.au/fire-extinguisher-testing-requirements-in-australia-the-ultimate-guide-for-business-owners/',
+    what: 'The competing claim that carbon dioxide extinguishers are pressure tested at ten years while every other portable is tested at five',
+    ref: 'Firechief Australia, fire extinguisher pressure testing guide — "CO2 extinguishers require testing every 10 years" against five years for most portables',
+    url: 'https://firechief.net.au/fire-extinguisher-pressure-testing-adelaide-guide/',
     confidence: 'low',
     basis:
-      'Second-hand trade guidance and not reconcilable with the sources that put every portable extinguisher on a '
-      + 'five-yearly test. Carried because the disagreement is real and a technician needs to know it exists, not '
-      + 'because this app believes it.',
+      "An Australian fire contractor's own page, and the only source reached that states the ten-year figure in its "
+      + 'own words. It names AS 1851 as the governing standard but does not say which clause or table the ten years '
+      + 'comes from, and it is not reconcilable with the sources that put every portable extinguisher on a five-yearly '
+      + 'test. No standard designation is asserted for it here, because none of the sources reached gives one. Carried '
+      + 'because the disagreement is real and a technician needs to know it exists, not because this app believes it.',
   },
   'as1841-series': {
     id: 'as1841-series',
@@ -178,11 +180,14 @@ export const SOURCES: Record<SourceId, Source> = {
   'qbcc-portable': {
     id: 'qbcc-portable',
     what: 'That Queensland licenses portable fire equipment work by class, and that a certify licence does not authorise inspect-and-test work',
-    ref: 'Queensland Building and Construction Commission — changes to portable fire equipment licences (fire protection licence framework)',
-    url: 'https://qbcc.qld.gov.au/licences/licensing-reforms/new-fire-protection-licence-framework/changes-portable-fire-equipment',
+    ref: 'Queensland Building and Construction Commission — fire protection (portable) certify licence class, scope of work',
+    url: 'https://qbcc.qld.gov.au/licences/apply-licence/available-licences/fire-protection/fire-protection-portable-certify',
     confidence: 'high',
     basis:
-      "The Queensland regulator's own page. Relevant to every line of this module because in Queensland the person "
+      "The Queensland regulator's own page for the licence class, which is where the exclusion is actually stated: "
+      + 'inspect and test work is outside the certify scope and needs the inspect-and-test class for the stream. The '
+      + 'licence-framework overview page names the classes but does not state that exclusion, so the class page is '
+      + 'cited instead of it. Relevant to every line of this module because in Queensland the person '
       + 'signing the record has to hold the class for the work actually done, and the record of maintenance carries '
       + 'their licence number.',
   },
@@ -244,6 +249,34 @@ export function citeSources(ids: SourceId[]): Source[] {
 }
 
 /**
+ * Why a refusal happened, in a form a caller can count.
+ *
+ * The prose in `reason` is written for a technician and will be reworded; the
+ * code is written for the rollup and must not be. Counting refusals by pattern
+ * matching their sentences — which the site rollup used to do — means an editor
+ * improving a message silently drops a caveat off a proposal, and nothing
+ * fails.
+ */
+export type RefusalCode =
+  | 'type-cell-empty'
+  | 'type-cell-ambiguous-powder'
+  | 'type-cell-two-agents'
+  | 'type-cell-unrecognised'
+  | 'no-anchor-date'
+  | 'manufacture-in-future'
+  | 'service-before-manufacture'
+  | 'service-in-future'
+  | 'anchor-unusable'
+  | 'interval-mismatch'
+  | 'mass-not-read'
+  | 'mass-not-whole-grams'
+  | 'gross-at-or-below-tare'
+  | 'no-expected-charge'
+  | 'no-charge-tolerance'
+  | 'tolerance-not-a-percentage'
+  | 'no-position-held';
+
+/**
  * The answer where there is no answer.
  *
  * Same shape the emergency lighting module uses, and deliberately so: a refusal
@@ -252,6 +285,7 @@ export function citeSources(ids: SourceId[]): Source[] {
  */
 export interface Refused {
   known: false;
+  code: RefusalCode;
   reason: string;
   whatToDo: string;
   sourceIds: SourceId[];
@@ -386,21 +420,20 @@ const CLASS_C_CONDITIONAL: Omit<ClassSuitability, 'sourceIds'> = {
   consequence:
     'Do not extinguish a burning gas escape unless the supply can be isolated first. Putting the flame out while gas '
     + 'is still flowing fills the space with an explosive mixture and leaves the ignition source in it. Isolate, then '
-    + 'deal with what the gas has set alight.',
+    + 'deal with what the gas has set alight. This is a statement about the gas valve and not a rating: whether this '
+    + "agent does anything to a gas fire is on the extinguisher's own label.",
   confidence: 'medium',
   dispute:
     'The two trade sources reached disagree on whether ABE powder carries a Class C rating at all. It makes no '
     + 'difference to what a technician should do, which is isolate the gas.',
 };
 
-const notRated = (
-  fireClass: FireClass,
-  confidence: Confidence,
-  sourceIds: SourceId[],
-  consequence?: string,
-): ClassSuitability => ({ fireClass, suitability: 'unrated', confidence, sourceIds, consequence });
-
-const CLASS_D_UNRATED = (sourceIds: SourceId[]): ClassSuitability => ({
+/**
+ * Class D, which every agent in this list is prohibited on rather than merely
+ * unrated. Named for what it returns: water and carbon dioxide are not useless
+ * on burning metal, they are fuel for it.
+ */
+const CLASS_D_PROHIBITED = (sourceIds: SourceId[]): ClassSuitability => ({
   fireClass: 'D',
   suitability: 'prohibited',
   consequence:
@@ -431,7 +464,7 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
         sourceIds: ['alexon-types', 'essentialfire-types'],
       },
       { ...CLASS_C_CONDITIONAL, sourceIds: ['essentialfire-types'] },
-      CLASS_D_UNRATED(['essentialfire-types']),
+      CLASS_D_PROHIBITED(['essentialfire-types']),
       {
         fireClass: 'E',
         suitability: 'prohibited',
@@ -470,7 +503,7 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
       { fireClass: 'A', suitability: 'rated', confidence: 'high', sourceIds: ['alexon-types', 'essentialfire-types'] },
       { fireClass: 'B', suitability: 'rated', confidence: 'high', sourceIds: ['alexon-types', 'essentialfire-types'] },
       { ...CLASS_C_CONDITIONAL, sourceIds: ['essentialfire-types'] },
-      CLASS_D_UNRATED(['essentialfire-types']),
+      CLASS_D_PROHIBITED(['essentialfire-types']),
       {
         fireClass: 'E',
         suitability: 'prohibited',
@@ -509,7 +542,7 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
       { fireClass: 'A', suitability: 'rated', confidence: 'high', sourceIds: ['alexon-types', 'essentialfire-types'] },
       { fireClass: 'B', suitability: 'rated', confidence: 'high', sourceIds: ['alexon-types', 'essentialfire-types'] },
       { ...CLASS_C_CONDITIONAL, sourceIds: ['alexon-types', 'essentialfire-types'] },
-      CLASS_D_UNRATED(['essentialfire-types']),
+      CLASS_D_PROHIBITED(['essentialfire-types']),
       { fireClass: 'E', suitability: 'rated', confidence: 'high', sourceIds: ['alexon-types', 'essentialfire-types'] },
       {
         fireClass: 'F',
@@ -554,7 +587,7 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
       },
       { fireClass: 'B', suitability: 'rated', confidence: 'medium', sourceIds: ['essentialfire-types'] },
       { ...CLASS_C_CONDITIONAL, sourceIds: ['essentialfire-types'] },
-      CLASS_D_UNRATED(['essentialfire-types']),
+      CLASS_D_PROHIBITED(['essentialfire-types']),
       { fireClass: 'E', suitability: 'rated', confidence: 'medium', sourceIds: ['essentialfire-types'] },
       {
         fireClass: 'F',
@@ -598,7 +631,7 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
       },
       { fireClass: 'B', suitability: 'rated', confidence: 'high', sourceIds: ['alexon-types', 'essentialfire-types'] },
       { ...CLASS_C_CONDITIONAL, sourceIds: ['essentialfire-types'] },
-      CLASS_D_UNRATED(['essentialfire-types']),
+      CLASS_D_PROHIBITED(['essentialfire-types']),
       {
         fireClass: 'E',
         suitability: 'rated',
@@ -658,7 +691,7 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
         sourceIds: ['essentialfire-types'],
       },
       { ...CLASS_C_CONDITIONAL, sourceIds: ['essentialfire-types'] },
-      CLASS_D_UNRATED(['essentialfire-types']),
+      CLASS_D_PROHIBITED(['essentialfire-types']),
       {
         fireClass: 'E',
         suitability: 'prohibited',
@@ -707,7 +740,7 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
       },
       { fireClass: 'B', suitability: 'rated', confidence: 'low', sourceIds: ['as1841-series'] },
       { ...CLASS_C_CONDITIONAL, sourceIds: ['as1841-series'] },
-      CLASS_D_UNRATED(['as1841-series']),
+      CLASS_D_PROHIBITED(['as1841-series']),
       { fireClass: 'E', suitability: 'rated', confidence: 'low', sourceIds: ['as1841-series'] },
       {
         fireClass: 'F',
@@ -738,7 +771,7 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
       { fireClass: 'A', suitability: 'unrated', confidence: 'low', sourceIds: ['dcceew-halon'] },
       { fireClass: 'B', suitability: 'unrated', confidence: 'low', sourceIds: ['dcceew-halon'] },
       { ...CLASS_C_CONDITIONAL, sourceIds: ['dcceew-halon'] },
-      CLASS_D_UNRATED(['dcceew-halon']),
+      CLASS_D_PROHIBITED(['dcceew-halon']),
       { fireClass: 'E', suitability: 'unrated', confidence: 'low', sourceIds: ['dcceew-halon'] },
       {
         fireClass: 'F',
@@ -827,6 +860,7 @@ export function checkUse(type: ExtinguisherType, fireClass: FireClass): UseVerdi
   if (!entry) {
     return {
       known: false,
+      code: 'no-position-held',
       reason: `This app holds no position on ${profile.label} against ${FIRE_CLASS_LABEL[fireClass]}.`,
       whatToDo: "Read the rating printed on the extinguisher's own label and record it against the asset.",
       sourceIds: profile.sourceIds,
@@ -885,7 +919,14 @@ const TYPE_PATTERNS: { type: ExtinguisherType; re: RegExp; confidence: Confidenc
   { type: 'wet-chemical', re: /wet\s*-?\s*chem\w*/i, confidence: 'high' },
   { type: 'carbon-dioxide', re: /\bco\s*-?\s*2\b|\bco₂|carbon\s*di-?\s*oxide/i, confidence: 'high' },
   { type: 'dry-chemical-abe', re: /\babe\b/i, confidence: 'high' },
-  { type: 'dry-chemical-be', re: /\bbe\b/i, confidence: 'medium' },
+  // The one pattern in this list that is deliberately case sensitive. "BE" is
+  // an agent designation and is written in capitals wherever it means one;
+  // "be" is the commonest word in English, and a case-insensitive match turns
+  // a note cell reading "9kg to be replaced" into a BE powder unit — a type
+  // with no Class A rating, asserted onto an asset nobody has looked at. A
+  // lower-case "be" falls through to the powder refusal or to "not
+  // recognised", which are both answers a person can act on.
+  { type: 'dry-chemical-be', re: /(?:^|[^A-Za-z])BE(?![A-Za-z])/, confidence: 'medium' },
   { type: 'foam', re: /\bafff\b|\bfoam\b|\bff\b/i, confidence: 'high' },
   { type: 'vaporising-liquid', re: /vapou?ri[sz]ing|\bhalotron\b|\bfe-?36\b|\bfm-?200\b|clean\s*agent/i, confidence: 'medium' },
   { type: 'water', re: /\bwater\b|\bh2o\b|\bair\s*water\b/i, confidence: 'high' },
@@ -910,6 +951,7 @@ export function classifyTypeText(text: string | undefined): TypeMatch | Refused 
   if (!raw) {
     return {
       known: false,
+      code: 'type-cell-empty',
       reason: 'The type column is empty.',
       whatToDo: 'Read the type off the label at the next attendance and correct the register.',
       sourceIds: ['as1841-series'],
@@ -929,6 +971,7 @@ export function classifyTypeText(text: string | undefined): TypeMatch | Refused 
   if (distinct.length > 1) {
     return {
       known: false,
+      code: 'type-cell-two-agents',
       reason: `"${raw}" names more than one agent: ${distinct.map((t) => PROFILES[t].shortLabel).join(' and ')}.`,
       whatToDo:
         'One row per extinguisher. Split the row, or read the label and record the one agent this asset actually '
@@ -942,6 +985,7 @@ export function classifyTypeText(text: string | undefined): TypeMatch | Refused 
   if (AMBIGUOUS_POWDER.test(raw)) {
     return {
       known: false,
+      code: 'type-cell-ambiguous-powder',
       reason:
         `"${raw}" says powder without saying whether it is ABE or BE. The two carry the same white band and differ on `
         + 'Class A, so this cannot be settled from the cell.',
@@ -952,6 +996,7 @@ export function classifyTypeText(text: string | undefined): TypeMatch | Refused 
 
   return {
     known: false,
+    code: 'type-cell-unrecognised',
     reason: `"${raw}" does not name an extinguisher type this app recognises.`,
     whatToDo: 'Read the label and record the agent. Do not assume from the size or the location.',
     sourceIds: ['as1841-series'],
@@ -1081,9 +1126,11 @@ export function pressureTestInterval(type: ExtinguisherType): PressureTestInterv
       sourceIds: ['as1851-s10', 'firewize-5yr', 'co2-ten-year-claim'],
       dispute:
         'Sources disagree. Guidance describing AS 1851 Section 10 puts every portable extinguisher on a five-yearly '
-        + 'test; other trade guidance puts CO₂ cylinders on a ten-yearly hydrostatic test at a certified gas cylinder '
-        + 'test station. Five years is used here because it is the shorter, not because the ten-year reading has been '
-        + 'disproved. Settle it against the purchased copy before quoting a client either way.',
+        + 'test; an Australian contractor reached puts CO₂ on a ten-yearly test while leaving every other portable on '
+        + 'five. Neither source names the clause or the cylinder standard the ten years would come from, so no '
+        + 'standard designation is asserted for it here. Five years is used because it is the shorter, not because '
+        + 'the ten-year reading has been disproved. Settle it against the purchased copy before quoting a client '
+        + 'either way.',
       note:
         'A CO₂ body is a high-pressure cylinder and is tested at a gas cylinder test station, not on the van.',
     };
@@ -1338,12 +1385,34 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
   const notes: string[] = [];
   const sourceIds: SourceId[] = [...spec.sourceIds];
 
+  // The occurrence count uses the interval in months and the date arithmetic
+  // uses the Section 6 frequency of the same length. They agree today for all
+  // three activities, and the day one of them moves — a ten-yearly CO₂ test
+  // settled in this module's favour, say — they must not silently disagree, or
+  // the app counts occurrences at one interval and dates them at another.
+  const frequencyMonths = frequencySpec(frequency)?.intervalMonths;
+  if (frequencyMonths !== spec.intervalMonths) {
+    return {
+      known: false,
+      code: 'interval-mismatch',
+      reason:
+        `The ${ACTIVITY_LABEL[input.activity].toLowerCase()} is held at ${spec.intervalMonths} months but its date `
+        + `arithmetic runs on a ${frequencyMonths ?? 'missing'}-month schedule. The two disagree, so no due date is `
+        + 'given.',
+      whatToDo:
+        'This is a fault in the app, not in the register. Report it — the interval and the schedule frequency for '
+        + 'this activity have to be the same length.',
+      sourceIds,
+    };
+  }
+
   const manufactured = toSpan(input.manufactured);
   const lastDone = toSpan(input.lastDone);
 
   if (!manufactured && !lastDone) {
     return {
       known: false,
+      code: 'no-anchor-date',
       reason:
         `Neither a date of manufacture nor a record of the last ${ACTIVITY_LABEL[input.activity].toLowerCase()} is `
         + 'readable, so there is nothing to count from.',
@@ -1357,6 +1426,7 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
   if (manufactured && manufactured.earliest > today) {
     return {
       known: false,
+      code: 'manufacture-in-future',
       reason: `The date of manufacture reads ${manufactured.label}, which is in the future.`,
       whatToDo:
         'Re-read the stamp. A two-digit year read as the wrong century is the usual cause, and the register needs '
@@ -1365,9 +1435,29 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
     };
   }
 
+  // A service dated in the future is the same class of error as a date of
+  // manufacture in the future — a typed year, usually — and it is worse to
+  // schedule from, because it is the date the whole schedule counts forward
+  // from where there is no cylinder stamp. Scheduled from, the asset reports
+  // "upcoming" until the typo is found, which on a five-yearly is years.
+  if (lastDone && lastDone.earliest > today) {
+    return {
+      known: false,
+      code: 'service-in-future',
+      reason:
+        `The last ${ACTIVITY_LABEL[input.activity].toLowerCase()} reads ${lastDone.label}, which has not happened `
+        + 'yet.',
+      whatToDo:
+        'Correct the date in the source system. Until it is corrected this asset has no schedule — a service dated '
+        + 'in the future counts an occurrence nobody carried out.',
+      sourceIds: ['as1841-series'],
+    };
+  }
+
   if (manufactured && lastDone && lastDone.latest < manufactured.earliest) {
     return {
       known: false,
+      code: 'service-before-manufacture',
       reason:
         `The last ${ACTIVITY_LABEL[input.activity].toLowerCase()} reads ${lastDone.label}, which is before the date of `
         + `manufacture of ${manufactured.label}.`,
@@ -1416,6 +1506,7 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
   if (!due) {
     return {
       known: false,
+      code: 'anchor-unusable',
       reason: 'The due date could not be worked out from the anchor date.',
       whatToDo: 'Check the anchor date is a real date and re-run.',
       sourceIds,
@@ -1706,7 +1797,10 @@ export function assessCondition(input: ConditionInput): ConditionAssessment {
   const repairable: ConditionRule[] = [];
   const unrecognised: string[] = [];
 
-  const findings = [...input.findings];
+  // The same finding ticked twice is one finding. Left in, it prints the
+  // condemnation reason twice on a report and counts two defects where there is
+  // one.
+  const findings = [...new Set(input.findings)];
   // The agent itself is a finding. A register that says "BCF" condemns the
   // asset whether or not anyone ticked the halon box.
   if (input.type === 'halon' && !findings.includes('halon-agent')) findings.push('halon-agent');
@@ -1723,8 +1817,11 @@ export function assessCondition(input: ConditionInput): ConditionAssessment {
   }
 
   // Halon first, then the rest in the order the rules are declared, which is
-  // worst first by construction.
-  condemning.sort((a, b) => (a.id === 'halon-agent' ? -1 : b.id === 'halon-agent' ? 1 : 0));
+  // worst first by construction. Written as a rank rather than as a pairwise
+  // "is it halon" test, which is not a consistent ordering and is not required
+  // to be stable.
+  const rank = (r: ConditionRule) => (r.id === 'halon-agent' ? 0 : 1);
+  condemning.sort((a, b) => rank(a) - rank(b));
 
   const sourceIds = [
     ...condemning.flatMap((r) => r.sourceIds),
@@ -1822,6 +1919,16 @@ export function assessCondition(input: ConditionInput): ConditionAssessment {
 
 export interface ChargeTolerance {
   percentOfCharge: number;
+  /**
+   * Where the figure came from.
+   *
+   * `manufacturer-plate` is read off the extinguisher in the technician's hand
+   * and has no document behind it, so it carries no `sourceIds` — and must not
+   * be given one. Stamping a plate reading with a standard's reference, which
+   * is what an empty-array fallback did here, puts AS 1851 Section 10 beside a
+   * number that AS 1851 never stated, in a document a client reads.
+   */
+  origin: 'manufacturer-plate' | 'app-held';
   confidence: Confidence;
   sourceIds: SourceId[];
   /** Why this figure should be treated carefully. Always present. */
@@ -1846,6 +1953,7 @@ export interface ChargeTolerance {
 export const CHARGE_TOLERANCE: Partial<Record<ExtinguisherType, ChargeTolerance>> = {
   'carbon-dioxide': {
     percentOfCharge: 10,
+    origin: 'app-held',
     confidence: 'low',
     sourceIds: ['nfpa10-co2-charge'],
     caveat:
@@ -1863,6 +1971,7 @@ export function chargeTolerance(
     if (!Number.isFinite(manufacturerPercent) || manufacturerPercent <= 0 || manufacturerPercent >= 100) {
       return {
         known: false,
+        code: 'tolerance-not-a-percentage',
         reason: `A tolerance of ${manufacturerPercent}% is not a usable figure.`,
         whatToDo: 'Re-read the plate. The tolerance is a small percentage of the charge, not of the gross mass.',
         sourceIds: ['as1851-s10'],
@@ -1870,15 +1979,20 @@ export function chargeTolerance(
     }
     return {
       percentOfCharge: manufacturerPercent,
+      origin: 'manufacturer-plate',
       confidence: 'high',
       sourceIds: [],
-      caveat: "Taken from the manufacturer's own marking on this extinguisher, which is the figure that governs.",
+      caveat:
+        "Taken from the manufacturer's own marking on this extinguisher, which is the figure that governs. It is a "
+        + 'reading off the asset and not a published figure, so no document is cited for it — record the plate in the '
+        + 'photographs instead.',
     };
   }
   const known = CHARGE_TOLERANCE[type];
   if (known) return known;
   return {
     known: false,
+    code: 'no-charge-tolerance',
     reason:
       `This app holds no charge tolerance for ${PROFILES[type].label}, and will not borrow one from another type. A `
       + 'few hundred grams either way decides whether an extinguisher goes back on a wall.',
@@ -1899,6 +2013,8 @@ export interface ChargeCheck {
   /** Difference as a percentage of the expected charge, to one decimal. */
   differencePercent: number;
   tolerancePercent: number;
+  /** Whether the tolerance is the app's own held figure or this asset's plate. */
+  toleranceOrigin: ChargeTolerance['origin'];
   toleranceCaveat: string;
   state: ChargeState;
   statement: string;
@@ -1920,8 +2036,19 @@ export interface ChargeInput {
   manufacturerTolerancePercent?: number;
 }
 
+/**
+ * A mass this module will do arithmetic on: a whole, non-negative number of
+ * grams.
+ *
+ * The integer test is the point of it. Everything downstream is subtraction and
+ * a comparison, and once one input is a float the answer prints as 3400.2 g
+ * short — or 3399.9999999999995 — on a document. A scale reads whole grams and
+ * the stamping is whole grams, so a fraction here is a unit that has already
+ * gone wrong somewhere (kilograms typed into a grams field is the usual one)
+ * and is refused rather than rounded into looking right.
+ */
 const isWholeGrams = (n: unknown): n is number =>
-  typeof n === 'number' && Number.isFinite(n) && n >= 0;
+  typeof n === 'number' && Number.isInteger(n) && n >= 0;
 
 /**
  * Whether the extinguisher is holding its charge.
@@ -1938,9 +2065,11 @@ const isWholeGrams = (n: unknown): n is number =>
 export function checkCharge(input: ChargeInput): ChargeCheck | Refused {
   const { type, tareGrams, grossGrams } = input;
 
-  if (!isWholeGrams(tareGrams) || !isWholeGrams(grossGrams)) {
+  const missingMass = (n: unknown) => typeof n !== 'number' || !Number.isFinite(n) || n < 0;
+  if (missingMass(tareGrams) || missingMass(grossGrams)) {
     return {
       known: false,
+      code: 'mass-not-read',
       reason: 'The tare or gross mass is missing or is not a mass.',
       whatToDo:
         'Read the tare off the cylinder stamping and weigh the extinguisher. Both in grams — a kilogram figure '
@@ -1949,9 +2078,24 @@ export function checkCharge(input: ChargeInput): ChargeCheck | Refused {
     };
   }
 
+  if (!isWholeGrams(tareGrams) || !isWholeGrams(grossGrams)) {
+    return {
+      known: false,
+      code: 'mass-not-whole-grams',
+      reason:
+        `A mass of ${!isWholeGrams(tareGrams) ? tareGrams : grossGrams} g is not a whole number of grams, and this `
+        + 'check works in whole grams so that a subtraction never turns into a float.',
+      whatToDo:
+        'Enter both masses as whole grams. A decimal here is almost always kilograms in a grams field — 3.5 is three '
+        + 'and a half grams, not a 3.5 kg extinguisher.',
+      sourceIds: ['amsa-707'],
+    };
+  }
+
   if (grossGrams <= tareGrams) {
     return {
       known: false,
+      code: 'gross-at-or-below-tare',
       reason:
         `The extinguisher weighs ${grossGrams} g and its stamped empty mass is ${tareGrams} g, so it appears to hold `
         + 'no agent at all.',
@@ -1970,9 +2114,22 @@ export function checkCharge(input: ChargeInput): ChargeCheck | Refused {
         ? input.labelledFullGrossGrams - tareGrams
         : undefined;
 
+  if (expected !== undefined && expected > 0 && !isWholeGrams(expected)) {
+    return {
+      known: false,
+      code: 'mass-not-whole-grams',
+      reason:
+        `The charge to compare against works out at ${expected} g, which is not a whole number of grams. The label `
+        + 'figure it came from is in the wrong unit or has been mistyped.',
+      whatToDo: "Re-read the nominal charge or the full gross mass off the label and enter it as whole grams.",
+      sourceIds: ['amsa-707'],
+    };
+  }
+
   if (expected === undefined || !isWholeGrams(expected) || expected <= 0) {
     return {
       known: false,
+      code: 'no-expected-charge',
       reason: 'There is nothing to compare the weight against — no nominal charge and no labelled full gross mass.',
       whatToDo:
         "Read the charge or the full gross mass off the extinguisher's label. Without one of them a weight is a "
@@ -1987,10 +2144,18 @@ export function checkCharge(input: ChargeInput): ChargeCheck | Refused {
   const actual = grossGrams - tareGrams;
   const difference = actual - expected;
   const differencePercent = Math.round((difference / expected) * 1000) / 10;
-  const allowed = (expected * tolerance.percentOfCharge) / 100;
+  // Compared as grams times a hundred against a percentage, so the tolerance
+  // itself never becomes a float either. 10% of 3 505 g is 350.5 g, and a
+  // 350 g loss is inside it — cross-multiplying keeps that decision exact
+  // instead of resting on how 350.50000000000006 compares.
+  const allowedTimes100 = expected * tolerance.percentOfCharge;
 
   const state: ChargeState =
-    Math.abs(difference) <= allowed ? 'within-tolerance' : difference < 0 ? 'undercharged' : 'overcharged';
+    Math.abs(difference) * 100 <= allowedTimes100
+      ? 'within-tolerance'
+      : difference < 0
+        ? 'undercharged'
+        : 'overcharged';
 
   const statement =
     state === 'within-tolerance'
@@ -2009,11 +2174,15 @@ export function checkCharge(input: ChargeInput): ChargeCheck | Refused {
     differenceGrams: difference,
     differencePercent,
     tolerancePercent: tolerance.percentOfCharge,
+    toleranceOrigin: tolerance.origin,
     toleranceCaveat: tolerance.caveat,
     state,
     statement,
     confidence: tolerance.confidence,
-    sourceIds: tolerance.sourceIds.length ? tolerance.sourceIds : ['as1851-s10'],
+    // Whatever the tolerance came from and nothing else. A plate reading has no
+    // document behind it and is left with an empty list rather than being
+    // credited to a standard that never stated it.
+    sourceIds: tolerance.sourceIds,
   };
 }
 
@@ -2024,9 +2193,15 @@ export function checkCharge(input: ChargeInput): ChargeCheck | Refused {
  * it is full. Everything else has a gauge, and the weight is a second opinion
  * on it — a useful one, because a gauge can read fine on a unit that has leaked
  * and been re-pressurised with air.
+ *
+ * `null` where the profile does not know whether this one carries a gauge, and
+ * that third answer matters on screen: returning false there tells a technician
+ * "the gauge is the primary check on this type" about a cylinder that may not
+ * have a gauge at all, which is the wrong instruction confidently given.
  */
-export function weighingIsPrimaryCheck(type: ExtinguisherType): boolean {
-  return PROFILES[type].hasPressureGauge === false;
+export function weighingIsPrimaryCheck(type: ExtinguisherType): boolean | null {
+  const gauge = PROFILES[type].hasPressureGauge;
+  return gauge === null ? null : gauge === false;
 }
 
 // ===========================================================================
@@ -2156,7 +2331,7 @@ export function rollupSite(entries: RegisterEntry[], todayIso: string, horizonMo
     if (!type) {
       const match = classifyTypeText(entry.typeText);
       if (isRefused(match)) {
-        if (/ABE or BE/.test(match.reason)) ambiguousPowder += 1;
+        if (match.code === 'type-cell-ambiguous-powder') ambiguousPowder += 1;
       } else {
         type = match.type;
       }
@@ -2173,6 +2348,12 @@ export function rollupSite(entries: RegisterEntry[], todayIso: string, horizonMo
           'Charged with halon. Not lawful to keep in service in Australia — surrender to the National Halon Bank '
           + 'rather than scheduling it.',
       });
+      // And then nothing else. A halon cylinder is counted on the site and left
+      // out of the schedule entirely: pricing a five-yearly strip and pressure
+      // test on a unit that has to be surrendered puts work in a proposal that
+      // must never be carried out, and buries the one asset on the page that
+      // needs a letter to the owner among a hundred ordinary services.
+      continue;
     }
 
     // An unclassified asset still has a schedule: the intervals are the same
@@ -2196,7 +2377,7 @@ export function rollupSite(entries: RegisterEntry[], todayIso: string, horizonMo
       if (isRefused(result)) {
         row.unknown += 1;
         assetUnknown = true;
-        if (/nothing to count from/.test(result.reason)) noAnchor += 1;
+        if (result.code === 'no-anchor-date') noAnchor += 1;
         const existing = row.unknownReasons.find((r) => r.reason === result.reason);
         if (existing) existing.count += 1;
         else row.unknownReasons.push({ reason: result.reason, count: 1 });
@@ -2254,7 +2435,8 @@ export function rollupSite(entries: RegisterEntry[], todayIso: string, horizonMo
   if (condemnable.length) {
     caveats.push(
       `${condemnable.length} ${condemnable.length === 1 ? 'asset is' : 'assets are'} not serviceable at any price and `
-      + 'must come off the wall: see the condemnable list.',
+      + 'must come off the wall: see the condemnable list. They are counted in the site total and in their type, and '
+      + 'left out of every due count — a service quoted on one of them is work that must not be carried out.',
     );
   }
 

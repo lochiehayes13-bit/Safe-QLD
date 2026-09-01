@@ -6,7 +6,7 @@ import {
   type TaggableAsset,
 } from '@/domain/assetTag';
 import {
-  CODE39_PATTERNS, LABEL_STOCKS, MIN_NARROW_MM,
+  CODE39_PATTERNS, CODE39_SPEC, LABEL_STOCKS, MIN_NARROW_MM,
   buildLabelSheet, code39Svg, code39WidthModules, decodeCode39Widths, planBarcode, stockById,
   stockLayout,
 } from '@/export/assetLabels';
@@ -61,6 +61,30 @@ describe('the code table', () => {
     expect(typeCodeFor('sampling-point')).toBe('SMP');
     expect(typeCodeFor('fire-door')).toBe('FDR');
     for (const entry of TYPE_CODES) expect(entry.code).toMatch(/^[A-Z]{3}$/);
+  });
+
+  it('keeps the register\'s own three-letter prefix, so the old asset code survives inside the tag', () => {
+    // The whole upgrade story rests on this: SQ-DET-0001847 is a leading
+    // substring of SQ-DET-0001847-3K, so a 2019 report still points at the head
+    // on the ceiling. Quietly coding detectors DTC instead would break that for
+    // every asset of the type, and the tag would still validate perfectly.
+    let checked = 0;
+    for (const entry of TYPE_CODES) {
+      const def = ASSET_TYPES.find((d) => d.id === entry.assetTypeId);
+      expect(def).toBeDefined();
+      const prefix = (def as NonNullable<typeof def>).codePrefix.toUpperCase();
+      if (!/^[A-Z]{3}$/.test(prefix)) {
+        expect(entry.origin).toBe('assigned-here');
+        continue;
+      }
+      checked += 1;
+      expect(entry.code).toBe(prefix);
+      expect(entry.origin).toBe('asset-type-catalogue');
+      const tag = formatTag(entry.assetTypeId, 1847) as string;
+      expect(tag.startsWith(assetCodeFor(entry.assetTypeId, 1847) as string)).toBe(true);
+    }
+    // Four of the catalogue prefixes are two letters, so 29 of the 33 keep theirs.
+    expect(checked).toBe(TYPE_CODES.length - 4);
   });
 
   it('returns nothing for a type it does not know rather than inventing three letters', () => {
@@ -404,12 +428,19 @@ describe('what the code carries', () => {
     expect(isTagPayload('SQ-DET-0001847-3K')).toBe(false);
   });
 
-  it('refuses a payload from a format it does not understand', () => {
+  it('refuses a payload from a format it does not understand, and says that is what happened', () => {
     // A later format might put something else after the second colon. Reading
-    // it as a tag would be a guess.
+    // it as a tag would be a guess. The reason has to be its own, not
+    // 'wrong-length': a caller switching on it must be able to send this
+    // technician to the office for an app update rather than back up the ladder
+    // to re-read a label that is perfectly correct.
     const reading = readScannedValue('SQFP:2:SQ-DET-0001847-3K');
     expect(reading.kind).toBe('unrecognised');
-    if (reading.kind === 'unrecognised') expect(reading.rejection.message).toContain('format 2');
+    if (reading.kind === 'unrecognised') {
+      expect(reading.rejection.message).toContain('format 2');
+      expect(reading.rejection.reason).toBe('future-format');
+      expect(reading.rejection.reason).not.toBe('wrong-length');
+    }
   });
 });
 
@@ -459,6 +490,19 @@ describe('auditing a site', () => {
     const blocked = audit.untagged.find((r) => r.asset.id === 'a5');
     expect(blocked?.blocker).toContain('no tag code');
     expect(audit.untagged.find((r) => r.asset.id === 'a2')?.blocker).toBeUndefined();
+  });
+
+  it('finds the same number worn once as a tag and once as the old code it upgrades from', () => {
+    // The two are the same serial on two devices, and one of them has already
+    // been re-labelled. Comparing only the tagged assets reports the site clean
+    // right up until the moment 400 labels are printed.
+    const audit = auditTags([
+      { id: 'new', assetTypeId: 'extinguisher', code: 'SQ-EXT-0000042-SR' },
+      { id: 'old', assetTypeId: 'extinguisher', code: 'SQ-EXT-0000042' },
+    ]);
+    expect(audit.duplicates).toHaveLength(1);
+    expect(audit.duplicates[0]?.tag).toBe('SQ-EXT-0000042-SR');
+    expect(audit.duplicates[0]?.assets.map((a) => a.id)).toEqual(['new', 'old']);
   });
 
   it('finds two assets wearing the same tag, which no check character can catch', () => {
@@ -566,6 +610,26 @@ describe('issuing tags in bulk', () => {
     expect(plan.assignments[1]?.serial).toBe(901);
   });
 
+  it('lets the asset that already wears a number keep it, whichever order the batch arrives in', () => {
+    // The screen lists untagged assets first and upgradeable ones after them,
+    // so the asset with a decade of paperwork behind its number is the one that
+    // asks for it last. Allocating in list order would hand SQ-EXT-0000900 to a
+    // brand new asset and then refuse the one whose sticker already says 900,
+    // leaving a physical label in the field pointing at nothing.
+    const plan = planTagAssignments(
+      [
+        { id: 'fresh', assetTypeId: 'extinguisher' },
+        { id: 'existing', assetTypeId: 'extinguisher', code: 'SQ-EXT-0000900' },
+      ],
+      { extinguisher: 900 },
+    );
+    const existing = plan.assignments.find((a) => a.assetId === 'existing');
+    expect(existing).toMatchObject({ serial: 900, keptExistingNumber: true });
+    expect(plan.assignments.find((a) => a.assetId === 'fresh')?.serial).toBe(901);
+    expect(plan.skipped).toEqual([]);
+    expect(new Set(plan.assignments.map((a) => a.tag)).size).toBe(2);
+  });
+
   it('stops at the end of a seven-digit serial instead of printing an eight-digit tag', () => {
     const plan = planTagAssignments([{ id: 'a1', assetTypeId: 'detector' }], { detector: MAX_SERIAL + 1 });
     expect(plan.assignments).toEqual([]);
@@ -598,38 +662,78 @@ describe('serialsInUse', () => {
 // ---------------------------------------------------------------------------
 
 describe('the Code 39 table', () => {
-  it('is exactly the complete set of valid patterns, with none missing and none invented', () => {
-    // Nine elements, three of them wide: either two wide bars and one wide
-    // space (40 patterns) or three wide spaces and no wide bars (4). That is
-    // 44, which is 43 characters plus the start/stop, so the table must be a
-    // perfect bijection onto the generated set. A single transposed row breaks
-    // it — and a transposed row is a barcode that scans as another character.
-    const bars = [0, 2, 4, 6, 8];
-    const spaces = [1, 3, 5, 7];
-    const generated = new Set<string>();
-    for (let i = 0; i < bars.length; i += 1) {
-      for (let j = i + 1; j < bars.length; j += 1) {
-        for (const s of spaces) {
-          const p = 'nnnnnnnnn'.split('');
-          p[bars[i] as number] = 'w';
-          p[bars[j] as number] = 'w';
-          p[s] = 'w';
-          generated.add(p.join(''));
+  /**
+   * The table rebuilt from the symbology's construction rather than from the
+   * table.
+   *
+   * USS-39 Table 2 is not an arbitrary list. The five bars carry a two-of-five
+   * code with the familiar weights 1, 2, 4, 7 and a parity position, so the two
+   * wide bars sum to the character's position 1..9 within its block, with the
+   * bars for 0 (positions 3 and 4, summing to 11) standing in for the tenth.
+   * The single wide space then selects the block: the second space gives the
+   * digits, the third the letters A-J, the fourth K-T, and the first U-Z and
+   * the punctuation. The four patterns with no wide bar at all are $ / + %.
+   *
+   * Spot-checked against the specification's own binary columns before being
+   * relied on here: character 1 is bars 10001 spaces 0100, N is 00101 / 0001,
+   * U is 10001 / 1000, and $ is 00000 / 1110 — all four fall out of the rule.
+   */
+  const derivePatterns = (): Record<string, string> => {
+    const WEIGHTS = [1, 2, 4, 7, 0];
+    const barsFor = (position: number): number[] => {
+      if (position === 10) return [2, 3]; // the tenth character, weights 4 + 7
+      for (let i = 0; i < 5; i += 1) {
+        for (let j = i + 1; j < 5; j += 1) {
+          if ((WEIGHTS[i] as number) + (WEIGHTS[j] as number) === position) return [i, j];
         }
       }
-    }
-    for (const skip of spaces) {
+      throw new Error(`no two-of-five pair sums to ${position}`);
+    };
+    const draw = (wideBars: number[], wideSpaces: number[]): string => {
       const p = 'nnnnnnnnn'.split('');
-      for (const s of spaces) if (s !== skip) p[s] = 'w';
-      generated.add(p.join(''));
-    }
+      for (const b of wideBars) p[b * 2] = 'w';
+      for (const sp of wideSpaces) p[sp * 2 + 1] = 'w';
+      return p.join('');
+    };
 
+    const out: Record<string, string> = {};
+    const blocks: [number, string][] = [
+      [1, '1234567890'],
+      [2, 'ABCDEFGHIJ'],
+      [3, 'KLMNOPQRST'],
+      [0, 'UVWXYZ-. *'],
+    ];
+    for (const [space, chars] of blocks) {
+      for (let i = 0; i < chars.length; i += 1) out[chars[i] as string] = draw(barsFor(i + 1), [space]);
+    }
+    for (const [ch, spaces] of [['$', [0, 1, 2]], ['/', [0, 1, 3]], ['+', [0, 2, 3]], ['%', [1, 2, 3]]] as [string, number[]][]) {
+      out[ch] = draw([], spaces);
+    }
+    return out;
+  };
+
+  it('gives every character the pattern the symbology assigns it, row by row', () => {
+    // Row by row, and not as a set. Swapping the rows for "0" and "1" leaves
+    // the set of 44 patterns exactly as it was, so a set-equality check passes
+    // while every barcode printed encodes a different string from the number
+    // printed beside it — and the decoder cannot notice, because it reads the
+    // same table. This is the assertion that catches it.
+    const derived = derivePatterns();
+    expect(Object.keys(derived)).toHaveLength(44);
+    for (const [ch, pattern] of Object.entries(derived)) {
+      expect(`${ch}=${CODE39_PATTERNS[ch]}`).toBe(`${ch}=${pattern}`);
+    }
+    expect(Object.keys(CODE39_PATTERNS).sort()).toEqual(Object.keys(derived).sort());
+  });
+
+  it('is 44 distinct patterns of nine elements with three wide, as the name says', () => {
     const patterns = Object.values(CODE39_PATTERNS);
-    expect(generated.size).toBe(44);
     expect(patterns).toHaveLength(44);
     expect(new Set(patterns).size).toBe(44);
-    expect([...generated].filter((p) => !patterns.includes(p))).toEqual([]);
-    expect(patterns.filter((p) => !generated.has(p))).toEqual([]);
+    for (const p of patterns) {
+      expect(p).toHaveLength(9);
+      expect([...p].filter((e) => e === 'w')).toHaveLength(3);
+    }
   });
 });
 
@@ -658,6 +762,34 @@ describe('rendering the barcode', () => {
     expect(plan).toBeDefined();
     expect(code39Svg('SQFP:1:SQDET', plan as NonNullable<typeof plan>)).toBeUndefined();
     expect(code39Svg('SQ*DET', plan as NonNullable<typeof plan>)).toBeUndefined();
+  });
+
+  it('gives the symbol the clear space the specification asks for, which does not scale with the module', () => {
+    // The quiet zone is the greater of ten narrow elements and 2.54 mm, and on
+    // a 63.5 mm label the fixed figure is the one that binds: ten modules of a
+    // 0.21 mm element is 2.09 mm, half a millimetre short at each end. Nothing
+    // about the printed symbol looks wrong, and it is the most ordinary reason
+    // a well-formed barcode will not read.
+    const plan = planBarcode(TAG_LENGTH, 57.5, 16);
+    expect(plan).toBeDefined();
+    const p = plan as NonNullable<typeof plan>;
+    expect(p.quietZoneMm).toBeGreaterThanOrEqual(CODE39_SPEC.quietZoneMinMm);
+    expect(p.quietZoneMm).toBeGreaterThanOrEqual(CODE39_SPEC.quietZoneModules * p.narrowMm);
+    expect(p.narrowMm * CODE39_SPEC.quietZoneModules).toBeLessThan(CODE39_SPEC.quietZoneMinMm);
+  });
+
+  it('still fits the symbol, quiet zones and all, inside the space it was given', () => {
+    // The quiet zone comes out of the label, not out of the margin next to it.
+    // A symbol that overflows its cell is clipped by the sheet's own overflow
+    // rule, and a clipped quiet zone is a barcode that does not read.
+    for (const width of [57.5, 93.1, 60, 70]) {
+      const plan = planBarcode(TAG_LENGTH, width, 16);
+      if (!plan) continue;
+      const svg = code39Svg(compactTag('SQ-DET-0001847-3K'), plan) as string;
+      const drawn = Number(/width="([\d.]+)mm"/.exec(svg)?.[1]);
+      expect(drawn).toBeLessThanOrEqual(width + 0.01);
+      expect(drawn).toBeGreaterThan(width - 0.5);
+    }
   });
 
   it('counts modules the way the symbology does', () => {
@@ -806,6 +938,24 @@ describe('the label sheet', () => {
     const nudged = buildLabelSheet([label('SQ-EXT-0000042-SR')], { stock, offsetXMm: 1, offsetYMm: -1.5 });
     expect(straight.html).toContain('left:7.25mm;top:15.15mm');
     expect(nudged.html).toContain('left:8.25mm;top:13.65mm');
+  });
+
+  it('refuses a printer nudge it cannot read instead of laying the sheet out at NaN', () => {
+    // "1,5" on an Australian keyboard is a comma, and Number() makes NaN of it.
+    // NaN travels silently through the arithmetic into "left:NaNmm", which no
+    // browser honours: every label collapses to the corner of the page and a
+    // whole sheet of adhesive stock goes in the bin.
+    const sheet = buildLabelSheet([label('SQ-EXT-0000042-SR')], { stock, offsetXMm: Number('1,5') });
+    expect(sheet.html).not.toContain('NaN');
+    expect(sheet.html).toContain('left:7.25mm;top:15.15mm');
+    expect(sheet.warnings.join(' ')).toContain('was not a number');
+  });
+
+  it('refuses a start position it cannot read, rather than silently skipping nothing', () => {
+    const sheet = buildLabelSheet([label('SQ-EXT-0000042-SR')], { stock, startAt: Number('half way') });
+    expect(sheet.sheets).toBe(1);
+    expect(sheet.html).not.toContain('NaN');
+    expect(sheet.warnings.join(' ')).toContain('Started at the first label instead');
   });
 
   it('says plainly when there is nothing it can print', () => {

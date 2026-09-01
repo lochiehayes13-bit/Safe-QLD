@@ -373,6 +373,29 @@ describe('the tag — what it has to establish', () => {
     for (const p of TAG_PARTICULARS) expect(p.establishes.length).toBeGreaterThan(30);
   });
 
+  it('does not credit AS 1905.1 with the door tag number, which is on the Queensland list alone', () => {
+    // Clause 6.1.4.2 names six particulars for the leaf tag and a tag number is
+    // not one of them. Citing the standard for it puts a figure in a client
+    // document behind a source that does not say it.
+    const tagNumber = TAG_PARTICULARS.find((p) => p.key === 'tagNumber')!;
+    expect(tagNumber.sourceIds).toEqual(['qfd-fire-doors']);
+    expect(tagNumber.establishes).toContain('6.1.4.2');
+    for (const key of ['componentStandard', 'frl', 'manufacturer', 'applicant', 'certifier', 'yearOfManufacture']) {
+      expect(TAG_PARTICULARS.find((p) => p.key === key)!.sourceIds).toContain('as1905-1');
+    }
+  });
+
+  it('does not claim in a report that the standard requires all seven particulars', () => {
+    const a = assessTag({
+      leaf: { state: 'present', particulars: FULL_TAG },
+      frame: { state: 'present', particulars: { frl: '-/60/30' } },
+      buildingApprovedOn: '1/6/2005',
+    });
+    expect(a.identified).toBe(true);
+    expect(a.statement).not.toContain('every particular AS/NZS 1905.1 requires');
+    expect(a.statement).toContain('information sheet lists');
+  });
+
   it('explains the manufacturer field by the recall it exists to make possible', () => {
     const manufacturer = TAG_PARTICULARS.find((p) => p.key === 'manufacturer')!;
     expect(manufacturer.establishes).toContain('recall');
@@ -415,6 +438,23 @@ describe('tagRequirement — the date Queensland publishes two ways', () => {
     const r = tagRequirement({ buildingApprovedOn: '1/1/1960', doorReplacedOn: '3/3/2019' });
     expect(r.required).toBe(true);
     expect(r.reason).toContain('replaced');
+  });
+
+  it('refuses on a leaf replaced inside the disputed window instead of answering off the building', () => {
+    // Both Queensland publications say a leaf replaced after their own date
+    // needs tags. Reading the replacement question off a 1960 approval hands
+    // back a confident "not required" for a door hung in the one window this
+    // module exists to stop at.
+    const r = tagRequirement({ buildingApprovedOn: '1/1/1960', doorReplacedOn: '1/9/1975' });
+    expect(r.required).toBeUndefined();
+    expect(r.confidence).toBe('low');
+    expect(r.reason).toContain('replaced on 1/9/1975');
+    expect(r.reason).toContain('between the two commencement dates');
+  });
+
+  it('still answers off the building for a leaf replaced before either date', () => {
+    expect(tagRequirement({ buildingApprovedOn: '1/7/1990', doorReplacedOn: '1/1/1970' }).required).toBe(true);
+    expect(tagRequirement({ buildingApprovedOn: '1/1/1960', doorReplacedOn: '1/1/1970' }).required).toBe(false);
   });
 
   it('refuses rather than assuming a modern building when the approval date is missing', () => {
@@ -585,6 +625,50 @@ describe('clearance gaps — every sourced limit carries its clause', () => {
     expect(bad.within).toBe(false);
     expect(bad.defectCode).toBe('DOR-FD-003');
     expect(bad.statement).toContain('before the core has been tested');
+  });
+
+  it('compares the true mean, not the mean rounded to a tenth of a millimetre', () => {
+    // 3.1, 2.9 and 3.05 average 3.017 mm. Rounding that to 3.0 before the
+    // comparison passes a door that is over the limit, and the printed figure
+    // then reads as evidence that it complied.
+    const c = gapChecked(checkGap({
+      position: 'stile', readingsMm: [3.1, 2.9, 3.05], doorType: 'fire', leafAction: 'side-hung', frame: 'rebated',
+    }));
+    expect(c.within).toBe(false);
+    expect(c.valueMm).toBe(3);
+    expect(c.defectCode).toBe('DOR-FD-003');
+  });
+
+  it('does not round a single reading down under a maximum it is actually over', () => {
+    const c = gapChecked(checkGap({
+      position: 'floor', readingsMm: [10.04], doorType: 'fire', leafAction: 'side-hung', floorCovering: 'none',
+    }));
+    expect(c.within).toBe(false);
+  });
+
+  it('says what the reported figure is rather than leaving a screen to infer it', () => {
+    // On the floor the limit has two ends, and the figure reported is whichever
+    // end is in question. A screen working the heading out from the basis
+    // prints the smallest reading of a passing door as its "worst point".
+    const passing = gapChecked(checkGap({
+      position: 'floor', readingsMm: [6, 7], doorType: 'fire', leafAction: 'side-hung', floorCovering: 'combustible',
+    }));
+    expect(passing.valueMm).toBe(6);
+    expect(passing.valueLabel).toBe('Smallest gap over the covering');
+    expect(passing.worstMm).toBe(7);
+
+    const wide = gapChecked(checkGap({
+      position: 'floor', readingsMm: [6, 12], doorType: 'fire', leafAction: 'side-hung', floorCovering: 'combustible',
+    }));
+    expect(wide.valueMm).toBe(12);
+    expect(wide.valueLabel).toBe('Largest gap over the covering');
+
+    expect(gapChecked(checkGap({
+      position: 'stile', readingsMm: [2, 3], doorType: 'fire', leafAction: 'side-hung', frame: 'rebated',
+    })).valueLabel).toBe('Mean clearance');
+    expect(gapChecked(checkGap({
+      position: 'sliding-overlap', readingsMm: [80, 90], doorType: 'fire', leafAction: 'sliding',
+    })).valueLabel).toBe('Least overlap');
   });
 
   it('refuses to average a single reading into a mean', () => {
@@ -820,6 +904,17 @@ describe('self-closing and latching', () => {
     expect(v.notes.join(' ')).toContain('change the door type');
   });
 
+  it('withholds the observation verdict on a smoke door when only one release position was tried', () => {
+    // The observation path is the only one that used to hand back a pass here.
+    // A leaf shut off momentum from wide open has not been shown to close from
+    // where somebody actually lets go of it, whatever the latch did.
+    const v = assessClosing(closing({ doorType: 'smoke', latched: false, releasedFrom: ['fully-open'] }));
+    expect(v.outcome).toBe('closed-not-latched');
+    expect(v.passed).toBeUndefined();
+    expect(v.reason).toContain('Only one release position');
+    expect(v.defectCode).toBeUndefined();
+  });
+
   it('never asks a double-acting leaf to latch', () => {
     const v = assessClosing(closing({ doorType: 'smoke', leafAction: 'double-acting', latched: undefined }));
     expect(v.outcome).toBe('closed-no-latch-required');
@@ -917,6 +1012,20 @@ describe('signage', () => {
   it('drops "do not keep open" from a door held open by an approved device', () => {
     const s = requiredSignWording({ era: 'current', heldOpenByDevice: true });
     if (!('known' in s)) expect(s.wording).not.toContain('DO NOT KEEP OPEN');
+  });
+
+  it('gives a door discharging from a fire-isolated exit its own wording, not the self-closing one', () => {
+    // The wording that applies to a discharge door is shorter. Specifying "DO
+    // NOT KEEP OPEN" for one is a sign bought against the wrong clause.
+    const s = requiredSignWording({
+      era: 'current', heldOpenByDevice: false, dischargingFromFireIsolatedExit: true,
+    });
+    if (!('known' in s)) {
+      expect(s.wording).toContain('FIRE SAFETY DOOR');
+      expect(s.wording).not.toContain('DO NOT KEEP OPEN');
+    } else {
+      throw new Error('expected a wording');
+    }
   });
 
   it('refuses to pick a wording when the approval era is unknown', () => {
@@ -1100,6 +1209,24 @@ describe('assessDoor — one door, one honest answer', () => {
       .toContain('protected to less than its approval');
   });
 
+  it('never fails a door with nothing anyone can raise against it', () => {
+    // A tag that disagrees with the register on a building that predates the
+    // tagging requirement used to come back as a failure carrying no defect
+    // code and no note — a critical finding with nowhere to go.
+    const v = assessDoor(workingDoor({
+      scheduleFrl: '-/120/30',
+      tag: {
+        leaf: { state: 'present', particulars: FULL_TAG },
+        frame: { state: 'present', particulars: { frl: '-/60/30' } },
+        buildingApprovedOn: '1/1/1970',
+      },
+    }));
+    expect(v.outcome).toBe('fail');
+    expect(v.defectCodes).toEqual([]);
+    expect(v.notes.join(' ')).toContain('no code for a tag that disagrees with the register');
+    expect(v.notes.join(' ')).toContain('raise it as its own item');
+  });
+
   it('does not treat an untested door as a working one', () => {
     const v = assessDoor(workingDoor({ closing: undefined }));
     expect(v.outcome).toBe('unverifiable');
@@ -1178,6 +1305,17 @@ describe('summariseDoors — what may honestly be said about a site', () => {
     expect(s.compliant).toBeUndefined();
     expect(s.compliantStatement).toContain('an unassessed door is not a compliant one');
     expect(s.caveats.join(' ')).toContain('1 of 3 doors were not assessed');
+  });
+
+  it('does not count a door nobody reached twice, once as unassessed and once as untagged', () => {
+    const s = summariseDoors([pass('a'), missed('b')]);
+    expect(s.untagged).toBe(1);
+    expect(s.caveats.join(' ')).toContain('not reached at all');
+    expect(s.caveats.join(' ')).toContain('not a separate shortfall');
+
+    // And where every untagged doorset really was inspected, no such note.
+    const inspected = summariseDoors([pass('a'), untagged('b')]);
+    expect(inspected.caveats.join(' ')).not.toContain('not reached at all');
   });
 
   it('refuses to call a site compliant when a door worked but could not be identified', () => {

@@ -262,8 +262,32 @@ export function typeCodeTableIssues(): string[] {
 
     const def = ASSET_TYPES.find((t) => t.id === entry.assetTypeId);
     if (!def) issues.push(`${entry.assetTypeId} has a tag code but is not an asset type any more.`);
-    else if (def.system !== entry.system) {
-      issues.push(`${entry.assetTypeId} is a ${def.system} type in the catalogue but ${entry.system} here.`);
+    else {
+      if (def.system !== entry.system) {
+        issues.push(`${entry.assetTypeId} is a ${def.system} type in the catalogue but ${entry.system} here.`);
+      }
+      // The invariant the whole upgrade path rests on. Where the catalogue's own
+      // prefix is already three letters, the tag MUST use it unchanged, because
+      // that is what makes the pre-tag asset code a leading substring of the tag
+      // — SQ-DET-0001847 inside SQ-DET-0001847-3K. Quietly assigning DTC instead
+      // would break the link between a 2019 report and the head on the ceiling
+      // for every asset of that type, silently, with the tag still validating.
+      const prefix = def.codePrefix.toUpperCase();
+      if (/^[A-Z]{3}$/.test(prefix) && prefix !== entry.code) {
+        issues.push(
+          `${entry.assetTypeId} is coded ${entry.code} here but ${prefix} in the asset catalogue. `
+          + `A tag would then not contain the asset code SQ-${prefix}-0000001 the register already holds.`,
+        );
+      }
+      // origin is printed and reasoned about, so it must be true rather than
+      // decorative: it is what tells a reader whether the old number survives.
+      const expectedOrigin: CodeOrigin = prefix === entry.code ? 'asset-type-catalogue' : 'assigned-here';
+      if (entry.origin !== expectedOrigin) {
+        issues.push(
+          `${entry.assetTypeId} is recorded as ${entry.origin} but its code ${entry.code} `
+          + `${prefix === entry.code ? 'is' : 'is not'} the catalogue prefix ${prefix}.`,
+        );
+      }
     }
   }
 
@@ -337,6 +361,7 @@ export type TagRejection =
   | 'check-failed'
   | 'missing-check'
   | 'unknown-type-code'
+  | 'future-format'
   | 'zero-serial';
 
 export interface ParsedTag {
@@ -598,12 +623,16 @@ export function readScannedValue(value: string): ScanReading {
     const version = Number(payload[1]);
     const body = payload[2] ?? '';
     if (version !== PAYLOAD_VERSION) {
+      // Its own reason, not 'wrong-length'. A caller that switches on the
+      // reason has to be able to tell "your app is old" from "you misread the
+      // label", because the two send a technician to different places: one to
+      // the office, the other back up the ladder.
       return {
         kind: 'unrecognised',
         fromPayload: true,
         rejection: {
           ok: false,
-          reason: 'wrong-length',
+          reason: 'future-format',
           message: `This label uses tag format ${version}; this app understands format ${PAYLOAD_VERSION}. `
             + 'Update the app rather than typing the number in by hand.',
           normalised: normalise(body),
@@ -668,6 +697,15 @@ export interface InvalidRow {
 }
 
 export interface DuplicateGroup {
+  /**
+   * The number the group shares, in tag form.
+   *
+   * Tag form even where the assets carry the pre-tag code, because
+   * SQ-EXT-0000042 and SQ-EXT-0000042-SR are the same number on the same
+   * device and grouping them apart would hide exactly the pair that matters:
+   * one asset already re-labelled and another still wearing the old sticker
+   * with the same serial.
+   */
   tag: string;
   assets: TaggableAsset[];
 }
@@ -682,9 +720,14 @@ export interface TagAudit {
   /** Carrying something that does not validate. Needs eyes on the physical label. */
   invalid: InvalidRow[];
   /**
-   * The same tag on more than one asset. The one failure the check characters
+   * The same number on more than one asset. The one failure the check characters
    * cannot catch, because each tag is individually perfect — and the worst of
    * them, since a scan is then ambiguous with no way to tell.
+   *
+   * Counted across tagged AND upgradeable assets. A pre-tag code duplicated
+   * twice is the same ambiguity as a tag duplicated twice; looking only at the
+   * tagged ones would report the site as clean right up until the moment the
+   * labels were printed.
    */
   duplicates: DuplicateGroup[];
 }
@@ -718,6 +761,11 @@ export function auditTags(assets: TaggableAsset[]): TagAudit {
     const code = parseAssetCode(raw);
     if (code) {
       audit.upgradeable.push({ asset, code, proposedTag: code.proposedTag });
+      if (code.proposedTag) {
+        const group = byTag.get(code.proposedTag) ?? [];
+        group.push(asset);
+        byTag.set(code.proposedTag, group);
+      }
       continue;
     }
 
@@ -775,6 +823,9 @@ export interface AssignmentPlan {
  *    problem. A person has to go and look.
  *  - A type with no starting serial supplied is skipped and says so, rather
  *    than starting at 1 and colliding with a decade of existing numbers.
+ *  - Numbers already worn by an asset in the batch are reserved before any new
+ *    one is issued, so the order the list happens to arrive in cannot decide
+ *    which of two assets keeps the number it has had for years.
  *
  * `nextSerials` comes from the database (the repo's nextAssetCode already
  * derives the high-water mark per prefix). It is passed in so this function
@@ -785,8 +836,31 @@ export function planTagAssignments(
   nextSerials: Readonly<Record<string, number>>,
 ): AssignmentPlan {
   const plan: AssignmentPlan = { assignments: [], skipped: [], nextSerials: { ...nextSerials } };
-  // Tags already spoken for in this batch — either kept from a legacy code or
-  // freshly allocated — so two assets cannot leave here with the same tag.
+
+  /**
+   * Numbers that are already somebody's, read off the whole batch before a
+   * single new one is handed out.
+   *
+   * Reserving first is not tidiness, it is the difference between an asset
+   * keeping its number and losing it. An asset carrying SQ-EXT-0000900 has that
+   * number on a sticker and in every report since it was installed. If a fresh
+   * allocation gets to 900 first — which it does whenever the starting serial
+   * passed in is stale, and the screen lists untagged assets ahead of
+   * upgradeable ones — the loop below would hand 900 to a brand new asset and
+   * then refuse the one that has owned it for years. Order of the input list
+   * would decide who keeps their identity, which is no way to decide it.
+   */
+  const owner = new Map<string, string>();
+  for (const asset of assets) {
+    const existing = (asset.code ?? '').trim();
+    if (!existing) continue;
+    const parsed = parseTag(existing);
+    const claim = parsed.ok ? parsed.tag : parseAssetCode(existing)?.proposedTag;
+    if (claim && !owner.has(claim)) owner.set(claim, asset.id);
+  }
+
+  // Tags handed out during this run, so two newly numbered assets cannot
+  // collide with each other either.
   const used = new Set<string>();
 
   for (const asset of assets) {
@@ -824,7 +898,7 @@ export function planTagAssignments(
           plan.skipped.push({ assetId: asset.id, reason: `Could not build a tag from ${legacy.assetCode}.` });
           continue;
         }
-        if (used.has(upgraded)) {
+        if (owner.get(upgraded) !== asset.id || used.has(upgraded)) {
           plan.skipped.push({
             assetId: asset.id,
             reason: `Another asset in this batch already carries ${legacy.assetCode}. Two assets cannot share a number.`,
@@ -862,8 +936,9 @@ export function planTagAssignments(
 
     let serial = next;
     let tag = formatTag(asset.assetTypeId, serial);
-    // Step over anything this batch has already claimed.
-    while (tag && used.has(tag) && serial <= MAX_SERIAL) {
+    // Step over anything this batch has already claimed — both numbers handed
+    // out here and numbers an asset in the batch already wears.
+    while (tag && (used.has(tag) || owner.has(tag)) && serial <= MAX_SERIAL) {
       serial += 1;
       tag = formatTag(asset.assetTypeId, serial);
     }

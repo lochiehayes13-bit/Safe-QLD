@@ -156,6 +156,15 @@ describe('prohibitions — the part that injures somebody when it is wrong', () 
     }
   });
 
+  it('says on the Class C row that the condition is about the gas valve and not a rating', () => {
+    // Every type answers Class C "only in the circumstances stated", which on a
+    // service sheet reads as permission unless the row says otherwise. A water
+    // extinguisher is not being offered for a gas fire here.
+    for (const type of ALL_TYPES) {
+      expect(suitabilityFor(type, 'C')!.consequence).toContain('not a rating');
+    }
+  });
+
   it('rules out every agent it carries on burning metal rather than offering the least bad one', () => {
     for (const type of ALL_TYPES) {
       expect(suitabilityFor(type, 'D')!.suitability).toBe('prohibited');
@@ -225,6 +234,40 @@ describe('classifyTypeText — reading the register cell', () => {
     expect(isRefused(r)).toBe(true);
     if (!isRefused(r)) return;
     expect(r.whatToDo).toContain('Do not assume from the size');
+  });
+
+  it('does not read the English word "be" in a note cell as BE powder', () => {
+    // "9.0kg to be replaced" is a note, not an agent. Matched case-insensitively
+    // it classifies as BE — a type with no Class A rating — and the app then
+    // prints a prohibition list for an asset nobody has identified. BE is an
+    // agent designation and is written in capitals; the lower-case word is not.
+    const r = classifyTypeText('9.0kg to be replaced');
+    expect(isRefused(r)).toBe(true);
+    if (!isRefused(r)) return;
+    expect(r.code).toBe('type-cell-unrecognised');
+
+    // And the real designation still reads, in either position.
+    expect(classifyTypeText('BE 4.5kg')).toMatchObject({ type: 'dry-chemical-be' });
+    expect(classifyTypeText('4.5KG BE POWDER')).toMatchObject({ type: 'dry-chemical-be' });
+  });
+
+  it('gives every refusal a code, so a count of them never depends on the wording', () => {
+    // The site rollup counts ambiguous-powder rows and unschedulable assets to
+    // put them in its caveats. It used to do that by matching the sentence,
+    // which means rewording a message silently drops a caveat off a proposal
+    // and nothing fails.
+    const refusals = [
+      classifyTypeText(''),
+      classifyTypeText('4.5kg DCP'),
+      classifyTypeText('CO2 / ABE trolley'),
+      classifyTypeText('9kg unit'),
+    ];
+    expect(refusals.map((r) => (isRefused(r) ? r.code : undefined))).toEqual([
+      'type-cell-empty',
+      'type-cell-ambiguous-powder',
+      'type-cell-two-agents',
+      'type-cell-unrecognised',
+    ]);
   });
 
   it('recognises halon on an old register so it can be dealt with rather than serviced', () => {
@@ -465,6 +508,29 @@ describe('nextDue — the refusals', () => {
     const r = nextDue({ activity: 'six-monthly', type: 'water', lastDone: 'n/a', today: TODAY });
     expect(isRefused(r)).toBe(true);
   });
+
+  it('refuses a service dated in the future rather than counting an occurrence nobody carried out', () => {
+    // The same typed-year error as a date of manufacture in the future, and
+    // worse to schedule from: with no cylinder stamp the whole schedule counts
+    // forward from this date, so the asset reports "upcoming" until somebody
+    // finds the typo — on a five-yearly, years.
+    const r = nextDue({ activity: 'five-yearly', type: 'water', lastDone: '1/6/2035', today: TODAY });
+    expect(isRefused(r)).toBe(true);
+    if (!isRefused(r)) return;
+    expect(r.code).toBe('service-in-future');
+    expect(r.reason).toContain('has not happened yet');
+  });
+
+  it('refuses a service dated in the future even where the cylinder date is sound', () => {
+    const r = nextDue({
+      activity: 'five-yearly',
+      type: 'water',
+      manufactured: '1/6/2015',
+      lastDone: 'Jun-40',
+      today: TODAY,
+    });
+    expect(isRefused(r)).toBe(true);
+  });
 });
 
 describe('assessCondition', () => {
@@ -540,6 +606,14 @@ describe('assessCondition', () => {
     expect(a.needsJudgement).toHaveLength(1);
   });
 
+  it('counts the same finding ticked twice as one finding', () => {
+    // A duplicated tick on a form prints the reason twice on the report and
+    // counts two defects where a technician found one.
+    const a = assessCondition({ type: 'foam', findings: ['hose-perished', 'hose-perished'], inspected: true });
+    expect(a.repairable).toHaveLength(1);
+    expect(a.verdict).toBe('serviceable');
+  });
+
   it('gives every rule an action, because a finding with no next step is a note nobody acts on', () => {
     for (const rule of Object.values(CONDITION_RULES)) {
       expect(rule.action.length).toBeGreaterThan(20);
@@ -611,6 +685,58 @@ describe('checkCharge', () => {
     expect(r.confidence).toBe('high');
   });
 
+  it("never credits a standard with a figure read off the extinguisher's own plate", () => {
+    // The screen prints the source list under the verdict. A plate reading has
+    // no document behind it, and an empty list filled in with AS 1851 puts the
+    // standard's name against a number the standard never stated — in a
+    // document a client reads.
+    const r = checkCharge({
+      type: 'dry-chemical-abe',
+      tareGrams: 3200,
+      grossGrams: 7300,
+      nominalChargeGrams: 4500,
+      manufacturerTolerancePercent: 5,
+    });
+    if (isRefused(r)) throw new Error(r.reason);
+    expect(r.toleranceOrigin).toBe('manufacturer-plate');
+    expect(r.sourceIds).toEqual([]);
+    expect(r.toleranceCaveat).toContain('no document is cited');
+
+    // The app's own held figure keeps its citation, and it is the North
+    // American one.
+    const held = checkCharge({ type: 'carbon-dioxide', tareGrams: 8200, grossGrams: 11600, nominalChargeGrams: 3500 });
+    if (isRefused(held)) throw new Error(held.reason);
+    expect(held.toleranceOrigin).toBe('app-held');
+    expect(held.sourceIds).toEqual(['nfpa10-co2-charge']);
+  });
+
+  it('refuses a mass that is not a whole number of grams instead of doing float arithmetic on it', () => {
+    // 3.5 in a grams field is three and a half grams, not a 3.5 kg unit, and a
+    // fractional tare turns every figure on the report into 3400.199999999999.
+    // The check is documented as whole grams; a fraction is a unit error
+    // upstream and is sent back rather than rounded into looking right.
+    const r = checkCharge({
+      type: 'carbon-dioxide',
+      tareGrams: 8200.5,
+      grossGrams: 11600,
+      nominalChargeGrams: 3500,
+    });
+    expect(isRefused(r)).toBe(true);
+    if (!isRefused(r)) return;
+    expect(r.code).toBe('mass-not-whole-grams');
+    expect(r.whatToDo).toContain('kilograms in a grams field');
+
+    // And a fractional charge worked out from a fractional label figure is
+    // caught as the same error, not reported as "nothing to compare against".
+    const fromLabel = checkCharge({
+      type: 'carbon-dioxide',
+      tareGrams: 8200,
+      grossGrams: 11600,
+      labelledFullGrossGrams: 11700.5,
+    });
+    expect(isRefused(fromLabel) && fromLabel.code).toBe('mass-not-whole-grams');
+  });
+
   it('works out the charge from a labelled full gross mass when no nominal charge is marked', () => {
     const r = checkCharge({
       type: 'carbon-dioxide',
@@ -666,11 +792,14 @@ describe('checkCharge', () => {
     expect(r.differenceGrams).toBe(0);
   });
 
-  it('knows which types the scale is the only check on', () => {
+  it('knows which types the scale is the only check on, and says so is unknown where it is', () => {
     // CO2 has no gauge. Everything else does, and the weight is a second
-    // opinion on it.
+    // opinion on it. Halon is neither: whether that cylinder carries a gauge
+    // depends on the model, and answering "the gauge is the primary check" for
+    // it is the wrong instruction confidently given.
     expect(weighingIsPrimaryCheck('carbon-dioxide')).toBe(true);
     expect(weighingIsPrimaryCheck('dry-chemical-abe')).toBe(false);
+    expect(weighingIsPrimaryCheck('halon')).toBeNull();
   });
 });
 
@@ -736,6 +865,16 @@ describe('rollupSite — what this site is going to need', () => {
       { assetId: 'E9', reason: expect.stringContaining('National Halon Bank') },
     ]);
     expect(r.caveats.join(' ')).toContain('must come off the wall');
+
+    // "Out of the schedule" has to mean out of the counts as well. The halon
+    // unit is on the same 2015 cylinder date as the ABE beside it, so left in
+    // it contributes an overdue five-yearly — and the office prices a strip and
+    // pressure test on a cylinder that is going to the Halon Bank instead.
+    const halon = r.byType.find((b) => b.type === 'halon')!;
+    expect(halon.count).toBe(1);
+    expect(halon.activities.every((a) => a.overdue + a.dueWithinHorizon + a.later + a.unknown === 0)).toBe(true);
+    expect(halon.overdue).toBe(0);
+    expect(r.overdue).toBe(1);
   });
 
   it('counts work in assets and activities and refuses to put a price on it', () => {

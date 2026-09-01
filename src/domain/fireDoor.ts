@@ -794,7 +794,7 @@ export function latchingApplies(doorType: DoorType, leafAction: LeafAction): {
       'A side-hung fire doorset is certified latched, not merely shut. Under fire the leaf distorts and the pressure '
       + 'difference across the compartment pushes an unlatched leaf off its stop, so a door that closes without '
       + 'latching would be an open doorway at the moment it is needed. AS 1905.1 makes latching from the fully open '
-      + 'position and from any intermediate position part of the final check and part of what the tag certifies.',
+      + 'position and from part open both part of the final check, and part of what the tag certifies.',
     sourceIds: ['as1905-1'],
   };
 }
@@ -855,7 +855,7 @@ export const TAG_PARTICULARS: TagParticularSpec[] = [
     establishes:
       'Who made the leaf, which is what a recall is traced through — the Korab pyrokor recall of 1999 was worked '
       + 'exactly this way, and those doors were supplied mostly into southern Queensland.',
-    sourceIds: ['qfd-fire-doors'],
+    sourceIds: ['qfd-fire-doors', 'as1905-1'],
   },
   {
     key: 'applicant',
@@ -876,8 +876,10 @@ export const TAG_PARTICULARS: TagParticularSpec[] = [
     label: 'Door tag number',
     establishes:
       'The reference that ties this leaf to its certificate and its schedule of evidence, and the number a '
-      + 'maintenance record system is kept against.',
-    sourceIds: ['qfd-fire-doors', 'as1905-1'],
+      + 'maintenance record system is kept against. This one is on the Queensland list and not on the standard’s: '
+      + 'AS 1905.1 Clause 6.1.4.2 names six particulars for the leaf tag and a tag number is not among them, so a '
+      + 'leaf tag without a number is short of what Queensland publishes rather than short of the standard.',
+    sourceIds: ['qfd-fire-doors'],
   },
   {
     key: 'yearOfManufacture',
@@ -885,7 +887,7 @@ export const TAG_PARTICULARS: TagParticularSpec[] = [
     establishes:
       'Which edition of the standard was current when the leaf was made, and whether the door falls inside the '
       + 'pre-1990 window where the core may be an asbestos containing material.',
-    sourceIds: ['qfd-fire-doors'],
+    sourceIds: ['qfd-fire-doors', 'as1905-1'],
   },
 ];
 
@@ -967,7 +969,10 @@ export function formatAuDate(iso: string): string {
  * Whether this door was required to be tagged.
  *
  * A door replaced after the commencement date needs a tag whatever the age of
- * the building, so the replacement date is checked first where it is known.
+ * the building, so the replacement date is checked first where it is known —
+ * and it gets the same three-valued treatment as the approval date, because the
+ * two Queensland publications disagree about replaced leaves in exactly the way
+ * they disagree about approvals.
  */
 export function tagRequirement(args: {
   /** When the building was approved, d/m/yyyy or ISO. */
@@ -993,6 +998,27 @@ export function tagRequirement(args: {
         `This leaf was replaced on ${formatAuDate(isoDate(replaced))}, after ${formatAuDate(TAG_REQUIRED_FROM)}. A `
         + 'fire door replaced after that date requires tags whatever the age of the building.',
       confidence: 'high',
+      sourceIds: sources,
+    };
+  }
+  // The two Queensland dates disagree about replaced leaves exactly as they do
+  // about approvals — both publications say a leaf replaced after their own
+  // date needs tags. Answering the replacement question off the building's
+  // approval date instead would hand back a confident "not required" for a leaf
+  // hung inside the disputed window, which is the one place this module is
+  // supposed to stop and say so.
+  if (replaced && isoDate(replaced) >= TAG_REQUIRED_FROM_SUPERSEDED) {
+    return {
+      reason:
+        `This leaf was replaced on ${formatAuDate(isoDate(replaced))}, which falls between the two commencement `
+        + `dates Queensland has published. The current Queensland Fire Department information sheet gives `
+        + `${formatAuDate(TAG_REQUIRED_FROM)}; the superseded 2012 QFRS fire door FAQ gives `
+        + `${formatAuDate(TAG_REQUIRED_FROM_SUPERSEDED)}. Both say a leaf replaced after their own date requires `
+        + 'tags, so this app will not choose between two Queensland Government publications.',
+      whatToDo:
+        'Confirm with the building certifier or the local government which requirement applied. Record what is on '
+        + 'the door either way — an untagged doorset still cannot be proved to be what the schedule says it is.',
+      confidence: 'low',
       sourceIds: sources,
     };
   }
@@ -1227,8 +1253,9 @@ export function assessTag(input: TagInput): TagAssessment {
   const parts: string[] = [];
   if (identified) {
     parts.push(
-      `Identified. The leaf and frame tags carry every particular AS/NZS 1905.1 requires${
-        tagFrl && tagFrl.ok ? ` and give an FRL of ${tagFrl.normalised}` : ''}.`,
+      `Identified. The leaf tag carries every particular the Queensland Fire Department's information sheet lists, `
+      + `and a matching frame tag is fitted${
+        tagFrl && tagFrl.ok ? `. The tag gives an FRL of ${tagFrl.normalised}` : ''}.`,
     );
     if (frlAgreement.result === 'match') parts.push(frlAgreement.statement);
   } else {
@@ -1464,6 +1491,15 @@ export interface GapCheck {
   limit: GapLimit;
   /** The reading the limit is applied to — the mean, the worst point or the least overlap. */
   valueMm: number;
+  /**
+   * What `valueMm` actually is, in words.
+   *
+   * A screen that works this out from `basis` gets it wrong on the floor, where
+   * the limit has two ends and the figure reported is whichever end is in
+   * question — printing the smallest reading of a passing door under the
+   * heading "worst point" is a measurement misreported to a client.
+   */
+  valueLabel: string;
   readingsMm: number[];
   /** The largest single reading, which matters where a single-point ceiling applies. */
   worstMm: number;
@@ -1483,8 +1519,16 @@ const EDITION_CAVEAT =
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
+/**
+ * The mean, unrounded.
+ *
+ * Rounding before the comparison is how a door that does not comply gets a
+ * pass: readings of 3.1, 2.9 and 3.05 average 3.017 mm, which rounds to 3.0 and
+ * slips under a 3 mm limit it is actually over. Every comparison below is made
+ * on the raw figure and only the printed number is rounded.
+ */
 function meanOf(readings: number[]): number {
-  return round1(readings.reduce((a, b) => a + b, 0) / readings.length);
+  return readings.reduce((a, b) => a + b, 0) / readings.length;
 }
 
 /**
@@ -1541,8 +1585,13 @@ export function checkGap(args: {
     return { known: false, reason: `${u.what}: ${u.why}`, whatToDo: u.whatToDo, sourceIds: u.sourceIds };
   }
 
-  const worst = round1(Math.max(...readings));
-  const least = round1(Math.min(...readings));
+  // Raw for every comparison, rounded only where a number is printed. A reading
+  // of 10.04 mm against a 10 mm limit is over it, and rounding it to 10.0 first
+  // would pass the door.
+  const worst = Math.max(...readings);
+  const least = Math.min(...readings);
+  const showWorst = round1(worst);
+  const showLeast = round1(least);
   const notes: string[] = [EDITION_CAVEAT];
 
   const readingCountNote = (want: number) => {
@@ -1588,7 +1637,7 @@ export function checkGap(args: {
       return {
         known: false,
         reason:
-          `A single reading of ${least} mm cannot establish a mean clearance, and Clause 5.5.3 is written against the `
+          `A single reading of ${showLeast} mm cannot establish a mean clearance, and Clause 5.5.3 is written against the `
           + 'mean rather than any one point.',
         whatToDo:
           `Take at least ${RECOMMENDED_READINGS.vertical} readings down each stile and `
@@ -1607,14 +1656,15 @@ export function checkGap(args: {
       known: true,
       position: args.position,
       limit,
-      valueMm: mean,
+      valueMm: round1(mean),
+      valueLabel: 'Mean clearance',
       readingsMm: readings,
-      worstMm: worst,
+      worstMm: showWorst,
       within,
       statement: within
-        ? `Mean clearance ${mean} mm across ${readings.length} readings, within the ${limit.maxMm} mm mean allowed by `
-          + `${limit.clause}.`
-        : `Mean clearance ${mean} mm across ${readings.length} readings, against a ${limit.maxMm} mm mean under `
+        ? `Mean clearance ${round1(mean)} mm across ${readings.length} readings, within the ${limit.maxMm} mm mean `
+          + `allowed by ${limit.clause}.`
+        : `Mean clearance ${round1(mean)} mm across ${readings.length} readings, against a ${limit.maxMm} mm mean under `
           + `${limit.clause}. A gap this size lets hot gas past the leaf before the core has been tested at all.`,
       defectCode: within ? undefined : GAP_DEFECT_CODE,
       notes,
@@ -1654,15 +1704,16 @@ export function checkGap(args: {
           clause: 'AS 1905.1—2005 Clause 5.5.2(b)(ii) and its commentary',
           confidence: 'medium',
         },
-        valueMm: worst,
+        valueMm: showWorst,
+        valueLabel: 'Largest gap under the leaf',
         readingsMm: readings,
-        worstMm: worst,
+        worstMm: showWorst,
         within,
         statement: within
-          ? `${worst} mm under the leaf, inside the ${FLOOR_MAX_CARPET_PENDING_MM} mm allowed only while a combustible `
-            + 'floor covering is being laid. This is a concession for certification day, not a clearance a finished '
-            + 'door may keep.'
-          : `${worst} mm under the leaf, past even the ${FLOOR_MAX_CARPET_PENDING_MM} mm concession allowed while a `
+          ? `${showWorst} mm under the leaf, inside the ${FLOOR_MAX_CARPET_PENDING_MM} mm allowed only while a `
+            + 'combustible floor covering is being laid. This is a concession for certification day, not a clearance '
+            + 'a finished door may keep.'
+          : `${showWorst} mm under the leaf, past even the ${FLOOR_MAX_CARPET_PENDING_MM} mm concession allowed while a `
             + 'covering is being laid.',
         defectCode: within ? undefined : GAP_DEFECT_CODE,
         notes: [
@@ -1689,14 +1740,15 @@ export function checkGap(args: {
           basis: 'any-point',
           clause: 'AS 1905.1—2005 Clause 5.5.2(b)(i)',
         },
-        valueMm: worst,
+        valueMm: showWorst,
+        valueLabel: 'Largest gap to the sill',
         readingsMm: readings,
-        worstMm: worst,
+        worstMm: showWorst,
         within,
         statement: within
-          ? `${worst} mm to the sill, within the ${FLOOR_MAX_OVER_NON_COMBUSTIBLE_SILL_MM} mm maximum where there is `
-            + 'no combustible floor covering.'
-          : `${worst} mm to the sill, against a ${FLOOR_MAX_OVER_NON_COMBUSTIBLE_SILL_MM} mm maximum where there is `
+          ? `${showWorst} mm to the sill, within the ${FLOOR_MAX_OVER_NON_COMBUSTIBLE_SILL_MM} mm maximum where there `
+            + 'is no combustible floor covering.'
+          : `${showWorst} mm to the sill, against a ${FLOOR_MAX_OVER_NON_COMBUSTIBLE_SILL_MM} mm maximum where there is `
             + 'no combustible floor covering.',
         defectCode: within ? undefined : GAP_DEFECT_CODE,
         notes,
@@ -1712,16 +1764,18 @@ export function checkGap(args: {
       known: true,
       position: 'floor',
       limit,
-      valueMm: withinMax ? least : worst,
+      valueMm: withinMax ? showLeast : showWorst,
+      valueLabel: withinMax ? 'Smallest gap over the covering' : 'Largest gap over the covering',
       readingsMm: readings,
-      worstMm: worst,
+      worstMm: showWorst,
       within,
       statement: within
-        ? `${least} mm to ${worst} mm to the top of the floor covering, inside the ${limit.minMm} mm to `
+        ? `${showLeast} mm to ${showWorst} mm to the top of the floor covering, inside the ${limit.minMm} mm to `
           + `${limit.maxMm} mm range in ${limit.clause}.`
         : !withinMax
-          ? `${worst} mm to the top of the floor covering, against a ${limit.maxMm} mm maximum under ${limit.clause}.`
-          : `${least} mm to the top of the floor covering, under the ${limit.minMm} mm minimum in ${limit.clause}. `
+          ? `${showWorst} mm to the top of the floor covering, against a ${limit.maxMm} mm maximum under `
+            + `${limit.clause}.`
+          : `${showLeast} mm to the top of the floor covering, under the ${limit.minMm} mm minimum in ${limit.clause}. `
             + 'Too little clearance is a door that binds and does not close under its own closer.',
       defectCode: within ? undefined : GAP_DEFECT_CODE,
       notes,
@@ -1746,16 +1800,18 @@ export function checkGap(args: {
       known: true,
       position: 'sliding-face',
       limit,
-      valueMm: mean,
+      valueMm: round1(mean),
+      valueLabel: 'Mean face clearance',
       readingsMm: readings,
-      worstMm: worst,
+      worstMm: showWorst,
       within,
       statement: within
-        ? `Mean face clearance ${mean} mm with a worst point of ${worst} mm, inside the ${limit.maxMm} mm mean and `
-          + `${SLIDING_FACE_ANY_POINT_MAX_MM} mm single-point limits in ${limit.clause}.`
+        ? `Mean face clearance ${round1(mean)} mm with a worst point of ${showWorst} mm, inside the ${limit.maxMm} mm `
+          + `mean and ${SLIDING_FACE_ANY_POINT_MAX_MM} mm single-point limits in ${limit.clause}.`
         : mean > limit.maxMm!
-          ? `Mean face clearance ${mean} mm, against a ${limit.maxMm} mm mean under ${limit.clause}.`
-          : `Mean face clearance ${mean} mm is inside the ${limit.maxMm} mm mean, but a single reading of ${worst} mm `
+          ? `Mean face clearance ${round1(mean)} mm, against a ${limit.maxMm} mm mean under ${limit.clause}.`
+          : `Mean face clearance ${round1(mean)} mm is inside the ${limit.maxMm} mm mean, but a single reading of `
+            + `${showWorst} mm `
             + `exceeds the ${SLIDING_FACE_ANY_POINT_MAX_MM} mm allowed at any point under ${limit.clause}.`,
       defectCode: within ? undefined : GAP_DEFECT_CODE,
       notes,
@@ -1779,14 +1835,15 @@ export function checkGap(args: {
     known: true,
     position: 'sliding-overlap',
     limit,
-    valueMm: least,
+    valueMm: showLeast,
+    valueLabel: 'Least overlap',
     readingsMm: readings,
-    worstMm: worst,
+    worstMm: showWorst,
     within,
     statement: within
-      ? `Least overlap ${least} mm, at or above the ${limit.minMm} mm minimum at each jamb and the head under `
+      ? `Least overlap ${showLeast} mm, at or above the ${limit.minMm} mm minimum at each jamb and the head under `
         + `${limit.clause}.`
-      : `Least overlap ${least} mm, under the ${limit.minMm} mm minimum required at each jamb and the head by `
+      : `Least overlap ${showLeast} mm, under the ${limit.minMm} mm minimum required at each jamb and the head by `
         + `${limit.clause}. Too little overlap leaves a path straight past the edge of the leaf.`,
     defectCode: within ? undefined : GAP_DEFECT_CODE,
     notes,
@@ -1857,8 +1914,8 @@ export const HELD_OPEN_DEFECT_CODE = 'DOR-FD-002';
  * `latchingApplies`. It is the single most argued-about call on a fire door
  * service and it turns on the same fact both ways: what the doorset was
  * certified as. A fire-resistant doorset is certified latching from the fully
- * open position and from any intermediate position, so a leaf that comes to
- * rest against its stop without engaging is not the certified assembly. A smoke
+ * open position and from part open too, so a leaf that comes to rest against
+ * its stop without engaging is not the certified assembly. A smoke
  * door is certified to return to the closed position, and that is all.
  *
  * Releasing the door from one position proves less than people think. A closer
@@ -1976,8 +2033,8 @@ export function assessClosing(input: ClosingInput): ClosingVerdict {
   const testedIntermediate = released.includes('intermediate') || released.includes('small-opening');
   if (!testedFullyOpen || !testedIntermediate) {
     notes.push(
-      'AS 1905.1 Clause 5.7 asks that the doorset closes and latches from the fully open position and from any '
-      + `intermediate position. Only ${released.join(' and ')} was tested here, so the result below is partial.`,
+      'AS 1905.1 Clause 5.7 asks for the doorset to close and latch from wide open and from part open alike. Only '
+      + `${released.join(' and ')} was tested here, so the result below is partial.`,
     );
   }
 
@@ -2038,12 +2095,22 @@ export function assessClosing(input: ClosingInput): ClosingVerdict {
     };
   }
 
+  // A partial release test is partial whatever the outcome. Every branch above
+  // withholds `passed` when only one position was tried, and this one has to as
+  // well: a smoke door that came shut off momentum from wide open and did not
+  // latch has not been shown to come shut from where somebody actually lets go
+  // of it, and "observation, not a defect" is not the same statement as "this
+  // door closes".
   return {
     outcome: 'closed-not-latched',
-    passed: true,
+    passed: !testedFullyOpen || !testedIntermediate ? undefined : true,
     statement:
       `Returned fully to the closed position from ${released.join(' and ')}. A latch is fitted and did not engage, `
       + `which is recorded as an observation rather than a defect. ${latching.reason}`,
+    reason: !testedFullyOpen || !testedIntermediate
+      ? 'Only one release position was tested, so the closing this observation rests on has not been shown from '
+        + 'every position the door is left in.'
+      : undefined,
     notes: [
       ...notes,
       'If this opening is also a required fire door, change the door type: the same observation becomes a defect.',
@@ -2106,6 +2173,13 @@ export const SIGN_WORDINGS: SignWording[] = [
 export function requiredSignWording(args: {
   era?: 'current' | 'earlier';
   heldOpenByDevice: boolean;
+  /**
+   * A door in the path of travel where somebody leaves a fire-isolated exit.
+   * It carries its own wording, and it is not the self-closing one — telling a
+   * discharge door it must say "DO NOT KEEP OPEN" is a sign specified against
+   * the wrong clause and paid for by the client.
+   */
+  dischargingFromFireIsolatedExit?: boolean;
 }): { wording: string; letterHeightMm: number; clause: string; sourceIds: SourceId[] } | Refusal {
   if (!args.era) {
     return {
@@ -2120,8 +2194,13 @@ export function requiredSignWording(args: {
     };
   }
   const set = SIGN_WORDINGS.find((w) => w.era === args.era)!;
+  const wording = args.dischargingFromFireIsolatedExit
+    ? set.dischargingFromFireIsolatedExit
+    : args.heldOpenByDevice
+      ? set.heldOpen
+      : set.selfClosing;
   return {
-    wording: args.heldOpenByDevice ? set.heldOpen : set.selfClosing,
+    wording,
     letterHeightMm: SIGN_MIN_LETTER_HEIGHT_MM,
     clause: set.clause,
     sourceIds: set.sourceIds,
@@ -2365,6 +2444,18 @@ export function assessDoor(input: DoorInput): DoorVerdict {
             + 'protected to less than its approval.',
           sourceIds: ['as1905-1', 'ncc-spec-1'],
         });
+        // No code is attached here on purpose, and the note is not optional
+        // padding — without it this check fails a door and leaves nothing for
+        // anyone to raise. DOR-FD-004 is "tag missing" at low severity, and a
+        // tag that disagrees with the register is neither missing nor low: it
+        // is either a wrong register or an opening protected to less than the
+        // building was approved for. Reusing the tag code would file the
+        // second as a paperwork job.
+        notes.push(
+          'The defect library has no code for a tag that disagrees with the register. DOR-FD-004 is "tag missing" '
+          + 'at low severity and this is not that — raise it as its own item, quoting both figures, and resolve '
+          + 'which of the register and the door is wrong before the door is signed off.',
+        );
       }
     } else {
       checks.push({
@@ -2545,9 +2636,20 @@ export function summariseDoors(verdicts: DoorVerdict[]): SiteDoorSummary {
     );
   }
   if (untagged > 0) {
+    // Split out the ones nobody reached. Rolled together, this caveat reads as
+    // though every one of them was inspected and found untagged, and the same
+    // doors are then counted a second time in the unassessed caveat above.
+    const unreachedTaggable = verdicts.filter(
+      (v) => v.outcome === 'not-assessed' && DOOR_TYPES[v.doorType].hasTag,
+    ).length;
     caveats.push(
       `${untagged} fire doorset${untagged === 1 ? '' : 's'} could not be identified from a tag. Their ratings are `
-      + 'taken from the register and have not been confirmed on site.',
+      + 'taken from the register and have not been confirmed on site.'
+      + (unreachedTaggable > 0
+        ? ` ${unreachedTaggable} of those ${unreachedTaggable === 1 ? 'was' : 'were'} not reached at all and `
+          + `${unreachedTaggable === 1 ? 'is' : 'are'} the same door${unreachedTaggable === 1 ? '' : 's'} counted `
+          + 'as unassessed above, not a separate shortfall.'
+        : ''),
     );
   }
 
