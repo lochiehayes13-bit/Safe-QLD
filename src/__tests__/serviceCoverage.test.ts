@@ -1,4 +1,6 @@
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { ASSET_TYPES, type AssetTypeDef } from '@/seed/assetTypes';
+import { parseAssetRegister } from '@/parsers/assetRegister';
 import { SERVICE_ROUTINES, type ServiceRoutine } from '@/seed/serviceRoutines';
 import {
   coverageGaps, isServiced, servicedTypeIds, siteCoverageGaps, systemsWithGaps,
@@ -170,5 +172,46 @@ describe('against the real routines and asset types', () => {
     const containers = ASSET_TYPES.filter((t) => t.container).map((t) => t.id);
     const reported = coverageGaps().map((g) => g.type.id);
     expect(reported.filter((id) => containers.includes(id))).toEqual([]);
+  });
+});
+
+/**
+ * The same question asked of the real book of work.
+ *
+ * Skips where the register is not staged, which is every checkout but a
+ * developer's — the register is customer data and is not committed. On a
+ * machine that has it, this is the number that makes the point: it is not a
+ * theoretical gap in a seed file, it is eight and a half per cent of the
+ * assets Safe QLD services.
+ */
+const REGISTER_DIR = '/tmp/safeqld-data';
+const registers = existsSync(REGISTER_DIR)
+  ? readdirSync(REGISTER_DIR).filter((f) => f.endsWith('.csv'))
+  : [];
+const describeReal = registers.length ? describe : describe.skip;
+
+describeReal('against the real asset register', () => {
+  it('counts how much of the book falls in a type nothing services', () => {
+    const gapIds = new Set(coverageGaps().map((g) => g.type.id));
+    let total = 0;
+    let affected = 0;
+    for (const file of registers) {
+      const parsed = parseAssetRegister(readFileSync(`${REGISTER_DIR}/${file}`, 'utf8'), file);
+      for (const asset of parsed.assets) {
+        total++;
+        if (gapIds.has(asset.assetTypeId)) affected++;
+      }
+    }
+
+    /*
+     * At the time of writing: 1,077 of 12,553 — five hundred fire blankets,
+     * five hundred and seventy-six smoke alarms and one gas cylinder. Asserted
+     * as a proportion rather than a count so it survives the next register
+     * export, and asserted at all so that covering these types later shows up
+     * here as the improvement it is.
+     */
+    expect(total).toBeGreaterThan(1000);
+    expect(affected / total).toBeLessThan(0.2);
+    expect(affected).toBeGreaterThan(0);
   });
 });
