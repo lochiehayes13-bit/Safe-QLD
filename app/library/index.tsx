@@ -13,6 +13,8 @@ import {
   deleteLibraryDoc, importPdf, listLibraryDocs, searchLibrary, type LibraryDoc,
 } from '@/db/libraryRepo';
 import type { PageHit } from '@/domain/docSearch';
+import { askGrounded, hasKey } from '@/ai/client';
+import type { GroundedAnswer, Passage } from '@/ai/grounding';
 import { useTheme } from '@/theme';
 import {
   Banner, Button, Card, Chip, Field, H2, Rowed, Screen, Txt,
@@ -80,6 +82,9 @@ export default function LibraryScreen() {
   const [mine, setMine] = useState<LibraryDoc[]>([]);
   const [pageHits, setPageHits] = useState<PageHit[]>([]);
   const [importing, setImporting] = useState(false);
+  const [aiOn, setAiOn] = useState(false);
+  const [answer, setAnswer] = useState<GroundedAnswer | null>(null);
+  const [thinking, setThinking] = useState(false);
 
   const q = query.trim();
   const searching = q.length >= 2;
@@ -88,7 +93,37 @@ export default function LibraryScreen() {
   const reading = useMemo(() => (searching ? explainQuery(q) : null), [q, searching]);
 
   const load = useCallback(async () => { setMine(await listLibraryDocs()); }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void load(); void hasKey().then(setAiOn); }, [load]);
+
+  // A new question invalidates the last answer immediately. Leaving it on
+  // screen under a different question is how a wrong answer gets acted on.
+  useEffect(() => { setAnswer(null); }, [q]);
+
+  /**
+   * The passages behind an answer are whatever the search already found, and
+   * nothing else — no site, no customer, no asset register.
+   */
+  const passages = useMemo((): Passage[] => [
+    ...pageHits.map((h) => ({
+      citation: `${h.docTitle} page ${h.page}`,
+      text: h.snippet,
+      source: 'Your imported document',
+    })),
+    ...results.filter((r) => r.kind === 'clause').slice(0, 5).map((r) => ({
+      citation: r.title,
+      text: r.body,
+      source: r.source,
+    })),
+  ], [pageHits, results]);
+
+  const askAi = async () => {
+    setThinking(true);
+    try {
+      setAnswer(await askGrounded({ question: q, passages }));
+    } finally {
+      setThinking(false);
+    }
+  };
 
   // The imported documents are searched from the database, so this cannot be a
   // memo — it lands a moment after the clause results and that is fine.
@@ -197,6 +232,34 @@ export default function LibraryScreen() {
               + 'Try the equipment name, or a clause reference like "AS 2419.1 10.4".'
             }
           />
+        ) : null}
+
+        {searching && aiOn && passages.length ? (
+          <Card>
+            {answer?.text ? (
+              <>
+                <Rowed gap={2} align="center">
+                  <MaterialCommunityIcons name="creation-outline" size={16} color={t.color.accentText} />
+                  <Txt size="xs" tone="accent" style={{ flex: 1 }}>Read from the passages below</Txt>
+                </Rowed>
+                <Txt size="sm" style={{ marginTop: t.space(1.5), lineHeight: 20 }}>{answer.text}</Txt>
+                <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 16 }}>
+                  Every claim above is numbered to a passage below. Anything it could not source it
+                  did not say — check the passage before you act on it.
+                </Txt>
+              </>
+            ) : answer?.refusal ? (
+              <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>{answer.refusal}</Txt>
+            ) : (
+              <Button
+                title="Read these for me"
+                variant="secondary"
+                compact
+                loading={thinking}
+                onPress={askAi}
+              />
+            )}
+          </Card>
         ) : null}
 
         {searching ? (

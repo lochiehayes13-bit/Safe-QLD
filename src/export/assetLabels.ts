@@ -392,14 +392,13 @@ export function buildLabelSheet(labels: LabelContent[], options: LabelSheetOptio
     printable.push({ ...label, tag: parsed.tag });
   }
 
-  // The barcode is sized once, from the stock, so every label on the sheet
-  // carries an identical symbol. Sizing per label would make two tags of the
-  // same length print at different module widths purely by accident.
   const padMm = stock.labelWidthMm >= 60 ? 3 : 2;
   const availableWidth = stock.labelWidthMm - padMm * 2;
+  // Barcodes get at most a little under half the label; the rest is the number
+  // and the location, which are what a person reads when the scan fails.
   const availableHeight = stock.labelHeightMm * 0.42;
-  // Every tag is the same width by construction, so the symbol is sized from
-  // the stock alone. Sizing it per label would print two tags of identical
+  // Every tag is the same width by construction, so the symbol is sized once
+  // from the stock. Sizing it per label would print two tags of identical
   // length at different module widths for no reason a reader could see.
   const plan = planBarcode(TAG_LENGTH, availableWidth, availableHeight);
 

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, FlatList, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -52,8 +52,8 @@ const toTaggable = (a: AssetRecord): TaggableAsset => ({
   name: a.name,
 });
 
-const locationOf = (a: AssetRecord): string =>
-  [a.level, a.room].filter(Boolean).join(' · ') || a.locationNote || '';
+const locationOf = (a: AssetRecord | undefined): string =>
+  a ? [a.level, a.room].filter(Boolean).join(' · ') || a.locationNote || '' : '';
 
 export default function LabelsScreen() {
   const t = useTheme();
@@ -70,7 +70,7 @@ export default function LabelsScreen() {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
-  React.useEffect(() => { void listSites().then(setSites); }, []);
+  useEffect(() => { void listSites().then(setSites); }, []);
 
   const openSite = useCallback(async (s: Site) => {
     setBusy(true);
@@ -176,7 +176,7 @@ export default function LabelsScreen() {
         return {
           tag: r.tag.tag,
           typeLabel: r.tag.typeLabel,
-          location: asset ? locationOf(asset) : '',
+          location: locationOf(asset),
           siteName: site.name,
         };
       });
@@ -364,7 +364,7 @@ export default function LabelsScreen() {
               item={item}
               selectable={filter === 'ready'}
               selected={selected.has(item.asset.id)}
-              location={locationOf(byId.get(item.asset.id) ?? ({} as AssetRecord))}
+              location={locationOf(byId.get(item.asset.id))}
               onToggle={() => {
                 const next = new Set(selected);
                 if (next.has(item.asset.id)) next.delete(item.asset.id);

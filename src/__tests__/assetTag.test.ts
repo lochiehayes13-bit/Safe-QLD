@@ -826,20 +826,3 @@ describe('the label sheet', () => {
     }
   });
 });
-
-describe('scratch', () => {
-  it('writes a sheet out to look at', () => {
-    const stock = stockById('l7160') as NonNullable<ReturnType<typeof stockById>>;
-    const labels = Array.from({ length: 24 }, (_, i) => ({
-      tag: formatTag(i % 3 === 0 ? 'extinguisher' : i % 3 === 1 ? 'detector' : 'hose-reel', 40 + i) as string,
-      typeLabel: i % 3 === 0 ? 'Fire extinguisher' : i % 3 === 1 ? 'Detector' : 'Fire hose reel',
-      location: `Level ${1 + (i % 4)} · Corridor ${i}`,
-      siteName: 'Brisbane Private Hospital',
-    }));
-    const sheet = buildLabelSheet(labels, { stock, startAt: 3, showOutlines: true });
-    // eslint-disable-next-line
-    require('fs').writeFileSync('/tmp/claude-0/-home-user-Safe-QLD/95b47080-12e4-52bf-8b08-91ab1cf7e072/scratchpad/sheet.html', sheet.html);
-    console.log(JSON.stringify({ sheets: sheet.sheets, printed: sheet.printed, barcode: sheet.barcode, warnings: sheet.warnings }, null, 2));
-    expect(sheet.printed).toBe(24);
-  });
-});
