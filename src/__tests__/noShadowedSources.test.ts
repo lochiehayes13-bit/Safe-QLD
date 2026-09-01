@@ -64,6 +64,18 @@ describe('the source tree', () => {
     expect(files.filter((f) => f.endsWith('.d.ts'))).toEqual([]);
   });
 
+  it('has no editor or script backups left lying in it', () => {
+    /*
+     * A .bak does not shadow its source the way a compiled .js does — the
+     * resolver will not load one — so this is about the reader rather than the
+     * runtime. Fifty-five kilobytes of stale duplicate turns up in every grep
+     * and reads as live code to whoever finds it next, and the copy that was
+     * left behind is by definition the one nobody is maintaining.
+     */
+    const backups = files.filter((f) => /\.(bak|orig|rej)$|~$/.test(f));
+    expect(backups).toEqual([]);
+  });
+
   it('found the tree it meant to check, rather than passing on an empty list', () => {
     // A vacuous pass here would hide every assertion above it.
     expect(files.filter((f) => f.endsWith('.ts') || f.endsWith('.tsx')).length).toBeGreaterThan(100);

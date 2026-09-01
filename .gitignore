@@ -82,3 +82,11 @@ src/**/*.js.map
 src/**/*.d.ts
 app/**/*.js
 app/**/*.js.map
+
+# Editor and script backups. Not a resolution hazard the way a compiled .js is,
+# but 55KB of stale duplicate turns up in every grep and reads as live code to
+# whoever finds it next.
+*.bak
+*.orig
+*.rej
+*~
