@@ -11,6 +11,7 @@ import {
 import { MIGRATION_V10 } from './schemaQuote';
 import { MIGRATION_V11 } from './schemaLibrary';
 import { MIGRATION_V12 } from './schemaForm72';
+import { MIGRATION_V13 } from './schemaOutbound';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -282,6 +283,9 @@ export const MIGRATIONS: string[] = [
 
   // v12 — Form 72, the Queensland statutory hydrant and sprinkler form
   MIGRATION_V12,
+
+  // v13 — what the office has already accepted, so a retry cannot post twice
+  MIGRATION_V13,
 ];
 
 /**

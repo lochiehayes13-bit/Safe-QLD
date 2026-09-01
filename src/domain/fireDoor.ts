@@ -348,7 +348,7 @@ const DIGIT_LOOKALIKES: Record<string, string> = { O: '0', o: '0', l: '1', I: '1
 function parseElement(raw: string): { minutes?: number } | { error: string } {
   const text = raw.trim();
   if (text === '') return { error: 'is empty' };
-  if (/^[-‐-―−]$/.test(text)) return { minutes: undefined };
+  if (/^[-\u2010-\u2015\u2212]$/.test(text)) return { minutes: undefined };
   if (/^\d{1,4}$/.test(text)) {
     const minutes = Number(text);
     if (minutes === 0) {
@@ -420,9 +420,9 @@ export function parseFrl(input: string): FrlResult {
     text = text.replace(/\\/g, '/');
   }
   // En dash, em dash, figure dash and the true minus sign all get typed for "-".
-  if (/[‐-―−]/.test(text)) {
+  if (/[\u2010-\u2015\u2212]/.test(text)) {
     notes.push('A dash character other than a plain hyphen was read as "-".');
-    text = text.replace(/[‐-―−]/g, '-');
+    text = text.replace(/[\u2010-\u2015\u2212]/g, '-');
   }
   text = text.replace(/\s*\/\s*/g, '/').trim();
 
@@ -1531,7 +1531,7 @@ export function checkGap(args: {
     return { known: false, reason: `${u.what}: ${u.why}`, whatToDo: u.whatToDo, sourceIds: u.sourceIds };
   }
 
-  if (args.doorType === 'smoke' && args.position !== 'floor') {
+  if (args.doorType === 'smoke') {
     const u = UNSOURCED_GAPS['smoke-door'];
     return { known: false, reason: `${u.what}: ${u.why}`, whatToDo: u.whatToDo, sourceIds: u.sourceIds };
   }

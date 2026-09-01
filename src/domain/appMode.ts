@@ -556,6 +556,17 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['defects', 'outstanding', 'open', 'faults'],
   },
   {
+    route: '/work/outbound', file: 'app/work/outbound.tsx', tab: 'work', section: 'Records',
+    label: 'Send to the office', modes: BOTH, openedFrom: ['/work'],
+    blurb: 'A finished service and the defects it raised, pushed to the Simpro job as notes.',
+    terms: ['send', 'office', 'simpro', 'push', 'upload', 'sync', 'job note'],
+    keptBecause:
+      'A technician is the only person who knows the service is finished, and the office finding '
+      + 'out when the paperwork arrives is how an invoice goes out for a service that was nine '
+      + 'assets short. The review before it sends is on this screen too, and that is the part '
+      + 'that has to be read on site rather than in an office.',
+  },
+  {
     route: '/work/reports', file: 'app/work/reports.tsx', tab: 'work', section: 'Records',
     label: 'Test sheets', modes: BOTH, openedFrom: ['/', '/work'],
     blurb: 'Every service report on this device, newest first.',
