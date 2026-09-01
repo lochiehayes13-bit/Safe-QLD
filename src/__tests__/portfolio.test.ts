@@ -77,6 +77,36 @@ describe('folding routine runs into a history per site and routine', () => {
     expect(histories[0]!.completedCount).toBe(3);
   });
 
+  it('anchors a run to the Queensland day it was finished, not to the UTC one', () => {
+    /*
+     * The anchor is the date every future service at that site is counted from,
+     * and every tolerance window with it. A run finished at seven on a Brisbane
+     * morning is 21:00 UTC the day before, so the first ten characters of the
+     * timestamp anchor the whole routine a day early and leave it there —
+     * quietly, and for as long as the site is on the books.
+     *
+     * 2024-02-29T21:00:00Z is seven in the morning on 1 March 2024 in
+     * Queensland, and it is a leap day, so a wrong reading here lands on a date
+     * that only exists every four years.
+     */
+    const { histories } = foldRuns([
+      { siteId: 's1', routineId: 'det-annual', frequency: 'annual', completedAt: '2024-02-29T21:00:00.000Z' },
+      { siteId: 's1', routineId: 'det-annual', frequency: 'annual', completedAt: '2025-03-01T23:30:00.000Z' },
+    ]);
+    expect(histories[0]!.firstCompletedAt).toBe('2024-03-01');
+    expect(histories[0]!.lastCompletedAt).toBe('2025-03-02');
+  });
+
+  it('leaves a date with no time in it where it was written', () => {
+    // A register import records "2024-03-01" as a day, not as an instant at
+    // midnight UTC. Shifting that forward ten hours moves the service to the
+    // second, which is the same bug pointing the other way.
+    const { histories } = foldRuns([
+      { siteId: 's1', routineId: 'det-annual', frequency: 'annual', completedAt: '2024-03-01' },
+    ]);
+    expect(histories[0]!.firstCompletedAt).toBe('2024-03-01');
+  });
+
   it("refuses a frequency it does not know rather than mapping it to the nearest one", () => {
     // Guessing "yearly" for an unrecognised string asserts a two-month
     // tolerance the app has no basis for, and the site looks compliant on it.
@@ -505,6 +535,19 @@ describe('statutory exposure', () => {
     // August has an August anniversary.
     expect(statementDue(site({ siteId: 's1', lastStatementAt: '2026-08-20' })).date).toBe('2027-08-20');
     expect(statementDue(site({ siteId: 's1', occupationAt: '2026-02-01' })).date).toBe('2027-02-01');
+
+    /*
+     * Signed at seven on a Brisbane morning, which is 21:00 UTC the day
+     * before. Read off the timestamp the anniversary falls on the 19th, and it
+     * keeps falling on the 19th for the life of the building.
+     */
+    expect(statementDue(site({ siteId: 's1', lastStatementAt: '2026-08-19T21:00:00.000Z' })).date)
+      .toBe('2027-08-20');
+    expect(statementDue(site({ siteId: 's1', occupationAt: '2026-01-31T21:00:00.000Z' })).date)
+      .toBe('2027-02-01');
+
+    // And nothing invented from a string that is not a date at all.
+    expect(statementDue(site({ siteId: 's1', lastStatementAt: '20/8/2026' })).date).toBeUndefined();
   });
 
   it('carries a source and a legal reference on every statutory item', () => {

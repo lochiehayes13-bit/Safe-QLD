@@ -89,6 +89,36 @@ describe('dates', () => {
     expect(formatAuDate('2026-03-04T09:15:00Z')).toBe('4/3/2026');
     expect(formatAuMonth('2028-11-04')).toBe('November 2028');
   });
+
+  it('reads the Queensland day, not the first ten characters of a timestamp', () => {
+    /*
+     * A measurement carries the instant of the service that took it, and
+     * between midnight and 10am Brisbane that instant's UTC date is yesterday.
+     * This company starts at seven, so every morning reading was plotted and
+     * labelled with the day before it happened.
+     *
+     * 21:00 UTC on 31 August is seven in the morning on 1 September in
+     * Queensland.
+     */
+    expect(formatAuDate('2026-08-31T21:00:00.000Z')).toBe('1/9/2026');
+    expect(formatAuMonth('2026-08-31T21:00:00.000Z')).toBe('September 2026');
+  });
+
+  it('leaves a date with no time in it alone', () => {
+    /*
+     * The same bug pointing the other way. "2026-07-03" written on a form means
+     * the third of July, not an instant at midnight UTC that happens to fall on
+     * it, and shifting it forward ten hours would move a service to the fourth.
+     */
+    expect(formatAuDate('2026-07-03')).toBe('3/7/2026');
+    expect(formatAuMonth('2026-07-01')).toBe('July 2026');
+  });
+
+  it('hands back what it cannot read rather than inventing a date for it', () => {
+    expect(formatAuDate('not a date')).toBe('not a date');
+    expect(formatAuDate('')).toBe('');
+    expect(formatAuMonth(undefined)).toBe('');
+  });
 });
 
 describe('trendMeasurements — refusing what cannot be trended', () => {

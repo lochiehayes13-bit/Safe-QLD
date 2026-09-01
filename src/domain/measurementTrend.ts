@@ -1,3 +1,4 @@
+import { QLD_UTC_OFFSET_HOURS, qldIsoDay } from '@/domain/qldTime';
 import { QUANTITIES, convert, type Unit } from '@/calc/units';
 
 /**
@@ -295,8 +296,15 @@ export function kindForKey(key: string): MeasurementKind | undefined {
 // Dates
 // ---------------------------------------------------------------------------
 
-/** Queensland is UTC+10 in every month of the year and never shifts. */
-export const QLD_UTC_OFFSET_HOURS = 10;
+/**
+ * Queensland is UTC+10 in every month of the year and never shifts.
+ *
+ * Re-exported rather than redefined. This module had its own copy of the number
+ * and its own date formatting beside it, and the formatting drifted — it read
+ * the UTC day off a timestamp while the rest of the app read the Queensland
+ * one. Two constants that have to agree are one too many.
+ */
+export { QLD_UTC_OFFSET_HOURS };
 
 const YEAR_MS = 365.25 * 24 * 3_600_000;
 const DAY_MS = 86_400_000;
@@ -319,10 +327,24 @@ export function qldDateOf(ms: number): string {
   return new Date(ms + QLD_UTC_OFFSET_HOURS * 3_600_000).toISOString().slice(0, 10);
 }
 
-/** d/m/yyyy. Never m/d/y — an Australian service record is read by Australians. */
+/**
+ * d/m/yyyy. Never m/d/y — an Australian service record is read by Australians.
+ *
+ * The Queensland day first, not the first ten characters of a UTC timestamp.
+ * A measurement carries the instant of the service that took it, and between
+ * midnight and 10am Brisbane that instant's UTC date is yesterday's — so a
+ * reading taken at seven in the morning, which is when this company starts,
+ * plotted on a chart labelled with the day before it happened.
+ *
+ * The same fix as the one in export/sheets.ts, from the same cause: this module
+ * grew its own copy of the date handling. qldTime.ts is the one that decides
+ * what day it is in Queensland, and both go through it now.
+ */
 export function formatAuDate(iso: string | undefined): string {
   if (!iso) return '';
-  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const day = qldIsoDay(iso);
+  if (!day) return iso;
+  const m = day.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!m) return iso;
   return `${Number(m[3])}/${Number(m[2])}/${m[1]}`;
 }
@@ -339,7 +361,12 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
  */
 export function formatAuMonth(iso: string | undefined): string {
   if (!iso) return '';
-  const m = iso.match(/^(\d{4})-(\d{2})/);
+  // The Queensland day, for the same reason as above — and it matters more at
+  // a month boundary, where the first of the month reads as the last of the one
+  // before and the projection appears to be a whole month earlier.
+  const day = qldIsoDay(iso);
+  if (!day) return iso;
+  const m = day.match(/^(\d{4})-(\d{2})/);
   if (!m) return iso;
   return `${MONTHS[Number(m[2]) - 1]} ${m[1]}`;
 }

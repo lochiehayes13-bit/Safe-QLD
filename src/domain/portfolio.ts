@@ -919,8 +919,22 @@ export function foldRuns(runs: PortfolioRun[]): FoldedRuns {
       });
       continue;
     }
-    const completedAt = run.completedAt?.slice(0, 10);
-    if (!parseIsoDate(completedAt)) {
+    /*
+     * The Queensland day, not the first ten characters of the timestamp.
+     *
+     * This becomes firstCompletedAt, which is the anchor — every future service
+     * at that site is counted from it, and so is every tolerance window. A run
+     * finished at seven on a Brisbane morning is 21:00 UTC the day before, so
+     * slicing the timestamp anchored the whole routine a day early and left it
+     * there.
+     *
+     * qldToday is in this file, written for this, with a comment saying a job
+     * closed at 23:00 UTC belongs to the following day. It refuses a non-ISO
+     * string and a date like 2026-02-31 on the round trip, so it does the
+     * rejection this used parseIsoDate for as well.
+     */
+    const completedAt = qldToday(run.completedAt ?? '');
+    if (!completedAt) {
       rejected.push({ run, reason: `"${run.completedAt}" is not a date this app can read.` });
       continue;
     }
@@ -1142,7 +1156,12 @@ function scoreSite(w: SiteWorkings, today: string, nowMs: number, statementLeadD
         factor: 'notice-overdue',
         label: 'Written critical defect notice not recorded',
         points: RISK_WEIGHTS['notice-overdue'].points,
-        detail: `The 24 hours ran out ${clocks.noticeDueAt?.slice(0, 10)}. ${RISK_WEIGHTS['notice-overdue'].why}`,
+        // The Queensland day the clock ran out on. A defect raised at seven on
+        // a Brisbane morning has its 24 hours run out at 21:00 UTC, so the
+        // first ten characters of that instant name the day before — on a
+        // statutory clock, printed as the day somebody missed.
+        detail: `The 24 hours ran out ${qldToday(clocks.noticeDueAt ?? '') ?? 'on a date this app could not read'}. `
+          + `${RISK_WEIGHTS['notice-overdue'].why}`,
         sourceIds: RISK_WEIGHTS['notice-overdue'].sourceIds,
         defectId: defect.defectId,
       });
@@ -1245,12 +1264,19 @@ function scoreSite(w: SiteWorkings, today: string, nowMs: number, statementLeadD
  * statutory obligation.
  */
 export function statementDue(site: PortfolioSite): { date?: string; legalRef: string } {
+  // Both anniversaries are counted from a Queensland day. A statement signed at
+  // seven on a Brisbane morning is stamped 21:00 UTC the day before, and the
+  // next one then falls due a day early for the life of the building.
   if (site.lastStatementAt) {
-    const answer = nextStatementDue(site.lastStatementAt.slice(0, 10));
+    const day = qldToday(site.lastStatementAt);
+    if (!day) return { legalRef: 'QDC MP 6.1 A2(b)' };
+    const answer = nextStatementDue(day);
     return { date: answer.date, legalRef: answer.legalRef };
   }
   if (site.occupationAt) {
-    const answer = firstStatementDue(site.occupationAt.slice(0, 10));
+    const day = qldToday(site.occupationAt);
+    if (!day) return { legalRef: 'QDC MP 6.1 A2(b)' };
+    const answer = firstStatementDue(day);
     return { date: answer.date, legalRef: answer.legalRef };
   }
   return { legalRef: 'QDC MP 6.1 A2(b)' };
