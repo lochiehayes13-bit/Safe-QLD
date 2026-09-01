@@ -273,6 +273,29 @@ describe('checking a measured flow against a supplied duty', () => {
     expect(r.notes.join(' ')).toMatch(/factor of sixty/);
   });
 
+  it('fails a reel that flowed nothing, instead of filing zero as "not measured"', () => {
+    // A stop valve shut somewhere upstream reads zero at the nozzle. Zero is
+    // the worst result on the sheet and the one most easily lost: treated as an
+    // empty field it becomes "undetermined" and the reel keeps its tag.
+    const r = checkFlow({ measuredFlowLitresPerMinute: 0, dutyFlowLitresPerSecond: 0.33 });
+    if (isRefused(r)) throw new Error(r.reason);
+    expect(r.flow.verdict).toBe('fail');
+    expect(r.verdict).toBe('fail');
+    expect(r.measuredFlowLitresPerSecond).toBe(0);
+  });
+
+  it('fails a reel with no pressure behind it for the same reason', () => {
+    const r = checkFlow({ measuredRunningPressureKpa: 0, dutyPressureKpa: 220 });
+    if (isRefused(r)) throw new Error(r.reason);
+    expect(r.verdict).toBe('fail');
+    expect(r.pressure.margin).toBe(-220);
+  });
+
+  it('still treats a duty of zero as a duty nobody entered, because no reel has one', () => {
+    const r = checkFlow({ measuredFlowLitresPerMinute: 24, dutyFlowLitresPerSecond: 0 });
+    expect(isRefused(r)).toBe(true);
+  });
+
   it('passes only when every figure it had a duty for was measured and met', () => {
     const r = checkFlow({
       measuredFlowLitresPerMinute: 24,

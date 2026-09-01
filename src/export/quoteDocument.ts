@@ -1,6 +1,6 @@
 import {
-  GST_RATE_SOURCE, QUOTE_STATUS_LABEL, UNPRICEABLE_REASON, lineAmountCents, pricingSources,
-  quoteTotals, type Quote, type QuoteLine, type QuoteSection, type QuoteTotals,
+  GST_RATE_SOURCE, GST_ROUNDING_SOURCE, QUOTE_STATUS_LABEL, lineAmountCents, pricingSources,
+  quoteTotals, unpriceableReason, type Quote, type QuoteLine, type QuoteSection, type QuoteTotals,
 } from '@/domain/quote';
 import { formatCents } from '@/domain/rates';
 import { formatAuDate } from './sheets';
@@ -189,7 +189,13 @@ function totalsTable(quote: Quote, totals: QuoteTotals): string {
     `<tr><td>Labour</td><td>${esc(formatCents(totals.labourCents))}</td></tr>`,
   ];
   if (totals.discountCents !== 0) {
-    rows.push(`<tr><td>Discount${quote.discountReason ? ` — ${esc(quote.discountReason)}` : ''}</td>`
+    // A negative discount adds to the price. Printed as "Discount $50.00" it
+    // reads to the client as fifty dollars off while the subtotal has gone
+    // fifty dollars up, and the column no longer adds up in front of them. It
+    // is named for what it does instead.
+    const adding = totals.discountCents < 0;
+    const label = adding ? 'Additional amount' : 'Discount';
+    rows.push(`<tr><td>${label}${quote.discountReason ? ` — ${esc(quote.discountReason)}` : ''}</td>`
       + `<td>${esc(formatCents(-totals.discountCents))}</td></tr>`);
   }
   rows.push(`<tr><td>Subtotal (ex GST)</td><td>${esc(formatCents(totals.subtotalCents))}</td></tr>`);
@@ -296,6 +302,9 @@ export function quoteDocumentHtml(input: QuoteDocumentInput): string {
     </table>
 
     <p class="foot">${esc(GST_RATE_SOURCE.label)}
+      ${esc(GST_ROUNDING_SOURCE.label)}
+      GST is therefore worked once on the subtotal above and may differ by a cent from the GST on
+      each line added together.
       This document is a quotation and is not a tax invoice.
       A tax invoice is issued on completion of the work.</p>
     ${sources.length
@@ -303,7 +312,7 @@ export function quoteDocumentHtml(input: QuoteDocumentInput): string {
     : '<p class="foot">No rate source is recorded against the figures on this quotation.</p>'}
     ${q.unpriceable.length
     ? `<p class="foot">Defects listed as not covered are excluded for the following reasons: ${
-      esc([...new Set(q.unpriceable.map((u) => UNPRICEABLE_REASON[u.reason]))].join('; '))}.</p>`
+      esc([...new Set(q.unpriceable.map((u) => unpriceableReason(u.reason)))].join('; '))}.</p>`
     : ''}
   </body></html>`;
 }

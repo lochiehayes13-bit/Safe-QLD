@@ -146,6 +146,19 @@ export const UNPRICEABLE_REASON: Record<UnpriceableDefect['reason'], string> = {
 };
 
 /**
+ * The reason in words, for a reason that may have come off the database.
+ *
+ * The list is stored as JSON on the quote, so a row written by an older or a
+ * newer build can carry a reason this one has never heard of. Reading it
+ * straight out of the table above puts "undefined" on a client's document; this
+ * says plainly that the reason was not recorded instead.
+ */
+export function unpriceableReason(reason: string): string {
+  return UNPRICEABLE_REASON[reason as UnpriceableDefect['reason']]
+    ?? 'It produced no priced work and the reason was not recorded';
+}
+
+/**
  * Defects that will contribute nothing to the quote, and why.
  *
  * Deliberately not the same test as partsNeeded's uncoveredDefects. That one
@@ -222,6 +235,15 @@ export interface QuoteBuild {
   lines: QuoteLine[];
   /** Defects that produced no line at all. Kept on the quote, not recomputed. */
   unpriceable: UnpriceableDefect[];
+  /**
+   * Prices that were offered and not used, in words.
+   *
+   * A refusal nobody is told about is indistinguishable from nobody having
+   * typed a price: both leave the line blank. These say which happened, so a
+   * rate that arrived without a source is a thing the technician can fix rather
+   * than a line that mysteriously will not price.
+   */
+  warnings: string[];
 }
 
 const materialKey = (description: string, unit: string) => `mat:${description.toLowerCase()}|${unit}`;
@@ -237,8 +259,22 @@ const labourKey = (description: string) => `lab:${description.toLowerCase()}`;
  * of "the same thing" is two answers to how many heads are needed.
  */
 export function buildQuoteLines(input: QuoteBuildInput): QuoteBuild {
+  const warnings: string[] = [];
   const prices = new Map<string, MaterialPrice>();
-  for (const p of input.materialPrices ?? []) prices.set(p.description.trim().toLowerCase(), p);
+  for (const p of input.materialPrices ?? []) {
+    // A price is whole cents or it is not a price. A fraction of a cent means
+    // dollars were multiplied out somewhere upstream, and it prints as
+    // "$89.5.5" on the document; nought or less means the material is being
+    // given away. Neither is used, and neither is quietly corrected.
+    if (!Number.isInteger(p.unitCents) || p.unitCents <= 0) {
+      warnings.push(
+        `The price offered for "${p.description.trim()}" is not a whole number of cents above `
+        + 'nought, so it has not been used and the line is unpriced.',
+      );
+      continue;
+    }
+    prices.set(p.description.trim().toLowerCase(), p);
+  }
 
   const lines: QuoteLine[] = [];
 
@@ -262,6 +298,22 @@ export function buildQuoteLines(input: QuoteBuildInput): QuoteBuild {
   // where it came from, and the whole point of carrying the source is that
   // there is never a figure without one.
   const rate = input.labourRate && input.labourRateSource ? input.labourRate : undefined;
+  if (input.labourRate && !input.labourRateSource) {
+    warnings.push(
+      `The labour rate "${input.labourRate.name}" arrived with nothing saying where it came from, `
+      + 'so it has not been used. The hours are on the quote unpriced until a rate with a stated '
+      + 'source is available.',
+    );
+  }
+  if (rate && (!Number.isInteger(rate.sellCentsPerHour) || rate.sellCentsPerHour <= 0)) {
+    warnings.push(
+      `The labour rate "${rate.name}" is not a whole number of cents above nought an hour, so it `
+      + 'has not been used and the hours are unpriced.',
+    );
+  }
+  const hourlyCents = rate && Number.isInteger(rate.sellCentsPerHour) && rate.sellCentsPerHour > 0
+    ? rate.sellCentsPerHour
+    : undefined;
 
   for (const labour of labourNeededFor(input.defects)) {
     lines.push({
@@ -270,14 +322,14 @@ export function buildQuoteLines(input: QuoteBuildInput): QuoteBuild {
       description: labour.description,
       unit: 'hr',
       quantity: labour.hours,
-      unitCents: rate?.sellCentsPerHour,
-      source: rate ? input.labourRateSource : undefined,
+      unitCents: hourlyCents,
+      source: hourlyCents === undefined ? undefined : input.labourRateSource,
       fromCodes: [...labour.fromCodes],
       defectCount: labour.defectCount,
     });
   }
 
-  return { lines, unpriceable: unpriceableDefects(input.defects) };
+  return { lines, unpriceable: unpriceableDefects(input.defects), warnings };
 }
 
 /** The plain-English scope, in the wording the library keeps for clients. */
@@ -288,7 +340,13 @@ export function scopeLinesFor(defects: Defect[]): { location: string; text: stri
     // The client wording where the library has one, then the technician's own
     // description. The formal report wording is deliberately not used: it is
     // written for a compliance record and reads as an accusation in a quote.
-    const text = code?.clientWording?.trim() || defect.description.trim();
+    // The library's own component and defect wording is the last resort rather
+    // than dropping the line: a defect can carry a code with no client wording
+    // (a panel fault does) and be raised with no typed description, and a
+    // priced line whose scope entry vanished is work the client is being
+    // charged for and cannot see described.
+    const named = code ? `${code.component} — ${code.defect.toLowerCase()}` : '';
+    const text = code?.clientWording?.trim() || defect.description.trim() || named;
     if (text) out.push({ location: defect.location, text });
   }
   return out;
@@ -540,12 +598,22 @@ export function canTransition(
     };
   }
 
-  if (to === 'accepted' && asAt) {
-    const lapse = lapseStatus(quote, asAt);
-    if (lapse.lapsed) {
+  if (to === 'accepted' && quote.expiresAt) {
+    // No date to check against is not the same as "it has not lapsed". Left to
+    // mean the latter, a quote six months past its date is accepted at last
+    // year's prices by a caller that simply did not pass today in.
+    if (!asAt) {
       return {
         allowed: false,
-        reason: `This quote lapsed ${-(lapse.daysRemaining ?? 0)} days ago and cannot be accepted `
+        reason: 'Accepting a quote needs a date to check it against, and none was given.',
+      };
+    }
+    const lapse = lapseStatus(quote, asAt);
+    if (lapse.lapsed) {
+      const days = -(lapse.daysRemaining ?? 0);
+      return {
+        allowed: false,
+        reason: `This quote lapsed ${days} day${days === 1 ? '' : 's'} ago and cannot be accepted `
           + 'at these prices. Raise a new quote at current rates.',
       };
     }
@@ -670,7 +738,7 @@ export function quoteTotals(quote: QuoteForTotals, asAt?: string): QuoteTotals {
   for (const u of quote.unpriceable ?? []) {
     warnings.push(
       `${u.location ? `${u.location}: ` : ''}${u.description || u.defectCode || 'A defect'} is on `
-      + `this job and priced at nothing — ${UNPRICEABLE_REASON[u.reason].toLowerCase()}. `
+      + `this job and priced at nothing — ${unpriceableReason(u.reason).toLowerCase()}. `
       + 'Add a line for it or say in the scope that it is excluded.',
     );
   }

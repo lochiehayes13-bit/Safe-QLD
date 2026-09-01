@@ -81,7 +81,7 @@ export const SOURCES: Record<SourceId, Source> = {
     what:
       'That fire hose reel coverage is worked out as the hose run plus a hose stream, that the hose has a maximum '
       + 'length, and that a minimum discharge is specified against an inlet pressure and a nominal hose diameter',
-    ref: 'AS 2441-2005 (incorporating Amendment No. 1), Installation of fire hose reels — Clause 10.2 (system coverage), Table 6.1 (minimum discharge rates and supply pipe sizes), Clause 12 (commissioning)',
+    ref: 'AS 2441-2005 (incorporating Amendment No. 1), Installation of fire hose reels — Clause 10.2 (system coverage), Table 6.1 (the minimum discharge and supply pipe size table), Clause 12 (commissioning)',
     url: 'https://store.standards.org.au/product/as-2441-2005',
     confidence: 'high',
     basis:
@@ -221,6 +221,17 @@ export function isRefused(v: unknown): v is Refused {
 
 const isFinitePositive = (n: unknown): n is number =>
   typeof n === 'number' && Number.isFinite(n) && n > 0;
+
+/**
+ * A measurement, which may legitimately be zero.
+ *
+ * Kept apart from `isFinitePositive` because zero means opposite things on the
+ * two sides of a duty check. A duty of zero is a duty nobody entered; a reading
+ * of zero is a reel with no water in it, which is the worst result on the sheet
+ * and must never be filed as "not measured".
+ */
+const isMeasurement = (n: unknown): n is number =>
+  typeof n === 'number' && Number.isFinite(n) && n >= 0;
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -395,7 +406,7 @@ export function estimateReels(
     };
   }
 
-  const radius = cov.hoseLengthM + cov.throwM;
+  const radius = cov.radiusM;
   const idealMinimum = Math.ceil(floorAreaM2 / (Math.PI * radius * radius));
   const gridEstimate = Math.ceil(floorAreaM2 / (2 * radius * radius));
 
@@ -575,7 +586,7 @@ export interface FlowCheckInput {
 export function checkFlow(input: FlowCheckInput): FlowCheck | Refused {
   const hasDuty = isFinitePositive(input.dutyFlowLitresPerSecond) || isFinitePositive(input.dutyPressureKpa);
   const hasMeasurement =
-    isFinitePositive(input.measuredFlowLitresPerMinute) || isFinitePositive(input.measuredRunningPressureKpa);
+    isMeasurement(input.measuredFlowLitresPerMinute) || isMeasurement(input.measuredRunningPressureKpa);
 
   if (!hasDuty) {
     return {
@@ -602,7 +613,9 @@ export function checkFlow(input: FlowCheckInput): FlowCheck | Refused {
   const requiredFlowLpm = isFinitePositive(input.dutyFlowLitresPerSecond)
     ? round2(input.dutyFlowLitresPerSecond * SECONDS_PER_MINUTE)
     : undefined;
-  const measuredLpm = isFinitePositive(input.measuredFlowLitresPerMinute)
+  // A reel with the stop valve shut reads zero. That is a measurement and a
+  // fail, not an absence — see isMeasurement().
+  const measuredLpm = isMeasurement(input.measuredFlowLitresPerMinute)
     ? input.measuredFlowLitresPerMinute
     : undefined;
 
@@ -625,7 +638,7 @@ export function checkFlow(input: FlowCheckInput): FlowCheck | Refused {
             : 'fail',
   };
 
-  const measuredKpa = isFinitePositive(input.measuredRunningPressureKpa)
+  const measuredKpa = isMeasurement(input.measuredRunningPressureKpa)
     ? input.measuredRunningPressureKpa
     : undefined;
   const requiredKpa = isFinitePositive(input.dutyPressureKpa) ? input.dutyPressureKpa : undefined;

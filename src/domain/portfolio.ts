@@ -5,7 +5,7 @@ import {
   criticalNoticeDueAt, isQldCriticalDefect, rectificationDueAt, type As1851Class,
 } from '@/domain/qldCompliance';
 import { routineDue, type DueState, type RoutineHistory } from '@/domain/schedule';
-import { SYSTEM_LABELS, assetTypeById, type SystemKind } from '@/seed/assetTypes';
+import { SYSTEM_LABELS, type SystemKind } from '@/seed/assetTypes';
 import { FREQUENCY_LABEL, routineById, type Frequency } from '@/seed/serviceRoutines';
 
 /**
@@ -466,6 +466,7 @@ export interface SiteRisk {
   siteName: string;
   clientName?: string;
   suburb?: string;
+  postcode?: string;
   standing: SiteStanding;
   /** Exactly the sum of the contributions below it. */
   score: number;
@@ -806,10 +807,9 @@ interface SiteWorkings {
   assetCount?: number;
 }
 
-const FREQUENCY_OF = (h: PortfolioRoutineHistory): Frequency => h.frequency;
-
+/** The routine's name as the app knows it, or a readable stand-in for one it does not. */
 function routineLabel(h: PortfolioRoutineHistory): string {
-  return routineById(h.routineId)?.label ?? `${FREQUENCY_LABEL[FREQUENCY_OF(h)]} routine ${h.routineId}`;
+  return routineById(h.routineId)?.label ?? `${FREQUENCY_LABEL[h.frequency]} routine ${h.routineId}`;
 }
 
 function systemOf(h: PortfolioRoutineHistory): SystemKind | undefined {
@@ -854,7 +854,7 @@ function scoreSite(w: SiteWorkings, today: string, statementLeadDays: number): S
   else standing = 'unschedulable';
 
   for (const { history, due } of overdue) {
-    const base = OVERDUE_POINTS_BY_FREQUENCY[FREQUENCY_OF(history)];
+    const base = OVERDUE_POINTS_BY_FREQUENCY[history.frequency];
     const label = routineLabel(history);
     // Days past the *end of the window*, not past the scheduled date. A yearly
     // carries two months of tolerance, and calling a service eight weeks late
@@ -866,24 +866,25 @@ function scoreSite(w: SiteWorkings, today: string, statementLeadDays: number): S
         factor: 'routine-overdue',
         label: `${label} — overdue`,
         points: base,
-        detail: `${FREQUENCY_LABEL[FREQUENCY_OF(history)]} routine, scheduled ${due.scheduledFor ?? 'unknown'}`
+        detail: `${FREQUENCY_LABEL[history.frequency]} routine, scheduled ${due.scheduledFor ?? 'unknown'}`
           + `${due.window ? `, window closed ${due.window.latest}` : ''}. Weighted ${base} because a lapsed `
-          + `${FREQUENCY_LABEL[FREQUENCY_OF(history)].toLowerCase()} is not equivalent to a lapsed monthly.`,
+          + `${FREQUENCY_LABEL[history.frequency].toLowerCase()} is not equivalent to a lapsed monthly.`,
         sourceIds: RISK_WEIGHTS['routine-overdue'].sourceIds,
         routineId: history.routineId,
       });
     }
     if (daysPastWindow !== undefined && daysPastWindow > 0) {
+      const weight = RISK_WEIGHTS['routine-overdue-age'];
       const weeks = Math.floor(daysPastWindow / 7);
-      const age = Math.min(weeks * RISK_WEIGHTS['routine-overdue-age'].points, RISK_WEIGHTS['routine-overdue-age'].cap!);
+      const age = Math.min(weeks * weight.points, weight.cap ?? Number.POSITIVE_INFINITY);
       if (age > 0) {
         contributions.push({
           factor: 'routine-overdue-age',
           label: `${label} — ${daysPastWindow} days past its window`,
           points: age,
           detail: `${weeks} full week${weeks === 1 ? '' : 's'} past the end of the tolerance window, at one point `
-            + `a week, capped at ${RISK_WEIGHTS['routine-overdue-age'].cap}.`,
-          sourceIds: RISK_WEIGHTS['routine-overdue-age'].sourceIds,
+            + `a week${weight.cap === undefined ? '' : `, capped at ${weight.cap}`}.`,
+          sourceIds: weight.sourceIds,
           routineId: history.routineId,
         });
       }
@@ -893,7 +894,7 @@ function scoreSite(w: SiteWorkings, today: string, statementLeadDays: number): S
   if (dueNow.length) {
     const weight = RISK_WEIGHTS['routine-due'];
     const raw = dueNow.length * weight.points;
-    const points = Math.min(raw, weight.cap!);
+    const points = Math.min(raw, weight.cap ?? Number.POSITIVE_INFINITY);
     contributions.push({
       factor: 'routine-due',
       label: `${dueNow.length} routine${dueNow.length === 1 ? '' : 's'} due now`,
@@ -1014,7 +1015,7 @@ function scoreSite(w: SiteWorkings, today: string, statementLeadDays: number): S
   if (minor.length) {
     const weight = RISK_WEIGHTS['non-critical-defects'];
     const raw = minor.length * weight.points;
-    const points = Math.min(raw, weight.cap!);
+    const points = Math.min(raw, weight.cap ?? Number.POSITIVE_INFINITY);
     contributions.push({
       factor: 'non-critical-defects',
       label: `${minor.length} open non-critical defect${minor.length === 1 ? '' : 's'}`,
@@ -1057,6 +1058,7 @@ function scoreSite(w: SiteWorkings, today: string, statementLeadDays: number): S
     siteName: w.site.siteName,
     clientName: w.site.clientName,
     suburb: w.site.suburb,
+    postcode: w.site.postcode,
     standing,
     score,
     band: riskBand(score),
@@ -1248,6 +1250,14 @@ export function buildPortfolio(input: PortfolioInput): Portfolio {
       : `None of the ${risks.length} sites in the book can be placed on the schedule, so there is no percentage `
         + 'to give. That is the finding.',
   };
+
+  if (risks.length > 0 && judged === 0) {
+    refusals.push(
+      'No site in the book can be placed on the servicing schedule, so no health percentage is offered at all. '
+      + 'Every site here has either never been serviced in this app or carries no routine with a schedule table '
+      + 'behind it, and a figure over none of them would be a number about nothing.',
+    );
+  }
 
   // --- Coverage, stated before anything else ------------------------------
   const sitesWithAssetsKnown = [...sites.values()]
@@ -1635,6 +1645,11 @@ function concentrationOf(
     if (!suburbKey) sitesWithNoSuburb++;
     else {
       const b = bucketOf(bySuburb, suburbKey, titleCase(suburbKey));
+      // Queensland reuses suburb names across postcodes. The row is keyed on
+      // the name because that is how the work is handed out, but the postcodes
+      // behind it are kept so a row covering two places says so.
+      const postcode = normalisePostcode(risk.postcode);
+      if (postcode) b.postcodes.add(postcode);
       b.siteIds.add(risk.siteId);
       b.overdueRoutines += risk.overdueRoutines;
       b.criticalDefectsOutstanding += risk.criticalDefectsOutstanding;

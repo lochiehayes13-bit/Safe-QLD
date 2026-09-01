@@ -146,6 +146,10 @@ describe('technician mode', () => {
       '/work/baselines',
       '/work/labels',
       '/work/plan',
+      // How 897 sites are going is not a question anybody answers from a plant
+      // room, and it is not actionable by the person standing in one. The site
+      // in front of them already shows its own state in full.
+      '/work/portfolio',
       '/work/purchases',
     ]);
     expect(hiddenFrom('office')).toEqual([]);
@@ -173,7 +177,7 @@ describe('technician mode', () => {
     const tech = summarise('technician');
     const office = summarise('office');
     expect(tech.total).toBe(DESTINATIONS.length);
-    expect(tech.hidden).toBe(5);
+    expect(tech.hidden).toBe(6);
     expect(office.hidden).toBe(0);
     expect(tech.listed).toBeLessThan(office.listed);
   });

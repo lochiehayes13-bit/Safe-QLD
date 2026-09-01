@@ -45,6 +45,12 @@ const CALCULATORS: ToolDef[] = [
     body: 'Sprinkler and hydrant duty on one page, converted before they are added, with the 150% overload run answered.',
   },
   {
+    href: '/tools/hose-reel',
+    icon: 'hydro-power',
+    title: 'Hose reels',
+    body: 'Whether the reel reaches the back of the room, whether it made its duty, and which service is next.',
+  },
+  {
     href: '/tools/fire-door',
     icon: 'door-closed',
     title: 'Fire and smoke doors',

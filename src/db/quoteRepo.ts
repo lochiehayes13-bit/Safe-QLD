@@ -1,6 +1,6 @@
 import { getDb, newId, nowIso } from '@/db';
 import {
-  DEFAULT_EXCLUSIONS, DEFAULT_VALIDITY_DAYS, canTransition, editRefusal, expiryFor,
+  DEFAULT_EXCLUSIONS, DEFAULT_VALIDITY_DAYS, canTransition, editRefusal, expiryFor, qldDate,
   type Confidence, type PriceSource, type Quote, type QuoteLine, type QuoteSection,
   type QuoteStatus, type UnpriceableDefect,
 } from '@/domain/quote';
@@ -75,6 +75,26 @@ function readStatus(v: string): QuoteStatus {
   return found;
 }
 
+/**
+ * The section a stored line belongs to.
+ *
+ * Refused rather than defaulted for the same reason as the status. Defaulting
+ * to materials would move a labour line into the materials subtotal and change
+ * two figures on a document a client is holding, and it would do it silently.
+ */
+function readSection(v: string): QuoteSection {
+  const found = SECTIONS.find((s) => s === v);
+  if (!found) throw new Error(`A quote line has an unrecognised section "${v}".`);
+  return found;
+}
+
+/** Likewise the unit: "ea" against hours quotes a day's labour as one item. */
+function readUnit(v: string): QuoteLine['unit'] {
+  const found = UNITS.find((u) => u === v);
+  if (!found) throw new Error(`A quote line has an unrecognised unit "${v}".`);
+  return found;
+}
+
 function readJsonArray<T>(raw: string, what: string): T[] {
   try {
     const parsed: unknown = JSON.parse(raw || '[]');
@@ -88,6 +108,33 @@ function readJsonArray<T>(raw: string, what: string): T[] {
 }
 
 const list = (v: string): string[] => v.split(',').map((s) => s.trim()).filter(Boolean);
+
+/**
+ * The stored list of defects the quote could not price.
+ *
+ * Read back defensively because it is JSON in a column: anything that is not an
+ * object with a location and a description would print as "undefined" on the
+ * client's copy, which is worse than the entry being missing. What survives is
+ * shown; what does not is said out loud rather than dropped in silence.
+ */
+function readUnpriceable(raw: string): UnpriceableDefect[] {
+  const rows = readJsonArray<Partial<UnpriceableDefect>>(raw, 'list of defects it could not price');
+  const out: UnpriceableDefect[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object' || typeof row.reason !== 'string') {
+      console.warn('A quote carried an entry in its unpriced-defect list that could not be read.');
+      continue;
+    }
+    out.push({
+      defectId: String(row.defectId ?? ''),
+      defectCode: row.defectCode,
+      location: String(row.location ?? ''),
+      description: String(row.description ?? ''),
+      reason: row.reason as UnpriceableDefect['reason'],
+    });
+  }
+  return out;
+}
 
 function toLine(r: QuoteLineRow): QuoteLine {
   // A stored line with a source kind but no label would be a figure with no
@@ -103,9 +150,9 @@ function toLine(r: QuoteLineRow): QuoteLine {
 
   return {
     id: r.id,
-    section: SECTIONS.find((s) => s === r.section) ?? 'materials',
+    section: readSection(r.section),
     description: r.description,
-    unit: UNITS.find((u) => u === r.unit) ?? 'ea',
+    unit: readUnit(r.unit),
     quantity: r.quantity,
     // NULL means nobody has priced it. It must not become zero here.
     unitCents: r.unitCents === null ? undefined : r.unitCents,
@@ -136,7 +183,7 @@ function toQuote(r: QuoteRow, lines: QuoteLine[]): Quote {
     discountCents: r.discountCents,
     discountReason: r.discountReason || undefined,
     lines,
-    unpriceable: readJsonArray<UnpriceableDefect>(r.unpriceable, 'exclusions list'),
+    unpriceable: readUnpriceable(r.unpriceable),
     scopeNote: r.scopeNote || undefined,
     exclusions: readJsonArray<string>(r.exclusions, 'exclusions'),
     notes: r.notes || undefined,
@@ -149,6 +196,16 @@ function toQuote(r: QuoteRow, lines: QuoteLine[]): Quote {
 export type NewQuote = Partial<Omit<Quote, 'id' | 'createdAt' | 'updatedAt'>> & Pick<Quote, 'siteId'>;
 
 export async function createQuote(input: NewQuote): Promise<Quote> {
+  // A quote starts as a draft and is moved along by setQuoteStatus, which
+  // checks the move is legal and stamps the dates that go with it. Letting a
+  // caller insert one straight in as issued or accepted would put a quote in
+  // the table with no issue date, no expiry and nothing having checked it.
+  if (input.status && input.status !== 'draft') {
+    throw new Error(
+      `A quote is created as a draft, not as ${input.status}. Save it, then issue it — issuing is `
+      + 'what sets the date the price holds good until.',
+    );
+  }
   const db = await getDb();
   const at = nowIso();
   const record: Quote = {
@@ -258,13 +315,26 @@ export async function listQuotes(siteId?: string): Promise<Quote[]> {
   return out;
 }
 
-/** The next sequence number for a site, for formatQuoteReference. */
+/**
+ * The next sequence number for a site, for formatQuoteReference.
+ *
+ * Taken from the highest number the site has already used rather than from how
+ * many quotes it has now. Counting hands a deleted quote's number to the next
+ * one, and the reference index is unique, so the second quote to carry
+ * Q-NPWTP-2026-004 does not save at all — the technician loses the quote they
+ * just built and the client is holding the number.
+ */
 export async function nextQuoteSeq(siteId: string): Promise<number> {
   const db = await getDb();
-  const row = await db.getFirstAsync<{ n: number }>(
-    'SELECT COUNT(*) AS n FROM quote WHERE siteId = ?', [siteId],
+  const rows = await db.getAllAsync<{ reference: string }>(
+    'SELECT reference FROM quote WHERE siteId = ?', [siteId],
   );
-  return (row?.n ?? 0) + 1;
+  let highest = 0;
+  for (const row of rows) {
+    const m = /-(\d+)$/.exec(row.reference ?? '');
+    if (m) highest = Math.max(highest, Number(m[1]));
+  }
+  return Math.max(highest, rows.length) + 1;
 }
 
 export type QuotePatch = Partial<Omit<Quote, 'id' | 'siteId' | 'createdAt' | 'updatedAt' | 'status'>>;
@@ -384,10 +454,18 @@ export async function setQuoteStatus(
  * expiry still reads as live on a screen, and someone accepts it.
  */
 export async function expireLapsedQuotes(asAt: string): Promise<string[]> {
+  // The Queensland date, not the first ten characters of a UTC timestamp. At
+  // eight on a Brisbane morning the slice is still yesterday, so a quote that
+  // lapsed overnight would be left reading as live for another day — the exact
+  // mistake domain/quote.ts exists to avoid.
+  const today = qldDate(asAt);
+  if (!today) {
+    throw new Error(`"${asAt}" cannot be read as a date, so which quotes have lapsed is unknown.`);
+  }
   const db = await getDb();
   const rows = await db.getAllAsync<{ id: string }>(
     "SELECT id FROM quote WHERE status = 'issued' AND expiresAt IS NOT NULL AND expiresAt < ?",
-    [asAt.slice(0, 10)],
+    [today],
   );
   const expired: string[] = [];
   for (const row of rows) {

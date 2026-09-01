@@ -486,6 +486,15 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['end of line', 'eol', 'resistor', 'monitoring', 'circuit'],
   },
   {
+    route: '/tools/hose-reel', file: 'app/tools/hose-reel.tsx', tab: 'tools', section: 'Calculators',
+    label: 'Hose reels', modes: BOTH, openedFrom: ['/tools'],
+    blurb: 'Whether the reel reaches the back of the room, whether it made its duty, and which service is next.',
+    terms: ['hose reel', 'reel', 'coverage', 'reach', 'flow', 'nozzle'],
+    keptBecause:
+      'A hose reel is the only asset on the book whose whole job is a distance, and nobody checks '
+      + 'it because the reel is already on the wall.',
+  },
+  {
     route: '/tools/fire-door', file: 'app/tools/fire-door.tsx', tab: 'tools', section: 'Calculators',
     label: 'Fire and smoke doors', modes: BOTH, openedFrom: ['/tools'],
     blurb: 'What the tag says, whether the gap passes, whether it closed and latched, and what to write down.',
@@ -639,6 +648,16 @@ export const DESTINATIONS: readonly Destination[] = [
     label: 'Company knowledge', modes: BOTH, openedFrom: ['/', '/work'],
     blurb: 'Tricks of the trade, marked verified or not wherever they are used.',
     terms: ['knowledge', 'tips', 'notes', 'how we do it'],
+  },
+  {
+    route: '/work/portfolio', file: 'app/work/portfolio.tsx', tab: 'work', section: 'Planning',
+    label: 'Portfolio health', modes: OFFICE, openedFrom: ['/work'],
+    blurb: 'How the whole book is going, with the coverage figure printed before any health figure.',
+    terms: ['portfolio', 'health', 'overview', 'dashboard', 'coverage', 'how are we going'],
+    hiddenBecause:
+      'How 897 sites are going is not a question anybody answers from a plant room, and it is not '
+      + 'actionable by the person standing in one. The site in front of you already shows its own '
+      + 'state in full.',
   },
   {
     route: '/work/plan', file: 'app/work/plan.tsx', tab: 'work', section: 'Planning',

@@ -556,12 +556,90 @@ describe('concentration', () => {
     expect(systems).toEqual({ detection: 2, extinguisher: 1 });
   });
 
+  it('says when one suburb name covers two postcodes rather than reading as one place', () => {
+    // Springfield is 4300 near Ipswich and 4870 outside Cairns. A row that
+    // merges them reads as one run of work and is eight hundred kilometres long.
+    const split = buildPortfolio(input({
+      sites: [
+        site({ siteId: 'a', suburb: 'Springfield', postcode: '4300' }),
+        site({ siteId: 'b', suburb: 'springfield', postcode: '4870' }),
+      ],
+      histories: [annual('a'), annual('b')],
+    }));
+    const row = split.concentration.bySuburb[0]!;
+    expect(row.label).toBe('Springfield');
+    expect(row.postcodes).toEqual(['4300', '4870']);
+    expect(split.concentration.caveats.join(' ')).toContain('Springfield');
+  });
+
+  it('ignores a postcode that is not one, rather than splitting a suburb on a typo', () => {
+    const typo = buildPortfolio(input({
+      sites: [
+        site({ siteId: 'a', suburb: 'Springwood', postcode: '4127' }),
+        site({ siteId: 'b', suburb: 'Springwood', postcode: 'QLD 4127' }),
+      ],
+      histories: [annual('a'), annual('b')],
+    }));
+    expect(typo.concentration.bySuburb[0]!.postcodes).toBeUndefined();
+    expect(typo.concentration.bySuburb[0]!.sites).toBe(2);
+  });
+
   it('reports how much of each row it could not judge', () => {
     const nothing = buildPortfolio(input({
       sites: [site({ siteId: 'a', clientName: 'Logan City Council' })],
     }));
     expect(nothing.concentration.byClient[0]!.unjudgedSites).toBe(1);
     expect(nothing.concentration.byClient[0]!.shareOfOverdue).toBeUndefined();
+  });
+});
+
+describe('at the size of the actual book', () => {
+  // 897 sites and 12,553 assets is the real shape of Safe QLD's work. An
+  // aggregation that is right for four sites and wrong for nine hundred is the
+  // failure that only ever shows up in front of a client.
+  const sites: PortfolioSite[] = [];
+  const histories: PortfolioRoutineHistory[] = [];
+  const defects: PortfolioDefect[] = [];
+  for (let i = 0; i < 897; i++) {
+    const id = `s${i}`;
+    sites.push(site({ siteId: id, suburb: i % 2 ? 'Springwood' : 'Chermside' }));
+    // Every third site has never been serviced; the rest lapsed in 2024.
+    if (i % 3 !== 0) histories.push(annual(id));
+    if (i % 50 === 0) defects.push(critical({ defectId: `d${i}`, siteId: id }));
+  }
+  const book = buildPortfolio(input({ sites, histories, defects, rankLimit: 25 }));
+
+  it('counts every site exactly once across the four standings', () => {
+    const { current, due, overdue, neverServiced, unschedulable, sites: total } = book.health;
+    expect(current + due + overdue + neverServiced + unschedulable).toBe(total);
+    expect(total).toBe(897);
+    expect(neverServiced).toBe(299);
+    expect(overdue).toBe(598);
+  });
+
+  it('reports the coverage that follows from that, and not a flattering one', () => {
+    expect(book.coverage.judged).toBe(598);
+    expect(book.coverage.percent).toBe(67);
+    expect(book.coverage.enoughToJudge).toBe(false);
+  });
+
+  it('cuts the ranked list without losing the count behind it', () => {
+    // 598 lapsed sites, plus the six never-serviced sites that score on a
+    // critical defect alone. The never-serviced sites with no defect score
+    // nothing, because an absent history is not evidence of anything.
+    expect(book.ranked).toHaveLength(25);
+    expect(book.rankedTotal).toBe(604);
+    expect(book.notes.join(' ')).toContain('604 sites scored above zero');
+  });
+
+  it('keeps every score in the list equal to its own breakdown', () => {
+    expect(book.ranked.every(scoreAddsUp)).toBe(true);
+    expect(book.ranked[0]!.score).toBeGreaterThanOrEqual(book.ranked[24]!.score);
+  });
+
+  it('puts the sites carrying a critical defect at the top of the ranking', () => {
+    expect(book.ranked[0]!.criticalDefectsOutstanding).toBe(1);
+    expect(book.statutory.criticalDefectsOutstanding).toBe(18);
   });
 });
 
@@ -579,6 +657,16 @@ describe('refusing to answer', () => {
     expect(book.ranked).toEqual([]);
     expect(book.refusals[0]).toContain('1/9/2026');
     expect(book.coverage.fraction).toBeUndefined();
+  });
+
+  it('offers no health percentage at all where no site can be placed on the schedule', () => {
+    // A book of sites nobody has serviced in this app is not 0% compliant and
+    // it is not 100% compliant. There is no percentage, and saying so out loud
+    // is the finding.
+    const book = buildPortfolio(input({ sites: [site({ siteId: 'a' }), site({ siteId: 'b' })] }));
+    expect(book.health.currentFractionOfJudged).toBeUndefined();
+    expect(book.coverage.percent).toBe(0);
+    expect(book.refusals.join(' ')).toContain('no health percentage is offered');
   });
 
   it('never hands an Australian date to a parser that reads it American', () => {

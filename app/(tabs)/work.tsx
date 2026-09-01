@@ -44,6 +44,7 @@ export default function WorkScreen() {
       rows: [
         { label: 'Jobs', sub: 'Scheduled and outstanding work', icon: 'clipboard-list-outline', href: '/work/jobs', badge: counts.jobs },
         { label: 'Month plan', sub: 'The month day by day, with what could not be planned said out loud', icon: 'calendar-month-outline', href: '/work/plan' },
+        { label: 'Portfolio health', sub: 'How the whole book is going, coverage stated before any score', icon: 'chart-donut', href: '/work/portfolio' },
         { label: "Today's run", sub: 'Jobs ordered by how close they are, urgent first', icon: 'map-marker-path', href: '/work/route' },
         { label: 'Overdue and due', sub: 'Routines past their tolerance window, across every site', icon: 'calendar-alert', href: '/work/due' },
         { label: 'Impairments', sub: 'Systems currently out of service', icon: 'alert-octagon-outline', href: '/work/impairments', badge: counts.impairments, tone: counts.impairments ? 'fail' : undefined },
