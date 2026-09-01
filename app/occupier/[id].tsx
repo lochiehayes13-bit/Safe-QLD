@@ -9,9 +9,11 @@ import { queryAssets } from '@/db/assetRepo';
 import { listDefects } from '@/db/repo';
 import { assetTypeById } from '@/seed/assetTypes';
 import {
-  SYSTEM_TO_INSTALLATION, commissionerCopyDueAt, commissionerDaysRemaining,
-  occupierStatementIssues, type OccupierStatementRow,
+  SYSTEM_TO_INSTALLATION, occupierStatementIssues, type OccupierStatementRow,
 } from '@/domain/qldCompliance';
+import {
+  COMMISSIONER_COPY_BUSINESS_DAYS, citeSources, commissionerCopyDeadline, qldBusinessDaysBetween,
+} from '@/domain/occupierForm';
 import { occupierStatementHtml } from '@/export/occupierStatement';
 import { shareFile, writePdf } from '@/export/files';
 import { loadPrefs } from '@/app-prefs';
@@ -164,8 +166,26 @@ export default function OccupierStatementScreen() {
   const issues = useMemo(() => (rec ? occupierStatementIssues(rec.rows) : []), [rec]);
   const presentCount = rec?.rows.filter((r) => r.present).length ?? 0;
 
-  const dueAt = rec?.signedAt ? commissionerCopyDueAt(rec.signedAt.slice(0, 10)) : null;
-  const daysLeft = rec?.signedAt ? commissionerDaysRemaining(rec.signedAt.slice(0, 10), nowIso().slice(0, 10)) : null;
+  /*
+   * Section 55A(3) counts from the day the occupier is *required to prepare*
+   * the statement, not from the day they sign it. Those are the same date only
+   * for an occupier who signs exactly on their anniversary — sign a month late
+   * and the ten business days have long since run, while a screen counting from
+   * the signature would have shown a comfortable deadline the whole time.
+   *
+   * So the period end is offered as the anchor, and the signature is passed
+   * only as the fallback the module labels as one.
+   */
+  const deadline = useMemo(() => commissionerCopyDeadline({
+    requiredPreparationDate: rec?.periodEnd || undefined,
+    signedDate: rec?.signedAt ? rec.signedAt.slice(0, 10) : undefined,
+  }), [rec?.periodEnd, rec?.signedAt]);
+
+  const daysLeft = useMemo(() => {
+    if (!deadline.due) return null;
+    const count = qldBusinessDaysBetween(nowIso().slice(0, 10), deadline.due);
+    return count.days ?? null;
+  }, [deadline.due]);
 
   if (!rec) {
     return (
@@ -192,21 +212,9 @@ export default function OccupierStatementScreen() {
             title="Copy sent to the Commissioner"
             body={`Recorded as sent on ${rec.sentToCommissionerAt.slice(0, 10)}.`}
           />
-        ) : rec.signedAt && dueAt ? (
-          <Banner
-            tone={daysLeft !== null && daysLeft < 0 ? 'fail' : daysLeft !== null && daysLeft <= 3 ? 'warn' : 'info'}
-            title={
-              daysLeft !== null && daysLeft < 0
-                ? `Copy to the Commissioner is ${Math.abs(daysLeft)} working day${Math.abs(daysLeft) === 1 ? '' : 's'} late`
-                : `Copy to the Commissioner due ${dueAt}`
-            }
-            body={
-              daysLeft !== null && daysLeft >= 0
-                ? `${daysLeft} working day${daysLeft === 1 ? '' : 's'} left. Weekends are excluded; public holidays are not, so treat this as the optimistic date.`
-                : 'Send the copy and record the date below.'
-            }
-          />
-        ) : null}
+        ) : (
+          <CommissionerDeadline deadline={deadline} daysLeft={daysLeft} />
+        )}
 
         <H2>Premises and occupier</H2>
         <Card>
@@ -270,7 +278,10 @@ export default function OccupierStatementScreen() {
             value={rec.sentToCommissionerAt?.slice(0, 10) ?? ''}
             onChangeText={(v) => void patch({ sentToCommissionerAt: v || null })}
             placeholder="YYYY-MM-DD"
-            hint={dueAt ? `Due ${dueAt}, being ten working days after signing.` : 'Ten working days after the occupier signs.'}
+            hint={deadline.due
+              ? `Due ${deadline.due} — ${COMMISSIONER_COPY_BUSINESS_DAYS} business days from when the statement `
+                + 'was required to be prepared, not from when it was signed.'
+              : `${COMMISSIONER_COPY_BUSINESS_DAYS} business days from when the statement was required to be prepared.`}
           />
         </Card>
       </Screen>
@@ -334,5 +345,68 @@ function InstallationRow({
         </View>
       ) : null}
     </Card>
+  );
+}
+
+/**
+ * The commissioner's copy deadline, showing its working.
+ *
+ * The date alone is not enough on this one. Section 55A(3) counts from the day
+ * the statement was *required to be prepared*, and an occupier who signs late
+ * has a deadline that has already run — so the screen says which date it
+ * counted from and whether that was the statutory anchor or a fallback. It also
+ * says which public holidays it applied and which it could not, because a
+ * district show holiday it cannot know pushes the real deadline later, never
+ * earlier. Work to this date and you cannot be late.
+ */
+function CommissionerDeadline({
+  deadline,
+  daysLeft,
+}: {
+  deadline: ReturnType<typeof commissionerCopyDeadline>;
+  daysLeft: number | null;
+}) {
+  if (!deadline.due) {
+    return (
+      <Banner
+        tone="info"
+        title={`Copy to the Commissioner — ${COMMISSIONER_COPY_BUSINESS_DAYS} business days`}
+        body={deadline.reason ?? 'Not enough is known yet to count from.'}
+      />
+    );
+  }
+
+  const late = daysLeft !== null && daysLeft < 0;
+  const close = daysLeft !== null && daysLeft >= 0 && daysLeft <= 3;
+  const applied = deadline.counting?.holidaysApplied ?? [];
+  const lines = [
+    daysLeft === null
+      ? 'The days remaining could not be counted.'
+      : late
+        ? `${Math.abs(daysLeft)} business day${Math.abs(daysLeft) === 1 ? '' : 's'} late. Send the copy and record the date below.`
+        : `${daysLeft} business day${daysLeft === 1 ? '' : 's'} left.`,
+    deadline.basis === 'signature-fallback'
+      ? 'Counted from the signature because nothing else was known. That is not what section 55A(3) says — '
+        + 'it counts from the day the statement was required to be prepared, so the real deadline may already have passed.'
+      : `Counted from ${deadline.anchorDate ?? 'the required preparation date'}, the day the statement was required to be prepared.`,
+    applied.length
+      ? `Public holidays skipped: ${applied.map((h) => h.name).join(', ')}.`
+      : 'No public holidays fell in the window.',
+    ...(deadline.counting?.caveats ?? []),
+    ...deadline.caveats,
+    deadline.legalRef,
+    // The rule for this app: nothing states a date without saying where the
+    // date comes from and how far that source can be trusted.
+    ...citeSources(deadline.sourceIds).map((src) => `${src.ref} — ${src.confidence} confidence.`),
+  ];
+
+  return (
+    <Banner
+      tone={late ? 'fail' : close ? 'warn' : 'info'}
+      title={late
+        ? `Copy to the Commissioner was due ${deadline.due}`
+        : `Copy to the Commissioner due ${deadline.due}`}
+      body={lines.join('\n')}
+    />
   );
 }
