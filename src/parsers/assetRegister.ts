@@ -485,3 +485,24 @@ export function parseAssetRegister(text: string, fileName = ''): ParsedRegister 
     parser: PARSER_ID,
   };
 }
+
+/** The soonest of an asset's due dates, for the denormalised column on the row. */
+export function soonestDue(schedule: RegisterAsset['schedule']): string | undefined {
+  if (!schedule.length) return undefined;
+  return schedule.map((s) => s.nextDueAt).sort()[0];
+}
+
+/**
+ * A name for an asset that has none.
+ *
+ * The register does not carry one — it carries a location and a descriptor —
+ * so one is built from what there is. A bare type name repeated four hundred
+ * times is unusable in a list, and the location is what a technician navigates
+ * by.
+ */
+export function assetName(asset: RegisterAsset): string {
+  const parts = [asset.descriptor, asset.location].filter(Boolean);
+  if (parts.length) return parts.join(' — ').slice(0, 120);
+  const label = SYSTEM_LABEL[asset.system] ?? 'Asset';
+  return asset.assetNumber ? `${label} ${asset.assetNumber}` : label;
+}

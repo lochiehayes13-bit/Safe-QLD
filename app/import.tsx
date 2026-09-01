@@ -9,6 +9,8 @@ import {
   type ColumnMapping, type FieldKey, type ParserStatus, type TabularPreview,
 } from '@/parsers';
 import { decodePack, PackError } from '@/share/pack';
+import { parseAssetRegister } from '@/parsers';
+import { importAssetRegister } from '@/db/registerRepo';
 import { probeFile, type FileProbe } from '@/parsers/probe';
 import { fromBase64 } from '@/export/zip';
 import { createSite, importParsedConfig, listSites } from '@/db/repo';
@@ -93,6 +95,13 @@ export default function ImportScreen() {
         return;
       }
 
+      // An asset register from the office system: sites, assets and when each
+      // routine falls due.
+      if (kind.kind === 'register') {
+        await importRegister(await file.text(), asset.name);
+        return;
+      }
+
       // Recognised, and known to be unreadable. Say why, once, rather than
       // leaving the tech to try again with the same file.
       if (kind.kind === 'unreadable' && kind.parser) {
@@ -135,6 +144,28 @@ export default function ImportScreen() {
     } finally {
       setBusy(false);
     }
+  };
+
+  /** Loads an asset register: the office system's book of work. */
+  const importRegister = async (text: string, fileName: string) => {
+    const parsed = parseAssetRegister(text, fileName);
+    if (!parsed.assets.length) {
+      Alert.alert('Nothing to import', parsed.warnings.join('\n\n') || 'The register had no rows.');
+      return;
+    }
+    const res = await importAssetRegister(parsed);
+    Alert.alert(
+      `${parsed.systemLabel} imported`,
+      [
+        `${(res.assetsCreated + res.assetsUpdated).toLocaleString()} assets across ` +
+        `${(res.sitesCreated + res.sitesMatched).toLocaleString()} sites`,
+        res.assetsUpdated ? `${res.assetsUpdated.toLocaleString()} already here and updated` : null,
+        res.sitesCreated ? `${res.sitesCreated.toLocaleString()} new sites` : null,
+        `${res.schedulesWritten.toLocaleString()} routine due dates`,
+        ...res.warnings,
+      ].filter(Boolean).join('\n\n'),
+    );
+    router.replace('/(tabs)/sites');
   };
 
   /** Writes a natively parsed vendor configuration straight in. */

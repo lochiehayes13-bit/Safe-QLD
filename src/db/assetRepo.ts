@@ -27,6 +27,12 @@ export interface AssetRecord {
   serial?: string;
   catalogueItemId?: string;
   installedDate?: string;
+  /** The id the source system gave it, which is what makes a re-import an update. */
+  externalId?: string;
+  /** Which system that id belongs to, so two sources cannot collide. */
+  externalSource?: string;
+  /** Position in the walk around the site. */
+  walkOrder?: number;
   status: string;
   attributes: Record<string, string | number | boolean>;
   lastServicedAt?: string;
@@ -191,6 +197,36 @@ export async function getAssetByCode(code: string): Promise<AssetRecord | null> 
 }
 
 /** Finds an asset by serial, so "where is serial 123456?" is answerable. */
+/**
+ * Finds assets already imported from a source system.
+ *
+ * Keyed on source and id together: two systems can both number an asset 14211,
+ * and matching on the number alone would fold two buildings into one.
+ */
+export async function findByExternalIds(
+  source: string,
+  ids: string[],
+): Promise<Map<string, AssetRecord>> {
+  const found = new Map<string, AssetRecord>();
+  if (!ids.length) return found;
+  const db = await getDb();
+  // Chunked: SQLite's default parameter limit is 999, and a register runs to
+  // thousands.
+  const CHUNK = 400;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const slice = ids.slice(i, i + CHUNK);
+    const rows = await db.getAllAsync<AssetRow>(
+      `SELECT * FROM asset WHERE externalSource = ? AND externalId IN (${slice.map(() => '?').join(',')})`,
+      source, ...slice,
+    );
+    for (const row of rows) {
+      const asset = hydrate(row);
+      if (asset.externalId) found.set(asset.externalId, asset);
+    }
+  }
+  return found;
+}
+
 export async function findBySerial(serial: string): Promise<AssetRecord[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<AssetRow>('SELECT * FROM asset WHERE serial = ? OR serial LIKE ?', serial, `%${serial}%`);
@@ -235,6 +271,9 @@ export async function createAsset(input: Partial<AssetRecord> & { siteId: string
     serial: input.serial,
     catalogueItemId: input.catalogueItemId,
     installedDate: input.installedDate,
+    externalId: input.externalId,
+    externalSource: input.externalSource,
+    walkOrder: input.walkOrder,
     status: input.status ?? 'in-service',
     attributes: input.attributes ?? {},
     lastServicedAt: input.lastServicedAt,
@@ -249,14 +288,16 @@ export async function createAsset(input: Partial<AssetRecord> & { siteId: string
   await db.runAsync(
     `INSERT INTO asset (id,siteId,assetTypeId,parentAssetId,code,name,level,room,locationNote,
        manufacturer,model,partNumber,serial,catalogueItemId,installedDate,status,attributes,
-       lastServicedAt,lastResult,nextDueAt,openDefects,notes,createdAt,updatedAt)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       lastServicedAt,lastResult,nextDueAt,openDefects,notes,createdAt,updatedAt,
+       externalId,externalSource,walkOrder)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     asset.id, asset.siteId, asset.assetTypeId, asset.parentAssetId ?? null, asset.code ?? null,
     asset.name, asset.level ?? null, asset.room ?? null, asset.locationNote ?? null,
     asset.manufacturer ?? null, asset.model ?? null, asset.partNumber ?? null, asset.serial ?? null,
     asset.catalogueItemId ?? null, asset.installedDate ?? null, asset.status,
     JSON.stringify(asset.attributes), asset.lastServicedAt ?? null, asset.lastResult ?? null,
     asset.nextDueAt ?? null, 0, asset.notes ?? null, asset.createdAt, asset.updatedAt,
+    asset.externalId ?? null, asset.externalSource ?? null, asset.walkOrder ?? null,
   );
 
   if (asset.installedDate) {
@@ -275,13 +316,14 @@ export async function updateAsset(id: string, patch: Partial<AssetRecord>): Prom
 
   const textFields = ['name', 'level', 'room', 'locationNote', 'manufacturer', 'model', 'partNumber',
     'serial', 'catalogueItemId', 'installedDate', 'status', 'lastServicedAt', 'lastResult',
-    'nextDueAt', 'notes', 'code', 'parentAssetId'] as const;
+    'nextDueAt', 'notes', 'code', 'parentAssetId', 'externalId', 'externalSource'] as const;
 
   for (const f of textFields) {
     if (patch[f] !== undefined) { sets.push(`${f} = ?`); vals.push((patch[f] as string | undefined) ?? null); }
   }
   if (patch.attributes !== undefined) { sets.push('attributes = ?'); vals.push(JSON.stringify(patch.attributes)); }
   if (patch.openDefects !== undefined) { sets.push('openDefects = ?'); vals.push(patch.openDefects); }
+  if (patch.walkOrder !== undefined) { sets.push('walkOrder = ?'); vals.push(patch.walkOrder ?? null); }
   if (!sets.length) return;
 
   sets.push('updatedAt = ?');

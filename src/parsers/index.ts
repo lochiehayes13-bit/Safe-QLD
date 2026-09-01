@@ -6,6 +6,7 @@ import { isPci, parsePci } from './notifierPci';
 import { isPertronicUtil, parsePertronicUtil } from './pertronicUtil';
 import { isNcf, parseNcf } from './ncfSite';
 import { isVigilantBytes, parseVigilantBytes } from './vigilant';
+import { isAssetRegister } from './assetRegister';
 
 export * from './csv';
 export * from './deviceType';
@@ -17,6 +18,7 @@ export * from './notifierPci';
 export * from './pertronicUtil';
 export * from './ncfSite';
 export * from './vigilant';
+export * from './assetRegister';
 export * from './lineTags';
 export * from './sqliteRead';
 export * from './zipRead';
@@ -235,6 +237,8 @@ export function parserForBrand(brand: PanelBrand): PanelParser | undefined {
 export type ImportKind =
   | 'tabular'
   | 'pack'
+  /** An asset register export from the office system. */
+  | 'register'
   /** A text format read directly; use `parser.parse`. */
   | 'native'
   /** A binary format read directly; use `parser.parseBytes`. */
@@ -267,6 +271,11 @@ export function classifyBytes(fileName: string, bytes: Uint8Array): { kind: Impo
     return { kind: 'pack' };
   }
   if (lower.endsWith('.sqld')) return { kind: 'pack' };
+
+  // Checked before the tabular path, which would otherwise claim it: a register
+  // is a CSV, and the column mapper would hand a technician nine hundred sites
+  // to map by hand.
+  if (isAssetRegister(decodeHead(bytes, 2048))) return { kind: 'register' };
 
   for (const p of PANEL_CATALOGUE) {
     if (p.sniffBytes?.(bytes, fileName)) return { kind: 'native-binary', parser: p };
