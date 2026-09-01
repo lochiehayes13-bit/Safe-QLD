@@ -486,6 +486,51 @@ describe('overdue work goes first', () => {
     expect(late.daysOfMargin).toBeLessThan(0);
   });
 
+  it('does not write off a job whose window closes on the first day it can be done', () => {
+    /*
+     * The plan runs 1–31 October. A routine whose tolerance closes on the 1st
+     * can still be done on the 1st, in tolerance — and telling a planner it is
+     * "late whatever happens" is telling them not to bother saving something
+     * that can be saved.
+     *
+     * A day earlier and it genuinely cannot: the window shut before the month
+     * opened, and the only variable left is how late.
+     */
+    const closesOnTheFirstDay = planWork(
+      [routine({ siteId: 'a', window: { earliest: '2026-09-01', latest: '2026-10-01' } })],
+      [site({ siteId: 'a' })],
+      options(),
+    );
+    const saveable = visitFor(closesOnTheFirstDay, 'a')[0]!;
+    expect(saveable.urgent).toBe(false);
+    expect(saveable.daysOfMargin).toBeGreaterThanOrEqual(0);
+
+    const closedTheDayBefore = planWork(
+      [routine({ siteId: 'a', window: { earliest: '2026-09-01', latest: '2026-09-30' } })],
+      [site({ siteId: 'a' })],
+      options(),
+    );
+    expect(visitFor(closedTheDayBefore, 'a')[0]!.urgent).toBe(true);
+  });
+
+  it('plans a routine whose window opens on the last day being planned', () => {
+    /*
+     * A window opening on the final day of the plan is due inside it, and
+     * dropping it as "not due" loses the job silently — nothing is left to say
+     * it was ever considered.
+     *
+     * The window ends on Friday 30 October rather than the 31st, because the
+     * 31st is a Saturday and there would be no working day to place it on: a
+     * correct absence that would make this test pass for the wrong reason.
+     */
+    const plan = planWork(
+      [routine({ siteId: 'a', window: { earliest: '2026-10-30', latest: '2026-12-31' } })],
+      [site({ siteId: 'a' })],
+      options({ window: { from: '2026-10-01', to: '2026-10-30', label: 'October 2026' } }),
+    );
+    expect(visitFor(plan, 'a').map((v) => v.date)).toEqual(['2026-10-30']);
+  });
+
   it('takes the day off an on-time job when the day is only big enough for one', () => {
     // Fifty detectors is most of a day each, so only one of these fits. The
     // overdue one must get the first day even though the other was equally
