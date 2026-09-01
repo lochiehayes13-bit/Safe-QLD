@@ -5,14 +5,16 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getSite, listDefects } from '@/db/repo';
 import { createPurchaseRequest, type PurchaseLine } from '@/db/opsRepo';
 import {
-  UNCOVERED_REASON, partsNeededFor, uncoveredDefects, type NeededPart,
+  UNCOVERED_REASON, labourNeededFor, partsNeededFor, totalLabourHours, uncoveredDefects,
+  type NeededPart,
 } from '@/domain/partsNeeded';
 import type { Defect, Site } from '@/domain/types';
-import { loadPrefs } from '@/app-prefs';
+import { loadPrefs, DEFAULT_PREFS, type Prefs } from '@/app-prefs';
+import { chargeForAttendance, formatCents, rateCardFrom } from '@/domain/rates';
 import { useTheme } from '@/theme';
 import { DevicePicker } from '@/components/DevicePicker';
 import {
-  Banner, Button, Card, Chip, Field, H2, Rowed, Screen, Txt,
+  Banner, Button, Card, Chip, Divider, Field, H2, Rowed, Screen, Txt,
 } from '@/components/ui';
 
 /**
@@ -41,12 +43,14 @@ export default function SitePartsScreen() {
   const [supplier, setSupplier] = useState('');
   const [picking, setPicking] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
 
   const load = useCallback(async () => {
     if (!siteId) return;
-    const [s, d] = await Promise.all([getSite(siteId), listDefects(siteId)]);
+    const [s, d, p] = await Promise.all([getSite(siteId), listDefects(siteId), loadPrefs()]);
     setSite(s);
     setDefects(d.filter((x) => x.status === 'open'));
+    setPrefs(p);
   }, [siteId]);
 
   useEffect(() => { void load(); }, [load]);
@@ -87,7 +91,6 @@ export default function SitePartsScreen() {
 
     setSaving(true);
     try {
-      const prefs = await loadPrefs();
       await createPurchaseRequest({
         siteId: site.id,
         supplier: supplier.trim() || undefined,
@@ -111,13 +114,35 @@ export default function SitePartsScreen() {
     }
   };
 
+  const labour = useMemo(() => labourNeededFor(defects), [defects]);
+
+  /**
+   * What the labour is worth, when rates have been set.
+   *
+   * Priced as ordinary hours with no attendance fee: this is rectification work
+   * quoted ahead of a visit, not an attendance being billed, and adding a
+   * call-out fee to a quote for work not yet scheduled would overstate it.
+   */
+  const quote = useMemo(() => {
+    const hours = totalLabourHours(defects);
+    const { rates } = rateCardFrom(prefs);
+    if (!hours || !rates.some((r) => r.hours === 'normal')) return null;
+    return chargeForAttendance({
+      minutesOnSite: Math.round(hours * 60),
+      hours: 'normal',
+      rates,
+      fees: [],
+      chargeAttendance: false,
+    });
+  }, [defects, prefs]);
+
   return (
     <>
       <Stack.Screen options={{ title: 'Parts needed' }} />
       <Screen>
         <Txt tone="muted" size="sm" style={{ lineHeight: 20 }}>
           Built from the coded defects open at {site?.name ?? 'this site'}. Quantities add up across defects that need
-          the same thing. Labour is left out — it belongs on the quote, not on an order.
+          the same thing. Labour is left out of the order — it belongs on the quote, and is summarised below.
         </Txt>
 
         {!parts.length ? (
@@ -228,6 +253,53 @@ export default function SitePartsScreen() {
                 {unresolved} line{unresolved === 1 ? '' : 's'} will go out without a part number.
               </Txt>
             ) : null}
+          </>
+        ) : null}
+
+        {labour.length ? (
+          <>
+            <H2>Labour on this work</H2>
+            <Card>
+              {labour.map((l) => (
+                <Rowed key={l.description} style={{ justifyContent: 'space-between' }}>
+                  <Txt size="sm" style={{ flex: 1 }}>{l.description}</Txt>
+                  <Txt size="sm" tone="muted">
+                    {l.hours} hr{l.hours === 1 ? '' : 's'} · {l.defectCount} defect{l.defectCount === 1 ? '' : 's'}
+                  </Txt>
+                </Rowed>
+              ))}
+              <Divider />
+              {quote ? (
+                <>
+                  {quote.lines.map((line, i) => (
+                    <Rowed key={i} style={{ justifyContent: 'space-between' }}>
+                      <Txt size="sm" style={{ flex: 1 }}>{line.label}</Txt>
+                      <Txt size="sm">{formatCents(line.amountCents)}</Txt>
+                    </Rowed>
+                  ))}
+                  <Rowed style={{ justifyContent: 'space-between', marginTop: t.space(1) }}>
+                    <Txt size="sm" weight="700">Labour, inc GST</Txt>
+                    <Txt size="sm" weight="700">{formatCents(quote.totalCents)}</Txt>
+                  </Rowed>
+                  {quote.warnings.length ? (
+                    <Txt size="xs" tone="warn" style={{ marginTop: t.space(1.5), lineHeight: 16 }}>
+                      {quote.warnings.join(' ')}
+                    </Txt>
+                  ) : null}
+                </>
+              ) : (
+                // Quoting at nothing is worse than not quoting: a zero total
+                // reads as a price.
+                <Txt size="xs" tone="warn" style={{ lineHeight: 16 }}>
+                  No charge-out rates are set, so this is hours only. Add them in Settings and the
+                  labour is priced here.
+                </Txt>
+              )}
+              <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5), lineHeight: 16 }}>
+                Hours come from the defect library, not from time recorded on site. They are an
+                estimate for quoting and are not a timesheet.
+              </Txt>
+            </Card>
           </>
         ) : null}
 

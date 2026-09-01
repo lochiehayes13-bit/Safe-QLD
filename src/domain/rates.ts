@@ -13,6 +13,9 @@
 
 export type HoursBand = 'normal' | 'after-hours';
 
+/** GST in Australia, as a fraction. Rates on a card are held excluding it. */
+export const GST = 0.1;
+
 export interface LabourRate {
   id: string;
   /** The name as the office system holds it, which is how a rate is matched. */
@@ -250,4 +253,71 @@ function withinOneEdit(a: string, b: string): boolean {
     j++;
   }
   return true;
+}
+
+/**
+ * The rate fields the app stores, as a shape rather than the Prefs type.
+ *
+ * Prefs lives behind AsyncStorage, and importing it here would drag a native
+ * module into a module that is otherwise pure arithmetic. A structural type
+ * costs nothing and keeps this testable.
+ */
+export interface RateCardPrefs {
+  normalHoursSellCents: number;
+  afterHoursSellCents: number;
+  attendanceNormalCents: number;
+  attendanceNormalMinutes: number;
+  attendanceAfterHoursCents: number;
+  attendanceAfterHoursMinutes: number;
+}
+
+/**
+ * Turns the settings figures into rates and fees the charge functions accept.
+ *
+ * A rate left at zero is omitted rather than included as a free hour. The
+ * distinction matters: an omitted rate makes `chargeForAttendance` warn that
+ * nothing is set up, where a zero rate would quietly bill the work at nothing
+ * and look like a real answer.
+ *
+ * Cost is left at zero because the app is not told it. That makes
+ * `marginFraction` read 100%, which is wrong, so nothing shown from this card
+ * should quote a margin.
+ */
+export function rateCardFrom(p: RateCardPrefs): { rates: LabourRate[]; fees: ServiceFee[] } {
+  const rates: LabourRate[] = [];
+  const fees: ServiceFee[] = [];
+
+  const labour = (hours: HoursBand, sell: number, name: string) => {
+    if (sell > 0) {
+      rates.push({
+        id: `${hours}-labour`,
+        name,
+        costCentsPerHour: 0,
+        sellCentsPerHour: sell,
+        taxRate: GST,
+        efficiencyMultiplier: 1,
+        kind: 'labour',
+        hours,
+      });
+    }
+  };
+  labour('normal', p.normalHoursSellCents, 'Labour — normal hours');
+  labour('after-hours', p.afterHoursSellCents, 'Labour — after hours');
+
+  const attendance = (hours: HoursBand, charge: number, minutes: number, name: string) => {
+    if (charge > 0) {
+      fees.push({
+        id: `${hours}-attendance`,
+        name,
+        chargeCents: charge,
+        includedLabourMinutes: Math.max(0, Math.round(minutes)),
+        taxRate: GST,
+        hours,
+      });
+    }
+  };
+  attendance('normal', p.attendanceNormalCents, p.attendanceNormalMinutes, 'Site attendance — normal hours');
+  attendance('after-hours', p.attendanceAfterHoursCents, p.attendanceAfterHoursMinutes, 'Site attendance — after hours');
+
+  return { rates, fees };
 }

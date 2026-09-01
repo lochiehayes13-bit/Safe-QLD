@@ -1,14 +1,18 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Linking, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SimproClient, type SimproConfig } from '@/simpro/client';
 import { loadPrefs, savePrefs, DEFAULT_PREFS, type Prefs } from '@/app-prefs';
 import { clearExports, exportsSize } from '@/export/files';
+import { listPhotoFiles } from '@/export/photoFiles';
+import { photoStorageReport } from '@/db/photoRepo';
+import type { StorageReport } from '@/domain/photoStore';
 import { pendingSyncCount } from '@/db/opsRepo';
 import { bundledCatalogueSize, startCatalogueSeed } from '@/seed/catalogueSeed';
 import { flushQueue, pullFromSimpro, type SyncProgress } from '@/simpro/sync';
 import { describeStaleness, type SyncState } from '@/simpro/incremental';
 import { readAllSyncState } from '@/simpro/watermark';
+import { formatCents, parseCents, rateCardFrom } from '@/domain/rates';
 import { formatBytes } from '@/share/pack';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
@@ -22,6 +26,7 @@ export default function SettingsScreen() {
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ name: string; readable: boolean; total: number | null; error?: string }[] | null>(null);
   const [storage, setStorage] = useState(0);
+  const [photos, setPhotos] = useState<StorageReport | null>(null);
   const [pending, setPending] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [syncState, setSyncState] = useState<SyncState[]>([]);
@@ -41,6 +46,7 @@ export default function SettingsScreen() {
       .catch(() => setCatalogue(0));
     try {
       setStorage(exportsSize());
+      void photoStorageReport(listPhotoFiles()).then(setPhotos);
     } catch {
       setStorage(0);
     }
@@ -53,6 +59,22 @@ export default function SettingsScreen() {
       return next;
     });
   }, []);
+
+  /**
+   * A plain sentence back, so a mistyped rate is visible before it prices a job.
+   *
+   * Reads the card the same way the rest of the app does rather than the
+   * preference fields directly: if a rate is dropped for being zero, this says
+   * so instead of showing a figure nothing will use.
+   */
+  const rateSummary = useMemo(() => {
+    const { rates, fees } = rateCardFrom(prefs);
+    const parts = [
+      ...rates.map((r) => `${r.hours === 'normal' ? 'Normal' : 'After'} hours at ${formatCents(r.sellCentsPerHour)} an hour`),
+      ...fees.map((f) => `${f.hours === 'normal' ? 'normal' : 'after'} hours attendance ${formatCents(f.chargeCents)} covering ${f.includedLabourMinutes} minutes`),
+    ];
+    return parts.length ? `${parts.join('; ')}.` : '';
+  }, [prefs]);
 
   const saveSecret = async () => {
     if (!secret.trim()) return;
@@ -160,6 +182,56 @@ export default function SettingsScreen() {
         <Field label="Company" value={prefs.companyName} onChangeText={(v) => update({ companyName: v })} />
         <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
           These prefill reports, baseline data and timesheets so you are not retyping them on every job.
+        </Txt>
+      </Card>
+
+      <H2>Charge-out rates</H2>
+      <Card>
+        <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
+          The office system is the record. These are a copy so the app can put a figure on labour
+          out of signal, and they stay on this device. Leave one blank and nothing is priced from
+          it — hours are shown on their own rather than a total that might be wrong.
+        </Txt>
+        <View style={{ height: t.space(3) }} />
+        <Label>Labour, excluding GST</Label>
+        <Money label="Normal hours" cents={prefs.normalHoursSellCents} onCents={(c) => update({ normalHoursSellCents: c })} suffix="per hour" />
+        <View style={{ height: t.space(2.5) }} />
+        <Money label="After hours" cents={prefs.afterHoursSellCents} onCents={(c) => update({ afterHoursSellCents: c })} suffix="per hour" />
+        <Divider />
+        <Label>Site attendance, excluding GST</Label>
+        <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
+          An attendance fee covers a set number of minutes on site. Only the time past that is
+          charged again at the labour rate — charging the fee and then every hour double-bills the
+          start of every job.
+        </Txt>
+        <View style={{ height: t.space(2.5) }} />
+        <Rowed gap={2} align="flex-start">
+          <View style={{ flex: 2 }}>
+            <Money label="Normal hours" cents={prefs.attendanceNormalCents} onCents={(c) => update({ attendanceNormalCents: c })} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Minutes label="Covers" minutes={prefs.attendanceNormalMinutes} onMinutes={(m) => update({ attendanceNormalMinutes: m })} />
+          </View>
+        </Rowed>
+        <View style={{ height: t.space(2.5) }} />
+        <Rowed gap={2} align="flex-start">
+          <View style={{ flex: 2 }}>
+            <Money label="After hours" cents={prefs.attendanceAfterHoursCents} onCents={(c) => update({ attendanceAfterHoursCents: c })} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Minutes label="Covers" minutes={prefs.attendanceAfterHoursMinutes} onMinutes={(m) => update({ attendanceAfterHoursMinutes: m })} />
+          </View>
+        </Rowed>
+        {rateSummary ? (
+          <Txt size="xs" tone="muted" style={{ marginTop: t.space(3), lineHeight: 17 }}>{rateSummary}</Txt>
+        ) : (
+          <Txt size="xs" tone="warn" style={{ marginTop: t.space(3), lineHeight: 17 }}>
+            Nothing is set, so labour and attendances are shown as hours only.
+          </Txt>
+        )}
+        <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 16 }}>
+          Cost rates are not asked for and not held here. Only what a client is charged, so nothing
+          on this device reveals a margin.
         </Txt>
       </Card>
 
@@ -310,6 +382,18 @@ export default function SettingsScreen() {
         </Rowed>
         <Divider />
         <Rowed style={{ justifyContent: 'space-between' }}>
+          <Txt size="sm">Photographs</Txt>
+          <Txt size="sm" tone={photos?.missing.length ? 'fail' : 'muted'}>
+            {photos ? `${photos.count} kept, ${formatBytes(photos.totalBytes)}` : 'checking…'}
+          </Txt>
+        </Rowed>
+        {photos?.warnings.length ? (
+          <Txt size="xs" tone={photos.missing.length ? 'fail' : 'warn'} style={{ lineHeight: 16 }}>
+            {photos.warnings.join(' ')}
+          </Txt>
+        ) : null}
+        <Divider />
+        <Rowed style={{ justifyContent: 'space-between' }}>
           <Txt size="sm">Parts catalogue</Txt>
           <Txt size="sm" tone={catalogue === null ? 'muted' : catalogue < bundled ? 'warn' : 'muted'}>
             {catalogue === null ? 'loading…' : `${catalogue.toLocaleString()} of ${bundled.toLocaleString()}`}
@@ -351,5 +435,67 @@ export default function SettingsScreen() {
         <Button title="Safe QLD website" variant="ghost" compact onPress={() => void Linking.openURL('https://www.safeqldfire.com.au')} />
       </Card>
     </Screen>
+  );
+}
+
+/**
+ * A dollars field over a whole-cents preference.
+ *
+ * The stored figure is cents but nobody types cents, so the draft is the
+ * technician's own text and only a reading that parses cleanly is committed.
+ * An unset rate shows blank rather than $0.00: a zero reads as a price, and
+ * every screen that uses these treats zero as "not set".
+ */
+function Money({
+  label, cents, onCents, suffix,
+}: {
+  label: string;
+  cents: number;
+  onCents: (cents: number) => void;
+  suffix?: string;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? (cents > 0 ? (cents / 100).toFixed(2) : '');
+  const typed = draft?.trim() ?? '';
+  const bad = typed !== '' && parseCents(typed) === undefined;
+  return (
+    <Field
+      label={label}
+      value={shown}
+      keyboardType="decimal-pad"
+      placeholder="0.00"
+      suffix={suffix}
+      hint={bad ? 'Not an amount — write it like 136.88' : undefined}
+      onChangeText={(v) => {
+        setDraft(v);
+        if (v.trim() === '') { onCents(0); return; }
+        const c = parseCents(v);
+        if (c !== undefined && c >= 0) onCents(c);
+      }}
+    />
+  );
+}
+
+/** Whole minutes, kept as a draft for the same reason as Money. */
+function Minutes({
+  label, minutes, onMinutes,
+}: {
+  label: string;
+  minutes: number;
+  onMinutes: (minutes: number) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <Field
+      label={label}
+      value={draft ?? String(minutes)}
+      keyboardType="numeric"
+      suffix="min"
+      onChangeText={(v) => {
+        setDraft(v);
+        const digits = v.replace(/[^\d]/g, '');
+        onMinutes(digits === '' ? 0 : Math.min(24 * 60, parseInt(digits, 10)));
+      }}
+    />
   );
 }

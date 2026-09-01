@@ -114,3 +114,53 @@ export const UNCOVERED_REASON: Record<UncoveredDefect['reason'], string> = {
   'unknown-code': 'Carries a code this build does not know',
   'labour-only': 'Needs labour only — nothing to order',
 };
+
+/**
+ * The labour the same defects call for.
+ *
+ * Deliberately separate from the parts. A purchase order goes to a supplier and
+ * has no labour on it, which is why partsNeededFor drops it — but the quote to
+ * the client does, and dropping it there means quoting a job at the cost of its
+ * materials.
+ */
+export interface NeededLabour {
+  description: string;
+  hours: number;
+  defectCount: number;
+  fromCodes: string[];
+}
+
+export function labourNeededFor(defects: Defect[]): NeededLabour[] {
+  const byDescription = new Map<string, NeededLabour>();
+
+  for (const defect of defects) {
+    if (!defect.defectCode) continue;
+    const code = defectByCode(defect.defectCode);
+    if (!code) continue;
+
+    for (const item of code.quoteItems ?? []) {
+      if (isMaterial(item)) continue;
+      const key = item.description.toLowerCase();
+      const existing = byDescription.get(key);
+      if (existing) {
+        existing.hours += item.qtyPerDefect;
+        existing.defectCount += 1;
+        if (!existing.fromCodes.includes(code.code)) existing.fromCodes.push(code.code);
+      } else {
+        byDescription.set(key, {
+          description: item.description,
+          hours: item.qtyPerDefect,
+          defectCount: 1,
+          fromCodes: [code.code],
+        });
+      }
+    }
+  }
+
+  return [...byDescription.values()].sort((a, b) => b.hours - a.hours);
+}
+
+/** Total hours across the defects, which is what gets priced. */
+export function totalLabourHours(defects: Defect[]): number {
+  return labourNeededFor(defects).reduce((n, l) => n + l.hours, 0);
+}

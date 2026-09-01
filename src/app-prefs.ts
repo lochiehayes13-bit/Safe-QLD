@@ -18,6 +18,19 @@ export interface Prefs {
   simproCompanyId: string;
   simproClientId: string;
   simproProxyUrl: string;
+  /**
+   * Charge-out rates, in whole cents excluding GST.
+   *
+   * Held here rather than shipped in the repository: these are commercial terms
+   * including cost, and therefore margin. Zero means not set, and the app says
+   * so rather than quoting at nothing.
+   */
+  normalHoursSellCents: number;
+  afterHoursSellCents: number;
+  attendanceNormalCents: number;
+  attendanceNormalMinutes: number;
+  attendanceAfterHoursCents: number;
+  attendanceAfterHoursMinutes: number;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -29,6 +42,12 @@ export const DEFAULT_PREFS: Prefs = {
   simproCompanyId: '',
   simproClientId: '',
   simproProxyUrl: '',
+  normalHoursSellCents: 0,
+  afterHoursSellCents: 0,
+  attendanceNormalCents: 0,
+  attendanceNormalMinutes: 120,
+  attendanceAfterHoursCents: 0,
+  attendanceAfterHoursMinutes: 180,
 };
 
 export async function loadPrefs(): Promise<Prefs> {

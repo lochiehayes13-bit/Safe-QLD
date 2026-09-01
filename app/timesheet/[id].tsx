@@ -8,6 +8,9 @@ import {
   dayName, entryHours, groupByDate, timesheetTotals, validateTimesheet, weekDates,
   type HourKind, type Timesheet, type TimesheetEntry,
 } from '@/domain/timesheet';
+import { valueTimesheet } from '@/domain/timesheetValue';
+import { formatCents, rateCardFrom } from '@/domain/rates';
+import { loadPrefs, DEFAULT_PREFS, type Prefs } from '@/app-prefs';
 import type { Site } from '@/domain/types';
 import { timesheetSheet, timesheetSummarySheet } from '@/export/safeqldForms';
 import { formatAuDate } from '@/export/sheets';
@@ -32,11 +35,15 @@ export default function TimesheetScreen() {
   const [sites, setSites] = useState<Site[]>([]);
   const [busy, setBusy] = useState(false);
   const [showIssues, setShowIssues] = useState(true);
+  const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
+  const [chargeAttendance, setChargeAttendance] = useState(false);
+  const [showValue, setShowValue] = useState(false);
 
   useEffect(() => {
     if (!id) return;
     void getTimesheet(id).then(setSheet);
     void listSites().then(setSites);
+    void loadPrefs().then(setPrefs);
   }, [id]);
 
   const update = useCallback((patch: Partial<Timesheet>) => {
@@ -60,6 +67,21 @@ export default function TimesheetScreen() {
   const totals = useMemo(() => (sheet ? timesheetTotals(sheet) : null), [sheet]);
   const issues = useMemo(() => (sheet ? validateTimesheet(sheet) : []), [sheet]);
   const days = useMemo(() => (sheet ? weekDates(sheet.weekStarting) : []), [sheet]);
+
+  /**
+   * The other side of the sheet: what the week's attendances are worth.
+   *
+   * A timesheet is a payroll document, so this is deliberately behind a tap and
+   * labelled as an estimate. It exists because the figure otherwise arrives a
+   * month later in the invoice run, by which time a week priced wrongly is
+   * already history.
+   */
+  const value = useMemo(() => {
+    if (!sheet) return null;
+    const card = rateCardFrom(prefs);
+    if (!card.rates.length && !card.fees.length) return null;
+    return valueTimesheet(sheet, { ...card, chargeAttendance });
+  }, [sheet, prefs, chargeAttendance]);
 
   const addEntry = (date: string) => {
     if (!sheet) return;
@@ -172,6 +194,69 @@ export default function TimesheetScreen() {
             </Card>
           );
         })}
+
+        {value ? (
+          <>
+            <H2>What this week is worth</H2>
+            <Card>
+              {!showValue ? (
+                <Button
+                  title={`Price ${value.hours} hour${value.hours === 1 ? '' : 's'} at the rate card`}
+                  variant="secondary"
+                  onPress={() => setShowValue(true)}
+                />
+              ) : (
+                <>
+                  <Segmented
+                    value={chargeAttendance ? 'callout' : 'contract'}
+                    onChange={(v) => setChargeAttendance(v === 'callout')}
+                    options={[
+                      { value: 'contract', label: 'Contract visit' },
+                      { value: 'callout', label: 'Chargeable callout' },
+                    ]}
+                  />
+                  <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 16 }}>
+                    {chargeAttendance
+                      ? 'The attendance fee is charged once per visit and covers its stated minutes; only the time past that bills again.'
+                      : 'Routine servicing under an agreement: hours only, no attendance fee.'}
+                  </Txt>
+                  <Divider />
+                  {value.entries.map((v) => (
+                    <Rowed key={v.entryId} style={{ justifyContent: 'space-between' }} align="flex-start">
+                      <View style={{ flex: 1 }}>
+                        <Txt size="sm">{v.siteName || v.jobNumber}</Txt>
+                        <Txt size="xs" tone="faint">
+                          {formatAuDate(v.date)} · {v.hours} hr{v.hours === 1 ? '' : 's'}
+                          {v.band === 'after-hours' ? ' · after hours' : ''}
+                        </Txt>
+                      </View>
+                      <Txt size="sm">{formatCents(v.charge.totalCents)}</Txt>
+                    </Rowed>
+                  ))}
+                  <Divider />
+                  <Rowed style={{ justifyContent: 'space-between' }}>
+                    <Txt size="sm" tone="muted">Excluding GST</Txt>
+                    <Txt size="sm" tone="muted">{formatCents(value.subtotalCents)}</Txt>
+                  </Rowed>
+                  <Rowed style={{ justifyContent: 'space-between', marginTop: t.space(1) }}>
+                    <Txt size="sm" weight="700">Week, inc GST</Txt>
+                    <Txt size="sm" weight="700">{formatCents(value.totalCents)}</Txt>
+                  </Rowed>
+                  {value.warnings.length ? (
+                    <Txt size="xs" tone="warn" style={{ marginTop: t.space(2), lineHeight: 16 }}>
+                      {value.warnings.join(' ')}
+                    </Txt>
+                  ) : null}
+                  <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 16 }}>
+                    An estimate from the rates in Settings, not an invoice. Variations, agreed caps
+                    and what the contract already covers are not visible from a timesheet — the
+                    office system raises the bill.
+                  </Txt>
+                </>
+              )}
+            </Card>
+          </>
+        ) : null}
 
         <H2>Sign off</H2>
         <Card>
