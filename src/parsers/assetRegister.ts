@@ -468,6 +468,36 @@ export function parseAssetRegister(text: string, fileName = ''): ParsedRegister 
     );
   }
 
+  /*
+   * An asset with no interval against it at all.
+   *
+   * Quieter than a wrong due date, and worse. A wrong date makes the asset
+   * permanently overdue, which somebody eventually notices; no interval means
+   * the app has nothing to make it due from, so it never appears in the due
+   * list, never lands in a month plan, and never gets serviced through the
+   * schedule. It sits in the register looking exactly like every other asset.
+   *
+   * The real register has 134 of these, dominated by a hundred and one smoke
+   * doors — which is a hundred and one pieces of fire safety equipment the
+   * source system holds no service interval for.
+   */
+  const unscheduled = assets.filter((a) => !a.schedule.length);
+  if (unscheduled.length) {
+    const kinds = new Map<string, number>();
+    for (const a of unscheduled) kinds.set(a.assetTypeId, (kinds.get(a.assetTypeId) ?? 0) + 1);
+    const breakdown = [...kinds.entries()]
+      .sort((x, y) => y[1] - x[1])
+      .slice(0, 3)
+      .map(([id, n]) => `${n} ${id}`)
+      .join(', ');
+    warnings.push(
+      `${unscheduled.length} ${unscheduled.length === 1 ? 'asset has' : 'assets have'} no service ` +
+      `interval recorded (${breakdown}${kinds.size > 3 ? ', and others' : ''}). They import and are ` +
+      `visible on their site, but nothing makes them due, so they will not appear in the due list ` +
+      `or in a month plan until an interval is set in the source system.`,
+    );
+  }
+
   const vague = assets.filter((a) => a.lastOverhaul && a.lastOverhaul.precision === 'month').length;
   if (vague) {
     warnings.push(

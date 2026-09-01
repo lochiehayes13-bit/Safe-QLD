@@ -286,3 +286,57 @@ describeReal('against the real register', () => {
     }
   });
 });
+
+/**
+ * An asset the app can never make due.
+ *
+ * Quieter than a wrong due date and worse. A wrong date makes an asset
+ * permanently overdue, which somebody eventually notices and chases; no
+ * interval at all means there is nothing to count from, so the asset never
+ * appears in the due list, never lands in a month plan, and never gets
+ * serviced through the schedule. It sits in the register looking exactly like
+ * every other asset.
+ */
+describe('assets with no service interval', () => {
+  const csvOf = (...bodies: Partial<Record<string, string>>[]) =>
+    [HEADER, ...bodies.map(row)].join('\n');
+
+  it('says how many and what they are', () => {
+    const csv = csvOf(
+      { 'Site Name': 'An Example Building', 'Site ID': '1', 'Asset ID': '101', 'Walk Order': '1', 'Location': 'Kitchen', 'Service Start Date': '20/10/2025' },
+      { 'Site Name': 'An Example Building', 'Site ID': '1', 'Asset ID': '102', 'Walk Order': '2', 'Location': 'Kitchen', 'Service Start Date': '20/10/2025' },
+      { 'Site Name': 'An Example Building', 'Site ID': '1', 'Asset ID': '103', 'Walk Order': '3', 'Location': 'Level 1', 'Service Start Date': '20/10/2025', '6 Monthly': '20/04/2026' },
+    );
+    const warning = parseAssetRegister(csv, 'fire_blankets_export.csv').warnings
+      .find((w) => w.includes('no service interval'));
+    expect(warning).toBeDefined();
+    expect(warning).toContain('2 assets');
+  });
+
+  it('explains the consequence rather than just counting', () => {
+    /*
+     * A count on its own reads as a parse complaint. What a person needs to
+     * know is that these will not show up anywhere they would look for them.
+     */
+    const csv = csvOf({ 'Site Name': 'An Example Building', 'Site ID': '1', 'Asset ID': '101', 'Walk Order': '1', 'Service Start Date': '20/10/2025' });
+    const warning = parseAssetRegister(csv, 'fire_blankets_export.csv').warnings
+      .find((w) => w.includes('no service interval'))!;
+    expect(warning).toContain('will not appear in the due list');
+    expect(warning).toContain('source system');
+  });
+
+  it('says nothing where every asset has an interval', () => {
+    const csv = csvOf({ 'Site Name': 'An Example Building', 'Site ID': '1', 'Asset ID': '101', 'Walk Order': '1', 'Service Start Date': '20/10/2025', '6 Monthly': '20/04/2026' });
+    expect(parseAssetRegister(csv, 'fire_blankets_export.csv').warnings
+      .some((w) => w.includes('no service interval'))).toBe(false);
+  });
+
+  it('still imports them, because a register row is a real asset', () => {
+    // Refusing the row would lose the asset entirely. It exists on the site and
+    // the technician should see it; what it lacks is a schedule.
+    const csv = csvOf({ 'Site Name': 'An Example Building', 'Site ID': '1', 'Asset ID': '101', 'Walk Order': '1', 'Service Start Date': '20/10/2025' });
+    const parsed = parseAssetRegister(csv, 'fire_blankets_export.csv');
+    expect(parsed.assets).toHaveLength(1);
+    expect(parsed.assets[0]!.schedule).toEqual([]);
+  });
+});
