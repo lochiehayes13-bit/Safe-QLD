@@ -208,9 +208,16 @@ function parseIsoDate(iso: string | undefined): Date | null {
  * has not been recognised as ISO here is passed to a date function.
  */
 export function isoDay(text: string | undefined): string | undefined {
-  const s = text?.trim();
-  if (!s || !/^\d{4}-\d{2}-\d{2}/.test(s)) return undefined;
-  return parseIsoDate(s) ? s.slice(0, 10) : undefined;
+  /*
+   * The Queensland day, not the first ten characters.
+   *
+   * `raisedDay` comes from here, and the month an occupier has to rectify a
+   * critical defect is counted from it. A defect raised at half past seven on a
+   * Brisbane morning is stamped 21:30 the previous day in UTC, so the slice was
+   * giving them until the second of the month instead of the third — on the
+   * screen, and on the notice they are handed.
+   */
+  return qldIsoDay(text);
 }
 
 /**

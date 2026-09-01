@@ -883,7 +883,22 @@ describe('refusing to answer', () => {
     // same round trip.
     expect(isoDay('2026-02-31')).toBeUndefined();
     expect(isoDay('1/9/2026')).toBeUndefined();
-    expect(isoDay('2026-09-01T23:00:00.000Z')).toBe('2026-09-01');
+    /*
+     * The Queensland day, and this line used to assert the UTC one.
+     *
+     * Four lines below, the test for qldToday pins 2026-08-31T23:00 as the
+     * first of September, which is what it is here. This pinned the same kind
+     * of value the other way, so one module had two readers of a date
+     * disagreeing about what day it was and both were held to it.
+     *
+     * It is isoDay that raisedDay comes from, and the month an occupier has to
+     * rectify a critical defect is counted from raisedDay. Eleven in the
+     * evening is not a working hour, but half past seven in the morning is —
+     * 21:30 UTC — and that is every morning this company works.
+     */
+    expect(isoDay('2026-09-01T23:00:00.000Z')).toBe('2026-09-02');
+    expect(isoDay('2026-09-01T21:30:00.000Z')).toBe('2026-09-02');
+    expect(isoDay('2026-09-02T04:30:00.000Z')).toBe('2026-09-02');
     expect(foldRuns([
       { siteId: 's1', routineId: 'det-annual', frequency: 'annual', completedAt: '2026-02-31' },
     ]).rejected).toHaveLength(1);

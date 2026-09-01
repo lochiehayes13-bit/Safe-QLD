@@ -83,9 +83,19 @@ export function frequencySpec(id: Frequency): FrequencySpec | undefined {
 // Scheduling
 // ---------------------------------------------------------------------------
 
+/**
+ * The calendar day a value names, as a UTC-midnight Date for arithmetic.
+ *
+ * The day is resolved in Queensland. Every clock counted from here is a
+ * statutory one — the month to rectify, the ten working days for the
+ * Commissioner's copy — and they are counted from the day the maintenance was
+ * carried out, which is a day in Brisbane and not a substring of a UTC stamp.
+ * A defect raised at half past seven on a Brisbane morning was being given
+ * until the second of the month rather than the third.
+ */
 function parseDate(iso: string): Date | null {
-  const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
-  return Number.isNaN(d.getTime()) ? null : d;
+  const day = qldIsoDay(iso);
+  return day ? new Date(`${day}T00:00:00Z`) : null;
 }
 
 function toIso(d: Date): string {

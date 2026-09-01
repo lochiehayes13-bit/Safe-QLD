@@ -232,9 +232,32 @@ describe('statutory clocks', () => {
     expect(commissionerCopyDueAt('2026-08-31')).toBe('2026-09-14');
   });
 
+  it('counts both from the Queensland day the maintenance was carried out', () => {
+    /*
+     * Every date these were given until now was a plain calendar day, so the
+     * reader underneath them could take the first ten characters of an instant
+     * and never be caught at it.
+     *
+     * A defect raised at half past seven on a Brisbane morning is stamped 21:30
+     * the previous day in UTC. Counted from the stamp, the occupier is given
+     * until the second of the month to rectify rather than the third — on the
+     * notice screen and on the notice they are handed — and the Commissioner's
+     * copy is due a working day early.
+     */
+    expect(rectificationDueAt('2026-07-02T21:30:00.000Z')).toBe('2026-08-03');
+    expect(rectificationDueAt('2026-07-03')).toBe('2026-08-03');
+    // 3 July 2026 is a Friday; ten working days on is Friday 17 July.
+    expect(commissionerCopyDueAt('2026-07-02T21:30:00.000Z')).toBe('2026-07-17');
+    expect(commissionerCopyDueAt('2026-07-03')).toBe('2026-07-17');
+  });
+
   it('handles an unparseable date without throwing', () => {
     expect(criticalNoticeDueAt('nope')).toBeNull();
     expect(rectificationDueAt('nope')).toBeNull();
+    // An Australian date is the one that gets through a lenient reader, so it
+    // is named here rather than left to "nope".
+    expect(rectificationDueAt('1/9/2026')).toBeNull();
+    expect(commissionerCopyDueAt('1/9/2026')).toBeNull();
   });
 });
 
