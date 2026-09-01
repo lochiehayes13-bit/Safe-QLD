@@ -24,8 +24,18 @@ import { PdfError, isEncrypted, isPdf, readPdf } from '@/parsers/pdfText';
 
 const REAL_DIR = '/tmp/safeqld-standards';
 const ORACLE_DIR = '/tmp/safeqld-text';
-const haveReal = existsSync(REAL_DIR) && existsSync(ORACLE_DIR);
-const describeReal = haveReal ? describe : describe.skip;
+
+/*
+ * The file list is read here rather than inside the describe body, because
+ * describe.skip still RUNS its callback — it only marks the tests it collects
+ * as skipped. A readdirSync in there throws ENOENT on any machine without the
+ * staged documents, which is every machine except the one they were staged on.
+ * It passed locally and took CI down four times.
+ */
+const realPdfs = existsSync(REAL_DIR) && existsSync(ORACLE_DIR)
+  ? readdirSync(REAL_DIR).filter((f) => f.toLowerCase().endsWith('.pdf'))
+  : [];
+const describeReal = realPdfs.length ? describe : describe.skip;
 
 // --- A PDF built here, so the parser is covered with no customer files ------
 
@@ -127,7 +137,7 @@ describe('readPdf — a scan', () => {
 // --- The real documents, where they are staged ------------------------------
 
 describeReal('readPdf — against the real standards', () => {
-  const pdfs = readdirSync(REAL_DIR).filter((f) => f.toLowerCase().endsWith('.pdf'));
+  const pdfs = realPdfs;
   const oracleFor = (pdf: string): string | undefined => {
     const name = pdf.replace(/^[0-9a-f]{8}-/, '').replace(/\.pdf$/i, '.txt');
     const path = join(ORACLE_DIR, name);
