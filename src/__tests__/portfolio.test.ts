@@ -522,6 +522,50 @@ describe('statutory exposure', () => {
     expect(book.ranked).toEqual([]);
   });
 
+  it('counts the day a statement falls due as due, and the day after as overdue', () => {
+    /*
+     * The anniversary itself is the day it is due, not the day it is late. A
+     * dashboard that calls it overdue on the day puts a statutory exposure
+     * against a building the occupier has until close of business to sign, and
+     * one that waits a day misses the day it should have been chased.
+     *
+     * TODAY is 2026-09-01, so a statement last signed on 2025-09-01 falls due
+     * today and one signed on 2025-08-31 fell due yesterday.
+     */
+    const dueToday = buildPortfolio(input({
+      sites: [site({ siteId: 's1', lastStatementAt: '2025-09-01' })],
+    }));
+    expect(dueToday.statutory.statementsOverdue).toBe(0);
+
+    const dueYesterday = buildPortfolio(input({
+      sites: [site({ siteId: 's1', lastStatementAt: '2025-08-31' })],
+    }));
+    expect(dueYesterday.statutory.statementsOverdue).toBe(1);
+  });
+
+  it('has the score and the statutory list agree on when a statement is late', () => {
+    /*
+     * "Is this statement overdue?" is decided twice in this module — once when
+     * a site is scored, and once when the statutory list is built — and the two
+     * are separate comparisons over the same dates. Drift between them shows as
+     * a dashboard listing a site as overdue while its score carries no
+     * statutory exposure, or the reverse, and either reads as one of the two
+     * being broken without saying which.
+     *
+     * Held at the boundary, which is where a drift of one day would appear.
+     */
+    for (const [lastStatementAt, overdue] of [
+      ['2025-09-01', false], // due today
+      ['2025-08-31', true], // due yesterday
+    ] as const) {
+      const book = buildPortfolio(input({ sites: [site({ siteId: 's1', lastStatementAt })] }));
+      const listed = book.statutory.statementsOverdue > 0;
+      const scored = book.ranked.some((r) => r.statutoryExposure);
+      expect({ lastStatementAt, listed, scored })
+        .toEqual({ lastStatementAt, listed: overdue, scored: overdue });
+    }
+  });
+
   it('counts a statement a year past its last one as overdue', () => {
     const book = buildPortfolio(input({
       sites: [site({ siteId: 's1', lastStatementAt: '2025-01-15' })],
