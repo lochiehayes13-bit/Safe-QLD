@@ -21,6 +21,30 @@ interface ToolDef {
 
 const CALCULATORS: ToolDef[] = [
   {
+    href: '/tools/extinguisher',
+    icon: 'fire-extinguisher',
+    title: 'Extinguishers',
+    body: 'What the type is and what it must never be pointed at, when the next test falls, and whether the cylinder is still full.',
+  },
+  {
+    href: '/tools/emergency-lighting',
+    icon: 'lightbulb-outline',
+    title: 'Emergency lighting',
+    body: 'Discharge outcome, exit sign viewing distance, battery age against what you saw, and whether the room has the light it needs.',
+  },
+  {
+    href: '/tools/hydrant',
+    icon: 'fire-hydrant',
+    title: 'Hydrant flow test',
+    body: 'Measure a flow, work out what the supply gives at the pressure the brigade needs, then check it against the duty.',
+  },
+  {
+    href: '/tools/flow-certificate',
+    icon: 'certificate-outline',
+    title: 'Combined flow certificate',
+    body: 'Sprinkler and hydrant duty on one page, converted before they are added, with the 150% overload run answered.',
+  },
+  {
     href: '/tools/battery',
     icon: 'car-battery',
     title: 'FIP battery calculator',

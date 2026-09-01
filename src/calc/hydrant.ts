@@ -1275,6 +1275,10 @@ export function assessHydrant(input: AssessmentInput): Assessment | Refused {
   if (demonstrated) {
     verdict = overPressure ? 'fail' : 'pass';
     flowMarginLpm = round(measuredFlowLpm - requiredFlowLpm, 1);
+    // The measured flow, not a projection. It is a lower bound: the residual on
+    // test was at or above the required one, so at the required residual the
+    // supply gives at least this. Reporting the demonstrated figure keeps the
+    // strongest number on the record rather than replacing it with a curve.
     availableAtRequiredKpa = round(measuredFlowLpm, 1);
     summary =
       `${round(measuredFlowLpm / 60, 2)} L/s flowed at ${round(measuredResidualKpa, 0)} kPa residual, against a duty of ` +

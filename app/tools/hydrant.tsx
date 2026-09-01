@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Linking, ScrollView, View } from 'react-native';
+import { Linking, Pressable, ScrollView, View } from 'react-native';
 import { Stack } from 'expo-router';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   CONDUITS,
   OUTLETS,
@@ -24,7 +23,7 @@ import {
 } from '@/calc/hydrant';
 import { useTheme } from '@/theme';
 import {
-  Banner, Button, Card, Chip, Divider, Field, H2, Label, ResultBlock, Rowed, Screen, Segmented, StatTile, Txt,
+  Banner, Card, Chip, Divider, Field, H2, Label, ResultBlock, Rowed, Screen, Segmented, StatTile, Txt,
 } from '@/components/ui';
 
 /**
@@ -717,25 +716,18 @@ function SourceLine({
   url?: string;
   confidence: 'high' | 'medium' | 'low';
 }) {
-  const t = useTheme();
-  const tone = confidence === 'high' ? 'pass' : confidence === 'medium' ? 'default' : 'warn';
+  const tone = confidence === 'high' ? 'pass' : confidence === 'medium' ? 'muted' : 'warn';
   return (
     <View style={{ gap: 5, marginTop: 6 }}>
-      <Rowed gap={2}>
+      <Rowed gap={2} wrap>
         <Txt weight="700">{value}</Txt>
-        <Chip label={`${confidence} confidence`} tone={tone === 'default' ? 'muted' : tone} />
+        <Chip label={`${confidence} confidence`} tone={tone} />
       </Rowed>
       <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>{source}</Txt>
       {url ? (
-        <Txt
-          size="xs"
-          tone="accent"
-          onPress={() => {
-            void Linking.openURL(url);
-          }}
-        >
-          {url}
-        </Txt>
+        <Pressable onPress={() => void Linking.openURL(url)} hitSlop={6}>
+          <Txt size="xs" tone="accent" style={{ lineHeight: 17 }}>{url}</Txt>
+        </Pressable>
       ) : null}
     </View>
   );

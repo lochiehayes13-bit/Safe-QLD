@@ -294,6 +294,18 @@ export default function SiteScreen() {
           onPress={() => router.push({ pathname: '/site/coverage', params: { siteId: site.id } })}
         />
         <NavRow
+          icon="currency-usd"
+          title="Rectification quote"
+          subtitle="Price the open defects from their coded lines and the rate card"
+          onPress={() => router.push({ pathname: '/site/quote', params: { siteId: site.id } })}
+        />
+        <NavRow
+          icon="clipboard-check-outline"
+          title="Form 72"
+          subtitle="The department's hydrant and sprinkler form, and the occupier's copy of it"
+          onPress={() => router.push({ pathname: '/site/form72', params: { siteId: site.id } })}
+        />
+        <NavRow
           icon="file-certificate-outline"
           title="Occupier statement"
           subtitle="Annual declaration, filled from this site's own register and defects"

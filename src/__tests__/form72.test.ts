@@ -276,7 +276,27 @@ describe('Part D — the flow table', () => {
     for (const rate of STANDARD_FLOW_RATES_LPS) expect(partD).toContain(`${rate} L/s`);
     expect(partD).toContain('320');
     // A rate that was not run is stated as not run, not left to look like a pass.
-    expect(partD).toContain('Not recorded');
+    expect(partD).toContain('Not run');
+  });
+
+  it('separates a rate that was never run from a reading that was never written down', () => {
+    // Both are blanks on paper and they mean opposite things: three untouched
+    // rates are normal, a half-filled row is a gap somebody has to answer for.
+    const html = form72Html(doc({
+      form: issuable({
+        flowTest: {
+          result: 'pass', hydrantLocations: [],
+          rows: [{ rateLps: 20, devices: 'DG1, DG2', hydrant1Kpa: 320 }],
+        },
+      }),
+    }));
+    const partD = between(html, 'Size/flow rate', 'System achieved');
+    const twenty = between(partD, '20 L/s', '30 L/s');
+    expect(twenty).toContain('Not recorded');
+    expect(twenty).not.toContain('Not run');
+    const thirty = between(partD, '30 L/s', 'System achieved');
+    expect(thirty).toContain('Not run');
+    expect(thirty).not.toContain('Not recorded');
   });
 
   it('keeps a reading taken at a rate the printed form has no row for', () => {
@@ -437,6 +457,14 @@ describe('Part G — the sprinkler test points', () => {
     expect(halfMeasured).not.toContain('950 l/m @');
   });
 
+  it('says a second test point was not used, rather than flagging four missing readings', () => {
+    const html = form72Html(doc({ form: issuable({ sprinklerFlow }) }));
+    const second = between(html, 'Test Point 2', 'Running Test');
+    expect(second).toContain('Not used');
+    expect(second).not.toContain('Not recorded');
+    expect(second).not.toContain('Not decided');
+  });
+
   it('keeps a third test point the printed form has no room for', () => {
     const html = form72Html(doc({
       form: issuable({
@@ -530,6 +558,13 @@ describe('the storage the form lives in', () => {
 });
 
 describe('the page itself', () => {
+  it('answers a missing licensee report number instead of flagging it, because not every job has one', () => {
+    const html = form72Html(doc());
+    const partI = between(html, 'Licence No. (QBCC/PIC)', '</table>');
+    expect(partI).toContain('<span class="na">None</span>');
+    expect(partI).not.toContain('Not recorded');
+  });
+
   it('escapes what a technician types, so a site called "Smith & Co <East>" cannot break the page', () => {
     const html = form72Html(doc({ form: issuable({ siteName: 'Smith & Co <East>' }) }));
     expect(html).toContain('Smith &amp; Co &lt;East&gt;');

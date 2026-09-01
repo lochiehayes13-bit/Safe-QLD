@@ -43,6 +43,7 @@ export default function WorkScreen() {
       title: 'On the tools',
       rows: [
         { label: 'Jobs', sub: 'Scheduled and outstanding work', icon: 'clipboard-list-outline', href: '/work/jobs', badge: counts.jobs },
+        { label: 'Month plan', sub: 'The month day by day, with what could not be planned said out loud', icon: 'calendar-month-outline', href: '/work/plan' },
         { label: "Today's run", sub: 'Jobs ordered by how close they are, urgent first', icon: 'map-marker-path', href: '/work/route' },
         { label: 'Overdue and due', sub: 'Routines past their tolerance window, across every site', icon: 'calendar-alert', href: '/work/due' },
         { label: 'Impairments', sub: 'Systems currently out of service', icon: 'alert-octagon-outline', href: '/work/impairments', badge: counts.impairments, tone: counts.impairments ? 'fail' : undefined },
@@ -61,6 +62,7 @@ export default function WorkScreen() {
     {
       title: 'Parts and knowledge',
       rows: [
+        { label: 'Asset labels', sub: 'Issue numbers to untagged assets and print the sheet', icon: 'tag-multiple-outline', href: '/work/labels' },
         { label: 'Van stock', sub: 'What you carry and what needs restocking', icon: 'van-utility', href: '/work/stock', badge: counts.restock, tone: counts.restock ? 'warn' : undefined },
         { label: 'Purchase requests', sub: 'Parts to order', icon: 'cart-outline', href: '/work/purchases', badge: counts.purchases },
         { label: 'Company knowledge', sub: 'Tricks of the trade, approved and unverified', icon: 'lightbulb-on-outline', href: '/work/knowledge' },

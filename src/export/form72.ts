@@ -427,13 +427,24 @@ function partD(form: Form72): string {
       <td class="dh">Hydrant 1 only (kPa)</td><td class="dh">Hydrants 1 &amp; 2 (kPa)</td>
       <td class="dh">Hydrants 1, 2 &amp; 3 (kPa)</td>
     </tr>
-    ${rows.map(({ row, standard }) => `<tr>
+    ${rows.map(({ row, standard }) => {
+    // A rate with nothing against it was not run, which is not the same thing
+    // as a reading somebody forgot to write down. The department prints all
+    // five rates whether or not the job needs them, so most forms legitimately
+    // leave three of them alone — flagging those in red would train a reader to
+    // ignore the flag on the row that matters.
+    const untouched = !row.devices?.trim() && row.hydrant1Kpa === undefined
+      && row.hydrants12Kpa === undefined && row.hydrants123Kpa === undefined;
+    const c = (v: string | number | undefined): string =>
+      (untouched ? '<span class="na">Not run</span>' : cell(v, r));
+    return `<tr>
       <td class="k">${esc(row.rateLps)} L/s${standard ? '' : ' <span class="extra">added</span>'}</td>
-      <td class="v">${cell(row.devices, r)}</td>
-      <td class="v">${cell(row.hydrant1Kpa, r)}</td>
-      <td class="v">${cell(row.hydrants12Kpa, r)}</td>
-      <td class="v">${cell(row.hydrants123Kpa, r)}</td>
-    </tr>`).join('')}
+      <td class="v">${c(row.devices)}</td>
+      <td class="v">${c(row.hydrant1Kpa)}</td>
+      <td class="v">${c(row.hydrants12Kpa)}</td>
+      <td class="v">${c(row.hydrants123Kpa)}</td>
+    </tr>`;
+  }).join('')}
     <tr><td class="k">System achieved</td><td class="v" colspan="4">${cell(d.systemAchieved, r)}</td></tr>
   </table>`;
 
@@ -460,7 +471,8 @@ function partD(form: Form72): string {
     ? `<div class="stated">${extras.length} flow rate${extras.length === 1 ? ' was' : 's were'} recorded `
       + `that the department's table does not print `
       + `(${esc(extras.map((x) => `${x.row.rateLps} L/s`).join(', '))}). `
-      + 'They are shown above marked "added" rather than dropped to fit the printed layout.</div>'
+      + `${extras.length === 1 ? 'It is' : 'They are'} shown above marked "added" rather than `
+      + 'dropped to fit the printed layout.</div>'
     : ''}`;
 }
 
@@ -545,19 +557,34 @@ function partG(form: Form72): string {
     `${tick('Pass', o === 'pass')}${tick('Fail', o === 'fail')}${
       o === undefined && r !== 'na' ? ' <span class="missing">Not decided</span>' : ''}`;
 
-  const point = (n: number, p: SprinklerTestPoint | undefined): string => `
+  // The department prints two test points and its own note says multiple points
+  // may be required — meaning one is often the right answer. An unused second
+  // point says so, rather than showing four boxes flagged as missing readings.
+  const unused = (p: SprinklerTestPoint | undefined): boolean => !p || (!p.location.trim()
+    && p.requiredFlowLpm === undefined && p.resultFlowLpm === undefined
+    && p.requiredPressureKpa === undefined && p.resultPressureKpa === undefined);
+
+  const point = (n: number, p: SprinklerTestPoint | undefined): string => {
+    const spare = unused(p);
+    const c = (v: string | number | undefined): string =>
+      (spare ? '<span class="na">Not used</span>' : cell(v, r));
+    const boxes = (o: 'pass' | 'fail' | undefined): string => (spare
+      ? `${tick('Pass', false)}${tick('Fail', false)}`
+      : outcomeBoxes(o));
+    return `
     <tr><td class="sub" colspan="4">Test Point ${n}</td></tr>
-    ${wide('Location', cell(p?.location, r))}
+    ${wide('Location', c(p?.location))}
     <tr>
-      <td class="k">Required flow rate (L/min)</td><td class="v">${cell(p?.requiredFlowLpm, r)}</td>
-      <td class="k">Result: ${cell(p?.resultFlowLpm, r)}</td>
-      <td class="v">${outcomeBoxes(testPointOutcome(p?.requiredFlowLpm, p?.resultFlowLpm))}</td>
+      <td class="k">Required flow rate (L/min)</td><td class="v">${c(p?.requiredFlowLpm)}</td>
+      <td class="k">Result: ${c(p?.resultFlowLpm)}</td>
+      <td class="v">${boxes(testPointOutcome(p?.requiredFlowLpm, p?.resultFlowLpm))}</td>
     </tr>
     <tr>
-      <td class="k">Required pressure (kPa)</td><td class="v">${cell(p?.requiredPressureKpa, r)}</td>
-      <td class="k">Result: ${cell(p?.resultPressureKpa, r)}</td>
-      <td class="v">${outcomeBoxes(testPointOutcome(p?.requiredPressureKpa, p?.resultPressureKpa))}</td>
+      <td class="k">Required pressure (kPa)</td><td class="v">${c(p?.requiredPressureKpa)}</td>
+      <td class="k">Result: ${c(p?.resultPressureKpa)}</td>
+      <td class="v">${boxes(testPointOutcome(p?.requiredPressureKpa, p?.resultPressureKpa))}</td>
     </tr>`;
+  };
 
   const extra = g.testPoints.slice(2);
 
@@ -619,7 +646,9 @@ function partI(form: Form72): string {
   <table class="grid">
     ${pair(['Licensee Name', cell(form.licenseeName, 'pass')], ['Licensee Signature', cell(form.signature, 'pass')])}
     ${pair(['Licence No. (QBCC/PIC)', cell(form.licenceNumber, 'pass')],
-    ['Licensee Report No.', cell(form.licenseeReportNumber, 'pass')])}
+    // Not every job has one, so its absence is answered rather than flagged.
+    ['Licensee Report No.', form.licenseeReportNumber?.trim()
+      ? esc(form.licenseeReportNumber) : '<span class="na">None</span>'])}
   </table>`;
 }
 
