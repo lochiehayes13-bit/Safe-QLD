@@ -48,6 +48,52 @@ describe('mapping a routine frequency onto the standard', () => {
   });
 });
 
+describe('the edges of the tolerance window', () => {
+  /*
+   * These are the days a technician is standing at a site asking the app
+   * whether the service is due, and every one of them was previously decided
+   * by a comparison no test touched — each of the four could have been off by
+   * one day and the suite stayed green.
+   *
+   * Anchored 2024-03-15, so the second yearly service is scheduled for
+   * 2025-03-15. A yearly has two months either side (AS 1851 table 6.4.1.4),
+   * putting the window at 2025-01-15 to 2025-05-15 inclusive.
+   *
+   * Inclusive is the whole point. A service done on the last day of its window
+   * is in tolerance, and calling it overdue sends someone back to a site that
+   * did not need them; calling a service overdue a day late is the failure
+   * that shows up in an audit.
+   */
+  const anchored = history({ firstCompletedAt: '2024-03-15', lastCompletedAt: '2024-03-15' });
+
+  it('is still upcoming the day before the window opens', () => {
+    expect(routineDue(anchored, '2025-01-14').state).toBe('upcoming');
+  });
+
+  it('is due on the first day of the window, not the day after', () => {
+    expect(routineDue(anchored, '2025-01-15').state).toBe('due');
+  });
+
+  it('is still due on the last day of the window, because the window includes it', () => {
+    expect(routineDue(anchored, '2025-05-15').state).toBe('due');
+  });
+
+  it('is overdue the day after the window closes', () => {
+    expect(routineDue(anchored, '2025-05-16').state).toBe('overdue');
+  });
+
+  it('counts nought days until due on the scheduled day itself', () => {
+    /*
+     * Nought, not nothing. The number is what the list sorts on and what the
+     * screen prints, and a falsy nought reads as "no date known" — the service
+     * due today sinks to the bottom of the list on the one day it matters.
+     */
+    const due = routineDue(anchored, '2025-03-15');
+    expect(due.daysUntilDue).toBe(0);
+    expect(due.state).toBe('due');
+  });
+});
+
 describe('where a routine stands', () => {
   it('says so when it has never been done', () => {
     const due = routineDue(history({ firstCompletedAt: undefined, completedCount: 0 }), '2026-08-31');
@@ -121,6 +167,21 @@ describe('ordering a list of them', () => {
       .toEqual(['overdue', 'due', 'upcoming', 'not-scheduled']);
   });
 
+  it('puts the one due today ahead of the one due next month', () => {
+    /*
+     * Both are 'due', so the order comes down to the day count, and the one due
+     * today counts nought days. A nought treated as no-answer sorts to the
+     * bottom on the one day the job has to be done — the list would show next
+     * month's work above today's.
+     */
+    const items = [
+      routineDue(history({ routineId: 'next-month', firstCompletedAt: '2024-04-15' }), '2025-03-15'),
+      routineDue(history({ routineId: 'today', firstCompletedAt: '2024-03-15' }), '2025-03-15'),
+    ];
+    expect(items.map((i) => i.state)).toEqual(['due', 'due']);
+    expect(sortByUrgency(items).map((i) => i.routineId)).toEqual(['today', 'next-month']);
+  });
+
   it('puts the most overdue first among the overdue', () => {
     const items = [
       routineDue(history({ routineId: 'recent', firstCompletedAt: '2025-03-01' }), '2026-08-31'),
@@ -174,6 +235,17 @@ describe('assessRunHistory', () => {
   it('counts a service inside the window as in tolerance', () => {
     const out = assessRunHistory(runs('2023-03-01', '2024-03-10'), 'annual');
     expect(out[1]).toMatchObject({ status: 'in-tolerance', scheduledFor: '2024-03-01' });
+  });
+
+  it('reports nought days off for one done exactly on its scheduled day', () => {
+    /*
+     * The service the company wants every one of these to be, and the one case
+     * where the number it is measured by is falsy. Reported as no-answer, a
+     * perfectly timed service prints beside the ones nothing is known about.
+     */
+    const out = assessRunHistory(runs('2023-03-01', '2024-03-01'), 'annual');
+    expect(out[1]!.status).toBe('in-tolerance');
+    expect(out[1]!.daysFromScheduled).toBe(0);
   });
 
   it('reports one done well before its window as early, not as compliant', () => {
