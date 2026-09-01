@@ -109,6 +109,69 @@ describe('tolerance status', () => {
     expect(toleranceStatus('2026-08-31', '2026-10-20', 'yearly')).toBe('in-tolerance');
     expect(toleranceStatus('2026-08-31', '2026-11-20', 'yearly')).toBe('late');
   });
+
+  it('counts the first and last days of the window as inside it', () => {
+    /*
+     * Both ends of the window are compliant days, and both comparisons that
+     * decide it could have been off by one with nothing to say so.
+     *
+     * This is where a job either is or is not in tolerance on the record, so a
+     * day either way changes what the annual report says about a service that
+     * was actually done properly. Scheduled 2026-08-31 yearly puts the window
+     * at 2026-06-30 to 2026-10-31, two months either side.
+     */
+    expect(toleranceStatus('2026-08-31', '2026-06-30', 'yearly')).toBe('in-tolerance');
+    expect(toleranceStatus('2026-08-31', '2026-10-31', 'yearly')).toBe('in-tolerance');
+    expect(toleranceStatus('2026-08-31', '2026-06-29', 'yearly')).toBe('early');
+    expect(toleranceStatus('2026-08-31', '2026-11-01', 'yearly')).toBe('late');
+  });
+
+  it('counts a monthly by working days at the edges, not calendar days', () => {
+    /*
+     * Monthly is the only frequency with a working-day tolerance, so its edges
+     * move with weekends and the boundary is worth holding separately. Five
+     * working days either side of Monday 2026-08-31 reaches back to Monday
+     * 2026-08-24 and forward to Monday 2026-09-07 — a calendar-day reading
+     * would put them at the 26th and the 5th and call two compliant services
+     * out of tolerance.
+     */
+    expect(toleranceStatus('2026-08-31', '2026-08-24', 'monthly')).toBe('in-tolerance');
+    expect(toleranceStatus('2026-08-31', '2026-09-07', 'monthly')).toBe('in-tolerance');
+    expect(toleranceStatus('2026-08-31', '2026-08-21', 'monthly')).toBe('early');
+    expect(toleranceStatus('2026-08-31', '2026-09-08', 'monthly')).toBe('late');
+  });
+
+  it('performed exactly on the scheduled day is in tolerance', () => {
+    expect(toleranceStatus('2026-08-31', '2026-08-31', 'yearly')).toBe('in-tolerance');
+  });
+
+  it('counts Queensland public holidays as working days, which is an open question', () => {
+    /*
+     * Not an assertion that this is right — an assertion that it is what the
+     * app does, so that changing it is deliberate.
+     *
+     * The monthly tolerance is given in working days, and this counts only
+     * weekends. So a monthly scheduled for Friday 10 April 2026 has its
+     * earliest permitted day on Good Friday, with Easter Monday counted as a
+     * working day too.
+     *
+     * The app knows better elsewhere: it carries the Queensland public holiday
+     * table appointed under the Holidays Act 1983, and the statutory clocks in
+     * occupierForm.ts do exclude those days. The two readings disagree by two
+     * days over Easter, and a service done on 1 April 2026 is early under this
+     * one and in tolerance under the other.
+     *
+     * Which reading a maintenance standard intends by "working day" is a
+     * question for the company to settle, not for this file to assume. Held
+     * here so the answer, when it comes, changes a test rather than surprising
+     * somebody at an audit.
+     */
+    expect(toleranceWindow('2026-04-10', 'monthly')).toMatchObject({
+      earliest: '2026-04-03', // Good Friday
+      latest: '2026-04-17',
+    });
+    expect(toleranceStatus('2026-04-10', '2026-04-01', 'monthly')).toBe('early');
+  });
 });
 
 describe('critical defect test', () => {
@@ -218,6 +281,27 @@ describe('occupier statement', () => {
       { installation: 'Sprinklers', present: true, nominatedStandard: 'AS 1851-2012', criticalDefectNoticeGiven: true },
     ]);
     expect(issues[0]).toContain('rectification date');
+  });
+
+  it('does not ask for a rectification date where no notice was given', () => {
+    /*
+     * The ordinary row, and the one most of a statement is made of: installed,
+     * maintained, nothing went wrong. Asking it for the date a critical defect
+     * was rectified would put a query against every clean installation on the
+     * form and bury the one row that has a real one.
+     */
+    expect(occupierStatementIssues([
+      { installation: 'Sprinklers', present: true, nominatedStandard: 'AS 1851-2012', criticalDefectNoticeGiven: false },
+    ])).toEqual([]);
+  });
+
+  it('accepts a notice that has been rectified', () => {
+    expect(occupierStatementIssues([
+      {
+        installation: 'Sprinklers', present: true, nominatedStandard: 'AS 1851-2012',
+        criticalDefectNoticeGiven: true, rectifiedDate: '2026-03-04',
+      },
+    ])).toEqual([]);
   });
 
   it('ignores installations the building does not have', () => {

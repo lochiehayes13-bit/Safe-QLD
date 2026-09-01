@@ -107,6 +107,27 @@ function addDays(d: Date, days: number): Date {
 }
 
 /** Adds working days, skipping weekends. Public holidays are not modelled. */
+/**
+ * Weekends only. Queensland public holidays are counted as working days here,
+ * and that is a decision rather than an oversight — but not a settled one.
+ *
+ * This sets the monthly tolerance window, which AS 1851 table 6.4.1.2 gives in
+ * working days. The app holds an authoritative Queensland public holiday table
+ * appointed under the Holidays Act 1983, and `addQldBusinessDays` in
+ * occupierForm.ts does exclude those days — but it counts a statutory clock
+ * (the ten business days to give the Commissioner a copy), where "business
+ * day" has a settled legal meaning. What a maintenance standard means by
+ * "working day" is a different question, and reading it either way moves a
+ * compliance boundary, so it is not one to answer quietly.
+ *
+ * What it costs: a monthly scheduled 10 April 2026 has its earliest permitted
+ * day on Good Friday, because Good Friday and Easter Monday are both counted.
+ * A holiday-aware reading would reach back two days further, and a service done
+ * on 1 April would read as in tolerance instead of early.
+ *
+ * Pinned by test either way, so changing the reading is a visible change and
+ * not a silent one.
+ */
 export function addWorkingDays(iso: string, days: number): string | null {
   const start = parseDate(iso);
   if (!start) return null;
