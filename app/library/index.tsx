@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, View } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
-import { Stack, router } from 'expo-router';
+import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   STANDARDS, type StandardDoc, type StandardScope,
@@ -77,7 +77,10 @@ const EXAMPLES = [
 
 export default function LibraryScreen() {
   const t = useTheme();
-  const [query, setQuery] = useState('');
+  // Opened from the question bar on the home screen, so a technician's question
+  // survives the navigation rather than making them type it twice.
+  const { q: initial } = useLocalSearchParams<{ q?: string }>();
+  const [query, setQuery] = useState(initial ?? '');
   const [system, setSystem] = useState<string | null>(null);
   const [mine, setMine] = useState<LibraryDoc[]>([]);
   const [pageHits, setPageHits] = useState<PageHit[]>([]);

@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Linking, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SimproClient, type SimproConfig } from '@/simpro/client';
+import { clearKey as clearAiKey, hasKey as hasAiKey, storeKey as storeAiKey } from '@/ai/client';
+import { PRIVACY_NOTE } from '@/ai/grounding';
 import { loadPrefs, savePrefs, DEFAULT_PREFS, type Prefs } from '@/app-prefs';
 import { clearExports, exportsSize } from '@/export/files';
 import { listPhotoFiles } from '@/export/photoFiles';
@@ -26,6 +28,8 @@ export default function SettingsScreen() {
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
   const [secret, setSecret] = useState('');
   const [hasSecret, setHasSecret] = useState(false);
+  const [aiKey, setAiKey] = useState('');
+  const [hasAi, setHasAi] = useState(false);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ name: string; readable: boolean; total: number | null; error?: string }[] | null>(null);
   const [storage, setStorage] = useState(0);
@@ -46,6 +50,7 @@ export default function SettingsScreen() {
     void loadPrefs().then(setPrefs);
     void loadRateCard().then(setCard);
     void SimproClient.hasSecret().then(setHasSecret);
+    void hasAiKey().then(setHasAi);
     void readAllSyncState().then(setSyncState);
     void pendingSyncCount().then(setPending);
     void startCatalogueSeed()
@@ -231,6 +236,50 @@ export default function SettingsScreen() {
         <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
           These prefill reports, baseline data and timesheets so you are not retyping them on every job.
         </Txt>
+      </Card>
+
+      <H2>Reading the standards for you</H2>
+      <Card>
+        <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
+          The search works offline and always will. With a key set, it can also read the passages it
+          found and tell you which one answers your question — and nothing else. Every claim it
+          makes is numbered to a passage; anything it cannot source, it does not say.
+        </Txt>
+        <View style={{ height: t.space(2.5) }} />
+        <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>{PRIVACY_NOTE}</Txt>
+        <View style={{ height: t.space(3) }} />
+        {hasAi ? (
+          <>
+            <Txt size="sm" tone="pass">A key is held in this device's keystore.</Txt>
+            <View style={{ height: t.space(2.5) }} />
+            <Button
+              title="Remove the key"
+              variant="ghost"
+              compact
+              onPress={() => { void clearAiKey().then(() => setHasAi(false)); }}
+            />
+          </>
+        ) : (
+          <>
+            <Field
+              label="Anthropic API key"
+              value={aiKey}
+              onChangeText={setAiKey}
+              placeholder="sk-ant-…"
+              autoCapitalize="none"
+              hint="Held in the hardware keystore, never in ordinary app storage"
+            />
+            <View style={{ height: t.space(2.5) }} />
+            <Button
+              title="Save the key"
+              variant="secondary"
+              onPress={() => {
+                if (!aiKey.trim()) return;
+                void storeAiKey(aiKey).then(() => { setAiKey(''); setHasAi(true); });
+              }}
+            />
+          </>
+        )}
       </Card>
 
       <H2>Charge-out rates</H2>

@@ -10,6 +10,55 @@ import type { Defect } from '@/domain/types';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme, type Theme } from '@/theme';
 import { Card, Chip, Rowed, Screen, Txt } from '@/components/ui';
+import { TextInput } from 'react-native';
+
+/**
+ * The question bar.
+ *
+ * A technician with a question is usually holding something in the other hand
+ * and standing under the thing they are asking about. Making them find the
+ * tools tab first is three taps they will not spend, so the whole library —
+ * clause index, their own imported documents, the defect wording, the
+ * calculators — opens from one line on the screen they are already on.
+ */
+function QuickAsk() {
+  const t = useTheme();
+  const [q, setQ] = useState('');
+  const go = () => {
+    const query = q.trim();
+    if (query.length < 2) return;
+    router.push(`/library?q=${encodeURIComponent(query)}` as never);
+    setQ('');
+  };
+  return (
+    <Pressable onPress={() => router.push('/library' as never)}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: t.space(2.5),
+          backgroundColor: t.color.surface,
+          borderWidth: 1,
+          borderColor: t.color.border,
+          borderRadius: t.radius.pill,
+          paddingHorizontal: t.space(4),
+          minHeight: t.touch,
+        }}
+      >
+        <MaterialCommunityIcons name="magnify" size={20} color={t.color.textFaint} />
+        <TextInput
+          value={q}
+          onChangeText={setQ}
+          onSubmitEditing={go}
+          returnKeyType="search"
+          placeholder="Ask anything — clauses, defects, a calculation"
+          placeholderTextColor={t.color.textFaint}
+          style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md, paddingVertical: t.space(3) }}
+        />
+      </View>
+    </Pressable>
+  );
+}
 
 /**
  * Today — the technician's home.
@@ -65,6 +114,7 @@ export default function TodayScreen() {
   return (
     <Screen>
       <Greeting />
+      <QuickAsk />
 
       {impairments.map((imp) => <ImpairmentBanner key={imp.id} impairment={imp} />)}
 
