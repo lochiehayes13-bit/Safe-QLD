@@ -51,8 +51,22 @@ interface TypeCode {
 
 const TYPE_CODES: Record<string, TypeCode> = {
   // --- Detectors -------------------------------------------------------
-  OPT: { name: 'Optical detector', type: 'smoke-photo' },
-  HEAT: { name: 'Heat detector', type: 'heat' },
+  // The Australian Detectors tab labels its icons with single letters rather
+  // than codes, so these come from the Loop Editor's Type column and the panel
+  // LCD rather than from the picker. Five captions on that tab — Ionisation,
+  // Filtrex, Beam, FAAST, OMNI — have no code anyone has seen, and are
+  // deliberately absent: a guessed key would shadow the unrecognised-code path
+  // that would otherwise report them.
+  OPT: { name: 'Optical smoke detector', type: 'smoke-photo' },
+  // One code covers fixed-temperature and rate-of-rise heads, and the alarm
+  // point lives in the sensitivity field rather than here, so neither the grade
+  // nor the temperature is recoverable from the type alone.
+  HEAT: { name: 'Heat detector (fixed or rate-of-rise)', type: 'heat' },
+  ACCL: { name: 'Acclimate multi-criteria detector', type: 'multi' },
+  // A high-sensitivity point detector, tested with aerosol at the head. Not
+  // aspirating, despite the sensitivity — there is no sampling pipe to test.
+  LASR: { name: 'Laser high-sensitivity smoke detector', type: 'smoke-photo' },
+  PTIR: { name: 'Photo/thermal infra-red multi-criteria detector', type: 'multi' },
 
   // --- Input modules, as captioned in the Device Type Selector ---------
   MCP: { name: 'Manual Callpoint', type: 'mcp' },
@@ -61,48 +75,93 @@ const TYPE_CODES: Record<string, TypeCode> = {
   SW: { name: 'Switch Input', type: 'module-input' },
   SW3: { name: 'Switch Input (3-way)', type: 'module-input' },
   SW_H: { name: 'Switch Input (Hidden)', type: 'module-input' },
-  // Captioned "Switch Input (Disable)" — an input that disables something.
-  // Emphatically not a loop isolator, which is what 'isolator' means here.
+  // Captioned "Switch Input (Disable)": an input that disables the zone it is
+  // assigned to. Emphatically not a loop isolator, which is what 'isolator'
+  // means in this app — nothing in this vocabulary maps to that class.
   ISO: { name: 'Switch Input (Disable)', type: 'module-input' },
   MON: { name: 'Monitor', type: 'module-input' },
   ZMU: { name: 'Zone Monitor Unit', type: 'module-input' },
-  // The device picker shows these as a channel count next to "LPRS" — an
-  // 8-way and a 1-way loop responder. How the count is spelled in the file is
-  // not legible from the icon, so only the bare mnemonic is claimed; a variant
-  // that does not match is reported as unrecognised, which is the right
-  // outcome for a key nobody has actually seen.
+  // The picker shows a channel count in front of this whose spelling is not
+  // legible, so only the bare mnemonic is claimed and a variant falls through
+  // to unrecognised. Its class is unsettled too: the responder carries relay
+  // outputs as well as inputs, so module-io may be the better answer once a
+  // real file shows the key.
   LPRS: { name: 'Loop Responder', type: 'module-input' },
   SPR: { name: 'Sprinkler Input', type: 'sprinkler-flow' },
   FSW: { name: 'Flow Switch', type: 'sprinkler-flow' },
-  // A pressure switch, but the file does not say which pressure — a sprinkler
-  // alarm line, a pump start, or dry-system air are all written the same way,
-  // and they are not tested the same way. Left as the monitored input it is.
+  // Deliberately not sprinkler-flow. The file never says which pressure: a
+  // sprinkler alarm line, a pump start and dry-system air are written
+  // identically and are not tested the same way, so "operate input" is the
+  // only honest default.
   PSW: { name: 'Pressure Switch', type: 'module-input' },
   VMD: { name: 'Valve Monitor', type: 'sprinkler-valve' },
   BMIF: { name: 'Beam Interface', type: 'beam' },
-  // Confirmed by the vendor's own caption. The real file agreed: every VES
-  // point names the aspirating unit it monitors ("MASD 1 ALERT").
   VES: { name: 'VESDA', type: 'aspirating' },
+  // Input-shaped on purpose: "operate input" is honest against a plant or
+  // sub-panel interface, where a smoke-aerosol instruction would be false.
+  SIP: { name: 'Sub-Indicator Panel', type: 'module-input' },
+  PLNT: { name: 'Plant', type: 'module-input' },
   // Fan control takes a status input and drives the fan, so it is both.
   FANC: { name: 'Fan Controller', type: 'module-io' },
   FCSU: { name: 'Fan Control Switch Unit', type: 'module-io' },
 
   // --- Output modules --------------------------------------------------
-  // Ancillary Control Facility, the AS 1670 term. Real descriptions on these
-  // were "BMS - ALARM", "GAS PANEL FIRE TRIP", "MSSB - 1 FIRE TRIP".
-  ACF: { name: 'Ancillary Control Facility', type: 'module-output' },
-  RLYM: { name: 'Relay Module', type: 'relay' },
-  // A warning device, but not which kind — the description says whether it is
-  // a sounder or a strobe, so it is resolved from there below.
-  WRN: { name: 'Warning device', type: 'sounder' },
+  // "Ancillary Control Function" is Pertronic's own wording; "Facility" appears
+  // nowhere in their documents.
+  ACF: { name: 'Ancillary Control Function output', type: 'module-output' },
+  ACFM: { name: 'Ancillary Control Function output, monitored', type: 'module-output' },
+  // The trailing M is Monitored — line-supervised — not Module.
+  RLYM: { name: 'Relay output, monitored', type: 'relay' },
+  RLY: { name: 'Relay output', type: 'relay' },
+  DHR: { name: 'Door Holder Relay', type: 'door-holder' },
+  // A warning device, but not which kind. The description decides where it is
+  // specific; where it is not, sounder-strobe is wrong less often than sounder,
+  // because every one of these in a real file was a strobe.
+  WRN: { name: 'Warning device output', type: 'sounder-strobe' },
+  WRNM: { name: 'Warning device output, monitored', type: 'sounder-strobe' },
+
+  // --- The US codeset ---------------------------------------------------
+  // Carried so a US-configured panel parses rather than warning on every row.
+  // Not merged with their Australian counterparts: different hardware families,
+  // and neither codeset's strings appear in the other's documents.
+  PHO: { name: 'Photoelectric smoke detector (US)', type: 'smoke-photo' },
+  HPHO: { name: 'High-sensitivity photoelectric detector (US)', type: 'smoke-photo' },
+  MPS: { name: 'Manual Pull Station (US)', type: 'mcp' },
+  WFL: { name: 'Waterflow Input (US)', type: 'sprinkler-flow' },
+  RLYS: { name: 'Relay, supervised (US)', type: 'relay' },
+  NAC: { name: 'NAC relay (US)', type: 'relay' },
+  NACS: { name: 'NAC relay, supervised (US)', type: 'relay' },
+  DHRS: { name: 'Door Holder, supervised (US)', type: 'door-holder' },
+  AUXS: { name: 'Aux relay, supervised (US)', type: 'relay' },
+  // AUX alone is genuinely ambiguous: the US output table has it as a relay and
+  // the input-module table has it against a two-input module, so the same
+  // string means an input there. Left unclassed rather than picked.
+  AUX: { name: 'Aux relay or two-input module (US)', type: 'unknown' },
 
   // --- Named by part number, so the class is not claimed ----------------
   MS12: { name: 'M210E-CZR (M512)', type: 'unknown' },
+  M512: { name: 'M210E-CZR (M512)', type: 'unknown' },
   M500DMR: { name: 'M500DMR', type: 'unknown' },
   M221E: { name: 'M221E', type: 'unknown' },
-  SIP: { name: 'Sub-Indicator Panel', type: 'unknown' },
-  PLNT: { name: 'Plant', type: 'unknown' },
 };
+
+/**
+ * A virtual detector is a second personality on a head that is already there.
+ *
+ * The panel writes it with a lower-case v in front of its parent's code, and it
+ * sits at the parent's address plus one. There is no separate device: nothing
+ * to put a hand on and nothing to test on its own, so it carries its parent's
+ * class and says what it is.
+ *
+ * The lower case matters — a check written against an upper-cased code would
+ * never fire, and the point would import as an unrecognised type.
+ */
+const VIRTUAL_PREFIX = /^v([A-Z][A-Z0-9_]*)$/;
+
+export function virtualParentCode(rawCode: string): string | undefined {
+  const m = rawCode.match(VIRTUAL_PREFIX);
+  return m ? m[1] : undefined;
+}
 
 /** Codes whose description is a better guide than the code itself. */
 const DESCRIPTION_WINS = new Set(['WRN']);
@@ -264,13 +323,20 @@ export function parsePertronicUtilText(text: string, fileName = ''): ParsedConfi
   const labelByRef = new Map<string, string>();
   const deviceOutputs: { ref: string; label: string; outputs: string[] }[] = [];
   const unmappedTypes = new Map<string, number>();
+  const virtualPoints: string[] = [];
 
   for (const r of records) {
     const at = loopAddress(r.key);
     if (!at) continue;
     const ref = canonicalRef(r.key);
 
-    const code = (r.fields.get('TYPE') ?? '').trim().toUpperCase();
+    // Kept as written. Upper-casing before the lookup would work for every
+    // ordinary code and quietly destroy the one that matters: a virtual
+    // detector is written with a lower-case v in front of its parent's code,
+    // and uppercased it becomes an unrecognised type instead.
+    const rawCode = (r.fields.get('TYPE') ?? '').trim();
+    const parentCode = virtualParentCode(rawCode);
+    const code = (parentCode ?? rawCode).toUpperCase();
     const text = r.fields.get('DESC')?.trim() ?? '';
     const zoneNumber = Number.parseInt(r.fields.get('Z') ?? '', 10);
 
@@ -280,6 +346,7 @@ export function parsePertronicUtilText(text: string, fileName = ''): ParsedConfi
     const fitted = code.length > 0 && !/^-+$/.test(code);
 
     const known = fitted ? TYPE_CODES[code] : undefined;
+    if (parentCode && fitted) virtualPoints.push(ref);
     let deviceType: DeviceType = 'unknown';
     if (fitted) {
       if (DESCRIPTION_WINS.has(code)) {
@@ -307,7 +374,9 @@ export function parsePertronicUtilText(text: string, fileName = ''): ParsedConfi
       // The vendor's own caption where there is one, so an unmapped code still
       // names something a technician can go and look at.
       deviceTypeRaw: fitted
-        ? `${code}${known ? ` — ${known.name}` : ''} (${at.kind === 'D' ? 'device' : 'module'} address)`
+        ? `${rawCode}${known ? ` — ${known.name}` : ''}` +
+          `${parentCode ? ', virtual — shares the head at the previous address' : ''}` +
+          ` (${at.kind === 'D' ? 'device' : 'module'} address)`
         : undefined,
       deviceType,
       zoneNumber: Number.isFinite(zoneNumber) && zoneNumber > 0 ? zoneNumber : undefined,
@@ -316,6 +385,15 @@ export function parsePertronicUtilText(text: string, fileName = ''): ParsedConfi
 
     const outputs = refList(r.fields.get('Out'));
     if (fitted && outputs.length) deviceOutputs.push({ ref, label: text || ref, outputs });
+  }
+
+  if (virtualPoints.length) {
+    warnings.push(
+      `${virtualPoints.length} ${virtualPoints.length === 1 ? 'point is' : 'points are'} a virtual detector ` +
+      `(${virtualPoints.slice(0, 5).join(', ')}${virtualPoints.length > 5 ? ', …' : ''}) — a second personality ` +
+      `on the head at the address below, not a separate device. They carry that head's type and there is ` +
+      `nothing extra to test at them.`,
+    );
   }
 
   if (unmappedTypes.size) {

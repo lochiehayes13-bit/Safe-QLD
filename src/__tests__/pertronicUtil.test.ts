@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'fs';
 import {
   canonicalRef, isPertronicUtil, isPertronicUtilText, parseFields,
-  parsePertronicUtil, parsePertronicUtilText, unwrapPertronicUtil,
+  parsePertronicUtil, parsePertronicUtilText, unwrapPertronicUtil, virtualParentCode,
 } from '@/parsers/pertronicUtil';
 import { createZip, utf8Bytes } from '@/export/zip';
 
@@ -193,9 +193,9 @@ describe('reading a site', () => {
     // The code alone tells a technician nothing. "MS12" is meaningless at a
     // panel; "MS12 — M210E-CZR" is a module they can go and find.
     const raw = (ref: string) => c().panels[0]!.points.find((p) => p.pointRef === ref)!.deviceTypeRaw;
-    expect(raw('L01D001')).toBe('OPT — Optical detector (device address)');
+    expect(raw('L01D001')).toBe('OPT — Optical smoke detector (device address)');
     expect(raw('L01D006')).toBe('SW_H — Switch Input (Hidden) (device address)');
-    expect(raw('L01M021')).toBe('ACF — Ancillary Control Facility (module address)');
+    expect(raw('L01M021')).toBe('ACF — Ancillary Control Function output (module address)');
   });
 
   it('classes the four switch-input flavours as the one thing they are', () => {
@@ -226,18 +226,53 @@ describe('reading a site', () => {
   });
 
   it('does not report a code whose class is deliberately not claimed', () => {
-    // "Plant" and "M221E" are named but their function is not stated, so they
-    // import as unknown on purpose. Warning about them on every import would
+    // M221E is named by part number and nothing states what it does, so it
+    // imports as unknown on purpose. Warning about it on every import would
     // teach the reader to skip the warning that does matter.
-    const withPlant = TEXT.replace(
+    const withPart = TEXT.replace(
       'L01D006=CompositeDeviceData:0|0 TYPE:SW_H',
-      'L01D006=CompositeDeviceData:0|0 TYPE:PLNT',
+      'L01D006=CompositeDeviceData:0|0 TYPE:M221E',
     );
-    const c2 = parsePertronicUtilText(withPlant);
+    const c2 = parsePertronicUtilText(withPart);
     expect(c2.warnings.join(' ')).not.toMatch(/not in the vocabulary/i);
     const point = c2.panels[0]!.points.find((p) => p.pointRef === 'L01D006')!;
     expect(point.deviceType).toBe('unknown');
-    expect(point.deviceTypeRaw).toMatch(/PLNT — Plant/);
+    expect(point.deviceTypeRaw).toMatch(/M221E — M221E/);
+  });
+
+  it('classes an interface as an input rather than something testable by aerosol', () => {
+    // "Operate input" is honest against a plant or sub-panel interface. A
+    // smoke-aerosol instruction against one would be actively false.
+    for (const code of ['PLNT', 'SIP', 'ZMU', 'PSW']) {
+      const c2 = parsePertronicUtilText(
+        TEXT.replace('TYPE:SW_H', `TYPE:${code}`),
+      );
+      const point = c2.panels[0]!.points.find((p) => p.pointRef === 'L01D006')!;
+      expect([code, point.deviceType]).toEqual([code, 'module-input']);
+    }
+  });
+
+  it('does not class an ambiguous code at all', () => {
+    // AUX is a relay in the output table and a two-input module in the input
+    // table, so the same string means different things. Picking one silently
+    // would be wrong about half the time.
+    const c2 = parsePertronicUtilText(TEXT.replace('TYPE:SW_H', 'TYPE:AUX'));
+    expect(c2.panels[0]!.points.find((p) => p.pointRef === 'L01D006')!.deviceType).toBe('unknown');
+  });
+
+  it('reads a detector code that was never in the sample file', () => {
+    const c2 = parsePertronicUtilText(TEXT.replace('TYPE:SW_H', 'TYPE:ACCL'));
+    const point = c2.panels[0]!.points.find((p) => p.pointRef === 'L01D006')!;
+    expect(point.deviceType).toBe('multi');
+    expect(point.deviceTypeRaw).toMatch(/Acclimate/);
+  });
+
+  it('does not treat a high-sensitivity point detector as aspirating', () => {
+    // A laser head is tested with aerosol at the head. There is no sampling
+    // pipe, so "smoke test at sampling point" would send someone looking for
+    // one that does not exist.
+    const c2 = parsePertronicUtilText(TEXT.replace('TYPE:SW_H', 'TYPE:LASR'));
+    expect(c2.panels[0]!.points.find((p) => p.pointRef === 'L01D006')!.deviceType).toBe('smoke-photo');
   });
 
   it('keeps the module and device address spaces apart', () => {
@@ -253,6 +288,62 @@ describe('reading a site', () => {
     expect(panel.points.find((p) => p.pointRef === 'L01D002')!.zoneText).toBe('EXTERNAL PLANT ROOM');
     expect(panel.zones.find((z) => z.number === 33)).toMatchObject({ text: 'UNUSED ZONE', unused: true });
     expect(panel.zones.find((z) => z.number === 1)!.unused).toBe(false);
+  });
+});
+
+describe('a virtual detector', () => {
+  // The panel writes one as a lower-case v in front of its parent's code. It is
+  // a second personality on a head that is already there, not another device.
+
+  it('reads it as its parent type rather than as an unknown code', () => {
+    const c = parsePertronicUtilText(TEXT.replace('TYPE:SW_H', 'TYPE:vOPT'));
+    const point = c.panels[0]!.points.find((p) => p.pointRef === 'L01D006')!;
+    expect(point.deviceType).toBe('smoke-photo');
+    expect(c.warnings.join(' ')).not.toMatch(/not in the vocabulary/i);
+  });
+
+  it('survives the upper-casing that every other code goes through', () => {
+    // This is the whole trap: uppercase the code before the lookup and "vOPT"
+    // becomes "VOPT", which matches nothing.
+    expect(virtualParentCode('vOPT')).toBe('OPT');
+    expect(virtualParentCode('vPTIR')).toBe('PTIR');
+    expect(virtualParentCode('VOPT')).toBeUndefined();
+    expect(virtualParentCode('OPT')).toBeUndefined();
+  });
+
+  it('says on the point that there is nothing extra to test there', () => {
+    const c = parsePertronicUtilText(TEXT.replace('TYPE:SW_H', 'TYPE:vOPT'));
+    const point = c.panels[0]!.points.find((p) => p.pointRef === 'L01D006')!;
+    expect(point.deviceTypeRaw).toMatch(/virtual — shares the head at the previous address/);
+    expect(c.warnings.join(' ')).toMatch(/not a separate device/i);
+  });
+});
+
+describe('names the vendor actually uses', () => {
+  it('calls the M in RLYM monitored, not module', () => {
+    // Line-supervised. "Relay Module" reads as a different product.
+    const c = parsePertronicUtilText(TEXT);
+    expect(c.panels[0]!.points.find((p) => p.pointRef === 'L01M023')!.deviceTypeRaw)
+      .toMatch(/Relay output, monitored/);
+  });
+
+  it("calls ACF a Function, which is the vendor's word", () => {
+    const c = parsePertronicUtilText(TEXT);
+    expect(c.panels[0]!.points.find((p) => p.pointRef === 'L01M021')!.deviceTypeRaw)
+      .toMatch(/Ancillary Control Function/);
+    expect(c.panels[0]!.points.find((p) => p.pointRef === 'L01M021')!.deviceTypeRaw)
+      .not.toMatch(/Facility/);
+  });
+
+  it('accepts both spellings of the one module nobody can read', () => {
+    // Two builds caption the same tile "M210E-CZR (M512)" and "M512", and the
+    // font makes S and 5 indistinguishable, so both keys resolve.
+    for (const code of ['MS12', 'M512']) {
+      const c = parsePertronicUtilText(TEXT.replace('TYPE:SW_H', `TYPE:${code}`));
+      expect([code, /not in the vocabulary/i.test(c.warnings.join(' '))]).toEqual([code, false]);
+      expect(c.panels[0]!.points.find((p) => p.pointRef === 'L01D006')!.deviceTypeRaw)
+        .toMatch(/M210E-CZR/);
+    }
   });
 });
 
