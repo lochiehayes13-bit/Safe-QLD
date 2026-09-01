@@ -49,13 +49,15 @@
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
     "react-native-svg": "15.15.4",
-    "react-native-worklets": "^0.12.1"
+    "react-native-worklets": "0.10.1"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/pako": "^2.0.4",
     "@types/react": "~19.2.2",
+    "@types/semver": "^7.8.0",
     "jest": "^30.5.0",
+    "semver": "^7.8.5",
     "ts-jest": "^29.4.12",
     "typescript": "~6.0.3"
   },
