@@ -156,6 +156,33 @@ describe('truncateOnSentence', () => {
     expect(truncateOnSentence('Short.', 100)).toEqual({ text: 'Short.', truncated: false, omittedChars: 0 });
   });
 
+  it('sends a note that exactly fills the limit whole', () => {
+    /*
+     * A note the length of the limit fits. Cutting it loses the last sentence
+     * of what a technician wrote, and on this note the thing most likely to be
+     * at the end is the list of assets that could not be tested — the one part
+     * of it that must not be lost.
+     *
+     * The character past it is the first that genuinely does not fit.
+     */
+    const exact = 'A'.repeat(200);
+    expect(truncateOnSentence(exact, 200)).toEqual({ text: exact, truncated: false, omittedChars: 0 });
+    expect(truncateOnSentence('A'.repeat(201), 200).truncated).toBe(true);
+  });
+
+  it('reports a limit of nothing as everything omitted rather than as a clean send', () => {
+    /*
+     * Nought is not a quiet no-op. The caller decides between posting a note
+     * and telephoning the office on whether anything was truncated, and a
+     * silent empty note is the case where a critical defect never reaches
+     * anybody.
+     */
+    expect(truncateOnSentence('Anything at all.', 0))
+      .toEqual({ text: '', truncated: true, omittedChars: 16 });
+    // Nothing in and nothing out is not a truncation.
+    expect(truncateOnSentence('', 0)).toEqual({ text: '', truncated: false, omittedChars: 0 });
+  });
+
   it('cuts at a sentence end rather than mid-thought', () => {
     /*
      * The failure this exists for: "the sprinkler control valve was found
