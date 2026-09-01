@@ -7,6 +7,7 @@ import {
 } from '@/db/repo';
 import { createBaseline, listBaselines } from '@/db/baselineRepo';
 import { createOccupierStatement, listOccupierStatements } from '@/db/occupierRepo';
+import { createAssessment, listAssessments } from '@/db/assessmentRepo';
 import { configTotals, siteToConfig } from '@/share/siteToConfig';
 import { encodePack, formatBytes } from '@/share/pack';
 import { shareFile, writePack, writePdf } from '@/export/files';
@@ -303,6 +304,24 @@ export default function SiteScreen() {
               premisesAddress: site.address ?? '',
             }));
             router.push({ pathname: '/occupier/[id]', params: { id: rec.id } });
+          }}
+        />
+        <NavRow
+          icon="clipboard-search-outline"
+          title="Effectiveness assessment"
+          subtitle="Visual and advisory — recommendations for a project, not a service"
+          onPress={async () => {
+            const existing = await listAssessments(site.id);
+            // One assessment per site until there is a reason for more: a
+            // second one raised by accident is a second report reference the
+            // client has to reconcile.
+            const rec = existing[0] ?? (await createAssessment({
+              siteId: site.id,
+              clientName: site.clientName ?? '',
+              scopeLabel: site.name,
+              attendanceDate: nowIso().slice(0, 10),
+            }));
+            router.push({ pathname: '/assessment/[id]', params: { id: rec.id } });
           }}
         />
         <NavRow

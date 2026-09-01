@@ -542,3 +542,62 @@ CREATE TABLE IF NOT EXISTS service_fee (
 );
 CREATE INDEX IF NOT EXISTS idx_service_fee_hours ON service_fee(hours);
 `;
+
+/**
+ * v9 — fire system effectiveness assessments.
+ *
+ * A separate document from a routine service and separate tables to match. It
+ * shares nothing with the defect table on purpose: a finding has no severity,
+ * no AS 1851 class and no statutory notice fields, so there is nowhere for a
+ * recommendation to acquire the clocks a defect starts. Joining the two would
+ * make that a schema change away rather than a rewrite.
+ */
+export const MIGRATION_V9 = `
+CREATE TABLE IF NOT EXISTS assessment (
+  id                TEXT PRIMARY KEY NOT NULL,
+  siteId            TEXT NOT NULL REFERENCES site(id) ON DELETE CASCADE,
+  /* SQLD-NPWTP-ADMIN-FSE-01 — the reference the client quotes back. */
+  reportReference   TEXT NOT NULL DEFAULT '',
+  jobReference      TEXT NOT NULL DEFAULT '',
+  assessmentType    TEXT NOT NULL DEFAULT 'Fire System Effectiveness / Readiness',
+  /* The building or part of it this covers, which is often not the whole site. */
+  scopeLabel        TEXT NOT NULL DEFAULT '',
+  /* What was deliberately not assessed. Printed, because an unstated boundary
+     reads as a whole-site assessment. */
+  boundary          TEXT NOT NULL DEFAULT '',
+  attendanceDate    TEXT,
+  issueDate         TEXT,
+  assessedBy        TEXT NOT NULL DEFAULT '',
+  preparedBy        TEXT NOT NULL DEFAULT '',
+  clientName        TEXT NOT NULL DEFAULT '',
+  systemDescription TEXT NOT NULL DEFAULT '',
+  panelStatus       TEXT NOT NULL DEFAULT '',
+  summary           TEXT NOT NULL DEFAULT '',
+  statement         TEXT NOT NULL DEFAULT '',
+  status            TEXT NOT NULL DEFAULT 'draft',
+  createdAt         TEXT NOT NULL,
+  updatedAt         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_assessment_site ON assessment(siteId, attendanceDate);
+
+CREATE TABLE IF NOT EXISTS finding (
+  id            TEXT PRIMARY KEY NOT NULL,
+  assessmentId  TEXT NOT NULL REFERENCES assessment(id) ON DELETE CASCADE,
+  /* recommendation | observation. There is no third kind, and no severity. */
+  kind          TEXT NOT NULL,
+  seq           INTEGER NOT NULL,
+  item          TEXT NOT NULL DEFAULT '',
+  location      TEXT NOT NULL DEFAULT '',
+  reference     TEXT,
+  detail        TEXT NOT NULL DEFAULT '',
+  action        TEXT NOT NULL DEFAULT '',
+  /* high | medium | low, and only on a recommendation. */
+  priority      TEXT,
+  /* Comma-separated references this finding is programmed with: "R-01". */
+  relatedRefs   TEXT NOT NULL DEFAULT '',
+  photos        TEXT NOT NULL DEFAULT '',
+  createdAt     TEXT NOT NULL,
+  updatedAt     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_finding_assessment ON finding(assessmentId, kind, seq);
+`;

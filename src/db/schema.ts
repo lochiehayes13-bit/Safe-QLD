@@ -6,7 +6,7 @@
  */
 
 import {
-  MIGRATION_V3, MIGRATION_V4, MIGRATION_V5, MIGRATION_V6, MIGRATION_V7, MIGRATION_V8,
+  MIGRATION_V3, MIGRATION_V4, MIGRATION_V5, MIGRATION_V6, MIGRATION_V7, MIGRATION_V8, MIGRATION_V9,
 } from './schemaV3';
 
 export const MIGRATIONS: string[] = [
@@ -267,6 +267,9 @@ export const MIGRATIONS: string[] = [
 
   // v8 — the rate card, pulled from the office system rather than typed
   MIGRATION_V8,
+
+  // v9 — fire system effectiveness assessments and their findings
+  MIGRATION_V9,
 ];
 
 /**
