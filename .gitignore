@@ -68,5 +68,7 @@ yarn-error.*
 # for development only, never committed. Tests that read them skip when absent.
 *.csv
 *.pdf
+*.xlsx
+*.docx
 !data/*.template.csv
 /data/registers/

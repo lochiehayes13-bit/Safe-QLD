@@ -1,4 +1,4 @@
-import { ANSWER_THRESHOLD, COVERAGE, KIND_LABEL, ask } from '@/domain/ask';
+import { ANSWER_THRESHOLD, COVERAGE, KIND_LABEL, ask, explainQuery } from '@/domain/ask';
 import { DEFECT_LIBRARY } from '@/seed/defectLibrary';
 
 /**
@@ -121,5 +121,47 @@ describe('ranking', () => {
     expect(answers.length).toBeGreaterThan(0);
     // The defect that is exactly this should outrank a generic detector entry.
     expect(answers[0]!.title.toLowerCase()).toMatch(/alarm|detector/);
+  });
+});
+
+describe('the standards catalogue', () => {
+  it('answers a spacing question with the clause that governs it', () => {
+    // The question a technician actually types shares one word with the
+    // clause heading, and it is "from". Getting this to the top is the whole
+    // reason the trade vocabulary exists.
+    const best = ask('how far off the wall can a detector go')[0]!;
+    expect(best.kind).toBe('clause');
+    expect(best.title).toContain('AS 1670.1');
+    expect(best.title).toContain('5.1.4');
+  });
+
+  it('jumps straight to a clause the technician named outright', () => {
+    // Someone typing a reference is navigating, not searching.
+    const best = ask('AS 2419.1 clause 10.4')[0]!;
+    expect(best.title).toContain('AS 2419.1:2005 10.4');
+    expect(best.score).toBeGreaterThan(100);
+  });
+
+  it('says an edition is superseded rather than letting it be quoted as current', () => {
+    const hit = ask('AS 2419.1 clause 10.4')[0]!;
+    expect(hit.source).toContain('superseded by');
+  });
+
+  it("marks a clause nobody has written up as low confidence and says so", () => {
+    // The app holds the reference, not the standard. A clause with no
+    // description is a pointer and must not read as an answer.
+    const bare = ask('AS 2419.1 clause 8.8')[0]!;
+    expect(bare.confidence).toBe('low');
+    expect(bare.body).toContain('not going to guess');
+  });
+
+  it('still refuses a question it cannot answer', () => {
+    expect(ask('what is the capital of France')).toEqual([]);
+  });
+
+  it('shows its working, so the search is never a black box', () => {
+    const e = explainQuery('can i still use this extinguisher');
+    expect(e.readings).toContain('whether equipment can stay in service');
+    expect(e.alsoSearched.length).toBeGreaterThan(0);
   });
 });

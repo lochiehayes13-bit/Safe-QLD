@@ -96,6 +96,12 @@ const REFERENCE: ToolDef[] = [
     body: 'Part numbers and electrical specs harvested from supplier catalogues and datasheets.',
   },
   {
+    href: '/library',
+    icon: 'bookshelf',
+    title: 'Standards',
+    body: 'The whole catalogue, offline — asked the way you would ask a mate, not the way the document is worded.',
+  },
+  {
     href: '/tools/routines',
     icon: 'clipboard-list-outline',
     title: 'Service routines',

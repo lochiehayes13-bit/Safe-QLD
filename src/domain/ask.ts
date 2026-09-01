@@ -3,6 +3,8 @@ import { SERVICE_ROUTINES, SOURCE_LABEL } from '@/seed/serviceRoutines';
 import { EOL_VALUES } from '@/calc/eol';
 import { PROTOCOLS } from '@/calc/dipswitch';
 import { ASSET_TYPES, SYSTEM_LABELS } from '@/seed/assetTypes';
+import { STANDARDS } from '@/domain/standardsCatalogue';
+import { clauseQuery, expand, normalise as normaliseRef } from '@/domain/tradeVocabulary';
 
 /**
  * Answering a technician's question from what the app already holds.
@@ -17,7 +19,8 @@ import { ASSET_TYPES, SYSTEM_LABELS } from '@/seed/assetTypes';
  * engineering against is a confident wrong answer about a fire system.
  */
 
-export type AnswerKind = 'routine' | 'defect' | 'eol' | 'protocol' | 'asset-type' | 'calculator';
+export type AnswerKind =
+  | 'routine' | 'defect' | 'eol' | 'protocol' | 'asset-type' | 'calculator' | 'clause';
 
 export interface Answer {
   kind: AnswerKind;
@@ -41,6 +44,7 @@ export const KIND_LABEL: Record<AnswerKind, string> = {
   protocol: 'Addressing',
   'asset-type': 'Equipment',
   calculator: 'Calculator',
+  clause: 'Standard',
 };
 
 /** What the app can answer about, shown when it cannot answer. */
@@ -51,6 +55,7 @@ export const COVERAGE = [
   'Device addressing by protocol',
   'Equipment types and their attributes',
   'The calculators and what each one needs',
+  'Which clause of which standard covers a subject, across the whole catalogue',
 ];
 
 interface CalculatorDef {
@@ -146,14 +151,27 @@ function tokens(s: string): string[] {
  * match is noise. Below that it is term coverage: an answer matching four of
  * the five words asked beats one matching one.
  */
-function score(query: string, identifier: string, haystack: string): number {
+function score(
+  query: string,
+  identifier: string,
+  haystack: string,
+  implied: string[] = [],
+  consumed: ReadonlySet<string> = new Set(),
+): number {
   const q = normalise(query);
   if (!q) return 0;
 
   const id = normalise(identifier);
   if (id && (id === q || id.replace(/ /g, '') === q.replace(/ /g, ''))) return 1000;
 
-  const words = tokens(query);
+  /*
+   * Words the trade vocabulary already turned into better terms are left out.
+   * "how far off the wall can a detector go" is five content words, three of
+   * which appear in no document ever written; counting them drags a perfect hit
+   * on the spacing clause below the threshold and the search returns nothing.
+   */
+  const typed = tokens(query);
+  const words = typed.filter((w) => !consumed.has(w));
   // Nothing but stop words is not a question this can answer.
   if (!words.length) return 0;
 
@@ -162,20 +180,72 @@ function score(query: string, identifier: string, haystack: string): number {
   for (const w of words) {
     if (hay.includes(w)) hits += 1;
   }
-  if (!hits) return 0;
+
+  /*
+   * Terms the trade vocabulary supplied count too, but never as much as the
+   * ones actually typed, and never enough on their own to clear the threshold.
+   * A question expanded into thirty terms would otherwise let a loosely related
+   * entry outrank a direct hit purely by surface area — which is exactly the
+   * "nearest thing lying around" this module exists to refuse.
+   */
+  let impliedHits = 0;
+  for (const w of implied) {
+    if (w.length >= 3 && !STOP_WORDS.has(w) && hay.includes(w)) impliedHits += 1;
+  }
+  const impliedBonus = implied.length
+    ? Math.min(IMPLIED_CAP, (impliedHits / implied.length) * IMPLIED_WEIGHT)
+    : 0;
+
+  if (!hits && !impliedHits) return 0;
 
   // Coverage of the question, plus a nudge for an identifier that contains it.
   const coverage = hits / words.length;
   const idBonus = id.includes(q) ? 0.5 : 0;
-  return coverage + idBonus;
+  return coverage + idBonus + impliedBonus;
 }
+
+/** How much a vocabulary-supplied term is worth against one the technician typed. */
+const IMPLIED_WEIGHT = 0.9;
+/** And the ceiling, so implied terms alone can never clear ANSWER_THRESHOLD. */
+const IMPLIED_CAP = 0.45;
 
 /** Anything below this is not an answer, it is the nearest thing lying around. */
 export const ANSWER_THRESHOLD = 0.5;
 
+/**
+ * What the search understood, so it is never a black box.
+ *
+ * Shown above the results. A technician who can see that "how far off the wall"
+ * was read as a spacing question can tell instantly whether the search is
+ * answering them or something else — which is the difference between trusting a
+ * result and checking it twice.
+ */
+export interface QueryReading {
+  /** Question shapes recognised, in plain words. */
+  readings: string[];
+  /** Terms the trade vocabulary added to the search. */
+  alsoSearched: string[];
+  /** A standard or clause the technician named outright. */
+  jumpTo?: { standard?: string; clause?: string };
+}
+
+export function explainQuery(query: string): QueryReading {
+  const e = expand(query);
+  return {
+    readings: e.readings,
+    alsoSearched: e.added.filter((t) => !t.includes(' ')).slice(0, 12),
+    jumpTo: clauseQuery(query),
+  };
+}
+
 export function ask(query: string, limit = 12): Answer[] {
   const q = query.trim();
   if (q.length < 2) return [];
+
+  const expansion = expand(q);
+  const implied = expansion.added;
+  const consumed = new Set(expansion.consumed);
+  const direct = clauseQuery(q);
 
   const out: Answer[] = [];
   const add = (a: Omit<Answer, 'score'>, s: number) => {
@@ -192,7 +262,7 @@ export function ask(query: string, limit = 12): Answer[] {
       source: `Safe QLD defect library · ${SYSTEM_LABELS[code.system]}`,
       confidence: 'high',
       route: '/tools/defects',
-    }, score(q, code.code, hay));
+    }, score(q, code.code, hay, implied, consumed));
   }
 
   for (const routine of SERVICE_ROUTINES) {
@@ -211,7 +281,7 @@ export function ask(query: string, limit = 12): Answer[] {
         // confidence answer on its own.
         confidence: test.verify ? 'low' : 'high',
         route: '/tools/routines',
-      }, score(q, test.label, hay));
+      }, score(q, test.label, hay, implied, consumed));
     }
   }
 
@@ -224,7 +294,7 @@ export function ask(query: string, limit = 12): Answer[] {
       source: eol.source ?? 'Manufacturer documentation',
       confidence: eol.confidence,
       route: '/tools/eol',
-    }, score(q, `${eol.brand} ${eol.panel}`, hay));
+    }, score(q, `${eol.brand} ${eol.panel}`, hay, implied, consumed));
   }
 
   for (const p of PROTOCOLS) {
@@ -236,7 +306,7 @@ export function ask(query: string, limit = 12): Answer[] {
       source: 'Manufacturer addressing documentation',
       confidence: 'high',
       route: '/tools/dipswitch',
-    }, score(q, p.label, hay));
+    }, score(q, p.label, hay, implied, consumed));
   }
 
   for (const type of ASSET_TYPES) {
@@ -248,7 +318,7 @@ export function ask(query: string, limit = 12): Answer[] {
       body: `${SYSTEM_LABELS[type.system]}. Records ${(type.attributes ?? []).length} attribute${(type.attributes ?? []).length === 1 ? '' : 's'}.`,
       source: 'Safe QLD asset register',
       confidence: 'high',
-    }, score(q, type.label, hay));
+    }, score(q, type.label, hay, implied, consumed));
   }
 
   for (const calc of CALCULATORS) {
@@ -260,7 +330,51 @@ export function ask(query: string, limit = 12): Answer[] {
       source: 'Safe QLD calculator',
       confidence: 'high',
       route: calc.route,
-    }, score(q, calc.title, hay));
+    }, score(q, calc.title, hay, implied, consumed));
+  }
+
+  for (const doc of STANDARDS) {
+    /*
+     * Normalised with the reference-aware form, which keeps the dots. This
+     * module's own normalise strips them, so "AS 2419.1:2005" would become
+     * "as 2419 1 2005" and never match the "as 2419.1" a technician typed —
+     * the jump silently degraded into an ordinary ranked search.
+     */
+    const designation = normaliseRef(doc.designation);
+    for (const clause of doc.clauses) {
+      /*
+       * A clause named outright is navigation, not search. "AS 2419.1 clause
+       * 10.4" wins over everything so the technician who already knows the
+       * reference is not made to fight the ranking for it.
+       */
+      const named = direct
+        && (!direct.standard || designation.startsWith(direct.standard))
+        && (!direct.clause || clause.ref.toLowerCase() === direct.clause);
+
+      const hay = [
+        doc.designation, doc.title, clause.ref, clause.title, clause.covers,
+      ].filter(Boolean).join(' ');
+
+      const body = clause.covers
+        ?? `${doc.designation} clause ${clause.ref}. Nobody has written up what this clause covers, `
+          + 'so the app is not going to guess — open your own copy of the standard.';
+
+      add({
+        kind: 'clause',
+        title: `${doc.designation} ${clause.ref} — ${clause.title}`,
+        body,
+        // Superseded editions still get answered, because they are what is
+        // installed on most sites — but the answer says so rather than letting
+        // a technician quote a withdrawn edition at a client.
+        source: doc.status === 'superseded' && doc.supersededBy
+          ? `${doc.designation} · superseded by ${doc.supersededBy}`
+          : doc.designation,
+        // The app holds the clause reference, not the clause. Where nobody has
+        // described it, that is a pointer and nothing more.
+        confidence: clause.covers ? 'high' : 'low',
+        route: `/library/${doc.id}`,
+      }, named ? 900 : score(q, `${doc.designation} ${clause.ref}`, hay, implied, consumed));
+    }
   }
 
   return out
