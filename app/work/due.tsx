@@ -108,7 +108,7 @@ function LapsedRow({ due }: { due: SiteDue }) {
           ) : null}
           <Rowed gap={2} wrap style={{ marginTop: t.space(1.5) }}>
             <Chip label={DUE_LABEL[due.state]} tone={due.state === 'overdue' ? 'fail' : 'warn'} />
-            {due.lastCompletedAt ? <Chip label={`Last ${formatAuDate(due.lastCompletedAt.slice(0, 10))}`} /> : null}
+            {due.lastCompletedAt ? <Chip label={`Last ${formatAuDate(due.lastCompletedAt)}`} /> : null}
           </Rowed>
         </View>
         <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />

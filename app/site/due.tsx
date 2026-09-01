@@ -133,7 +133,7 @@ function DueRow({ due, siteId }: { due: RoutineDue; siteId?: string }) {
           <Rowed gap={2} wrap style={{ marginTop: t.space(1.5) }}>
             <Chip label={DUE_LABEL[due.state]} tone={TONE[due.state]} />
             {due.completedCount ? <Chip label={`${due.completedCount} recorded`} /> : null}
-            {due.lastCompletedAt ? <Chip label={`Last ${formatAuDate(due.lastCompletedAt.slice(0, 10))}`} /> : null}
+            {due.lastCompletedAt ? <Chip label={`Last ${formatAuDate(due.lastCompletedAt)}`} /> : null}
           </Rowed>
           {due.window ? (
             <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5), lineHeight: 17 }}>

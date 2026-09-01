@@ -94,7 +94,7 @@ ${rows.map((r) => `  <tr${r.unused ? ' class="unused"' : ''}>
   <div class="meta">
     <div><strong>${esc(panel.name)}</strong>${panel.model ? ` — ${esc(panel.model)}` : ''}</div>
     <div>${chart.totalZones} zones · ${chart.totalDevices} devices</div>
-    <div>Generated ${esc(formatAuDate(input.generatedAt.slice(0, 10)))}</div>
+    <div>Generated ${esc(formatAuDate(input.generatedAt))}</div>
   </div>
 </div>
 
