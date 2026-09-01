@@ -438,3 +438,66 @@ CREATE TABLE IF NOT EXISTS routine_run (
 );
 CREATE INDEX IF NOT EXISTS idx_run_site ON routine_run(siteId, routineId, completedAt);
 `;
+
+/**
+ * v7 — where an asset came from, when it is next due, and how fresh our copy is.
+ *
+ * Three things a real asset register needs that the original schema had no
+ * room for.
+ *
+ * An external id, because a register is re-exported constantly and a re-import
+ * has to be an update rather than a second copy of the building. Matching on
+ * name and location cannot do that: two extinguishers in the same corridor are
+ * indistinguishable by anything except the id the source system gave them.
+ *
+ * A schedule per routine, because one asset is due on several different cycles
+ * at once — an extinguisher is six-monthly, yearly and five-yearly, each with
+ * its own date — and a single nextDueAt can only hold the soonest, which loses
+ * the other two.
+ *
+ * And a sync watermark per resource, because the office system changes daily.
+ * Without a record of what was last seen, every sync is a full pull of every
+ * site and every asset, which is slow enough that it stops being done.
+ */
+export const MIGRATION_V7 = `
+ALTER TABLE asset ADD COLUMN externalId TEXT;
+ALTER TABLE asset ADD COLUMN externalSource TEXT;
+ALTER TABLE asset ADD COLUMN walkOrder INTEGER;
+CREATE INDEX IF NOT EXISTS idx_asset_external ON asset(externalSource, externalId);
+/* The walk is ordered within a site, which is how a technician moves through it. */
+CREATE INDEX IF NOT EXISTS idx_asset_walk ON asset(siteId, walkOrder);
+
+CREATE TABLE IF NOT EXISTS asset_schedule (
+  id                TEXT PRIMARY KEY NOT NULL,
+  assetId           TEXT NOT NULL REFERENCES asset(id) ON DELETE CASCADE,
+  /* monthly | quarterly | six-monthly | annual | five-yearly | ten-yearly */
+  frequency         TEXT NOT NULL,
+  nextDueAt         TEXT,
+  lastDoneAt        TEXT,
+  /* day | month | year — a five-yearly test recorded as "Jun-25" knows no day,
+     and inventing one moves the next one by up to a month. */
+  lastDonePrecision TEXT,
+  /* Exactly what the source said, kept because the parse is lossy. */
+  lastDoneRaw       TEXT,
+  source            TEXT NOT NULL DEFAULT 'register-import',
+  createdAt         TEXT NOT NULL,
+  updatedAt         TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_asset_schedule ON asset_schedule(assetId, frequency);
+CREATE INDEX IF NOT EXISTS idx_asset_schedule_due ON asset_schedule(nextDueAt);
+
+CREATE TABLE IF NOT EXISTS sync_state (
+  resource         TEXT PRIMARY KEY NOT NULL,
+  /* When a sync of this resource last completed without error. */
+  lastSyncedAt     TEXT,
+  /* The newest modification timestamp seen, which is where the next one starts. */
+  lastChangeSeenAt TEXT,
+  lastRecordCount  INTEGER NOT NULL DEFAULT 0,
+  /* incremental | full — recorded because a server that ignores the filter
+     silently turns an incremental sync into a full one, and the difference
+     matters when deciding whether the local copy can be trusted. */
+  mode             TEXT NOT NULL DEFAULT 'full',
+  lastError        TEXT,
+  updatedAt        TEXT NOT NULL
+);
+`;

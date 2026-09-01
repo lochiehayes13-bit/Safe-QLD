@@ -99,6 +99,60 @@ const SYSTEMS: SystemDef[] = [
     fileNames: /doorset|resistant.?door/ },
 ];
 
+/**
+ * The headings each system's report puts over its own two columns.
+ *
+ * These live here rather than in the report template because they are the same
+ * headings the register export uses, and a service report whose columns do not
+ * match the register it was built from is a document the client has to
+ * reconcile by hand. One source, both ends.
+ */
+export interface SystemColumns {
+  /** Over the type/size column. */
+  descriptor: string;
+  /** Over the overhaul or pressure-test column; absent where the system has none. */
+  overhaul?: string;
+  /** Some registers label the tag column "Asset Number" rather than "Asset #". */
+  assetNumber: string;
+}
+
+export const SYSTEM_COLUMNS: Record<RegisterSystem, SystemColumns> = {
+  extinguisher: { descriptor: 'Extinguisher Type', overhaul: 'Last 5 Yearly', assetNumber: 'Asset #' },
+  'fire-blanket': { descriptor: 'Blanket Type & Size', assetNumber: 'Asset #' },
+  'emergency-lighting': { descriptor: 'Emergency Light Type & Size', assetNumber: 'Asset #' },
+  'hose-reel': { descriptor: 'Equipment Type & Size', overhaul: 'Annual Flow Test', assetNumber: 'Asset #' },
+  hydrant: { descriptor: 'Size mm RG / QRT', overhaul: 'Last 5 Yearly Test', assetNumber: 'Asset Number' },
+  'smoke-alarm': { descriptor: 'Equipment Type & Batt Type', assetNumber: 'Asset #' },
+  ews: { descriptor: 'EWIS Brand', overhaul: 'Last 5 Yearly Test', assetNumber: 'Asset #' },
+  detection: { descriptor: 'Equipment Type', overhaul: 'Last 5 Yearly Test', assetNumber: 'Asset #' },
+  sprinkler: { descriptor: 'Type & Size', overhaul: 'Last 5 Yearly Test', assetNumber: 'Asset #' },
+  'special-hazard': { descriptor: 'Type & Size', overhaul: 'Last 10 Yearly Test', assetNumber: 'Asset #' },
+  pump: { descriptor: 'Equipment Type & Batt Sizes', overhaul: 'Last 5 Yearly Test', assetNumber: 'Asset #' },
+  'water-tank': { descriptor: 'Type & Size', overhaul: 'Last 10 Yearly Test', assetNumber: 'Asset #' },
+  'smoke-door': { descriptor: 'Dimensions, Lockset, Closer', assetNumber: 'Tag No.' },
+  'fire-door': { descriptor: 'Doorset', assetNumber: 'Asset #' },
+  unknown: { descriptor: 'Type', assetNumber: 'Asset #' },
+};
+
+/** The report heading for a system, e.g. "Fire Hydrant Systems". */
+export const SYSTEM_LABEL: Record<RegisterSystem, string> = {
+  extinguisher: 'Portable and Wheeled Fire Extinguishers',
+  'fire-blanket': 'Fire Blankets',
+  'emergency-lighting': 'Emergency Lighting',
+  'hose-reel': 'Fire Hose Reels',
+  hydrant: 'Fire Hydrant Systems',
+  'smoke-alarm': 'Fire Detection and Alarm Systems - Smoke Alarms and Heat Alarms',
+  ews: 'Fire Detection and Alarm Systems - Emergency Warning Systems',
+  detection: 'Fire Detection and Alarm Systems - Fire Detection and Alarm Systems',
+  sprinkler: 'Automatic Fire Sprinkler Systems',
+  'special-hazard': 'Special Hazard Systems',
+  pump: 'Fire Pumpsets',
+  'water-tank': 'Water Storage Tanks for Fire Detection Purposes',
+  'smoke-door': 'Passive Fire and Smoke Systems - Smoke Doors, Hinged and Pivoted',
+  'fire-door': 'Passive Fire and Smoke Systems - Fire Resistant Doorsets',
+  unknown: 'Unidentified System',
+};
+
 /** Column headings that carry the descriptor, in the order they are preferred. */
 const DESCRIPTOR_COLUMNS = [
   'extinguisher type', 'blanket type & size', 'emergency light type & size',
