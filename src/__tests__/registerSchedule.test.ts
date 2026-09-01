@@ -1,5 +1,5 @@
 import {
-  REGISTER_DUE_LABEL, registerScheduleLines, type RegisterScheduleRow,
+  REGISTER_DUE_LABEL, registerAttributes, registerScheduleLines, type RegisterScheduleRow,
 } from '@/domain/registerSchedule';
 
 /**
@@ -115,5 +115,65 @@ describe('reading the register schedule', () => {
 
   it('is nothing at all for an asset the register never scheduled', () => {
     expect(registerScheduleLines([], '2026-09-01')).toEqual([]);
+  });
+});
+
+/**
+ * What the register said that no screen was showing.
+ *
+ * The importer keeps every column it did not claim to understand — its own
+ * comment says so — and the asset screen rendered the attributes the *type
+ * definition* declares, so anything the register carried that the type does not
+ * know about was stored on every import and displayed nowhere.
+ *
+ * On the real register that is 2,892 asset numbers, 281 fire doors' FRL level,
+ * 243 tag numbers, and the battery-size and flow-test columns. The asset number
+ * is the one that matters most: it is the number written on the asset's own
+ * tag, and it is how a technician standing in front of one says which row of
+ * the register this is.
+ */
+describe('the register columns the type definition has no field for', () => {
+  it('shows what the type does not declare, and leaves alone what it does', () => {
+    const rows = registerAttributes(
+      { assetNumber: '0147', 'FRL Level': '-/60/30', capacity: '2.5' },
+      ['capacity'],
+    );
+    expect(rows.map((r) => r.key)).toEqual(['assetNumber', 'FRL Level']);
+  });
+
+  it('puts the asset number first, because that is the one being held', () => {
+    const rows = registerAttributes(
+      { 'Annual Flow Test': '1/6/25', 'Brand & Location': 'Wormald', assetNumber: '0147' },
+      [],
+    );
+    expect(rows.map((r) => r.label)).toEqual(['Asset number', 'Annual Flow Test', 'Brand & Location']);
+  });
+
+  it('keeps the register heading for a column it has no name of its own for', () => {
+    // "FRL Level" is the register's heading and it is the only name anybody
+    // uses for it. Renaming it here would make the screen and the export
+    // disagree about a fire door's fire-resistance level.
+    const [frl] = registerAttributes({ 'FRL Level': '-/60/30' }, []);
+    expect(frl).toEqual({ key: 'FRL Level', label: 'FRL Level', value: '-/60/30' });
+  });
+
+  it('does not repeat what is already on the screen', () => {
+    /*
+     * The descriptor is what assetName builds the asset's name from, and the
+     * last overhaul belongs against its own routine in the schedule above.
+     * Printing either again is noise on a screen read one-handed.
+     */
+    expect(registerAttributes({ descriptor: 'DCP 2.5kg ABE', lastOverhaul: 'Jun-25' }, [])).toEqual([]);
+  });
+
+  it('drops a blank rather than printing an empty row', () => {
+    expect(registerAttributes({ 'Tag No.': '   ', 'Contract No.': '' }, [])).toEqual([]);
+  });
+
+  it('renders a value that is not text', () => {
+    // Type-defined attributes can be numbers or flags, and this is handed the
+    // whole attribute bag.
+    const rows = registerAttributes({ 'Walk Order': 6 as unknown as string }, []);
+    expect(rows).toEqual([{ key: 'Walk Order', label: 'Walk Order', value: '6' }]);
   });
 });

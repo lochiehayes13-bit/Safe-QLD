@@ -10,7 +10,7 @@ import { assetTypeById, SYSTEM_LABELS, type AttributeDef } from '@/seed/assetTyp
 import { getSite } from '@/db/repo';
 import { assetSchedule } from '@/db/registerRepo';
 import {
-  REGISTER_DUE_LABEL, registerScheduleLines,
+  REGISTER_DUE_LABEL, registerAttributes, registerScheduleLines,
   type RegisterScheduleLine, type RegisterScheduleRow,
 } from '@/domain/registerSchedule';
 import type { Site } from '@/domain/types';
@@ -106,6 +106,7 @@ export default function AssetScreen() {
   const failures = events.filter((e) => e.kind === 'failed').length;
   const attributes: AttributeDef[] = type?.attributes ?? [];
   const routines = registerScheduleLines(schedule, nowIso());
+  const fromRegister = registerAttributes(asset.attributes, attributes.map((a) => a.key));
 
   return (
     <>
@@ -221,6 +222,28 @@ export default function AssetScreen() {
             onPress={async () => { await record('noted', note.trim()); setNote(''); }}
           />
         </Rowed>
+
+        {fromRegister.length ? (
+          <>
+            <H2>From the register</H2>
+            {/*
+              * What the office system said about this asset that the type
+              * definition has no field for. The importer keeps these columns
+              * deliberately and nothing was showing them — including the asset
+              * number, which is how somebody holding the device says which row
+              * of the register this is.
+              */}
+            <Card>
+              {fromRegister.map((a, i) => (
+                <View key={a.key}>
+                  {i > 0 ? <Divider /> : null}
+                  <Label>{a.label}</Label>
+                  <Txt mono={a.key === 'assetNumber'}>{a.value}</Txt>
+                </View>
+              ))}
+            </Card>
+          </>
+        ) : null}
 
         {attributes.length ? (
           <>

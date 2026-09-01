@@ -133,3 +133,56 @@ export const REGISTER_DUE_LABEL: Record<RegisterDueState, string> = {
   upcoming: 'Upcoming',
   unscheduled: 'No date in the register',
 };
+
+/**
+ * What the register said about an asset that no screen was showing.
+ *
+ * The importer keeps every column it did not claim to understand — the comment
+ * on `extra` says so in as many words — and then nothing displayed one. The
+ * asset screen renders the attributes its *type definition* declares, so
+ * anything the register carried and the type does not know about was stored on
+ * every import and visible nowhere.
+ *
+ * On the real register that is 2,892 asset numbers, 281 fire doors' FRL level,
+ * 243 tag numbers, and the battery sizes and flow-test columns. The asset
+ * number is the worst of them: it is the number written on the asset's own tag,
+ * which is how a technician standing in front of one says which row of the
+ * register this is.
+ *
+ * Two are left out because they are already on the screen rather than missing:
+ * the descriptor, which `assetName` builds the asset's name from, and the last
+ * overhaul, which belongs against its routine in the schedule above.
+ */
+const ALREADY_SHOWN = new Set(['descriptor', 'lastOverhaul']);
+
+/** The register's own heading for a key it did not have one for. */
+const REGISTER_LABEL: Record<string, string> = {
+  assetNumber: 'Asset number',
+};
+
+export interface RegisterAttribute {
+  key: string;
+  label: string;
+  value: string;
+}
+
+export function registerAttributes(
+  // Attribute values are whatever the asset row holds; a register column
+  // arrives as text but a type-defined one can be a number or a flag.
+  attributes: Readonly<Record<string, string | number | boolean>>,
+  definedKeys: readonly string[],
+): RegisterAttribute[] {
+  const defined = new Set(definedKeys);
+  const rows = Object.entries(attributes)
+    .filter(([key]) => !defined.has(key) && !ALREADY_SHOWN.has(key))
+    .map(([key, value]) => ({ key, label: REGISTER_LABEL[key] ?? key, value: String(value ?? '').trim() }))
+    .filter((row) => row.value !== '');
+
+  // The asset number first — it is the one a person is holding the device to
+  // check — and the rest as the register headed them.
+  return rows.sort((a, b) => {
+    if (a.key === 'assetNumber') return -1;
+    if (b.key === 'assetNumber') return 1;
+    return a.label.localeCompare(b.label);
+  });
+}
