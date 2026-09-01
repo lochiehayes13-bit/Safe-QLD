@@ -126,6 +126,39 @@ describe('tolerance status', () => {
     expect(toleranceStatus('2026-08-31', '2026-11-01', 'yearly')).toBe('late');
   });
 
+  it('reads the day the work was done in Queensland, not the day it was stamped in UTC', () => {
+    /*
+     * This company starts at seven. A service carried out at half past seven on
+     * a Brisbane morning is stamped 21:30 the previous day in UTC, so the first
+     * ten characters of the stamp are yesterday — and every date this function
+     * was given until now was a plain calendar day, which is why that never
+     * showed.
+     *
+     * It is wrong in both directions and neither is harmless. Scheduled
+     * 2026-08-31 yearly puts the window at 2026-06-30 to 2026-10-31.
+     */
+
+    // The first day of the window, worked at half past seven. Stamped 29 June;
+    // read from the stamp it is a day before the window opened, and the annual
+    // report carries an AS 1851 non-compliance for a service done on time.
+    expect(toleranceStatus('2026-08-31', '2026-06-29T21:30:00.000Z', 'yearly')).toBe('in-tolerance');
+
+    // And the same shift the other way. Worked at half past seven on 1 November,
+    // the day after the window closed; read from the stamp it is the last day
+    // of it, and a late service is recorded as compliant.
+    expect(toleranceStatus('2026-08-31', '2026-10-31T21:30:00.000Z', 'yearly')).toBe('late');
+
+    // An afternoon service, where UTC and Queensland agree about the date.
+    expect(toleranceStatus('2026-08-31', '2026-06-30T04:30:00.000Z', 'yearly')).toBe('in-tolerance');
+  });
+
+  it('says unknown rather than reading a stamp it does not understand', () => {
+    // "1/9/2026" is the first of September to everyone who works here and the
+    // ninth of January to Date.parse. A verdict is not the place to guess.
+    expect(toleranceStatus('2026-08-31', '1/9/2026', 'yearly')).toBe('unknown');
+    expect(toleranceStatus('2026-08-31', '', 'yearly')).toBe('unknown');
+  });
+
   it('counts a monthly by working days at the edges, not calendar days', () => {
     /*
      * Monthly is the only frequency with a working-day tolerance, so its edges

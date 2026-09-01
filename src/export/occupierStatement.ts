@@ -4,6 +4,7 @@ import {
   COMMISSIONER_COPY_BUSINESS_DAYS, commissionerCopyDeadline,
 } from '@/domain/occupierForm';
 import { formatAuDate } from './sheets';
+import { qldIsoDay } from '@/domain/qldTime';
 
 /**
  * The annual occupier statement, as something that can be printed and signed.
@@ -53,7 +54,7 @@ export function occupierStatementHtml(input: OccupierStatementInput): string {
    */
   const deadline = commissionerCopyDeadline({
     requiredPreparationDate: s.periodEnd || undefined,
-    signedDate: s.signedAt ? s.signedAt.slice(0, 10) : undefined,
+    signedDate: qldIsoDay(s.signedAt ?? undefined),
   });
 
   const period = [s.periodStart, s.periodEnd].filter(Boolean).map(formatAuDate).join(' to ');

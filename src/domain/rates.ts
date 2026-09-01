@@ -11,6 +11,8 @@
  * and the arithmetic.
  */
 
+import { qldIsoDay } from '@/domain/qldTime';
+
 export type HoursBand = 'normal' | 'after-hours';
 
 /** GST in Australia, as a fraction. Rates on a card are held excluding it. */
@@ -369,7 +371,7 @@ export function effectiveRateCard(
 
   let note = `${parts.join(', ')}.`;
   if ((rateSource === 'office' || feeSource === 'office') && pulled.pulledAt) {
-    note += ` Pulled ${pulled.pulledAt.slice(0, 10)}.`;
+    note += ` Pulled ${qldIsoDay(pulled.pulledAt) ?? pulled.pulledAt}.`;
   }
   if (rateSource === 'none' && feeSource === 'none') {
     note = 'No rates are set, so labour is shown as hours only.';

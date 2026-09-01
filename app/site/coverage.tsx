@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { formatAuDate } from '@/export/sheets';
 import { FlatList, View } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -140,7 +141,7 @@ function GapRow({ gap }: { gap: CoverageGap }) {
           </Txt>
           <Txt size="sm" tone="warn" style={{ marginTop: 3, lineHeight: 19 }}>{reason}</Txt>
           <Rowed gap={2} wrap style={{ marginTop: t.space(1.5) }}>
-            <Chip label={gap.occurredAt.slice(0, 10)} />
+            <Chip label={formatAuDate(gap.occurredAt)} />
             {gap.attempts > 1 ? <Chip label={`${gap.attempts} attempts`} tone="fail" /> : null}
           </Rowed>
         </View>

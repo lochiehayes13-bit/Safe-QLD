@@ -7,6 +7,7 @@ import type { RegisterSystem } from '@/parsers/assetRegister';
 import type {
   RoutineReportAsset, RoutineReportInput, RoutineReportSection, RoutineResult,
 } from '@/export/routineServiceReport';
+import { qldIsoDay } from '@/domain/qldTime';
 
 /**
  * Assembling the routine service report from what was actually recorded.
@@ -94,7 +95,7 @@ export async function buildRoutineReport(q: RoutineReportQuery): Promise<Routine
       location: row.locationNote ?? undefined,
       descriptor: attribute(row.attributes, 'descriptor'),
       overhaul: attribute(row.attributes, 'lastOverhaul'),
-      date: row.occurredAt.slice(0, 10),
+      date: qldIsoDay(row.occurredAt) ?? row.occurredAt,
       result,
       // A not-tested event carries its reason in the summary; that is the whole
       // point of recording it separately from a pass.

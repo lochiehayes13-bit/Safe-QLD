@@ -3,6 +3,7 @@ import {
   type Frequency as ComplianceFrequency, type ToleranceStatus,
 } from '@/domain/qldCompliance';
 import type { Frequency as RoutineFrequency } from '@/seed/serviceRoutines';
+import { qldIsoDay } from '@/domain/qldTime';
 
 /**
  * What is due, and when.
@@ -184,13 +185,22 @@ export function assessRunHistory(
   const ordered = [...runs].sort((a, b) => a.completedAt.localeCompare(b.completedAt));
   if (!ordered.length) return [];
 
-  const anchor = ordered[0]!.completedAt.slice(0, 10);
+  /*
+   * The Queensland day of the first service, not the UTC one.
+   *
+   * Every date in this list is derived from the anchor, so a day lost here is a
+   * day lost from every scheduled date at the site for as long as the site is
+   * on the books. A first service completed at half past seven on a Brisbane
+   * morning is stamped 21:30 the previous day in UTC, and the slice anchored
+   * the whole schedule to the day before the work was done.
+   */
+  const anchor = qldIsoDay(ordered[0]!.completedAt);
   const compliance = complianceFrequency(frequency);
 
   return ordered.map((run, i) => {
     const completedAt = run.completedAt;
     if (i === 0) return { occurrence: 0, completedAt, status: 'anchor' as const };
-    if (!compliance || !frequencySpec(compliance)) {
+    if (!anchor || !compliance || !frequencySpec(compliance)) {
       return { occurrence: i, completedAt, status: 'unknown' as const };
     }
     const scheduledFor = scheduledDate(anchor, compliance, i);
@@ -200,7 +210,8 @@ export function assessRunHistory(
       completedAt,
       scheduledFor,
       status: toleranceStatus(scheduledFor, completedAt, compliance),
-      daysFromScheduled: daysBetween(scheduledFor, completedAt.slice(0, 10)) ?? undefined,
+      // Both sides of this subtraction have to be the same kind of day.
+      daysFromScheduled: daysBetween(scheduledFor, qldIsoDay(completedAt) ?? '') ?? undefined,
     };
   });
 }

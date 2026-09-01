@@ -27,6 +27,33 @@ import { join } from 'node:path';
  * A date-only string needs no slice, so the pattern says nothing useful in
  * either case: where the value is already a day the slice is dead code, and
  * where it is an instant the slice is a bug.
+ *
+ * ---
+ *
+ * **The formatter rule was too narrow, and the ones it missed were worse.**
+ *
+ * Nineteen more of these were sitting outside a formatter call, where the
+ * sliced day was not printed but counted with. Three of them decided things:
+ *
+ *  - `assessRunHistory` anchored a site's whole schedule on
+ *    `completedAt.slice(0, 10)`. Every scheduled date is derived from that
+ *    anchor, so a first service done at half past seven on a Brisbane morning
+ *    moved every date at that site a day early for as long as it is on the
+ *    books.
+ *  - `toleranceStatus` decided early, in-tolerance or late from
+ *    `performedIso.slice(0, 10)`, and it is wrong in both directions: a service
+ *    carried out on the first day of the window reads as before it and is
+ *    reported early — an AS 1851 non-compliance that did not happen — and one
+ *    carried out the day after the window closed reads as the last day of it
+ *    and is reported in tolerance, which is one that did.
+ *  - The 24-hour critical defect notice countdown subtracted a sliced UTC day
+ *    from a Queensland day, so the two sides of the subtraction were not the
+ *    same kind of day.
+ *
+ * So the rule is about the value rather than about what is done to it. Every
+ * field in this app whose name ends in `At` is an instant — `completedAt`,
+ * `signedAt`, `raisedAt`, `noticeDueAt` — and taking its first ten characters
+ * is asking for its UTC day. There is nowhere in this app that wants one.
  */
 
 const ROOTS = ['src', 'app'];
@@ -42,6 +69,16 @@ const SKIP = new Set(['node_modules', '.git', 'dist', '.expo', 'coverage', '__te
  */
 const SLICED = /\bformat[A-Za-z]*\([^)]*\.slice\(0,\s*10\)/;
 
+/**
+ * An instant, sliced to its UTC day.
+ *
+ * Matched on the naming convention because that is what actually identifies
+ * one here: `...At` is this codebase's name for a stamped instant, and it holds
+ * across the schema, the domain and the screens. A rule that listed the field
+ * names instead would be a list of the ones that existed tonight.
+ */
+const SLICED_INSTANT = /[A-Za-z_]+[Aa]t[!?]?\.slice\(0,\s*10\)/;
+
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
     if (SKIP.has(entry)) continue;
@@ -52,11 +89,11 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-function offences(): string[] {
+function offences(rule: RegExp): string[] {
   const found: string[] = [];
   for (const file of ROOTS.flatMap((r) => walk(r))) {
     readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
-      if (SLICED.test(line)) found.push(`${file}:${i + 1}`);
+      if (rule.test(line)) found.push(`${file}:${i + 1}`);
     });
   }
   return found;
@@ -66,7 +103,27 @@ describe('dates handed to a formatter', () => {
   it('are never sliced to a day first', () => {
     // Named with their line numbers rather than counted, so the fix is the
     // file somebody opens rather than a search.
-    expect(offences()).toEqual([]);
+    expect(offences(SLICED)).toEqual([]);
+  });
+
+  it('and no instant is sliced to its UTC day anywhere, formatter or not', () => {
+    expect(offences(SLICED_INSTANT)).toEqual([]);
+  });
+
+  it('recognises an instant being sliced, and leaves the honest work alone', () => {
+    // The three that decided something, as they were written.
+    expect(SLICED_INSTANT.test('const anchor = ordered[0]!.completedAt.slice(0, 10);')).toBe(true);
+    expect(SLICED_INSTANT.test('  const performed = performedIso.slice(0, 10);')).toBe(false);
+    expect(SLICED_INSTANT.test('daysBetween(today, clocks.noticeDueAt.slice(0, 10))')).toBe(true);
+    expect(SLICED_INSTANT.test('signedDate: s.signedAt ? s.signedAt.slice(0, 10) : undefined,')).toBe(true);
+    expect(SLICED_INSTANT.test('const rectified = d.rectifiedAt?.slice(0, 10);')).toBe(true);
+
+    // And says nothing about the slices that are not an instant's UTC day:
+    // reading a day out of a date-only string, or out of an ISO date inside
+    // qldTime itself, which is where that work belongs.
+    expect(SLICED_INSTANT.test("return new Date(ms).toISOString().slice(0, 10);")).toBe(false);
+    expect(SLICED_INSTANT.test("const day = iso.slice(0, 10);")).toBe(false);
+    expect(SLICED_INSTANT.test("if (!realDay(trimmed.slice(0, 10))) return undefined;")).toBe(false);
   });
 
   it('recognises the shape it is looking for', () => {

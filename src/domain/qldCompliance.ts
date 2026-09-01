@@ -17,6 +17,8 @@
  * captured rather than one being inferred from the other.
  */
 
+import { qldIsoDay } from '@/domain/qldTime';
+
 export type Frequency = 'monthly' | 'six-monthly' | 'yearly' | 'five-yearly' | 'ten-yearly';
 
 export interface FrequencySpec {
@@ -219,7 +221,20 @@ export type ToleranceStatus = 'early' | 'in-tolerance' | 'late' | 'unknown';
 export function toleranceStatus(scheduledIso: string, performedIso: string, frequency: Frequency): ToleranceStatus {
   const window = toleranceWindow(scheduledIso, frequency);
   if (!window) return 'unknown';
-  const performed = performedIso.slice(0, 10);
+  /*
+   * The Queensland day the work was done, not the first ten characters of the
+   * instant it was stamped with.
+   *
+   * This company starts at seven, so a morning service is stamped the previous
+   * day in UTC and the slice moved every one of them a day earlier. It is wrong
+   * in both directions and neither is harmless: a service carried out on the
+   * first day of the window reads as before it and is reported early, which is
+   * an AS 1851 non-compliance that did not happen; a service carried out the
+   * day after the window closed reads as the last day of it and is reported in
+   * tolerance, which is one that did.
+   */
+  const performed = qldIsoDay(performedIso);
+  if (!performed) return 'unknown';
   if (performed < window.earliest) return 'early';
   if (performed > window.latest) return 'late';
   return 'in-tolerance';

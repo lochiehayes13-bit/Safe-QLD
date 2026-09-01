@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { qldIsoDay } from '@/domain/qldTime';
+import { formatAuDate } from '@/export/sheets';
 import { Alert, Pressable, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -135,7 +137,7 @@ export default function OccupierStatementScreen() {
         // Keep the latest rectification we know of, so a row that was fixed
         // shows a date rather than an unanswered notice.
         const existing = noticed.get(installation);
-        const rectified = d.rectifiedAt?.slice(0, 10);
+        const rectified = qldIsoDay(d.rectifiedAt ?? undefined);
         noticed.set(installation, !existing || (rectified && rectified > existing) ? rectified : existing);
       }
 
@@ -263,7 +265,7 @@ export default function OccupierStatementScreen() {
    */
   const deadline = useMemo(() => commissionerCopyDeadline({
     requiredPreparationDate: rec?.periodEnd || undefined,
-    signedDate: rec?.signedAt ? rec.signedAt.slice(0, 10) : undefined,
+    signedDate: qldIsoDay(rec?.signedAt ?? undefined),
   }), [rec?.periodEnd, rec?.signedAt]);
 
   const daysLeft = useMemo(() => {
@@ -288,7 +290,7 @@ export default function OccupierStatementScreen() {
           <Banner
             tone="pass"
             title="Copy sent to the Commissioner"
-            body={`Recorded as sent on ${rec.sentToCommissionerAt.slice(0, 10)}.`}
+            body={`Recorded as sent on ${formatAuDate(rec.sentToCommissionerAt)}.`}
           />
         ) : (
           <CommissionerDeadline deadline={deadline} daysLeft={daysLeft} />
@@ -349,7 +351,7 @@ export default function OccupierStatementScreen() {
             value={rec.signature ?? undefined}
             onChange={(sig) => void patch({ signature: sig, signedAt: sig ? (rec.signedAt ?? nowIso()) : null })}
           />
-          {rec.signedAt ? <Txt size="xs" tone="faint">Signed {rec.signedAt.slice(0, 10)}</Txt> : null}
+          {rec.signedAt ? <Txt size="xs" tone="faint">Signed {formatAuDate(rec.signedAt)}</Txt> : null}
         </Card>
 
         <Button
@@ -361,7 +363,7 @@ export default function OccupierStatementScreen() {
         <Card>
           <Field
             label="Copy sent to the Commissioner on"
-            value={rec.sentToCommissionerAt?.slice(0, 10) ?? ''}
+            value={qldIsoDay(rec.sentToCommissionerAt ?? undefined) ?? ''}
             onChangeText={(v) => void patch({ sentToCommissionerAt: v || null })}
             placeholder="YYYY-MM-DD"
             hint={deadline.due

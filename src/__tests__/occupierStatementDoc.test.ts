@@ -137,6 +137,29 @@ describe('the commissioner deadline on the page', () => {
     expect(flat).toContain('later than the date shown, never earlier');
   });
 
+  it('falls back to the Queensland day it was signed, not the UTC stamp', () => {
+    /*
+     * The fallback anchor, on a morning signature. A statement signed at half
+     * past seven on a Brisbane morning is stamped 21:30 the previous day in
+     * UTC, and taking the first ten characters of that anchors the ten business
+     * days a day early.
+     *
+     * A day early is the safer direction of the two, but this is a date the
+     * occupier is told to work to on a document they sign, and being told the
+     * wrong one is not made acceptable by the error's direction. Signed on
+     * Friday 3 July 2026, the copy is due 17 July; anchored on Thursday the 2nd
+     * it prints the 16th.
+     */
+    const html = occupierStatementHtml(input({
+      statement: statement({ periodEnd: '', signedAt: '2026-07-02T21:30:00.000Z' }),
+    }));
+    expect(html).toContain('by 17/07/2026');
+    // And the signature date on the page is the same day as the one the
+    // deadline was counted from — a page that disagrees with itself about when
+    // it was signed is worse than either date alone.
+    expect(html).toContain('Date: 03/07/2026');
+  });
+
   it('records the date the copy actually went, where it did', () => {
     const html = occupierStatementHtml(input({
       statement: statement({

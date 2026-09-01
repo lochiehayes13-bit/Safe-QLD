@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
+import { qldIsoDay } from '@/domain/qldTime';
 import { View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -68,7 +69,7 @@ export default function OccupierIndexScreen() {
       }
       const deadline = commissionerCopyDeadline({
         requiredPreparationDate: statement.periodEnd || undefined,
-        signedDate: statement.signedAt.slice(0, 10),
+        signedDate: qldIsoDay(statement.signedAt),
       });
       const daysLeft = deadline.due
         ? qldBusinessDaysBetween(today, deadline.due).days
@@ -206,7 +207,7 @@ function StateChip({ row }: { row: Row }) {
  */
 function SentLine({ statement }: { statement: OccupierStatement }) {
   const next = statement.signedAt
-    ? nextStatementDue(statement.signedAt.slice(0, 10))
+    ? nextStatementDue(qldIsoDay(statement.signedAt) ?? '')
     : undefined;
   return (
     <Rowed gap={2}>

@@ -1,4 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
+import { formatAuDate } from '@/export/sheets';
 import { Pressable, View } from 'react-native';
 import { Stack, router } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -169,7 +170,7 @@ function Result({ found, onAgain }: { found: Found; onAgain: () => void }) {
             </Txt>
             <Rowed gap={2} wrap style={{ marginTop: t.space(1.5) }}>
               {a.lastResult ? <Chip label={a.lastResult === 'fail' ? 'Last failed' : 'Last passed'} tone={a.lastResult === 'fail' ? 'fail' : 'pass'} /> : null}
-              {a.lastServicedAt ? <Chip label={`Serviced ${a.lastServicedAt.slice(0, 10)}`} /> : null}
+              {a.lastServicedAt ? <Chip label={`Serviced ${formatAuDate(a.lastServicedAt)}`} /> : null}
             </Rowed>
           </View>
           <MaterialCommunityIcons name="chevron-right" size={22} color={t.color.textFaint} />

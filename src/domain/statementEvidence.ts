@@ -4,6 +4,7 @@ import {
 } from '@/domain/occupierForm';
 import type { RegisterSystem } from '@/parsers/assetRegister';
 import type { SystemKind } from '@/seed/assetTypes';
+import { qldIsoDay } from '@/domain/qldTime';
 
 /**
  * Checking the occupier statement against the company's own records.
@@ -278,7 +279,7 @@ export function checkStatementAgainstRecords(
     const row = rowFor(installation);
     const formRef = refFor(installation);
     const ids = held0.map((n) => n.defectId);
-    const listed = held0.map((n) => `${describe(n)} (notice given ${n.noticeIssuedAt.slice(0, 10)})`).join('; ');
+    const listed = held0.map((n) => `${describe(n)} (notice given ${qldIsoDay(n.noticeIssuedAt) ?? n.noticeIssuedAt})`).join('; ');
     const count = held0.length;
 
     if (row && row.installed === false) {
@@ -398,7 +399,7 @@ export function checkStatementAgainstRecords(
       message: outside.length
         ? `${item.name}: the statement says a critical defect notice was issued in this period, and `
           + `the ${plural(outside.length, 'notice', 'notices')} Safe QLD holds for it fall outside `
-          + `it — ${outside.map((n) => n.noticeIssuedAt.slice(0, 10)).join(', ')}, against a period `
+          + `it — ${outside.map((n) => qldIsoDay(n.noticeIssuedAt) ?? n.noticeIssuedAt).join(', ')}, against a period `
           + `of ${start} to ${end}. Either the period is wrong or the answer belongs to a different `
           + 'statement.'
         : `${item.name}: the statement says a critical defect notice was issued in this period and `
@@ -412,7 +413,7 @@ export function checkStatementAgainstRecords(
   for (const { notice, why } of unattributed) {
     problems.push({
       kind: 'notice-unattributed',
-      message: `A critical defect notice was issued on ${notice.noticeIssuedAt.slice(0, 10)} for `
+      message: `A critical defect notice was issued on ${qldIsoDay(notice.noticeIssuedAt) ?? notice.noticeIssuedAt} for `
         + `${describe(notice)}, and it cannot be filed against a Schedule 2 row: ${why}. `
         + 'Check the row it belongs to by hand.',
       contradiction: false,

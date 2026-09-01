@@ -1632,7 +1632,7 @@ function statutoryExposure(
           siteName: site.siteName,
           defectId: defect.defectId,
           dueAt: clocks.noticeDueAt,
-          daysRemaining: daysBetween(today, clocks.noticeDueAt.slice(0, 10)),
+          daysRemaining: daysBetween(today, qldIsoDay(clocks.noticeDueAt) ?? ''),
           detail: 'No written critical defect notice is recorded and the 24 hours has run. Counted from when the '
             + 'defect was raised, which is the closest date this app holds to when the maintenance was carried out.',
           legalRef: 'Building Fire Safety Regulation 2008 (Qld) s 53(2)',
@@ -1646,7 +1646,7 @@ function statutoryExposure(
           siteName: site.siteName,
           defectId: defect.defectId,
           dueAt: clocks.noticeDueAt,
-          daysRemaining: daysBetween(today, clocks.noticeDueAt.slice(0, 10)),
+          daysRemaining: daysBetween(today, qldIsoDay(clocks.noticeDueAt) ?? ''),
           detail: 'The written critical defect notice is not recorded yet and the 24 hours is still running.',
           legalRef: 'Building Fire Safety Regulation 2008 (Qld) s 53(2)',
           sourceIds: ['bfsr-2008'],

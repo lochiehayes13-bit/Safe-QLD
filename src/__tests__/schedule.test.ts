@@ -232,6 +232,38 @@ describe('assessRunHistory', () => {
     expect(out[2]!.daysFromScheduled).toBe(101);
   });
 
+  it('anchors on the Queensland day of the first service, not on its UTC stamp', () => {
+    /*
+     * Every date in the list is derived from the anchor, so a day lost here is
+     * a day lost from every scheduled date at that site for as long as it is on
+     * the books — and it is lost silently, because the schedule it produces is
+     * a perfectly ordinary-looking one.
+     *
+     * Both of these are half past seven on a Brisbane morning, a year apart to
+     * the day: 3 July 2026 and 3 July 2027. Both are stamped 2 July in UTC.
+     */
+    const out = assessRunHistory(runs('2026-07-02T21:30:00.000Z', '2027-07-02T21:30:00.000Z'), 'annual');
+    expect(out[1]!.scheduledFor).toBe('2027-07-03');
+    expect(out[1]!.daysFromScheduled).toBe(0);
+    expect(out[1]!.status).toBe('in-tolerance');
+  });
+
+  it('measures the drift between two days of the same kind', () => {
+    // The anchor is a morning stamp and the recurrence a plain date, so the
+    // subtraction has one of each unless both are resolved the same way.
+    const out = assessRunHistory(runs('2026-07-02T21:30:00.000Z', '2027-07-13'), 'annual');
+    expect(out[1]!.scheduledFor).toBe('2027-07-03');
+    expect(out[1]!.daysFromScheduled).toBe(10);
+  });
+
+  it('schedules nothing off a first service whose stamp cannot be read', () => {
+    // The anchor defines everything, so an unreadable one leaves nothing to
+    // measure against. Saying so beats scheduling from a date read wrong.
+    const out = assessRunHistory(runs('1/9/2026', '2027-07-03'), 'annual');
+    expect(out.map((r) => r.status)).toEqual(['anchor', 'unknown']);
+    expect(out[1]!.scheduledFor).toBeUndefined();
+  });
+
   it('counts a service inside the window as in tolerance', () => {
     const out = assessRunHistory(runs('2023-03-01', '2024-03-10'), 'annual');
     expect(out[1]).toMatchObject({ status: 'in-tolerance', scheduledFor: '2024-03-01' });
