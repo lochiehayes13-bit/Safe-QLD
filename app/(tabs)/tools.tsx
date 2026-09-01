@@ -63,6 +63,12 @@ const CALCULATORS: ToolDef[] = [
     body: 'DIP switches, Apollo XPERT cards and rotary dials, with the traps each protocol carries.',
   },
   {
+    href: '/tools/detector-age',
+    icon: 'calendar-clock',
+    title: 'Detector age',
+    body: 'The date code off a head, read every way it can be read — and whether it has passed the recommended replacement age.',
+  },
+  {
     href: '/tools/eol',
     icon: 'resistor-nodes',
     title: 'End-of-line reference',
