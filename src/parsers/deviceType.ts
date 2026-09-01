@@ -27,7 +27,7 @@ const RULES: Rule[] = [
   { type: 'beam', patterns: [/\bBEAM\b/, /\bREFLECT/, /\bFIRERAY\b/] },
   { type: 'duct', patterns: [/\bDUCT\b/, /\bAIR\s*DUCT\b/, /\bSAMPLING\s*DUCT\b/] },
   { type: 'flame', patterns: [/\bFLAME\b/, /\bUV\s*IR\b/, /\bINFRA\s*RED\s*FLAME\b/] },
-  { type: 'multi', patterns: [/\bMULTI\s*(CRITERIA|SENSOR)\b/, /\bMULTISENSOR\b/, /\bCOMBINED\s*(SMOKE|OPTICAL)\b/, /\bOPTICAL\s*HEAT\b/, /\bSMOKE\s*HEAT\b/, /\bMULTI\b/] },
+  { type: 'multi', patterns: [/\bMULTI\s*(CRITERIA|SENSOR)\b/, /\bMULTISENSOR\b/, /\bCOMBINED\s*(SMOKE|OPTICAL)\b/, /\bOPTICAL\s*HEAT\b/, /\bSMOKE\s*HEAT\b/, /\bPHOTO(ELECTRIC)?\s*(THERMAL|HEAT)\b/, /\bMULTI\b/] },
   { type: 'smoke-ion', patterns: [/\bION(I[SZ]ATION)?\b/, /\bIONISATION\b/, /\bIONIZATION\b/] },
   { type: 'smoke-photo', patterns: [/\bPHOTO(ELECTRIC)?\b/, /\bOPTICAL\b/, /\bPE\s*SMOKE\b/] },
   { type: 'heat', patterns: [/\bHEAT\b/, /\bTHERMAL\b/, /\bTEMP(ERATURE)?\b/, /\bROR\b/, /\bRATE\s*OF\s*RISE\b/, /\bFIXED\s*TEMP\b/] },
@@ -39,7 +39,9 @@ const RULES: Rule[] = [
   { type: 'door-holder', patterns: [/\bDOOR\s*(HOLDER|RELEASE|MAG)\b/, /\bMAG\s*DOOR\b/, /\bMAGNET\b/] },
   { type: 'isolator', patterns: [/\bISOLATOR\b/, /\bSHORT\s*CIRCUIT\s*ISOLATOR\b/, /\bSCI\b/] },
   { type: 'relay', patterns: [/\bRELAY\b/, /\bRLY\b/] },
-  { type: 'module-io', patterns: [/\bI\/?O\s*(MODULE|UNIT)\b/, /\bINPUT\s*OUTPUT\b/, /\bIOM\b/] },
+  // "I/O" arrives here as "I O" now that the slash is a separator, so the rule
+  // has to tolerate the gap it leaves.
+  { type: 'module-io', patterns: [/\bI\s*O\s*(MODULE|UNIT)\b/, /\bINPUT\s*OUTPUT\b/, /\bIOM\b/] },
   { type: 'module-output', patterns: [/\bOUTPUT\s*(MODULE|UNIT)\b/, /\bCONTROL\s*MODULE\b/, /\bSUPERVISED\s*OUTPUT\b/, /\bSIGNAL\s*MODULE\b/] },
   { type: 'module-input', patterns: [/\bINPUT\s*(MODULE|UNIT)\b/, /\bMONITOR\s*MODULE\b/, /\bMINI\s*MONITOR\b/, /\bCONTACT\s*MODULE\b/, /\bZONE\s*MONITOR\b/] },
 ];
@@ -55,8 +57,18 @@ export function normaliseDeviceType(raw: string | undefined | null): DeviceType 
   const cached = CACHE.get(key);
   if (cached) return cached;
 
-  // Uppercase and turn separators into spaces so \b anchors behave.
-  const s = ` ${key.toUpperCase().replace(/[^A-Z0-9&/]+/g, ' ').trim()} `;
+  /*
+   * Uppercase, and turn every separator into a space so the \b anchors behave.
+   *
+   * The slash is a separator like any other, and it used to be kept. That was a
+   * silent halving of combined devices: "Sounder/Strobe" is how most vendors
+   * write one, the multi-word rules all join with \s*, and \s* does not match a
+   * slash — so it fell through to the strobe rule and the service sheet asked
+   * for a visual check and no audible one. "Smoke/Heat" lost its smoke test the
+   * same way. Only the ampersand survives, because OS&Y is a name rather than
+   * two words.
+   */
+  const s = ` ${key.toUpperCase().replace(/[^A-Z0-9&]+/g, ' ').trim()} `;
 
   let result: DeviceType = 'unknown';
   for (const rule of RULES) {
