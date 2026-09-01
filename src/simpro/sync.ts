@@ -5,6 +5,7 @@ import { readSyncState, writeSyncState } from './watermark';
 import { createSite, listSites, updateSite } from '@/db/repo';
 import { saveRateCard } from '@/db/rateCardRepo';
 import { upsertJob, enqueueSync, pendingSync, markSynced, markSyncFailed, type JobRecord } from '@/db/opsRepo';
+import { matchSiteByRefOrName } from '@/domain/siteNames';
 import type { Site } from '@/domain/types';
 
 /**
@@ -42,12 +43,16 @@ export interface SyncResult {
   notes: string[];
 }
 
-/** Matches an incoming site to one already held, by external id then by name. */
-function matchSite(existing: Site[], externalId: string, name: string): Site | undefined {
-  const byRef = existing.find((s) => s.siteRef === `SIMPRO:${externalId}`);
-  if (byRef) return byRef;
-  const target = name.trim().toLowerCase();
-  return existing.find((s) => s.name.trim().toLowerCase() === target);
+/**
+ * Matches an incoming site to one already held, by external id then by name.
+ *
+ * The name fallback refuses a name that identifies more than one building —
+ * see matchSiteByRefOrName. Three of this company's sites are called "Luggage
+ * Direct", and folding a Simpro site onto whichever of them came first merges
+ * three buildings' jobs and assets into one.
+ */
+function matchSite(existing: Site[], externalId: string, name: string) {
+  return matchSiteByRefOrName(existing, `SIMPRO:${externalId}`, name);
 }
 
 export async function pullFromSimpro(
@@ -91,7 +96,17 @@ export async function pullFromSimpro(
   for (const [i, remote] of remoteSites.entries()) {
     if (i % 25 === 0) onProgress?.({ stage: 'Sites', done: i, total: remoteSites.length });
     try {
-      const match = matchSite(existing, remote.id, remote.name);
+      const { match, ambiguous } = matchSite(existing, remote.id, remote.name);
+      if (ambiguous) {
+        // Said out loud rather than resolved. A second site is visible and can
+        // be merged by hand; two buildings folded together cannot be taken
+        // apart, because nothing records which service belonged to which.
+        result.notes.push(
+          `${ambiguous.length} sites are already called "${remote.name}", so Simpro site `
+          + `${remote.id} could not be matched to one of them by name and has been added `
+          + 'separately. Set its reference on the right one to join them.',
+        );
+      }
       if (match) {
         siteIdByExternal.set(remote.id, match.id);
         // Only fill what is blank locally. Someone on site knows better than

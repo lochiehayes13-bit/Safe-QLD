@@ -5,6 +5,7 @@ import {
   assetName, soonestDue, type ParsedRegister, type RegisterAsset,
 } from '@/parsers/assetRegister';
 import type { Frequency } from '@/seed/serviceRoutines';
+import { matchSiteByRefOrName } from '@/domain/siteNames';
 import type { Site } from '@/domain/types';
 
 /**
@@ -41,14 +42,12 @@ export interface RegisterImportResult {
  * on, and the alternative is a duplicate site with the assets split across the
  * two.
  */
-function matchSite(existing: Site[], externalId: string | undefined, name: string): Site | undefined {
-  if (externalId) {
-    const ref = `${REGISTER_SOURCE}:${externalId}`;
-    const byRef = existing.find((s) => s.siteRef === ref);
-    if (byRef) return byRef;
-  }
-  const wanted = name.trim().toLowerCase();
-  return existing.find((s) => s.name.trim().toLowerCase() === wanted);
+function matchSite(existing: Site[], externalId: string | undefined, name: string) {
+  return matchSiteByRefOrName(
+    existing,
+    externalId ? `${REGISTER_SOURCE}:${externalId}` : undefined,
+    name,
+  );
 }
 
 async function writeSchedule(
@@ -108,7 +107,14 @@ export async function importAssetRegister(parsed: ParsedRegister): Promise<Regis
 
   for (const site of parsed.sites) {
     const key = site.externalId ?? site.name;
-    const match = matchSite(existing, site.externalId, site.name);
+    const { match, ambiguous } = matchSite(existing, site.externalId, site.name);
+    if (ambiguous) {
+      result.warnings.push(
+        `${ambiguous.length} sites are already called "${site.name}", so this one could not be `
+        + 'matched to any of them by name and has been added separately. Set its reference on the '
+        + 'right one to join them.',
+      );
+    }
     if (match) {
       siteIdByKey.set(key, match.id);
       result.sitesMatched++;

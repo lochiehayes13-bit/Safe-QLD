@@ -88,3 +88,69 @@ export function indistinguishable(sites: readonly NamedSite[]): NamedSite[] {
   return sites.filter((s) => ambiguous.has(s.name.trim().toLowerCase())
     && !disambiguator(s, ambiguous));
 }
+
+// ---------------------------------------------------------------------------
+// Matching an incoming site to one already held
+// ---------------------------------------------------------------------------
+
+export interface SiteMatch<T> {
+  /** The site this one is, where that can be established. */
+  match?: T;
+  /**
+   * The sites a name matched, where it matched more than one.
+   *
+   * Present only when no match was made. It is what a caller says out loud:
+   * "three sites are called this, so the incoming one was added separately."
+   */
+  ambiguous?: T[];
+}
+
+/**
+ * The site an incoming record belongs to: by reference, then by an unambiguous
+ * name, and never by a name that identifies more than one building.
+ *
+ * Two importers do this — the asset register and the Simpro sync — and both
+ * fell back to matching on name whenever the reference did not hit. That
+ * fallback is necessary: a site created by hand on a phone has no reference to
+ * match on, and without it every import makes a second copy of the building.
+ *
+ * But it was matching on names that are not identities. In Safe QLD's own
+ * register three names cover eight separate buildings — three "Luggage
+ * Direct", three "Storage Choice - Sumner Park", two "Brisbane
+ * Rheumatology" — and a name lookup returns whichever of them comes first.
+ * So all three Luggage Directs collapse onto one local site, and the assets,
+ * jobs and service history of three different buildings merge into it.
+ * Silently, because a match is the quiet path.
+ *
+ * The two importers also write different references for the same site —
+ * `asset-register:3370` and `SIMPRO:3370` — so a site imported from the
+ * register never matches the sync by reference, and every sync falls through to
+ * the name. The ambiguity is not a one-off: it recurs on every sync, for as
+ * long as the site is on the books.
+ *
+ * Refusing the ambiguous match creates a second site instead. That is a worse
+ * answer in the abstract and a much better one here: a duplicate is visible, it
+ * is already reported by `indistinguishable` above, and it can be merged by
+ * hand. Two buildings folded into one cannot be taken apart afterwards —
+ * nothing records which service belonged to which.
+ */
+export function matchSiteByRefOrName<T extends NamedSite>(
+  existing: readonly T[],
+  ref: string | undefined,
+  name: string,
+): SiteMatch<T> {
+  if (ref) {
+    const byRef = existing.find((s) => s.siteRef === ref);
+    if (byRef) return { match: byRef };
+  }
+
+  const wanted = name.trim().toLowerCase();
+  // A blank name is not an identity either. Matching on it would join every
+  // unnamed site into one.
+  if (!wanted) return {};
+
+  const byName = existing.filter((s) => s.name.trim().toLowerCase() === wanted);
+  if (byName.length === 1) return { match: byName[0] };
+  if (byName.length > 1) return { ambiguous: byName };
+  return {};
+}

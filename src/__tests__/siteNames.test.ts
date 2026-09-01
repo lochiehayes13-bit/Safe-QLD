@@ -1,5 +1,6 @@
 import {
-  ambiguousNames, disambiguator, indistinguishable, readableRef, type NamedSite,
+  ambiguousNames, disambiguator, indistinguishable, matchSiteByRefOrName, readableRef,
+  type NamedSite,
 } from '@/domain/siteNames';
 
 /**
@@ -131,5 +132,82 @@ describe('indistinguishable', () => {
 
   it('is empty where no name is shared at all', () => {
     expect(indistinguishable([site({ id: '1', name: 'A' }), site({ id: '2', name: 'B' })])).toEqual([]);
+  });
+});
+
+describe('matching an incoming site to one already held', () => {
+  /*
+   * Both importers — the asset register and the Simpro sync — fell back to
+   * matching on name whenever the reference did not hit. The fallback is
+   * necessary: a site created by hand on a phone has no reference, and without
+   * it every import makes a second copy of the building.
+   *
+   * But three names in Safe QLD's own register cover eight separate buildings,
+   * and a name lookup returns whichever comes first. All three Luggage Directs
+   * collapsed onto one local site and took three buildings' assets, jobs and
+   * service history with them — silently, because a match is the quiet path.
+   */
+  const held: NamedSite[] = [
+    { id: 'a', name: 'Luggage Direct', siteRef: 'asset-register:3370' },
+    { id: 'b', name: 'Luggage Direct', siteRef: 'asset-register:3371' },
+    { id: 'c', name: 'Luggage Direct', siteRef: 'asset-register:3372' },
+    { id: 'd', name: 'Sandgate Hall', siteRef: 'asset-register:9000' },
+    { id: 'e', name: 'Carina Bus Depot' },
+  ];
+
+  it('matches on the reference, which is the only real identity', () => {
+    expect(matchSiteByRefOrName(held, 'asset-register:3371', 'Luggage Direct').match?.id).toBe('b');
+  });
+
+  it('prefers the reference over a name that would have matched something else', () => {
+    // The reference wins even where the name is unique and points elsewhere.
+    expect(matchSiteByRefOrName(held, 'asset-register:9000', 'Carina Bus Depot').match?.id)
+      .toBe('d');
+  });
+
+  it('falls back to a name only one site answers to', () => {
+    // The case the fallback exists for: a site somebody created on a phone,
+    // with no reference on it at all.
+    expect(matchSiteByRefOrName(held, 'SIMPRO:412', 'Carina Bus Depot').match?.id).toBe('e');
+  });
+
+  it('refuses a name three buildings answer to, and names them', () => {
+    /*
+     * The whole point. A second site is visible, is already reported by
+     * indistinguishable(), and can be merged by hand. Two buildings folded
+     * together cannot be taken apart afterwards — nothing records which
+     * service belonged to which.
+     */
+    const out = matchSiteByRefOrName(held, 'SIMPRO:3370', 'Luggage Direct');
+    expect(out.match).toBeUndefined();
+    expect(out.ambiguous?.map((s) => s.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('is the case that actually arises, because the two importers write different references', () => {
+    /*
+     * The register writes asset-register:3370 and the sync writes SIMPRO:3370
+     * for the same building, so a register-imported site never matches the sync
+     * by reference and every sync falls through to the name. This is not a
+     * one-off on first import; it recurs on every sync for the life of the
+     * site.
+     */
+    for (const id of ['3370', '3371', '3372']) {
+      expect(matchSiteByRefOrName(held, `SIMPRO:${id}`, 'Luggage Direct').match).toBeUndefined();
+    }
+  });
+
+  it('says nothing matched rather than matching a blank name to a blank name', () => {
+    // Otherwise every unnamed site joins into one.
+    const blanks: NamedSite[] = [{ id: 'x', name: '' }, { id: 'y', name: '  ' }];
+    expect(matchSiteByRefOrName(blanks, undefined, '')).toEqual({});
+    expect(matchSiteByRefOrName(blanks, undefined, '   ')).toEqual({});
+  });
+
+  it('matches a name on case and spacing, because the register is typed by people', () => {
+    expect(matchSiteByRefOrName(held, undefined, '  sandgate hall ').match?.id).toBe('d');
+  });
+
+  it('finds nothing for a site it has never seen', () => {
+    expect(matchSiteByRefOrName(held, 'SIMPRO:1', 'Somewhere New')).toEqual({});
   });
 });
