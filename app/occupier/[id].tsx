@@ -9,11 +9,16 @@ import { queryAssets } from '@/db/assetRepo';
 import { listDefects } from '@/db/repo';
 import { assetTypeById } from '@/seed/assetTypes';
 import {
-  SYSTEM_TO_INSTALLATION, occupierStatementIssues, type OccupierStatementRow,
+  occupierStatementIssues, type OccupierStatementRow,
 } from '@/domain/qldCompliance';
 import {
   COMMISSIONER_COPY_BUSINESS_DAYS, citeSources, commissionerCopyDeadline, qldBusinessDaysBetween,
+  toFilledRow,
 } from '@/domain/occupierForm';
+import {
+  checkStatementAgainstRecords, contradictions, evidenceSummary, installationForSystem,
+  type EvidenceProblem, type RecordedNotice,
+} from '@/domain/statementEvidence';
 import { occupierStatementHtml } from '@/export/occupierStatement';
 import { shareFile, writePdf } from '@/export/files';
 import { loadPrefs } from '@/app-prefs';
@@ -91,7 +96,7 @@ export default function OccupierStatementScreen() {
       const present = new Set<string>();
       for (const a of assets) {
         const system = assetTypeById(a.assetTypeId)?.system;
-        const installation = system ? SYSTEM_TO_INSTALLATION[system] : undefined;
+        const installation = system ? installationForSystem(system).installation : undefined;
         if (installation) present.add(installation);
       }
 
@@ -104,13 +109,29 @@ export default function OccupierStatementScreen() {
       };
 
       const noticed = new Map<string, string | undefined>();
+      /*
+       * Critical defects the prefill could not file against a row.
+       *
+       * These used to be skipped without a word. A fire pumpset that will not
+       * start fails both limbs of the Queensland critical test, has no Schedule
+       * 2 row of its own — it belongs to whichever installation it feeds — and
+       * so fell straight through, leaving a statement that said no notice was
+       * issued over a record of one. Named now, so the occupier places it by
+       * hand instead of never seeing it.
+       */
+      const unplaced: string[] = [];
       for (const d of defects) {
         if (d.severity !== 'critical' || !inPeriod(d.noticeIssuedAt ?? d.raisedAt)) continue;
         const system = d.pointId
           ? assetTypeById(assets.find((a) => a.id === d.pointId)?.assetTypeId ?? '')?.system
           : undefined;
-        const installation = system ? SYSTEM_TO_INSTALLATION[system] : undefined;
-        if (!installation) continue;
+        const placed = system ? installationForSystem(system) : undefined;
+        const installation = placed?.installation;
+        if (!installation) {
+          unplaced.push([d.location?.trim(), d.description?.trim()].filter(Boolean).join(' — ')
+            || 'a critical defect');
+          continue;
+        }
         // Keep the latest rectification we know of, so a row that was fixed
         // shows a date rather than an unanswered notice.
         const existing = noticed.get(installation);
@@ -132,7 +153,12 @@ export default function OccupierStatementScreen() {
       await patch({ rows });
       setPrefilled(
         `${present.size} installation${present.size === 1 ? '' : 's'} found in the register` +
-        (noticed.size ? `, ${noticed.size} with a critical defect notice this period.` : '.'),
+        (noticed.size ? `, ${noticed.size} with a critical defect notice this period.` : '.') +
+        (unplaced.length
+          ? `\n\n${unplaced.length} critical defect${unplaced.length === 1 ? '' : 's'} could not be `
+            + `put against a row and ${unplaced.length === 1 ? 'is' : 'are'} not on the form: `
+            + `${unplaced.join('; ')}. Place ${unplaced.length === 1 ? 'it' : 'them'} by hand.`
+          : ''),
       );
     } catch (e) {
       Alert.alert('Could not prefill', e instanceof Error ? e.message : String(e));
@@ -171,6 +197,58 @@ export default function OccupierStatementScreen() {
   };
 
   const issues = useMemo(() => (rec ? occupierStatementIssues(rec.rows) : []), [rec]);
+
+  /*
+   * The statement checked against Safe QLD's own file.
+   *
+   * The prefill proposes; the occupier can then change any answer, and until
+   * now nothing looked again. A row prefilled Yes from a recorded notice and
+   * then switched to No was signed and sent saying the opposite of what this
+   * company recorded and handed to that occupier.
+   *
+   * Loaded separately from the prefill because it has to be true of the
+   * statement as it stands now, not as it was when somebody last pressed a
+   * button.
+   */
+  const [evidence, setEvidence] = useState<EvidenceProblem[]>([]);
+  useEffect(() => {
+    if (!rec) return;
+    let live = true;
+    void (async () => {
+      try {
+        const [assets, defects] = await Promise.all([
+          queryAssets({ siteId: rec.siteId }),
+          listDefects(rec.siteId),
+        ]);
+        const notices: RecordedNotice[] = defects
+          .filter((d) => d.severity === 'critical' && d.noticeIssuedAt)
+          .map((d) => ({
+            defectId: d.id,
+            noticeIssuedAt: d.noticeIssuedAt!,
+            system: d.pointId
+              ? assetTypeById(assets.find((a) => a.id === d.pointId)?.assetTypeId ?? '')?.system
+              : undefined,
+            rectifiedAt: d.rectifiedAt ?? undefined,
+            location: d.location,
+            description: d.description,
+          }));
+        const problems = checkStatementAgainstRecords(
+          {
+            periodStart: rec.periodStart,
+            periodEnd: rec.periodEnd,
+            rows: rec.rows.map(toFilledRow),
+          },
+          notices,
+        );
+        if (live) setEvidence(problems);
+      } catch {
+        // A statement that cannot be checked is not a statement that is wrong.
+        // The banner simply does not appear; every other check still runs.
+        if (live) setEvidence([]);
+      }
+    })();
+    return () => { live = false; };
+  }, [rec]);
   const presentCount = rec?.rows.filter((r) => r.present).length ?? 0;
 
   /*
@@ -243,6 +321,14 @@ export default function OccupierStatementScreen() {
         {rec.rows.map((row) => (
           <InstallationRow key={row.installation} row={row} onChange={(p) => setRow(row.installation, p)} />
         ))}
+
+        {evidence.length ? (
+          <Banner
+            tone={contradictions(evidence).length ? 'fail' : 'warn'}
+            title={evidenceSummary(evidence) ?? ''}
+            body={evidence.map((p) => p.message).join('\n\n')}
+          />
+        ) : null}
 
         <H2>Signature</H2>
         {issues.length ? (

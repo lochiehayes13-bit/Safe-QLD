@@ -454,19 +454,14 @@ export function occupierStatementIssues(rows: OccupierStatementRow[]): string[] 
  * system and its exit signs on some jobs, and "passive" covers three separate
  * lines on the statement. Mapping only what is unambiguous means a prefill
  * proposes rather than asserts — the occupier still ticks the list.
+ *
+ * Kept here as a re-export because the table now has to answer for the asset
+ * side and the register importer both, and a system left out of it silently
+ * dropped a critical defect off a statement. It lives with the check that
+ * catches that, in statementEvidence.ts, which also says why each unmapped
+ * system is unmapped.
  */
-export const SYSTEM_TO_INSTALLATION: Record<string, string> = {
-  detection: 'Fire detection and alarm systems',
-  ews: 'Emergency warning and intercommunication systems',
-  aspirating: 'Fire detection and alarm systems',
-  sprinkler: 'Sprinklers',
-  hydrant: 'Fire hydrants (including boosters)',
-  'hose-reel': 'Fire hose reels',
-  extinguisher: 'Fire extinguishers',
-  'emergency-lighting': 'Emergency lighting',
-  gas: 'Special automatic fire suppression systems',
-  door: 'Fire doorsets',
-};
+export { SYSTEM_TO_INSTALLATION } from '@/domain/statementEvidence';
 
 /**
  * How many working days remain to give the Commissioner a copy.

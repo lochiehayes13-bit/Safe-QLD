@@ -4,6 +4,8 @@ import { FREQUENCY_LABEL, SERVICE_ROUTINES, SOURCE_LABEL } from '@/seed/serviceR
 import { CATEGORY_LABEL } from '@/seed/catalogueCategories';
 import { CATALOGUE_CHUNKS, CATALOGUE_SIZE } from '@/seed/catalogue/index';
 import { OCCUPIER_STATEMENT_INSTALLATIONS, SYSTEM_TO_INSTALLATION } from '@/domain/qldCompliance';
+import { installationForSystem } from '@/domain/statementEvidence';
+import { SYSTEM_LABEL as REGISTER_SYSTEM_LABEL, type RegisterSystem } from '@/parsers/assetRegister';
 
 /**
  * The seed data is three tables that reference each other by string id: a
@@ -197,10 +199,50 @@ describe('occupier statement mapping', () => {
     }
   });
 
-  it('maps only from systems that exist', () => {
+  it('maps only from systems that exist in one of the two vocabularies', () => {
+    /*
+     * The table answers for both: an asset carries a SystemKind, and the CSV
+     * register importer produces a RegisterSystem. A key in neither is a typo
+     * that maps nothing.
+     */
     for (const system of Object.keys(SYSTEM_TO_INSTALLATION)) {
-      expect(SYSTEM_LABELS[system as SystemKind]).toBeTruthy();
+      const known = Boolean(SYSTEM_LABELS[system as SystemKind])
+        || Boolean(REGISTER_SYSTEM_LABEL[system as RegisterSystem]);
+      expect({ system, known }).toEqual({ system, known: true });
     }
+  });
+
+  it('accounts for every system in both vocabularies, mapped or explained', () => {
+    /*
+     * The guard that would have caught the one this replaced.
+     *
+     * The old map was an untyped Record<string, string> and four of the
+     * fourteen asset system kinds simply had no entry — pump among them. The
+     * statement screen skipped any defect whose system did not map, so a
+     * critical defect on a fire pumpset, which fails both limbs of the
+     * Queensland test, never reached the statement at all and nothing said so.
+     *
+     * Every system now either names a Schedule 2 row or says why it cannot.
+     * Silence is the one answer that is not allowed.
+     */
+    const systems = [
+      ...Object.keys(SYSTEM_LABELS),
+      ...Object.keys(REGISTER_SYSTEM_LABEL),
+    ] as (SystemKind | RegisterSystem)[];
+
+    const unaccounted = systems.filter((sys) => {
+      const out = installationForSystem(sys);
+      return !out.installation && !out.why;
+    });
+    expect(unaccounted).toEqual([]);
+  });
+
+  it('sends a fire pumpset defect somewhere rather than nowhere', () => {
+    // Named because it is the one that was lost. It has no row of its own, and
+    // saying so is what keeps it on the statement as something to place by hand.
+    const out = installationForSystem('pump');
+    expect(out.installation).toBeUndefined();
+    expect(out.why).toBeTruthy();
   });
 });
 
