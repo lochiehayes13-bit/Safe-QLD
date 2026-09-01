@@ -496,6 +496,73 @@ describe('planOutboundWork — amendments', () => {
   });
 });
 
+describe('planOutboundWork — a critical defect the office has already seen', () => {
+  const critical = (over: Partial<OutboundDefect> = {}) =>
+    defect({ severity: 'critical', location: 'Level 3 east', ...over });
+
+  it('is not raised a second time', () => {
+    /*
+     * The failure this exists to prevent: the same critical defect raised twice
+     * in the office system, which becomes two defects, two jobs and two clocks
+     * on one fault. A retry after a dropped connection is the ordinary way it
+     * happens.
+     */
+    const first = planOutboundWork(run(), [pass('1')], [critical()]);
+    const again = planOutboundWork(run(), [pass('1')], [critical()], {
+      alreadySentKeys: [first.items[0]!.key],
+    });
+
+    expect(again.items.map((i) => i.urgency)).toEqual(['routine']);
+    const declined = again.warnings.find((w) => w.code === 'already-sent');
+    expect(declined?.message).toContain('already been accepted');
+    // Naming the key, because that is what somebody searches the job for.
+    expect(declined?.message).toContain(first.items[0]!.key);
+  });
+
+  it('still sends the service record, which is a different thing', () => {
+    // One note being a duplicate must not stop the other. The service record
+    // for this attendance has not been sent.
+    const first = planOutboundWork(run(), [pass('1')], [critical()]);
+    const again = planOutboundWork(run(), [pass('1')], [critical()], {
+      alreadySentKeys: [first.items[0]!.key],
+    });
+    expect(again.items).toHaveLength(1);
+    expect(again.items[0]!.payload.subject).toContain('CRITICAL DEFECT RAISED');
+  });
+
+  it('goes out again marked as an amendment when the record has changed', () => {
+    /*
+     * The caution says it goes out "marked as an amendment", and this is the
+     * half that checks the note is actually marked. A second critical defect
+     * notice arriving unmarked reads as a second defect.
+     */
+    const first = planOutboundWork(run(), [pass('1')], [critical()]);
+    const changed = planOutboundWork(run(), [pass('1')], [
+      critical({ interimMeasures: 'Extinguisher posted at the door until repaired.' }),
+    ], { alreadySentKeys: [first.items[0]!.key] });
+
+    expect(changed.warnings.map((w) => w.code)).toContain('amended-record');
+    const note = changed.items[0]!.payload.note;
+    expect(note).toContain('AMENDED: this replaces the critical defect notice sent earlier');
+    // And the first one was not marked, so the word means something.
+    expect(first.items[0]!.payload.note).not.toContain('AMENDED:');
+    // A changed record is a new key, or the office cannot tell the two apart.
+    expect(changed.items[0]!.key).not.toBe(first.items[0]!.key);
+  });
+
+  it('says so when the notice had to be shortened to fit', () => {
+    // The notice still goes — a shortened critical defect notice beats none —
+    // but the technician is told, and the note says where the rest is.
+    const wordy = 'The sprinkler control valve was found closed and padlocked. '.repeat(90);
+    const plan = planOutboundWork(run(), [pass('1')], [critical({ description: wordy })]);
+    const item = plan.items.find((i) => i.urgency === 'critical')!;
+
+    expect(item.payload.truncated).toBe(true);
+    expect(plan.warnings.some((w) => w.code === 'truncated' && w.message.includes('Level 3 east'))).toBe(true);
+    expect(item.payload.note).toContain('Full record');
+  });
+});
+
 describe('planOutboundWork — the service note', () => {
   it('states the not-tested count in the subject where there is one', () => {
     const plan = planOutboundWork(run(), [
@@ -640,6 +707,61 @@ describe('planOutboundWork — the service note', () => {
     expect(plan.items[0]!.description).toContain('An Example Building');
     expect(plan.items[0]!.description).toContain('JOB-1');
     expect(plan.items[0]!.description).toContain('1 failed');
+  });
+});
+
+describe('a note that will not fit', () => {
+  it('stops adding detail once a section has had to be cut', () => {
+    /*
+     * The rule that keeps a shortened note readable. Without it a later short
+     * section is squeezed in behind a truncated one, and the office reads a
+     * defect list that stops mid-way with a full technician's note after it —
+     * which looks like the list ended rather than that it was cut.
+     *
+     * So once one section has been shortened, every later one is dropped whole
+     * and named in the footer, and the note says how many characters are only
+     * in the full record.
+     */
+    const defects = Array.from({ length: 30 }, (_, i) => defect({
+      id: `d${i}`,
+      location: `Level ${i + 1}`,
+      description: 'Detector missing from its base and the base left live. '.repeat(3),
+    }));
+
+    // A technician's note short enough to fit in what the cut left behind.
+    // That is the case the rule exists for: without it this is squeezed in
+    // after a defect list that stops mid-sentence.
+    const plan = planOutboundWork(run({ notes: 'Ask reception.' }), [pass('1')], defects);
+    const note = plan.items[0]!.payload;
+
+    expect(note.omittedSections).toEqual(['other defects shortened', 'technician notes']);
+    expect(note.note).not.toContain('TECHNICIAN NOTES');
+    // Named in the note itself, not only in a warning the office never sees.
+    expect(note.note).toContain('technician notes');
+    expect(note.note).toContain('Full record');
+    expect(note.omittedChars).toBeGreaterThan(0);
+  });
+
+  it('drops a later section whole rather than shortening that as well', () => {
+    // Two cuts in one note read as two lists that both ended. One cut, and
+    // everything after it named as missing, is the honest shape.
+    const results = Array.from({ length: 8 }, (_, i) => pass(String(i + 1), i < 3
+      ? { outcome: 'not-tested', notTestedReason: 'Locked, no key held on site' }
+      : {}));
+    const defects = Array.from({ length: 30 }, (_, i) => defect({
+      id: `d${i}`,
+      location: `Level ${i + 1} east riser cupboard`,
+      description: 'Detector missing from its base and the base left live, cover plate absent. '.repeat(3),
+    }));
+
+    const plan = planOutboundWork(
+      run({ notes: 'Site contact asked for a copy of the report by email.' }),
+      results,
+      defects,
+    );
+    expect(plan.items[0]!.payload.omittedSections).toEqual([
+      'other defects shortened', 'not tested assets', 'technician notes',
+    ]);
   });
 });
 
