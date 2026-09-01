@@ -318,7 +318,7 @@ function readImpreciseDate(value: string | undefined): ImpreciseDate | undefined
     const year = fourDigitYear(Number(bare[1]));
     // Only plausible service years; "25" is a year, "99" on a modern register
     // is far more likely to be a tag number.
-    if (year >= 1970 && year <= 2100) return { raw, year, precision: 'year' };
+    if (year >= EARLIEST_PLAUSIBLE_YEAR && year <= 2100) return { raw, year, precision: 'year' };
   }
 
   return { raw, precision: 'unreadable' };
@@ -332,6 +332,16 @@ function readImpreciseDate(value: string | undefined): ImpreciseDate | undefined
  * earliest day in it. "06/26" read in September 2026 is a real record of a test
  * done in June; it is only impossible once the whole month is still to come.
  */
+/**
+ * The earliest year a service record in this register could plausibly carry.
+ *
+ * Their register has "1/03/1930" in the last-pressure-test column on forty-five
+ * extinguishers at one site. Nothing in service was tested ninety-six years
+ * ago; it is a typing slip for a year in this century, and the honest answer is
+ * that this reader does not know which one.
+ */
+const EARLIEST_PLAUSIBLE_YEAR = 1970;
+
 function earliestDay(date: ImpreciseDate): string | undefined {
   if (date.iso) return date.iso;
   if (date.year === undefined) return undefined;
@@ -369,11 +379,47 @@ export function parseImpreciseDate(
   notAfter?: string,
 ): ImpreciseDate | undefined {
   const read = readImpreciseDate(value);
-  if (!read || !notAfter) return read;
+  if (!read) return read;
+
+  // Kept as `raw` with no precision, in both directions: the cell said
+  // something, and this reader does not understand it as a date a test was
+  // done on.
+  const refuse = { raw: read.raw, precision: 'unreadable' } as const;
+
+  /*
+   * The floor applies at every precision, which is the whole reason it moved
+   * here. A bare "1930" was already refused as an implausible service year and
+   * "1/03/1930" was accepted as a fact — the same year, typed two ways, getting
+   * two answers out of one field of one file. Their register contains both.
+   *
+   * Unlike the ceiling below it this needs no clock, so it holds whether or not
+   * the caller supplied one.
+   */
+  if (read.year !== undefined && read.year < EARLIEST_PLAUSIBLE_YEAR) return refuse;
+
+  if (!notAfter) return read;
   const earliest = earliestDay(read);
-  // Kept as `raw` with no precision: the cell said something, and this reader
-  // does not understand it as a date a test was done on.
-  return earliest && earliest > notAfter ? { raw: read.raw, precision: 'unreadable' } : read;
+  return earliest && earliest > notAfter ? refuse : read;
+}
+
+/**
+ * Why the overhaul column was refused, where it was a date at all.
+ *
+ * The importer reports these two apart because they are different things to go
+ * and fix: one is a year somebody mistyped and the other is a date somebody put
+ * in the wrong column. Undefined where the cell parsed, and where it was never
+ * a date — "unknown" and a blank are ordinary and need no explaining.
+ */
+export function overhaulRefusal(
+  value: string | undefined,
+  notAfter?: string,
+): 'too-old' | 'not-yet' | undefined {
+  const read = readImpreciseDate(value);
+  if (!read || read.year === undefined) return undefined;
+  if (read.year < EARLIEST_PLAUSIBLE_YEAR) return 'too-old';
+  if (!notAfter) return undefined;
+  const earliest = earliestDay(read);
+  return earliest && earliest > notAfter ? 'not-yet' : undefined;
 }
 
 /** Which register this is, from the file name and then the column set. */
@@ -450,6 +496,7 @@ export function parseAssetRegister(
   let unreadableDates = 0;
   /** Overhaul cells refused for recording a test that has not happened yet. */
   const notYet: { raw: string; where: string }[] = [];
+  const tooOld: { raw: string; where: string }[] = [];
 
   for (const row of rows) {
     const siteName = clean(at(row, 'site name'));
@@ -477,15 +524,14 @@ export function parseAssetRegister(
 
     const overhaulRaw = overhaulIndex >= 0 ? row[overhaulIndex] : undefined;
     const lastOverhaul = parseImpreciseDate(overhaulRaw, today);
-    // Only where the day rule is what refused it. Reading the cell a second
-    // time without the day says whether this was a date at all, and it happens
-    // for a handful of rows in a register of twelve thousand.
-    if (lastOverhaul?.precision === 'unreadable' && parseImpreciseDate(overhaulRaw)?.year !== undefined) {
+    const refusal = overhaulRefusal(overhaulRaw, today);
+    if (refusal && lastOverhaul) {
       // Named by tag where the register carries one. Most of the extinguisher
       // rows this fires on have an empty Asset # column, so the site is what is
       // left to go looking with.
       const tag = clean(at(row, 'asset #')) ?? clean(at(row, 'asset number'));
-      notYet.push({ raw: lastOverhaul.raw, where: tag ? `asset ${tag}` : `an asset at ${siteName}` });
+      const entry = { raw: lastOverhaul.raw, where: tag ? `asset ${tag}` : `an asset at ${siteName}` };
+      (refusal === 'too-old' ? tooOld : notYet).push(entry);
     }
 
     assets.push({
@@ -588,6 +634,25 @@ export function parseAssetRegister(
       `on a day that has not come, so ${notYet.length === 1 ? 'it has' : 'these have'} been left unset ` +
       `rather than counted as done, which would put the next one five years past it. The cell is kept ` +
       `against the asset so it can be corrected in the source system.`,
+    );
+  }
+
+  /*
+   * A last test from before this equipment existed.
+   *
+   * Quieter than the future case and worth saying anyway. A date this old is
+   * visibly wrong to anybody who reads it, so it does not hide an asset the way
+   * a future one does — but it is still a cell only the office can correct, and
+   * until they do the routine has no record of when the test was last done.
+   */
+  if (tooOld.length) {
+    const example = tooOld[0]!;
+    warnings.push(
+      `${tooOld.length} overhaul ${tooOld.length === 1 ? 'date is' : 'dates are'} from before ` +
+      `${EARLIEST_PLAUSIBLE_YEAR} — for example "${example.raw}" against ${example.where}. Nothing in ` +
+      `service was tested that long ago, so ${tooOld.length === 1 ? 'it reads' : 'these read'} as a ` +
+      `mistyped year rather than a record, and ${tooOld.length === 1 ? 'has' : 'have'} been left unset. ` +
+      `The cell is kept against the asset so it can be corrected in the source system.`,
     );
   }
 

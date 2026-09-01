@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import {
-  detectSystem, isAssetRegister, parseAssetRegister, parseAuDate, parseImpreciseDate,
+  detectSystem, isAssetRegister, overhaulRefusal, parseAssetRegister, parseAuDate, parseImpreciseDate,
 } from '@/parsers/assetRegister';
 
 /**
@@ -539,5 +539,78 @@ describe('assets with no service interval', () => {
     const parsed = parseAssetRegister(csv, 'fire_blankets_export.csv');
     expect(parsed.assets).toHaveLength(1);
     expect(parsed.assets[0]!.schedule).toEqual([]);
+  });
+});
+
+/**
+ * A last test from before this equipment existed.
+ *
+ * Their register has "1/03/1930" in the last-pressure-test column on
+ * forty-five extinguishers at Logan DC, and seventy-nine such cells across the
+ * whole export. Nothing in service was tested ninety-six years ago; it is a
+ * typing slip for a year in this century and the honest answer is that this
+ * reader does not know which one.
+ *
+ * The rule existed and was applied to one branch out of three. A bare "1930"
+ * was refused as an implausible service year — the comment beside it says
+ * exactly that — while "1/03/1930" and "03/1930" were accepted as fact. The
+ * same year, typed three ways, getting two different answers out of one field
+ * of one file, and their register contains all three shapes.
+ */
+describe('an overhaul date from before this equipment existed', () => {
+  const TODAY = '2026-09-01';
+
+  it('is refused however much of the date was typed', () => {
+    for (const raw of ['1/03/1930', '03/1930', '1930', '1/3/30'.replace('30', '1930')]) {
+      expect([raw, parseImpreciseDate(raw, TODAY)!.precision]).toEqual([raw, 'unreadable']);
+    }
+  });
+
+  it('keeps the cell as written, because only the office can correct it', () => {
+    expect(parseImpreciseDate('1/03/1930', TODAY)).toEqual({ raw: '1/03/1930', precision: 'unreadable' });
+  });
+
+  it('holds whether or not a day was supplied to judge against', () => {
+    // Unlike the ceiling, this one needs no clock — so it cannot be defeated by
+    // a caller that forgets to pass one.
+    expect(parseImpreciseDate('1/03/1930')!.precision).toBe('unreadable');
+  });
+
+  it('accepts the first year it considers plausible', () => {
+    // 1970 itself is in. A fire door installed in the seventies is a real
+    // asset, and the boundary is where the rule says it is.
+    expect(parseImpreciseDate('1/03/1970', TODAY)).toMatchObject({ year: 1970, precision: 'day' });
+    expect(parseImpreciseDate('1969', TODAY)!.precision).toBe('unreadable');
+  });
+
+  it('says which of the two things is wrong with the cell', () => {
+    /*
+     * They are different jobs to go and fix: one is a year somebody mistyped,
+     * the other is a date somebody put in the wrong column. A single "could not
+     * read this" would send the office looking for the wrong thing.
+     */
+    expect(overhaulRefusal('1/03/1930', TODAY)).toBe('too-old');
+    expect(overhaulRefusal('1/6/29', TODAY)).toBe('not-yet');
+    expect(overhaulRefusal('1/2/23', TODAY)).toBeUndefined();
+    // Not a date at all is ordinary and needs no explaining.
+    expect(overhaulRefusal('unknown', TODAY)).toBeUndefined();
+    expect(overhaulRefusal('', TODAY)).toBeUndefined();
+  });
+
+  it('is reported with a count and a cell to go and look at', () => {
+    const csv = [
+      'Asset ID,Site Name,Walk Order,Asset #,Extinguisher Type,Last 5 Yearly,Location,5 Yearly',
+      '1,Logan DC,1,,DCP 9.0kg ABE,1/03/1930,Dock,1/3/2030',
+      '2,Logan DC,2,,DCP 9.0kg ABE,1/03/1930,Dock,1/3/2030',
+      '3,Logan DC,3,,DCP 9.0kg ABE,1/2/23,Dock,1/3/2028',
+    ].join('\n');
+    const out = parseAssetRegister(csv, 'extinguishers.csv', '2026-09-01T21:00:00.000Z');
+    const warning = out.warnings.find((w) => w.includes('before 1970'));
+    expect(warning).toContain('2 overhaul dates');
+    expect(warning).toContain('"1/03/1930"');
+    // And says what happens to it, rather than only that it happened.
+    expect(warning).toContain('left unset');
+    // The one good cell is untouched.
+    expect(out.assets[2]!.lastOverhaul).toMatchObject({ precision: 'day', iso: '2023-02-01' });
   });
 });
