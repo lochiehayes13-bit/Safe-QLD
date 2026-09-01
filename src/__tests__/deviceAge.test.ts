@@ -32,6 +32,23 @@ describe('readDateCode — System Sensor', () => {
     });
   });
 
+  it('reads both ends of the week-of-month digit', () => {
+    /*
+     * System Sensor's fourth digit is a week of the month, 1 to 5. Both ends
+     * are real weeks: refusing either makes a head manufactured in that week
+     * unreadable, and an unreadable code is a head with no age at all on the
+     * effectiveness report.
+     */
+    for (const week of [1, 5]) {
+      const [best] = readDateCode(`601${week}`, { brand: 'Notifier', today: AUG_2026 });
+      expect({ week, read: best?.week }).toEqual({ week, read: week });
+    }
+
+    // Six is not a week of the month, and is not read as one.
+    const [six] = readDateCode('6016', { brand: 'Notifier', today: AUG_2026 });
+    expect(six?.format).not.toBe('system-sensor');
+  });
+
   it('offers every decade the single year digit could mean, newest first', () => {
     const years = readDateCode('6015', { brand: 'System Sensor', today: AUG_2026 }).map((r) => r.year);
     expect(years).toEqual([2026, 2016, 2006, 1996, 1986]);
@@ -180,6 +197,31 @@ describe('serviceLife', () => {
     // between a head inside its life and one past it.
     expect(reading.manufactured).toBe('2016-01-29');
     expect(ageYears(reading, new Date('2026-07-03T00:00:00Z'))).toBe(10.4);
+  });
+
+  it('counts a head that has reached its recommended age as past it', () => {
+    /*
+     * Ten years exactly is the age the recommendation is about, so it counts.
+     * This is where a lifecycle finding either appears on the report or does
+     * not, and nothing held the year itself.
+     *
+     * The comparison is made on the age as reported, which is a tenth of a
+     * year — about five weeks. That is the right resolution for a
+     * recommendation rather than a deadline, but it means the changeover is
+     * not to the day: two months before the anniversary reads as 9.8 and is
+     * inside its life, the day before reads as 10.0 and is not. Both are
+     * asserted so the resolution is a stated property rather than something
+     * somebody rediscovers.
+     */
+    const reached = serviceLife(reading, new Date(`${reading.year + 10}-01-29T00:00:00Z`));
+    expect(reached.ageYears).toBe(10);
+    expect(reached.past).toBe(true);
+    expect(reached.yearsLeft).toBe(0);
+
+    const twoMonthsBefore = serviceLife(reading, new Date(`${reading.year + 9}-12-01T00:00:00Z`));
+    expect(twoMonthsBefore.ageYears).toBe(9.8);
+    expect(twoMonthsBefore.past).toBe(false);
+    expect(twoMonthsBefore.yearsLeft).toBe(0.2);
   });
 
   it('calls a head past the recommended age without calling it a defect', () => {
