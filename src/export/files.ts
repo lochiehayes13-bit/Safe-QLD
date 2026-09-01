@@ -3,6 +3,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { buildXlsx } from './xlsx';
 import type { Sheet } from './xlsx';
+import { isPdfName, mimeTypeFor, safeFileName } from './fileNames';
 import { toCsv } from '@/parsers/csv';
 
 /**
@@ -19,22 +20,6 @@ function exportDir(): Directory {
   const dir = new Directory(Paths.cache, EXPORT_DIR);
   if (!dir.exists) dir.create({ intermediates: true });
   return dir;
-}
-
-/**
- * Makes a string safe for a filename across Android and iOS.
- *
- * Site names routinely contain slashes and colons ("Level 3 / Plant Room"),
- * which silently break file creation on Android.
- */
-export function safeFileName(name: string, fallback = 'export'): string {
-  const cleaned = name
-    .replace(/[/\\?%*:|"<>\x00-\x1F]/g, '-')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/^\.+/, '')
-    .slice(0, 90);
-  return cleaned || fallback;
 }
 
 export interface WrittenFile {
@@ -56,7 +41,10 @@ function writeText(fileName: string, text: string): WrittenFile {
   if (file.exists) file.delete();
   file.create();
   file.write(text);
-  return { uri: file.uri, name: fileName, size: text.length };
+  // Bytes, not characters. A CSV of Queensland site names carries a byte-order
+  // mark and any number of non-ASCII characters, and reporting its length in
+  // characters understates the file by however many of them there are.
+  return { uri: file.uri, name: fileName, size: new TextEncoder().encode(text).length };
 }
 
 export function writeXlsx(baseName: string, sheets: Sheet[]): WrittenFile {
@@ -84,21 +72,13 @@ export async function writePdf(baseName: string, html: string): Promise<WrittenF
   return { uri: target.uri, name: target.name, size: target.size ?? 0 };
 }
 
-const MIME: Record<string, string> = {
-  '.pdf': 'application/pdf',
-  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  '.csv': 'text/csv',
-  '.sqld': 'application/octet-stream',
-};
-
 /** Opens the system share sheet for a written file. */
 export async function shareFile(file: WrittenFile, dialogTitle?: string): Promise<boolean> {
   if (!(await Sharing.isAvailableAsync())) return false;
-  const ext = file.name.slice(file.name.lastIndexOf('.'));
   await Sharing.shareAsync(file.uri, {
-    mimeType: MIME[ext] ?? 'application/octet-stream',
+    mimeType: mimeTypeFor(file.name),
     dialogTitle: dialogTitle ?? file.name,
-    UTI: ext === '.pdf' ? 'com.adobe.pdf' : undefined,
+    UTI: isPdfName(file.name) ? 'com.adobe.pdf' : undefined,
   });
   return true;
 }
