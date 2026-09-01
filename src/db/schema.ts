@@ -10,6 +10,7 @@ import {
 } from './schemaV3';
 import { MIGRATION_V10 } from './schemaQuote';
 import { MIGRATION_V11 } from './schemaLibrary';
+import { MIGRATION_V12 } from './schemaForm72';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -278,6 +279,9 @@ export const MIGRATIONS: string[] = [
 
   // v11 — documents the technician imported and had read on the device
   MIGRATION_V11,
+
+  // v12 — Form 72, the Queensland statutory hydrant and sprinkler form
+  MIGRATION_V12,
 ];
 
 /**
