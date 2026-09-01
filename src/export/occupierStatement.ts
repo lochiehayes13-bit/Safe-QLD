@@ -151,7 +151,7 @@ ${issues.length ? `<div class="warn">
     <div class="sigline">${esc(s.signedBy) || 'Occupier'}${s.signedPosition ? ` — ${esc(s.signedPosition)}` : ''}</div>
   </div>
   <div class="sigbox">
-    <div class="sigline">Date${s.signedAt ? `: ${esc(formatAuDate(s.signedAt.slice(0, 10)))}` : ''}</div>
+    <div class="sigline">Date${s.signedAt ? `: ${esc(formatAuDate(s.signedAt))}` : ''}</div>
   </div>
 </div>
 
@@ -161,7 +161,7 @@ ${deadline.due ? `<p class="clock" style="margin-top:14px">
     ? 'the date it was signed. That is not the date the Regulation counts from — it counts from the day '
       + 'the statement was required to be prepared, so this date may be later than the real one'
     : 'the day the statement was required to be prepared'}.${s.sentToCommissionerAt
-    ? ` Recorded as sent ${esc(formatAuDate(s.sentToCommissionerAt.slice(0, 10)))}.`
+    ? ` Recorded as sent ${esc(formatAuDate(s.sentToCommissionerAt))}.`
     : ''}
 </p>` : ''}
 
@@ -175,7 +175,7 @@ ${deadline.due ? `<p class="clock" style="margin-top:14px">
 
 <div class="footer">
   <span>${esc(input.companyName)}</span>
-  <span>Generated ${esc(formatAuDate(generatedAt.slice(0, 10)))}</span>
+  <span>Generated ${esc(formatAuDate(generatedAt))}</span>
 </div>
 </body></html>`;
 }

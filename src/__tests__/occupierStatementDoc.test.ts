@@ -55,6 +55,53 @@ const input = (over: Partial<OccupierStatementInput> = {}): OccupierStatementInp
   ...over,
 });
 
+describe('the dates printed on the signed document', () => {
+  /*
+   * Every date on this page came from a timestamp with its first ten characters
+   * taken, which is the UTC day. Queensland is UTC+10, so a statement signed at
+   * seven on a Brisbane morning printed the day before — on the document the
+   * occupier signs and the Commissioner receives, and next to a deadline
+   * counted in business days from it.
+   *
+   * The formatter this page uses had already been fixed to resolve the
+   * Queensland day. The slice at each call site was throwing that away before
+   * it ever saw the timestamp.
+   *
+   * 2026-07-02T21:00:00Z is seven in the morning on 3 July in Queensland.
+   */
+  const MORNING = '2026-07-02T21:00:00.000Z';
+
+  it('dates the signature the day it was signed in Queensland', () => {
+    const html = occupierStatementHtml(input({
+      statement: statement({ signedAt: MORNING, signature: 'data:image/svg+xml;utf8,<svg/>' }),
+    }));
+    expect(html).toContain('03/07/2026');
+    expect(html).not.toContain('02/07/2026');
+  });
+
+  it('dates the copy to the Commissioner the day it was sent in Queensland', () => {
+    // This one evidences the ten business days. A day early on the page is a
+    // day of an obligation that reads as met earlier than it was.
+    const html = occupierStatementHtml(input({
+      statement: statement({ sentToCommissionerAt: MORNING }),
+    }));
+    expect(html).toMatch(/Recorded as sent 03\/07\/2026/);
+  });
+
+  it('leaves a date with no time in it where it was written', () => {
+    // A rectification date is stored as a day, not an instant, and shifting it
+    // forward ten hours would move it to the next day.
+    const html = occupierStatementHtml(input({
+      statement: statement({
+        rows: OCCUPIER_STATEMENT_INSTALLATIONS.map((i) => row(i, i === 'Sprinklers'
+          ? { present: true, criticalDefectNoticeGiven: true, rectifiedDate: '2026-03-01' }
+          : {})),
+      }),
+    }));
+    expect(html).toContain('rectified 01/03/2026');
+  });
+});
+
 describe('the commissioner deadline on the page', () => {
   it('counts from when the statement was required, not from when it was signed', () => {
     /*
