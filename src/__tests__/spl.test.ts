@@ -371,6 +371,47 @@ describe('coverageVerdict', () => {
     expect(r.headroomDb).toBe(15);
   });
 
+  it('passes a signal that exactly meets the pass mark, and fails the one below it', () => {
+    /*
+     * Nought decibels of headroom is a pass. The threshold is what the signal
+     * has to reach, so reaching it is compliance — and read a hair the other
+     * way, a system designed exactly to the requirement is condemned and
+     * somebody is quoted for sounders it does not need.
+     *
+     * 100 dB at a metre is 80 dB at ten. With 70 dB ambient and a 10 dB margin
+     * the pass mark is exactly 80.
+     */
+    const exact = pass({ ...SOUNDER, distanceM: 10, ambientDb: 70, occupancy: 'non-sleeping', requiredMarginDb: 10 });
+    expect(exact.bindingThresholdDb).toBe(80);
+    expect(exact.headroomDb).toBe(0);
+    expect(exact.verdict).toBe('pass');
+
+    const short = pass({ ...SOUNDER, distanceM: 10, ambientDb: 71, occupancy: 'non-sleeping', requiredMarginDb: 10 });
+    expect(short.headroomDb).toBeLessThan(0);
+    expect(short.verdict).toBe('fail');
+  });
+
+  it('does not call a signal sitting exactly on the ceiling too loud', () => {
+    /*
+     * The ceiling exists because a signal loud enough to hurt drives people
+     * towards the noise or away from the exit. A signal at the limit is at the
+     * limit, not over it, and failing it there sends somebody quieting a
+     * system that complies.
+     */
+    const atCeiling = pass({
+      ratedDb: 105, referenceDistanceM: 1, distanceM: 1,
+      ambientDb: 45, occupancy: 'non-sleeping', requiredMarginDb: 10,
+    });
+    expect(atCeiling.signalDb).toBe(105);
+    expect(atCeiling.verdict).toBe('pass');
+
+    const overIt = pass({
+      ratedDb: 106, referenceDistanceM: 1, distanceM: 1,
+      ambientDb: 45, occupancy: 'non-sleeping', requiredMarginDb: 10,
+    });
+    expect(overIt.verdict).toBe('fail');
+  });
+
   it('says which of the two thresholds actually decided it', () => {
     // A room failing the 65 dB floor needs a louder device; a room failing the
     // margin needs the noise dealt with. Naming the wrong one sends a
