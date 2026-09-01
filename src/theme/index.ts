@@ -7,10 +7,32 @@
  */
 import { Platform, useColorScheme } from 'react-native';
 
+import { brand } from './brand';
+
 export type Mode = 'dark' | 'light';
 
+/**
+ * Re-exported so screens can pull brand and tokens from one place, while
+ * document builders import `@/theme/brand` directly and stay free of React
+ * Native.
+ */
+export { brand, company } from './brand';
+
 const palette = {
-  // Fire industry red, desaturated enough to sit on dark without vibrating.
+  /**
+   * Brand orange, and a darkened version of it.
+   *
+   * Contrast measured against the real surfaces rather than eyeballed:
+   * `brandOrange` reads 5.71:1 on the dark background and 5.10:1 on a card, so
+   * it is the accent *text* colour — but white on it is only 3.39:1, which is
+   * under the 4.5:1 floor for a button label. `brandOrangeDeep` carries white
+   * at 5.01:1 and still reads 4.75:1 as text on the light background, so it is
+   * the fill in both themes. That split is why there are two of them.
+   */
+  brandOrange: brand.orange,
+  brandOrangeDeep: '#C4441C',
+
+  // Kept for status colours: a failure must not be mistaken for a brand accent.
   red600: '#E03131',
   red500: '#F03E3E',
   red400: '#FF6B6B',
@@ -103,8 +125,8 @@ export const darkTheme: Theme = {
     text: '#EEF2F7',
     textMuted: '#9AA6B6',
     textFaint: '#66748A',
-    accent: palette.red500,
-    accentText: palette.red400,
+    accent: palette.brandOrangeDeep,
+    accentText: palette.brandOrange,
     onAccent: '#FFFFFF',
     pass: palette.green400,
     fail: palette.red400,
@@ -130,8 +152,8 @@ export const lightTheme: Theme = {
     text: palette.grey900,
     textMuted: palette.grey700,
     textFaint: palette.grey600,
-    accent: palette.red600,
-    accentText: palette.red600,
+    accent: palette.brandOrangeDeep,
+    accentText: palette.brandOrangeDeep,
     onAccent: '#FFFFFF',
     pass: palette.green500,
     fail: palette.red600,
