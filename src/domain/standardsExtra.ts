@@ -125,8 +125,12 @@ export const NOTE_SOURCES: Record<string, NoteProvenance> = {
  *
  * The key is the document id and the clause reference exactly as the catalogue
  * prints them, so a note can only ever attach to a clause that really exists.
- * Nothing here overwrites a description the catalogue already carries — see
- * `clauseNoteConflicts`, which the test uses to prove it.
+ *
+ * The catalogue owns any clause it describes itself. If a description is added
+ * there for a clause also described here, the catalogue's text wins and the note
+ * here goes dormant rather than fighting it — `withClauseNotes` fills gaps and
+ * never overwrites, and `clauseNoteConflicts` reports the overlap so a dormant
+ * note can be deleted rather than quietly rotting.
  */
 export const CLAUSE_NOTES: Record<string, ClauseNote> = {
   // -------------------------------------------------------------------------

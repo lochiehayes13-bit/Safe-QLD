@@ -72,3 +72,13 @@ yarn-error.*
 *.docx
 !data/*.template.csv
 /data/registers/
+
+# Compiled output next to a TypeScript source shadows it: jest and Metro both
+# resolve the .js first, so the app and the suite quietly read a stale copy of
+# a file somebody is actively editing. This happened once with the standards
+# catalogue and cost an afternoon of edits that appeared to do nothing.
+src/**/*.js
+src/**/*.js.map
+src/**/*.d.ts
+app/**/*.js
+app/**/*.js.map

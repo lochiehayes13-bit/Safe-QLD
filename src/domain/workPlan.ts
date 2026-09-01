@@ -435,7 +435,7 @@ export function estimateVisitHours(
       if (!notCosted.includes(label)) notCosted.push(label);
       continue;
     }
-    minutes += effort.systemMinutes + VISIT_OVERHEAD_MINUTES;
+    minutes += effort.systemMinutes;
     basis.push(
       `${FREQUENCY_LABEL[routine.frequency]} ${systemLabel(routine.system)} — `
       + `${effort.systemMinutes} min at the panel and on the record`,
