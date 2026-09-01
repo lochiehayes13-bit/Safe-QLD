@@ -1,5 +1,5 @@
 import {
-  CHECK_SCHEME, MAX_SERIAL, TAG_LENGTH, TYPE_CODES,
+  CHECK_SCHEME, MAX_SERIAL, MIN_SERIAL, TAG_LENGTH, TYPE_CODES,
   assetCodeFor, assetTypeForCode, auditTags, checkCharacters, checkCharactersAgree, compactTag,
   formatTag, isTagPayload, isValidTag, normalise, parseAssetCode, parseTag, planTagAssignments,
   readScannedValue, serialsInUse, tagPayload, typeCodeFor, typeCodeTableIssues,
@@ -253,6 +253,24 @@ describe('formatting a tag', () => {
     expect(formatTag('detector', -1)).toBeUndefined();
     expect(formatTag('detector', MAX_SERIAL + 1)).toBeUndefined();
     expect(formatTag('detector', 12.5)).toBeUndefined();
+  });
+
+  it('uses both ends of the range it advertises', () => {
+    /*
+     * The range was tested only from outside — nought and one past the top.
+     * Excluding its own last number would take seven-digit numbering down to
+     * 9,999,998 usable tags with nothing saying so, and the failure only shows
+     * up when the register reaches the end of a type.
+     */
+    for (const serial of [MIN_SERIAL, MAX_SERIAL]) {
+      const tag = formatTag('detector', serial);
+      expect(tag).toBeDefined();
+      // Round-tripped rather than written out, so the check characters are the
+      // ones the scheme produces and not the ones a test author expected.
+      expect(parseTag(tag!)).toMatchObject({ ok: true, serial, assetTypeId: 'detector' });
+    }
+    expect(assetCodeFor('detector', MIN_SERIAL)).toBe('SQ-DET-0000001');
+    expect(assetCodeFor('detector', MAX_SERIAL)).toBe('SQ-DET-9999999');
   });
 
   it('refuses a type it has no code for rather than guessing one', () => {
