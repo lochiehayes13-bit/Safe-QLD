@@ -51,6 +51,8 @@ interface RawCustomerAsset {
 }
 
 export interface SimproSite {
+  /** The source's own modification timestamp, where it provides one. */
+  DateModified?: string;
   id: string;
   name: string;
   address?: string;
@@ -61,6 +63,8 @@ export interface SimproSite {
 }
 
 export interface SimproJob {
+  /** The source's own modification timestamp, where it provides one. */
+  DateModified?: string;
   id: string;
   title: string;
   description?: string;
@@ -113,8 +117,15 @@ const str = (v: unknown): string | undefined => {
 export class SimproResources {
   constructor(private readonly client: SimproClient) {}
 
-  async sites(maxRecords = 2000): Promise<SimproSite[]> {
-    const raw = await this.client.listAll<RawSite>('sites/', { columns: 'ID,Name,Address,Customers' }, maxRecords);
+  /**
+   * @param query extra filters, used to ask only for what changed since the
+   * last sync. Passed through rather than built here, because whether the
+   * endpoint honours a filter is checked by the caller.
+   */
+  async sites(maxRecords = 2000, query: Record<string, string> = {}): Promise<SimproSite[]> {
+    const raw = await this.client.listAll<RawSite>(
+      'sites/', { columns: 'ID,Name,Address,Customers,DateModified', ...query }, maxRecords,
+    );
     return raw.map((s) => ({
       id: String(s.ID ?? ''),
       name: str(s.Name) ?? 'Unnamed site',
@@ -123,15 +134,19 @@ export class SimproResources {
       state: str(s.Address?.State) ?? 'QLD',
       postcode: str(s.Address?.PostalCode),
       customerName: str(s.Customers?.[0]?.Name),
+      // Kept so the caller can anchor the next incremental sync on the newest
+      // record rather than on the local clock.
+      DateModified: str((s as { DateModified?: unknown }).DateModified),
     }));
   }
 
   async jobs(query: Record<string, string | number> = {}, maxRecords = 1000): Promise<SimproJob[]> {
     const raw = await this.client.listAll<RawJob>('jobs/', {
-      columns: 'ID,Type,Name,Description,Customer,Site,Stage,Status,DateIssued,DueDate',
+      columns: 'ID,Type,Name,Description,Customer,Site,Stage,Status,DateIssued,DueDate,DateModified',
       ...query,
     }, maxRecords);
     return raw.map((j) => ({
+      DateModified: str((j as { DateModified?: unknown }).DateModified),
       id: String(j.ID ?? ''),
       title: str(j.Name) ?? str(j.Description) ?? `Job ${j.ID ?? ''}`,
       description: str(j.Description),

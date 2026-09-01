@@ -1,5 +1,7 @@
 import { SimproClient, SimproError, type SimproConfig } from './client';
 import { SimproResources } from './resources';
+import { assessIncremental, newestChange, planIncremental, type SyncResource } from './incremental';
+import { readSyncState, writeSyncState } from './watermark';
 import { createSite, listSites, updateSite } from '@/db/repo';
 import { upsertJob, enqueueSync, pendingSync, markSynced, markSyncFailed, type JobRecord } from '@/db/opsRepo';
 import type { Site } from '@/domain/types';
@@ -25,6 +27,15 @@ export interface SyncResult {
   jobsAdded: number;
   jobsUpdated: number;
   errors: string[];
+  /**
+   * Whether each resource actually came down incrementally.
+   *
+   * Reported rather than assumed. A server that does not understand the filter
+   * returns everything and looks exactly like a busy day of changes, so the
+   * result is checked and a watermark is only recorded when it holds.
+   */
+  modes: Partial<Record<SyncResource, 'incremental' | 'full'>>;
+  notes: string[];
 }
 
 /** Matches an incoming site to one already held, by external id then by name. */
@@ -38,16 +49,32 @@ function matchSite(existing: Site[], externalId: string, name: string): Site | u
 export async function pullFromSimpro(
   config: SimproConfig,
   onProgress?: (p: SyncProgress) => void,
+  options?: { force?: boolean },
 ): Promise<SyncResult> {
   const client = new SimproClient(config);
   const api = new SimproResources(client);
-  const result: SyncResult = { sitesAdded: 0, sitesUpdated: 0, jobsAdded: 0, jobsUpdated: 0, errors: [] };
+  const result: SyncResult = {
+    sitesAdded: 0, sitesUpdated: 0, jobsAdded: 0, jobsUpdated: 0,
+    errors: [], modes: {}, notes: [],
+  };
+  const startedAt = new Date().toISOString();
 
   onProgress?.({ stage: 'Reading sites', done: 0, total: 2 });
 
+  // Ask only for what changed since the last successful sync. At nine hundred
+  // sites a full pull every time is slow enough that it stops being done, which
+  // is how a local copy quietly becomes weeks old.
+  const siteState = await readSyncState('sites');
+  const sitePlan = planIncremental('sites', siteState.lastChangeSeenAt, { force: options?.force });
+
   let remoteSites: Awaited<ReturnType<SimproResources['sites']>> = [];
+  let siteMode: 'incremental' | 'full' = 'full';
   try {
-    remoteSites = await api.sites();
+    remoteSites = await api.sites(undefined, sitePlan.query);
+    const outcome = assessIncremental(remoteSites, sitePlan, siteState.lastRecordCount);
+    siteMode = outcome.mode;
+    result.modes.sites = outcome.mode;
+    if (outcome.note) result.notes.push(outcome.note);
   } catch (e) {
     result.errors.push(describe(e, 'sites'));
   }
@@ -93,10 +120,33 @@ export async function pullFromSimpro(
     }
   }
 
+  // The watermark is only written when the pull actually succeeded. Recording
+  // one after a failure would make the next sync skip everything that changed
+  // while the network was down.
+  if (!result.errors.length) {
+    await writeSyncState({
+      resource: 'sites',
+      lastSyncedAt: startedAt,
+      // From the records rather than the clock: a phone running fast would
+      // otherwise skip everything written in the gap, silently and for good.
+      lastChangeSeenAt: newestChange(remoteSites as unknown as Record<string, unknown>[])
+        ?? (siteMode === 'full' ? startedAt : siteState.lastChangeSeenAt),
+      lastRecordCount: siteMode === 'full' ? remoteSites.length : siteState.lastRecordCount,
+      mode: siteMode,
+    }, startedAt);
+  }
+
   onProgress?.({ stage: 'Reading jobs', done: 1, total: 2 });
 
+  const jobState = await readSyncState('jobs');
+  const jobPlan = planIncremental('jobs', jobState.lastChangeSeenAt, { force: options?.force });
+  const errorsBeforeJobs = result.errors.length;
+
   try {
-    const remoteJobs = await api.jobs({}, 500);
+    const remoteJobs = await api.jobs(jobPlan.query, 500);
+    const outcome = assessIncremental(remoteJobs, jobPlan, jobState.lastRecordCount);
+    result.modes.jobs = outcome.mode;
+    if (outcome.note) result.notes.push(outcome.note);
     for (const [i, job] of remoteJobs.entries()) {
       if (i % 25 === 0) onProgress?.({ stage: 'Jobs', done: i, total: remoteJobs.length });
       try {
@@ -106,6 +156,16 @@ export async function pullFromSimpro(
       } catch (e) {
         result.errors.push(describe(e, `job ${job.id}`));
       }
+    }
+    if (result.errors.length === errorsBeforeJobs) {
+      await writeSyncState({
+        resource: 'jobs',
+        lastSyncedAt: startedAt,
+        lastChangeSeenAt: newestChange(remoteJobs as unknown as Record<string, unknown>[])
+          ?? (outcome.mode === 'full' ? startedAt : jobState.lastChangeSeenAt),
+        lastRecordCount: outcome.mode === 'full' ? remoteJobs.length : jobState.lastRecordCount,
+        mode: outcome.mode,
+      }, startedAt);
     }
   } catch (e) {
     result.errors.push(describe(e, 'jobs'));

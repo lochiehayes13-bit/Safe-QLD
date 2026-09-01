@@ -7,6 +7,8 @@ import { clearExports, exportsSize } from '@/export/files';
 import { pendingSyncCount } from '@/db/opsRepo';
 import { bundledCatalogueSize, startCatalogueSeed } from '@/seed/catalogueSeed';
 import { flushQueue, pullFromSimpro, type SyncProgress } from '@/simpro/sync';
+import { describeStaleness, type SyncState } from '@/simpro/incremental';
+import { readAllSyncState } from '@/simpro/watermark';
 import { formatBytes } from '@/share/pack';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
@@ -22,6 +24,7 @@ export default function SettingsScreen() {
   const [storage, setStorage] = useState(0);
   const [pending, setPending] = useState(0);
   const [syncing, setSyncing] = useState(false);
+  const [syncState, setSyncState] = useState<SyncState[]>([]);
   const [progress, setProgress] = useState<SyncProgress | null>(null);
   // Null until seeding settles, so a first launch shows "loading" rather than
   // an alarming zero against the bundled figure.
@@ -31,6 +34,7 @@ export default function SettingsScreen() {
   useEffect(() => {
     void loadPrefs().then(setPrefs);
     void SimproClient.hasSecret().then(setHasSecret);
+    void readAllSyncState().then(setSyncState);
     void pendingSyncCount().then(setPending);
     void startCatalogueSeed()
       .then(({ count }) => setCatalogue(count))
@@ -102,10 +106,21 @@ export default function SettingsScreen() {
     setProgress(null);
     try {
       const r = await pullFromSimpro(configFor(), setProgress);
+      setSyncState(await readAllSyncState());
+      const incremental = Object.entries(r.modes)
+        .filter(([, mode]) => mode === 'incremental')
+        .map(([resource]) => resource);
       const lines = [
         `${r.sitesAdded} sites added, ${r.sitesUpdated} updated`,
         `${r.jobsAdded + r.jobsUpdated} jobs synced`,
+        incremental.length
+          ? `Only changes were fetched for ${incremental.join(' and ')}.`
+          : 'Everything was fetched — this was a full sync.',
       ];
+      // A server that ignores the filter returns everything and looks like a
+      // busy day. Saying so is the difference between a slow sync and a sync
+      // that is quietly not doing what it claims.
+      if (r.notes.length) lines.push('', ...r.notes);
       if (r.errors.length) lines.push('', ...r.errors.slice(0, 5));
       Alert.alert('Sync complete', lines.join('\n'));
     } catch (e) {
@@ -243,6 +258,44 @@ export default function SettingsScreen() {
           ))}
         </Card>
       ) : null}
+
+      <H2>How current this device is</H2>
+      <Card>
+        {syncState.filter((st) => st.lastSyncedAt || st.lastRecordCount > 0).length === 0 ? (
+          <Txt size="sm" tone="muted">
+            Nothing has been synced from the office yet. Everything held here was entered on this
+            device or imported from a file.
+          </Txt>
+        ) : (
+          syncState.map((st, i) => {
+            const age = describeStaleness(st, new Date());
+            return (
+              <View key={st.resource}>
+                {i > 0 ? <Divider /> : null}
+                <Rowed style={{ justifyContent: 'space-between' }}>
+                  <Txt size="sm" style={{ textTransform: 'capitalize' }}>{st.resource}</Txt>
+                  <Txt
+                    size="sm"
+                    tone={age.state === 'stale' ? 'fail' : age.state === 'ageing' ? 'warn' : 'muted'}
+                  >
+                    {age.label}
+                  </Txt>
+                </Rowed>
+                {st.mode === 'full' && st.lastSyncedAt ? (
+                  <Txt size="xs" tone="faint">
+                    Fetched in full — this endpoint does not filter by change date.
+                  </Txt>
+                ) : null}
+              </View>
+            );
+          })
+        )}
+        <View style={{ height: t.space(2) }} />
+        <Txt size="xs" tone="faint" style={{ lineHeight: 16 }}>
+          Safe QLD works offline, so what you are looking at is a copy taken when there was last a
+          signal — not a live view of the office system. That is why this says how old it is.
+        </Txt>
+      </Card>
 
       <H2>Storage</H2>
       <Card>
