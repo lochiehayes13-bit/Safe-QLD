@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, View } from 'react-native';
+import { Alert, Image, Pressable, View } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
@@ -12,9 +13,13 @@ import {
   summariseFindings, validateFindings, type Finding, type FindingKind, type FindingPriority,
 } from '@/domain/findings';
 import { effectivenessReportHtml } from '@/export/effectivenessReport';
-import { photoUri } from '@/export/photoFiles';
+import { keepPhoto, photoUri } from '@/export/photoFiles';
+import {
+  CAPTURE_QUALITY, groupForRegister, numberRegister, type PhotoRef,
+} from '@/domain/photoStore';
 import { shareFile, writePdf } from '@/export/files';
 import { loadPrefs } from '@/app-prefs';
+import { newId } from '@/db';
 import type { Site } from '@/domain/types';
 import { useTheme } from '@/theme';
 import {
@@ -132,11 +137,30 @@ export default function AssessmentScreen() {
         systemDescription: assessment.systemDescription,
         panelStatus: assessment.panelStatus,
         findings: fresh,
-        photos: fresh.flatMap((f) => f.photos.map((p) => ({
-          uri: photoUri(p),
-          caption: `${findingRef(f.kind, f.seq)} — ${f.item || f.location}`,
-          group: f.item || f.location,
-        }))),
+        // Grouped and numbered by the same functions the register was written
+        // for, rather than counted again here: the findings cite photographs by
+        // number, so there can only be one answer to which one is Photo 7.
+        photos: numberRegister(groupForRegister(
+          fresh.flatMap((f): PhotoRef[] => f.photos.map((path, i) => ({
+            id: `${f.id}-${i}`,
+            subject: 'report',
+            subjectId: f.id,
+            path,
+            caption: f.item || f.location,
+            // Every photograph on a finding shares its timestamp, so the sort
+            // is stable and they stay in the order they were attached.
+            takenAt: f.createdAt,
+          }))),
+          (_subject, subjectId) => {
+            const f = fresh.find((x) => x.id === subjectId);
+            return f ? `${findingRef(f.kind, f.seq)} — ${f.item || f.location}` : 'General';
+          },
+        )).map(({ ref, photo, group }) => ({
+          ref,
+          uri: photoUri(photo.path),
+          caption: photo.caption ?? group.label,
+          group: group.label,
+        })),
         statement: assessment.statement,
         openDefectCaution: caution,
       });
@@ -365,6 +389,45 @@ function FindingCard({
   const t = useTheme();
   const ref = findingRef(finding.kind, finding.seq);
 
+  /**
+   * A photograph for the register.
+   *
+   * Copied out of the picker's cache immediately. The operating system may
+   * clear that directory at any point, and a register entry pointing at a file
+   * that is no longer there produces no error — just a gap in an issued report.
+   */
+  const addPhoto = async (fromCamera: boolean) => {
+    const perm = fromCamera
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('Permission needed', 'Safe QLD needs access to add a photograph to this finding.');
+      return;
+    }
+    const result = fromCamera
+      ? await ImagePicker.launchCameraAsync({ quality: CAPTURE_QUALITY })
+      : await ImagePicker.launchImageLibraryAsync({ quality: CAPTURE_QUALITY });
+    if (result.canceled || !result.assets[0]) return;
+    try {
+      const kept = keepPhoto({
+        id: newId(),
+        sourceUri: result.assets[0]!.uri,
+        subject: 'report',
+        subjectId: finding.id,
+        takenAt: new Date().toISOString(),
+        caption: finding.item,
+      });
+      onChange({ photos: [...finding.photos, kept.path] });
+    } catch (e) {
+      Alert.alert(
+        'Could not keep that photograph',
+        `It was taken but could not be saved to this device, so it has not been attached. ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
+    }
+  };
+
   return (
     <Card>
       <Pressable onPress={onToggle}>
@@ -458,6 +521,39 @@ function FindingCard({
               />
             </>
           ) : null}
+
+          <View style={{ height: t.space(3) }} />
+          <Label>Photographs</Label>
+          <Txt size="xs" tone="faint" style={{ lineHeight: 16 }}>
+            These print in the report's photographic register, grouped under {ref} and numbered in
+            the order they were taken.
+          </Txt>
+          {finding.photos.length ? (
+            <Rowed gap={2} style={{ flexWrap: 'wrap', marginTop: t.space(2) }}>
+              {finding.photos.map((path) => (
+                <Pressable
+                  key={path}
+                  onPress={() => Alert.alert('Remove this photograph?', 'It stays on the device; it just leaves the register.', [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Remove',
+                      style: 'destructive',
+                      onPress: () => onChange({ photos: finding.photos.filter((p) => p !== path) }),
+                    },
+                  ])}
+                >
+                  <Image
+                    source={{ uri: photoUri(path) }}
+                    style={{ width: 76, height: 76, borderRadius: t.radius.sm }}
+                  />
+                </Pressable>
+              ))}
+            </Rowed>
+          ) : null}
+          <Rowed gap={2} style={{ marginTop: t.space(2) }}>
+            <Button title="Take one" variant="secondary" compact style={{ flex: 1 }} onPress={() => void addPhoto(true)} />
+            <Button title="From the gallery" variant="ghost" compact style={{ flex: 1 }} onPress={() => void addPhoto(false)} />
+          </Rowed>
 
           <View style={{ height: t.space(3) }} />
           <Button title={`Remove ${ref}`} variant="ghost" compact onPress={onRemove} />

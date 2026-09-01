@@ -1,5 +1,6 @@
 import {
-  DUE_LABEL, complianceFrequency, routineDue, sortByUrgency, type RoutineHistory,
+  DUE_LABEL, RUN_STATUS_LABEL, assessRunHistory, complianceFrequency, routineDue, sortByUrgency,
+  type RoutineHistory,
 } from '@/domain/schedule';
 import { SERVICE_ROUTINES } from '@/seed/serviceRoutines';
 
@@ -142,6 +143,67 @@ describe('ordering a list of them', () => {
   it('has wording for every state it can report', () => {
     for (const state of ['overdue', 'due', 'never-done', 'upcoming', 'not-scheduled'] as const) {
       expect(DUE_LABEL[state]).toBeTruthy();
+    }
+  });
+});
+
+describe('assessRunHistory', () => {
+  const runs = (...dates: string[]) => dates.map((completedAt) => ({ completedAt }));
+
+  it('does not judge the first service, which defines the schedule', () => {
+    const [first] = assessRunHistory(runs('2023-03-15'), 'annual');
+    expect(first).toEqual({ occurrence: 0, completedAt: '2023-03-15', status: 'anchor' });
+    expect(RUN_STATUS_LABEL.anchor).toContain('counts from here');
+  });
+
+  it('judges each service against the schedule, not against the one before it', () => {
+    // Roughly fourteen months between each. Measured against the service
+    // before it every one looks like an annual done slightly late; measured
+    // against the schedule the drift compounds and the third is out of
+    // tolerance, which is the whole reason the anchor exists.
+    const out = assessRunHistory(runs('2023-03-01', '2024-04-20', '2025-06-10'), 'annual');
+    expect(out.map((r) => r.status)).toEqual(['anchor', 'in-tolerance', 'late']);
+    expect(out[1]!.daysFromScheduled).toBe(50);
+    expect(out[2]!.scheduledFor).toBe('2025-03-01');
+    // Yearly carries a two-month tolerance, so 50 days late is still compliant
+    // and 101 is not. The drift is only visible because each is measured from
+    // the anchor.
+    expect(out[2]!.daysFromScheduled).toBe(101);
+  });
+
+  it('counts a service inside the window as in tolerance', () => {
+    const out = assessRunHistory(runs('2023-03-01', '2024-03-10'), 'annual');
+    expect(out[1]).toMatchObject({ status: 'in-tolerance', scheduledFor: '2024-03-01' });
+  });
+
+  it('reports one done well before its window as early, not as compliant', () => {
+    const out = assessRunHistory(runs('2023-03-01', '2023-09-01'), 'annual');
+    expect(out[1]!.status).toBe('early');
+    expect(out[1]!.daysFromScheduled).toBeLessThan(0);
+  });
+
+  it('orders by date, so runs recorded out of order still anchor correctly', () => {
+    const out = assessRunHistory(runs('2024-03-10', '2023-03-01'), 'annual');
+    expect(out[0]!.completedAt).toBe('2023-03-01');
+    expect(out[0]!.status).toBe('anchor');
+    expect(out[1]!.status).toBe('in-tolerance');
+  });
+
+  it('says it does not know rather than inventing a window', () => {
+    // Quarterly has no schedule table behind it, so there is no tolerance to
+    // measure against and none is assumed.
+    const out = assessRunHistory(runs('2023-03-01', '2023-06-14'), 'quarterly');
+    expect(out[1]!.status).toBe('unknown');
+    expect(out[1]!.scheduledFor).toBeUndefined();
+  });
+
+  it('returns nothing for a routine never carried out', () => {
+    expect(assessRunHistory([], 'annual')).toEqual([]);
+  });
+
+  it('labels every status it can produce', () => {
+    for (const status of ['anchor', 'in-tolerance', 'early', 'late', 'unknown'] as const) {
+      expect(RUN_STATUS_LABEL[status]).toBeTruthy();
     }
   });
 });

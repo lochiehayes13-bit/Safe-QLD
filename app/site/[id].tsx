@@ -307,6 +307,12 @@ export default function SiteScreen() {
           }}
         />
         <NavRow
+          icon="history"
+          title="Service history"
+          subtitle="What has been done here, and whether it was done within tolerance"
+          onPress={() => router.push({ pathname: '/site/history', params: { siteId: site.id } })}
+        />
+        <NavRow
           icon="clipboard-search-outline"
           title="Effectiveness assessment"
           subtitle="Visual and advisory — recommendations for a project, not a service"

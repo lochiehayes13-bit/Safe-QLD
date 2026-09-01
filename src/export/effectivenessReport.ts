@@ -34,11 +34,21 @@ function paras(s: string | undefined): string {
   return s.trim().split(/\n{2,}|\r\n\r\n/).map((p) => `<p>${esc(p.trim()).replace(/\n/g, '<br />')}</p>`).join('');
 }
 
+/**
+ * One numbered entry in the photographic register.
+ *
+ * Already grouped and numbered by the caller, using groupForRegister and
+ * numberRegister — the report renders what it is given rather than counting
+ * again. A second counter here would be a second answer to "which photo is
+ * Photo 7", and the register is cited by number from the findings.
+ */
 export interface ReportPhoto {
+  /** "Photo 7", from numberRegister. */
+  ref: string;
   /** A resolved URI the renderer can load, or a data URI. */
   uri: string;
   caption: string;
-  /** The group it prints under: "Fire Indicator Panel — External, Controls & Status". */
+  /** The heading it prints under: "Fire Indicator Panel — External, Controls & Status". */
   group?: string;
 }
 
@@ -173,22 +183,20 @@ function registerTable(findings: Finding[], kind: Finding['kind']): string {
 
 function photoRegister(photos: ReportPhoto[]): string {
   if (!photos.length) return '';
-  const groups = new Map<string, ReportPhoto[]>();
+  // Headings in the order the register was numbered, so the numbers run down
+  // the page rather than jumping between sections.
+  const groups: { label: string; photos: ReportPhoto[] }[] = [];
   for (const p of photos) {
-    const key = p.group?.trim() || 'General';
-    const list = groups.get(key) ?? [];
-    list.push(p);
-    groups.set(key, list);
+    const label = p.group?.trim() || 'General';
+    const last = groups[groups.length - 1];
+    if (last && last.label === label) last.photos.push(p);
+    else groups.push({ label, photos: [p] });
   }
-  let n = 0;
-  const blocks = [...groups.entries()].map(([group, list]) => `
-    <h3>${esc(group)}</h3>
-    <div class="photos">${list.map((p) => {
-    n += 1;
-    return `<div class="photo"><img src="${esc(p.uri)}" alt="" />
-      <div class="cap">Photo ${n} — ${esc(p.caption)}</div></div>`;
-  }).join('')}</div>`).join('');
-  return blocks;
+  return groups.map((g) => `
+    <h3>${esc(g.label)}</h3>
+    <div class="photos">${g.photos.map((p) => `
+      <div class="photo"><img src="${esc(p.uri)}" alt="" />
+      <div class="cap">${esc(p.ref)} — ${esc(p.caption)}</div></div>`).join('')}</div>`).join('');
 }
 
 export function effectivenessReportHtml(input: EffectivenessReportInput): string {

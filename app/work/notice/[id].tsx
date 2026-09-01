@@ -5,7 +5,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getSite, listDefects, updateDefect } from '@/db/repo';
 import type { Defect, Site } from '@/domain/types';
 import {
-  criticalNoticeDueAt, isQldCriticalDefect, rectificationDueAt,
+  AS1851_CLASS_LABEL, AS1851_CLASS_OBLIGATION, criticalNoticeDueAt, isQldCriticalDefect,
+  rectificationDueAt, type As1851Class,
 } from '@/domain/qldCompliance';
 import { criticalDefectNoticeHtml } from '@/export/criticalDefectNotice';
 import { shareFile, writePdf } from '@/export/files';
@@ -149,6 +150,33 @@ export default function NoticeScreen() {
           <Txt size="sm" tone="muted" style={{ lineHeight: 20, marginTop: 4 }}>{defect.description}</Txt>
           <Divider />
           <Txt size="xs" tone="faint">Identified {formatAuDate(defect.raisedAt)}</Txt>
+        </Card>
+
+        <H2>How AS 1851 classifies it</H2>
+        <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+          The technical classification, which carries its own notification and rectification
+          expectations. It is not the Queensland test below, and the two can disagree.
+        </Txt>
+        <Card>
+          <Segmented
+            value={defect.as1851Class ?? 'non-critical'}
+            onChange={(v) => update({ as1851Class: v })}
+            options={(Object.keys(AS1851_CLASS_LABEL) as As1851Class[])
+              .map((k) => ({ value: k, label: AS1851_CLASS_LABEL[k] }))}
+          />
+          <View style={{ height: t.space(2.5) }} />
+          <Rowed gap={2} align="flex-start">
+            <Txt size="xs" tone="faint" style={{ width: 62 }}>Notify</Txt>
+            <Txt size="sm" style={{ flex: 1, lineHeight: 19 }}>
+              {AS1851_CLASS_OBLIGATION[defect.as1851Class ?? 'non-critical'].notify}
+            </Txt>
+          </Rowed>
+          <Rowed gap={2} align="flex-start" style={{ marginTop: t.space(2) }}>
+            <Txt size="xs" tone="faint" style={{ width: 62 }}>Rectify</Txt>
+            <Txt size="sm" style={{ flex: 1, lineHeight: 19 }}>
+              {AS1851_CLASS_OBLIGATION[defect.as1851Class ?? 'non-critical'].rectify}
+            </Txt>
+          </Rowed>
         </Card>
 
         <H2>Is this a critical defect in Queensland?</H2>

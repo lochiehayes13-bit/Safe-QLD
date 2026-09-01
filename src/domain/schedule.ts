@@ -1,6 +1,6 @@
 import {
-  frequencySpec, scheduledDate, toleranceWindow,
-  type Frequency as ComplianceFrequency,
+  frequencySpec, scheduledDate, toleranceStatus, toleranceWindow,
+  type Frequency as ComplianceFrequency, type ToleranceStatus,
 } from '@/domain/qldCompliance';
 import type { Frequency as RoutineFrequency } from '@/seed/serviceRoutines';
 
@@ -148,4 +148,67 @@ export const DUE_LABEL: Record<DueState, string> = {
   'never-done': 'Never recorded',
   upcoming: 'Upcoming',
   'not-scheduled': 'No schedule',
+};
+
+/**
+ * Whether each service in a site's history landed inside its window.
+ *
+ * The anchor is the first service, and everything after it is judged against
+ * the date the schedule said it was due — not against the service before it.
+ * That distinction is the whole reason the anchor exists: judging each run
+ * against the last one makes any amount of accumulated drift look compliant,
+ * because every service is roughly a year after the one before it however far
+ * the whole sequence has slid.
+ *
+ * The anchor itself is not judged. It defines the schedule rather than being
+ * measured by it, and calling it "in tolerance" would assert a compliance that
+ * nothing established.
+ */
+export type RunStatus = ToleranceStatus | 'anchor';
+
+export interface RunAssessment {
+  /** 0 for the anchor, 1 for the first scheduled recurrence, and so on. */
+  occurrence: number;
+  completedAt: string;
+  /** The date the schedule called for. Absent on the anchor and where unschedulable. */
+  scheduledFor?: string;
+  status: RunStatus;
+  /** Negative early, positive late. Absent where there is no scheduled date. */
+  daysFromScheduled?: number;
+}
+
+export function assessRunHistory(
+  runs: { completedAt: string }[],
+  frequency: RoutineFrequency,
+): RunAssessment[] {
+  const ordered = [...runs].sort((a, b) => a.completedAt.localeCompare(b.completedAt));
+  if (!ordered.length) return [];
+
+  const anchor = ordered[0]!.completedAt.slice(0, 10);
+  const compliance = complianceFrequency(frequency);
+
+  return ordered.map((run, i) => {
+    const completedAt = run.completedAt;
+    if (i === 0) return { occurrence: 0, completedAt, status: 'anchor' as const };
+    if (!compliance || !frequencySpec(compliance)) {
+      return { occurrence: i, completedAt, status: 'unknown' as const };
+    }
+    const scheduledFor = scheduledDate(anchor, compliance, i);
+    if (!scheduledFor) return { occurrence: i, completedAt, status: 'unknown' as const };
+    return {
+      occurrence: i,
+      completedAt,
+      scheduledFor,
+      status: toleranceStatus(scheduledFor, completedAt, compliance),
+      daysFromScheduled: daysBetween(scheduledFor, completedAt.slice(0, 10)) ?? undefined,
+    };
+  });
+}
+
+export const RUN_STATUS_LABEL: Record<RunStatus, string> = {
+  anchor: 'First service — the schedule counts from here',
+  'in-tolerance': 'Within tolerance',
+  early: 'Earlier than the window',
+  late: 'Later than the window',
+  unknown: 'No schedule table for this frequency',
 };

@@ -156,12 +156,12 @@ describe('open defects already on the site', () => {
 });
 
 describe('the photographic register', () => {
-  it('numbers photographs across groups, as a register does', () => {
+  it('prints the numbers the register gave them, rather than counting again', () => {
     const html = effectivenessReportHtml(input({
       photos: [
-        { uri: 'file:///a.jpg', caption: 'Panel front', group: 'Fire Indicator Panel' },
-        { uri: 'file:///b.jpg', caption: 'Panel display', group: 'Fire Indicator Panel' },
-        { uri: 'file:///c.jpg', caption: 'A detector head', group: 'Detection' },
+        { ref: 'Photo 1', uri: 'file:///a.jpg', caption: 'Panel front', group: 'Fire Indicator Panel' },
+        { ref: 'Photo 2', uri: 'file:///b.jpg', caption: 'Panel display', group: 'Fire Indicator Panel' },
+        { ref: 'Photo 3', uri: 'file:///c.jpg', caption: 'A detector head', group: 'Detection' },
       ],
     }));
     expect(html).toContain('Photo 1 — Panel front');
@@ -174,7 +174,7 @@ describe('the photographic register', () => {
   it('renumbers the sign-off section when there are no photographs', () => {
     expect(effectivenessReportHtml(input({ photos: [] }))).toContain('6. Assessment Summary');
     expect(effectivenessReportHtml(input({
-      photos: [{ uri: 'file:///a.jpg', caption: 'x' }],
+      photos: [{ ref: 'Photo 1', uri: 'file:///a.jpg', caption: 'x' }],
     }))).toContain('7. Assessment Summary');
   });
 });
