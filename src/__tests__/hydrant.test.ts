@@ -28,6 +28,8 @@ import {
   totalPitotFlow,
   type FlowUnit,
   type KFactorUnit,
+  RECOMMENDED_DRAWDOWN_FRACTION,
+  PITOT_MIN_RELIABLE_KPA, PITOT_MAX_RELIABLE_KPA,
 } from '@/calc/hydrant';
 
 /**
@@ -136,6 +138,33 @@ describe('pitotFlow — the coefficient is the whole ball game', () => {
     expect(r.reason).toMatch(/coefficient/i);
     // The refusal has to tell the technician what to do instead, or it is just a blank screen.
     expect(r.reason).toMatch(/meter|documentation|geometry/i);
+  });
+
+  it('trusts a pitot reading at either end of its own window', () => {
+    /*
+     * Below about 10 psi the stream does not fill the outlet and the reading
+     * understates the flow; above about 30 psi a pitot tube is hard to hold
+     * centred and an off-centre one reads low. Those two pressures are the ends
+     * of the usable window, not outside it.
+     *
+     * Warning at them puts a caution on a reading taken exactly as the source
+     * describes — and a caution that fires on good readings is one nobody
+     * reads by the third hydrant.
+     */
+    for (const kpa of [PITOT_MIN_RELIABLE_KPA, PITOT_MAX_RELIABLE_KPA]) {
+      const r = pitotFlow({ pitotKpa: kpa, outletDiameterMm: 65, outlet: 'rounded' });
+      if (isRefused(r)) throw new Error(r.reason);
+      expect({ kpa, warned: r.issues.some((i2) => i2.title.includes('Pitot reading')) })
+        .toEqual({ kpa, warned: false });
+    }
+
+    // Outside it, both ends warn.
+    for (const kpa of [PITOT_MIN_RELIABLE_KPA - 1, PITOT_MAX_RELIABLE_KPA + 1]) {
+      const r = pitotFlow({ pitotKpa: kpa, outletDiameterMm: 65, outlet: 'rounded' });
+      if (isRefused(r)) throw new Error(r.reason);
+      expect({ kpa, warned: r.issues.some((i2) => i2.title.includes('Pitot reading')) })
+        .toEqual({ kpa, warned: true });
+    }
   });
 
   it('accepts a coefficient from the equipment documentation and records that it was entered', () => {
@@ -545,6 +574,32 @@ describe('projectAvailableFlow — refusals', () => {
     expect(isRefused(r)).toBe(true);
     if (!isRefused(r)) return;
     expect(r.reason).toMatch(/did not move/i);
+  });
+
+  it('treats both thresholds as the numbers they are named for', () => {
+    /*
+     * Five per cent is usable and twenty-five is recommended, and each is the
+     * value the rule is about rather than the first value past it.
+     *
+     * Getting the lower one wrong withholds an answer a technician can act on,
+     * from a test they may not be able to repeat — there may be no more outlets
+     * on that main. Getting the upper one wrong attaches a caveat to a test
+     * that met NFPA 291's own figure, which is how a caveat stops meaning
+     * anything.
+     */
+    const at = (fraction: number) => projectAvailableFlow({
+      staticKpa: 600,
+      residualKpa: 600 * (1 - fraction),
+      measuredFlowLpm: 500,
+      targetResidualKpa: 350,
+    });
+
+    const usable = at(MINIMUM_USABLE_DRAWDOWN_FRACTION);
+    expect(isRefused(usable)).toBe(false);
+
+    const recommended = at(RECOMMENDED_DRAWDOWN_FRACTION);
+    if (isRefused(recommended)) throw new Error(recommended.reason);
+    expect(recommended.issues.some((i) => i.title.includes('25%'))).toBe(false);
   });
 
   it('refuses a drawdown too small to project from', () => {
