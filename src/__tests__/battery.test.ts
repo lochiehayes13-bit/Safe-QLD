@@ -9,6 +9,7 @@ import {
   STANDARD_SLA_AH,
   totalCurrents,
   type LoadItem,
+  TEMP_MIN_C, TEMP_MAX_C,
 } from '@/calc/battery';
 
 /**
@@ -123,6 +124,42 @@ describe('calculateBattery — validation', () => {
   it('flags a battery that will not fit the panel', () => {
     const r = calculateBattery({ ...base, mode: 'design', monitored: false, panelMaxBatteryAh: 26 });
     expect(r.issues.some((i) => i.level === 'error' && i.title.includes('will not fit'))).toBe(true);
+  });
+
+  it('accepts a battery that exactly fills the panel, and refuses the one over it', () => {
+    /*
+     * The calculation calls for 50 Ah here. A panel that accepts 50 accepts it;
+     * one that accepts 49 does not, and needs an external supply and a cabinet.
+     *
+     * Read a hair the wrong way, a panel sized exactly for its own battery is
+     * told it needs a cabinet it does not need — which is a quote for work
+     * nobody has to do.
+     */
+    const exact = calculateBattery({ ...base, mode: 'design', monitored: false, panelMaxBatteryAh: 50 });
+    expect(exact.recommendedAh).toBe(50);
+    expect(exact.issues.some((i) => i.title.includes('will not fit'))).toBe(false);
+
+    const oneShort = calculateBattery({ ...base, mode: 'design', monitored: false, panelMaxBatteryAh: 49 });
+    expect(oneShort.issues.some((i) => i.level === 'error' && i.title.includes('will not fit'))).toBe(true);
+  });
+
+  it('treats both ends of the stated temperature window as inside it', () => {
+    /*
+     * The capacity formula is stated for 15–30 °C and gives no correction
+     * outside it. Those two temperatures are inside the window, and warning at
+     * them sends somebody to a manufacturer's derating curve for a battery
+     * sitting in the range the formula covers.
+     */
+    for (const temp of [TEMP_MIN_C, TEMP_MAX_C]) {
+      const r = calculateBattery({ ...base, mode: 'design', monitored: false, averageTempC: temp });
+      expect({ temp, warned: r.issues.some((i) => i.title.includes('outside')) })
+        .toEqual({ temp, warned: false });
+    }
+    for (const temp of [TEMP_MIN_C - 1, TEMP_MAX_C + 1]) {
+      const r = calculateBattery({ ...base, mode: 'design', monitored: false, averageTempC: temp });
+      expect({ temp, warned: r.issues.some((i) => i.title.includes('outside')) })
+        .toEqual({ temp, warned: true });
+    }
   });
 
   it('warns when no alarm signalling equipment load was entered', () => {
