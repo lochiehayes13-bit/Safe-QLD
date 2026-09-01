@@ -219,6 +219,23 @@ describe('when the statement contradicts the file', () => {
     expect(out).toEqual([]);
   });
 
+  it('challenges a row struck out as not installed that we hold a notice against', () => {
+    /*
+     * Footnote 2 has an occupier delete a row the building does not have, so a
+     * struck row is a positive answer and it takes the whole installation off
+     * the form. Struck wrongly, the notice goes with it and nothing else on
+     * the document would ever mention it.
+     */
+    const out = checkStatementAgainstRecords(statement({
+      rows: [{ installation: 'Fire detection and alarm systems', installed: false }],
+    }), [notice()]);
+
+    expect(out.map((p) => p.kind)).toEqual(['struck-but-recorded']);
+    expect(out[0]!.contradiction).toBe(true);
+    expect(out[0]!.message).toMatch(/does not have this installation/);
+    expect(out[0]!.message).toMatch(/struck wrongly, or the defect is recorded against the wrong asset/);
+  });
+
   it('measures against the last defect rectified, not the first', () => {
     // Two defects behind one row. The row is only honestly rectified once the
     // later one is, and taking the earlier date would pass a statement that
@@ -257,6 +274,26 @@ describe('when it is something to check rather than something wrong', () => {
     expect(out[0]!.contradiction).toBe(false);
     expect(out[0]!.message).toMatch(/another contractor/);
     expect(out[0]!.message).toMatch(/attached either way/);
+  });
+
+  it('says a notice it holds falls outside the period rather than claiming none', () => {
+    /*
+     * "Safe QLD holds no record of one" would be untrue, and the dates are the
+     * fact that tells somebody whether the period is wrong or the answer is.
+     */
+    const out = checkStatementAgainstRecords(statement({
+      rows: [{
+        installation: 'Fire detection and alarm systems', installed: true,
+        criticalDefectNoticeIssued: true, rectificationDate: '2025-06-20',
+      }],
+    }), [notice({ noticeIssuedAt: '2025-06-04' })]);
+
+    expect(out.map((p) => p.kind)).toEqual(['declared-without-record']);
+    expect(out[0]!.contradiction).toBe(false);
+    expect(out[0]!.message).toContain('2025-06-04');
+    expect(out[0]!.message).toMatch(/fall outside it/);
+    expect(out[0]!.message).toMatch(/period is wrong or the answer belongs to a different statement/);
+    expect(out[0]!.defectIds).toEqual(['d1']);
   });
 
   it('answers an unanswered column 3 rather than only complaining about it', () => {

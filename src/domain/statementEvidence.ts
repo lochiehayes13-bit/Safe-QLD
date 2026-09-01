@@ -164,6 +164,8 @@ export interface RecordedNotice {
 export type EvidenceProblemKind =
   /** We hold a notice for this row and the statement declares none. */
   | 'notice-not-declared'
+  /** The row is struck out as not installed and we hold a notice against it. */
+  | 'struck-but-recorded'
   /** We hold a notice and column 3 has not been answered either way. */
   | 'notice-unanswered'
   /** We hold a notice that cannot be filed against a row without guessing. */
@@ -279,6 +281,33 @@ export function checkStatementAgainstRecords(
     const listed = held0.map((n) => `${describe(n)} (notice given ${n.noticeIssuedAt.slice(0, 10)})`).join('; ');
     const count = held0.length;
 
+    if (row && row.installed === false) {
+      /*
+       * The row is struck out — the statement says the building does not have
+       * this installation — and we hold a critical defect notice against it.
+       *
+       * Footnote 2 has an occupier delete a row the building does not have, so
+       * a struck row is a positive answer rather than a blank, and it takes the
+       * whole installation off the form. If it is struck wrongly, the notice
+       * disappears with it and nothing else on the document would ever mention
+       * it. Two things can be wrong here and both matter: the row, or which
+       * asset the defect was recorded against.
+       */
+      problems.push({
+        kind: 'struck-but-recorded',
+        formRef,
+        installation,
+        message: `${installation}: the statement says the building does not have this installation, `
+          + `and Safe QLD holds ${count} critical defect ${plural(count, 'notice', 'notices')} `
+          + `against it in this period — ${listed}. Either the row is struck wrongly, or the `
+          + 'defect is recorded against the wrong asset. Struck out, the notice comes off the form '
+          + 'with the row.',
+        contradiction: true,
+        defectIds: ids,
+      });
+      continue;
+    }
+
     if (!row || row.criticalDefectNoticeIssued === undefined) {
       problems.push({
         kind: 'notice-unanswered',
@@ -350,15 +379,33 @@ export function checkStatementAgainstRecords(
     if (row.criticalDefectNoticeIssued !== true) continue;
     const item = schedule2Installation(row.installation);
     if (!item || byInstallation.has(item.name)) continue;
+
+    /*
+     * We may hold a notice for this installation outside the period. That does
+     * not support the claim — every column on the schedule is answered "during
+     * the period covered by this statement" — but saying we hold no record of
+     * one would be untrue, and it is the fact that tells somebody whether the
+     * period is wrong or the answer is.
+     */
+    const outside = held
+      .filter((n) => !inPeriod(n.noticeIssuedAt, start, end))
+      .filter((n) => n.system && installationForSystem(n.system).installation === item.name);
+
     problems.push({
       kind: 'declared-without-record',
       formRef: item.ref,
       installation: item.name,
-      message: `${item.name}: the statement says a critical defect notice was issued in this period and `
-        + 'Safe QLD holds no record of one. That is expected where another contractor maintains it — '
-        + 'worth confirming, and the notice has to be attached either way.',
+      message: outside.length
+        ? `${item.name}: the statement says a critical defect notice was issued in this period, and `
+          + `the ${plural(outside.length, 'notice', 'notices')} Safe QLD holds for it fall outside `
+          + `it — ${outside.map((n) => n.noticeIssuedAt.slice(0, 10)).join(', ')}, against a period `
+          + `of ${start} to ${end}. Either the period is wrong or the answer belongs to a different `
+          + 'statement.'
+        : `${item.name}: the statement says a critical defect notice was issued in this period and `
+          + 'Safe QLD holds no record of one. That is expected where another contractor maintains it — '
+          + 'worth confirming, and the notice has to be attached either way.',
       contradiction: false,
-      defectIds: [],
+      defectIds: outside.map((n) => n.defectId),
     });
   }
 
