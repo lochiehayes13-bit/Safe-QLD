@@ -37,7 +37,63 @@ jobs:
       - name: Tests
         run: npm test -- --ci
 
-      # Bundling is the check that catches what typecheck cannot: a missing
-      # native peer dependency compiles fine and then fails to start.
+      # Bundling catches a missing or unresolvable import, which typecheck does
+      # not: Metro resolves for real. It does NOT catch a native dependency
+      # conflict — this step passed for weeks on a tree Gradle refused to
+      # build, because it produces JavaScript and never opens the Android
+      # project. The apk job below is what checks that.
       - name: Bundle for Android
         run: npx expo export --platform android --output-dir dist
+
+  apk:
+    name: Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Gradle needs a JDK; the Android SDK is already on the runner image.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install
+        run: npm ci --legacy-peer-deps
+
+      # The android/ directory is generated and not in version control, so it
+      # is produced here the same way it is locally.
+      - name: Generate the native project
+        run: npx expo prebuild --platform android --no-install
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # The build that actually proves this ships. Reanimated asserts its own
+      # worklets version in a Gradle task, and nothing before this point in the
+      # pipeline runs it — typecheck reads types, the tests are pure logic, and
+      # the bundle above is JavaScript. All three passed on a tree where this
+      # failed outright.
+      #
+      # arm64 only: it is every handset from roughly 2017 on, and it halves the
+      # build. Drop the -P flag for a universal APK that also covers 32-bit and
+      # emulator images.
+      - name: Build the release APK
+        working-directory: android
+        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
+
+      # Signed with the standard Android debug key, which prebuild configures:
+      # installable by sideload, not accepted by the Play Store. RUNNING.md
+      # covers the Play route.
+      - name: Upload the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: safe-qld-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
