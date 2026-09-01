@@ -140,6 +140,50 @@ describe('validation', () => {
     expect(validateAddress(127, hochiki, 'dip').some((i) => i.level === 'error')).toBe(false);
   });
 
+  it('accepts both ends of a protocol\'s own range', () => {
+    /*
+     * The first and last addresses a protocol takes are addresses. Refusing
+     * either tells a technician standing at the device that the address they
+     * just set is out of range when it is the manufacturer's own limit, and
+     * they take the head down again to change it.
+     */
+    for (const p of PROTOCOLS) {
+      const lowest = validateAddress(p.minAddress, p, p.methods[0]!);
+      expect({ id: p.id, at: p.minAddress, rejected: lowest.some((i) => i.message.includes('outside that range')) })
+        .toEqual({ id: p.id, at: p.minAddress, rejected: false });
+
+      const highest = validateAddress(p.maxAddress, p, p.methods[0]!);
+      expect({ id: p.id, at: p.maxAddress, rejected: highest.some((i) => i.message.includes('outside that range')) })
+        .toEqual({ id: p.id, at: p.maxAddress, rejected: false });
+
+      const past = validateAddress(p.maxAddress + 1, p, p.methods[0]!);
+      expect({ id: p.id, at: p.maxAddress + 1, rejected: past.some((i) => i.message.includes('outside that range')) })
+        .toEqual({ id: p.id, at: p.maxAddress + 1, rejected: true });
+    }
+  });
+
+  it('leaves a rotary dial at 99 alone and warns about the one past it', () => {
+    // Ninety-nine is two decades and needs no moulded stop removed. A hundred
+    // does, and that is a trip back to the van for a screwdriver if nobody
+    // said so.
+    const f220 = protocolById('pertronic_f220')!;
+    expect(validateAddress(99, f220, 'rotary').some((i) => i.message.includes('moulded stop')))
+      .toBe(false);
+    expect(validateAddress(100, f220, 'rotary').some((i) => i.message.includes('moulded stop')))
+      .toBe(true);
+  });
+
+  it('leaves Apollo CoreProtocol at 126 alone and warns above it', () => {
+    // Above 126 needs the whole CoreProtocol chain — XPERT 8 base and card, a
+    // Soteria head, a CoreProtocol panel. At 126 it does not, and saying it
+    // does sends somebody pricing hardware the site already works without.
+    const core = protocolById('apollo_coreprotocol')!;
+    expect(validateAddress(126, core, 'xpert8').some((i) => i.message.includes('CoreProtocol chain')))
+      .toBe(false);
+    expect(validateAddress(127, core, 'xpert8').some((i) => i.message.includes('CoreProtocol chain')))
+      .toBe(true);
+  });
+
   it('warns that Hochiki switch 8 is not an address bit', () => {
     expect(validateAddress(10, hochiki, 'dip').some((i) => i.message.includes('switch 8') || i.message.includes('1 to 7'))).toBe(true);
   });
