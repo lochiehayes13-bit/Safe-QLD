@@ -17,6 +17,7 @@ import { useTheme } from '@/theme';
 import {
   Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
+import { RecordGate } from '@/components/RecordGate';
 
 /**
  * Critical defect notice.
@@ -29,6 +30,8 @@ export default function NoticeScreen() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [defect, setDefect] = useState<Defect | null>(null);
+  // Loaded-and-absent is not the same as still loading. See RecordGate.
+  const [missing, setMissing] = useState(false);
   const [site, setSite] = useState<Site | null>(null);
   const [occupier, setOccupier] = useState('');
   const [busy, setBusy] = useState(false);
@@ -40,6 +43,7 @@ export default function NoticeScreen() {
       const all = await listDefects();
       const d = all.find((x) => x.id === id) ?? null;
       setDefect(d);
+      setMissing(!d);
       setOccupier(d?.noticeRecipient ?? '');
       if (d) setSite(await getSite(d.siteId));
     })();
@@ -60,7 +64,7 @@ export default function NoticeScreen() {
     });
   };
 
-  if (!defect) return <Screen><Txt tone="muted">Loading…</Txt></Screen>;
+  if (!defect) return <RecordGate missing={missing} what="defect notice" />;
 
   const isCritical = isQldCriticalDefect(!!defect.qldLimbInoperable, !!defect.qldLimbAdverseImpact);
   const dueAt = criticalNoticeDueAt(defect.raisedAt);

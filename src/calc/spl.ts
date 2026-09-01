@@ -29,12 +29,14 @@
  *    not rule coverage out. It does not mean the system complies with anything.
  *
  * Every threshold carries where it came from and how much it is trusted, in
- * the data rather than in a comment. The Australian Standards themselves are
- * licensed per copy and are not reproduced here — what is recorded is clause
- * numbers, the official product page, figures as understood from public
- * sources, and our own words. Where the only sources are trade publications,
- * the figure is marked low confidence and says so on screen: it is a starting
- * point for a check against a licensed copy, not the copy itself.
+ * the data rather than in a comment — and so does every clause number, because
+ * a clause number is a fact from outside this file like any other and the
+ * publisher's shop listing is not what establishes it. The Australian
+ * Standards themselves are licensed per copy and are not reproduced here: what
+ * is recorded is clause numbers, figures as understood from public sources,
+ * and our own words. Where the only sources are trade publications, the figure
+ * is marked low confidence and says so on screen — a starting point for a
+ * check against a licensed copy, not the copy itself.
  */
 
 export type Confidence = 'high' | 'medium' | 'low';
@@ -53,7 +55,17 @@ export interface Sourced<T> {
 
 export type SourcedDb = Sourced<number>;
 
-/** A clause reference. The number is a fact; the wording behind it is not ours to carry. */
+/**
+ * A clause reference. The number is a fact; the wording behind it is not ours
+ * to carry.
+ *
+ * The number is a fact that came from somewhere, so it carries its own
+ * provenance. A store listing proves the standard exists and nothing else — it
+ * is where to buy the document, not evidence that a requirement sits at 4.7
+ * rather than 4.3.4. A clause number printed in a client document and later
+ * found to be the wrong one reads as carelessness about everything else in the
+ * report, so the ones only trade commentary supports say so.
+ */
 export interface ClauseRef {
   /** How a technician cites it: "AS 1670.1:2018". */
   standard: string;
@@ -61,8 +73,14 @@ export interface ClauseRef {
   clause: string;
   /** The clause heading, which is a title rather than the requirement text. */
   title: string;
-  /** The publisher's own page for the document. */
+  /** The publisher's own page for the document. Where to buy it, nothing more. */
   url: string;
+  /** How well the clause NUMBER itself is established. */
+  numberConfidence: Confidence;
+  /** What establishes the number, which is never the store listing. */
+  numberSource: string;
+  numberSourceUrl?: string;
+  note?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,16 +185,31 @@ export interface DistanceResult {
  * defect.
  */
 export function splAtDistance(input: DistanceInput): DistanceResult | undefined {
-  const { ratedDb, referenceDistanceM, distanceM } = input;
-  if (!Number.isFinite(ratedDb)) return undefined;
-  const changeDb = distanceChangeDb(referenceDistanceM, distanceM);
-  if (changeDb === undefined) return undefined;
+  const exact = directLevelDb(input);
+  if (exact === undefined) return undefined;
+  const changeDb = distanceChangeDb(input.referenceDistanceM, input.distanceM)!;
 
   return {
-    db: round1(ratedDb + changeDb),
+    db: round1(exact),
     changeDb: round1(changeDb),
-    cautions: regimeCautions(input.space ?? 'enclosed-room', distanceM, referenceDistanceM),
+    cautions: regimeCautions(input.space ?? 'enclosed-room', input.distanceM, input.referenceDistanceM),
   };
+}
+
+/**
+ * The same level, unrounded, for anything that goes on to compute with it.
+ *
+ * Rounding to the tenth a meter reads is right at the point a number is
+ * *shown*, and wrong anywhere upstream of a comparison. A direct level of
+ * 74.96 dB rounded to 75.0 and then held against a 75 dB floor passes a room
+ * that is short — a verdict decided by the display format. Everything internal
+ * works from this; round1 is applied once, on the way out.
+ */
+function directLevelDb(input: DistanceInput): number | undefined {
+  if (!Number.isFinite(input.ratedDb)) return undefined;
+  const changeDb = distanceChangeDb(input.referenceDistanceM, input.distanceM);
+  if (changeDb === undefined) return undefined;
+  return input.ratedDb + changeDb;
 }
 
 /**
@@ -275,10 +308,16 @@ export function requiredRatedDb(
  * as being at the threshold of hearing.
  */
 export function addLevels(levels: number[]): number | undefined {
+  const exact = addLevelsExact(levels);
+  return exact === undefined ? undefined : round1(exact);
+}
+
+/** The same sum, unrounded, for anything that goes on to compare against it. */
+function addLevelsExact(levels: number[]): number | undefined {
   if (!levels.length) return undefined;
   if (!levels.every(Number.isFinite)) return undefined;
   const total = levels.reduce((sum, db) => sum + 10 ** (db / 10), 0);
-  return round1(10 * Math.log10(total));
+  return 10 * Math.log10(total);
 }
 
 /** What a meter reads with the alarm running: the signal on top of the ambient. */
@@ -349,27 +388,6 @@ export const OCCUPANCY_LABEL: Record<OccupancyKind, string> = {
   sleeping: 'Sleeping area',
 };
 
-const AS_1670_1: ClauseRef = {
-  standard: 'AS 1670.1:2018',
-  clause: '3.22',
-  title: 'Building occupant warning system',
-  url: 'https://store.standards.org.au/product/as-1670-1-2018',
-};
-
-const AS_1670_4: ClauseRef = {
-  standard: 'AS 1670.4:2018',
-  clause: '4.7',
-  title: 'Output from emergency loudspeakers',
-  url: 'https://store.standards.org.au/product/as-1670-4-2018',
-};
-
-const AS_1670_4_INTELLIGIBILITY: ClauseRef = {
-  standard: 'AS 1670.4:2018',
-  clause: '4.9',
-  title: 'Intelligibility',
-  url: 'https://store.standards.org.au/product/as-1670-4-2018',
-};
-
 /**
  * Confirmation that AS 1670.1 clause 3.22 is the clause the sound pressure
  * level requirement lives in comes from the Queensland regulator itself, in a
@@ -395,6 +413,51 @@ const TRADE_SOURCE_URL = 'https://firewize.com.au/help/legislation-codes-standar
 const UNVERIFIED_NOTE =
   'Read from published trade commentary, not from the standard itself. Confirm against a licensed '
   + 'copy before relying on it in a report.';
+
+const AS_1670_1: ClauseRef = {
+  standard: 'AS 1670.1:2018',
+  clause: '3.22',
+  title: 'Building occupant warning system',
+  url: 'https://store.standards.org.au/product/as-1670-1-2018',
+  numberConfidence: 'high',
+  numberSource: 'Queensland Fire and Emergency Services position statement, which cites AS 1670.1 clause 3.22 by number',
+  numberSourceUrl: QFES_POSITION_URL,
+};
+
+/**
+ * The loudspeaker output clause, and the one number in this file that could not
+ * be pinned down at all.
+ *
+ * The 2004 edition of AS 1670.4 is cited publicly with the loudspeaker output
+ * requirement at 4.3.4, and nothing freely published names the clause in the
+ * 2018 edition. 4.7 is what the trade commentary behind the thresholds uses, so
+ * it is recorded — as a pointer to check, not as a citation to print. Whoever
+ * opens a licensed copy should settle it.
+ */
+const AS_1670_4: ClauseRef = {
+  standard: 'AS 1670.4:2018',
+  clause: '4.7',
+  title: 'Output from emergency loudspeakers',
+  url: 'https://store.standards.org.au/product/as-1670-4-2018',
+  numberConfidence: 'low',
+  numberSource: TRADE_SOURCE,
+  numberSourceUrl: TRADE_SOURCE_URL,
+  note:
+    'The clause number is unconfirmed. Public references to the 2004 edition put the loudspeaker '
+    + 'output requirement at 4.3.4, and no free source names it in the 2018 edition. Confirm before '
+    + 'citing it to a client.',
+};
+
+const AS_1670_4_INTELLIGIBILITY: ClauseRef = {
+  standard: 'AS 1670.4:2018',
+  clause: '4.9',
+  title: 'Intelligibility',
+  url: 'https://store.standards.org.au/product/as-1670-4-2018',
+  numberConfidence: 'low',
+  numberSource: TRADE_SOURCE,
+  numberSourceUrl: TRADE_SOURCE_URL,
+  note: 'The clause number comes from trade commentary rather than the standard. Confirm before citing it.',
+};
 
 export interface SplRequirement {
   kind: OccupancyKind;
@@ -525,7 +588,7 @@ export const SOU_DOOR_CONCESSIONS: SouDoorConcession[] = [
     label: 'Smoke alarm based warning system in the units',
     atDoorDb: {
       value: 85,
-      source: 'Queensland Fire and Emergency Services position statement on NCC Specification E2.2a clause 5, and NCC 2022 Specification 20 clause S20C7',
+      source: 'Queensland Fire and Emergency Services position statement, quoting NCC Specification E2.2a clause 7(a) and (b) — NCC 2022 Specification 20 clause S20C7',
       url: QFES_POSITION_URL,
       confidence: 'high',
       note: 'Measured at the door giving access to the sole-occupancy unit, in place of a reading inside it.',
@@ -536,7 +599,7 @@ export const SOU_DOOR_CONCESSIONS: SouDoorConcession[] = [
     label: 'Smoke detection based warning system in the units',
     atDoorDb: {
       value: 100,
-      source: 'Queensland Fire and Emergency Services position statement on NCC Specification E2.2a clause 5, and NCC 2022 Specification 20 clause S20C7',
+      source: 'Queensland Fire and Emergency Services position statement, quoting NCC Specification E2.2a clause 7(a) and (b) — NCC 2022 Specification 20 clause S20C7',
       url: QFES_POSITION_URL,
       confidence: 'high',
       note: 'Measured at the door giving access to the sole-occupancy unit, in place of a reading inside it.',
@@ -545,12 +608,15 @@ export const SOU_DOOR_CONCESSIONS: SouDoorConcession[] = [
 ];
 
 export const QFES_CONCESSION_POSITION =
-  'Queensland reads this concession narrowly. QFES’ published position is that it does not extend '
-  + 'to a system built on smoke alarms inside the units under NCC Specification E2.2a clause 5, '
-  + 'because that is not the arrangement the concession was written for — so in Queensland the level '
-  + 'has to be measured inside the unit against AS 1670.1 clause 3.22. QFES states it asked the ABCB '
-  + 'to confirm this in writing and had no reply, so it is an interpretation rather than a settled '
-  + 'point. Check it is still current before relying on it.';
+  'Queensland reads this concession narrowly, and the reason is a cross-reference rather than a '
+  + 'judgement call. The concession at NCC Specification E2.2a clause 7(b) is written to apply only '
+  + 'to a system installed under clause 4(b), which puts smoke detectors in each unit. A clause 5 '
+  + 'system is allowed to use smoke alarms in the units instead of detectors, so on QFES’ reading it '
+  + 'never satisfies clause 4(b) and the concession does not reach it — meaning the level has to be '
+  + 'measured inside the unit against AS 1670.1 clause 3.22. QFES states it asked the ABCB to confirm '
+  + 'this in writing and had no reply, so it is an interpretation rather than a settled point. The '
+  + 'statement is version 12/2021 and predates the NCC 2022 renumbering; check it is still current '
+  + 'before relying on it.';
 
 // ---------------------------------------------------------------------------
 // Barriers
@@ -638,7 +704,11 @@ export interface CoverageInput {
   requiredMarginDb: number;
   /** Barriers on the path, by id. An unknown id refuses the whole calculation. */
   barrierIds?: string[];
-  /** Other devices audible at the same point, as levels already at that point. */
+  /**
+   * Other devices audible at the same point, as levels already at that point.
+   * An entry that is not a readable level refuses the whole calculation, the
+   * same way an unknown barrier does.
+   */
   otherSourcesDb?: number[];
   space?: SpaceKind;
 }
@@ -656,7 +726,11 @@ export interface CoverageResult {
   /** The threshold that actually decides it, and why that one. */
   bindingThresholdDb: number;
   bindingReason: string;
-  /** Positive is headroom, negative is shortfall, both in dB. */
+  /**
+   * Positive is headroom, negative is shortfall, both in dB. Rounded down to
+   * the tenth a meter reads, never up — the verdict is taken on the exact
+   * figure first, so a room four hundredths short is reported short.
+   */
   headroomDb: number;
   /** Set when the estimate is above the ceiling rather than below the floor. */
   tooLoud: boolean;
@@ -697,10 +771,11 @@ export function coverageVerdict(input: CoverageInput): Coverage {
   const requirement = SPL_REQUIREMENTS[input.occupancy];
   if (!requirement) return { ok: false, error: `No requirement is recorded for "${input.occupancy}".` };
 
-  const direct = splAtDistance({ ratedDb, referenceDistanceM, distanceM, space: input.space });
-  if (!direct) {
+  const directDb = directLevelDb({ ratedDb, referenceDistanceM, distanceM, space: input.space });
+  if (directDb === undefined) {
     return { ok: false, error: 'Distances must be greater than zero — the inverse square law says nothing at the device itself.' };
   }
+  const directCautions = regimeCautions(input.space ?? 'enclosed-room', distanceM, referenceDistanceM);
 
   // An unknown barrier refuses the whole answer rather than being skipped. A
   // skipped barrier silently inflates the level by the amount it would have
@@ -721,32 +796,55 @@ export function coverageVerdict(input: CoverageInput): Coverage {
     barrierNotes.push(`${b.label}: −${b.lossDb.value} dB, ${b.lossDb.source} (${b.lossDb.confidence} confidence, indicative).`);
   }
 
-  const others = (input.otherSourcesDb ?? []).filter(Number.isFinite);
-  const signalDb = addLevels([direct.db - barrierLossDb, ...others]);
-  if (signalDb === undefined) return { ok: false, error: 'The signal level could not be resolved.' };
+  // A source the technician entered that could not be read is not a source of
+  // zero, and it is not a source that was never mentioned. Dropping it quietly
+  // is the same failure as skipping an unknown barrier, only in the opposite
+  // direction: the answer comes back missing a device nobody was told about.
+  const others = input.otherSourcesDb ?? [];
+  if (!others.every(Number.isFinite)) {
+    return {
+      ok: false,
+      error:
+        'One of the other sources at this position is not a readable level. Give every source a '
+        + 'number or take it off the list — a source that cannot be read is not a source of zero.',
+    };
+  }
 
-  const measuredDb = signalPlusAmbient(signalDb, ambientDb);
-  if (measuredDb === undefined) return { ok: false, error: 'The combined level could not be resolved.' };
+  const signalExact = addLevelsExact([directDb - barrierLossDb, ...others]);
+  if (signalExact === undefined) return { ok: false, error: 'The signal level could not be resolved.' };
+  const signalDb = round1(signalExact);
 
-  const marginDb = round1(signalDb - ambientDb);
+  const measuredExact = addLevelsExact([signalExact, ambientDb]);
+  if (measuredExact === undefined) return { ok: false, error: 'The combined level could not be resolved.' };
+
+  const marginDb = round1(signalExact - ambientDb);
 
   const floorDb = requirement.minimumDb.value;
   const ambientThresholdDb = ambientDb + requiredMarginDb;
-  const bindingThresholdDb = round1(Math.max(floorDb, ambientThresholdDb));
+  const bindingExact = Math.max(floorDb, ambientThresholdDb);
+  const bindingThresholdDb = round1(bindingExact);
   const bindingReason = ambientThresholdDb > floorDb
     ? `The ambient of ${round1(ambientDb)} dB(A) plus the ${round1(requiredMarginDb)} dB margin sets the pass mark, `
       + `above the ${floorDb} dB(A) floor for a ${requirement.label.toLowerCase()}. A quieter room would not help; `
       + 'this one needs either more output or less noise.'
-    : `The ${floorDb} dB(A) floor for a ${requirement.label.toLowerCase()} sets the pass mark, above the `
-      + `${round1(ambientThresholdDb)} dB(A) the ambient and margin would ask for.`;
+    : ambientThresholdDb === floorDb
+      ? `The ${floorDb} dB(A) floor for a ${requirement.label.toLowerCase()} and the ambient plus margin land on the `
+        + 'same number, so either would decide it. Any more noise in this room and the margin takes over.'
+      : `The ${floorDb} dB(A) floor for a ${requirement.label.toLowerCase()} sets the pass mark, above the `
+        + `${round1(ambientThresholdDb)} dB(A) the ambient and margin would ask for.`;
 
-  const headroomDb = round1(signalDb - bindingThresholdDb);
+  // The verdict is taken on the exact figures and only then rounded down for
+  // display, so a room 0.04 dB short is reported short. Rounding a shortfall to
+  // the nearest tenth turns it into a pass at the boundary, which is the number
+  // on the sheet deciding the outcome instead of the room.
+  const headroomExact = signalExact - bindingExact;
+  const headroomDb = floor1(headroomExact);
 
   const ceiling = requirement.maximumDb?.value;
-  const tooLoud = ceiling !== undefined && signalDb > ceiling;
-  const verdict: 'pass' | 'fail' = tooLoud || headroomDb < 0 ? 'fail' : 'pass';
+  const tooLoud = ceiling !== undefined && signalExact > ceiling;
+  const verdict: 'pass' | 'fail' = tooLoud || headroomExact < 0 ? 'fail' : 'pass';
 
-  const cautions = [...direct.cautions, ...barrierNotes];
+  const cautions = [...directCautions, ...barrierNotes];
 
   if (requiredMarginDb < (requirement.marginAboveAmbientDb?.value ?? 0)) {
     cautions.push(
@@ -781,7 +879,7 @@ export function coverageVerdict(input: CoverageInput): Coverage {
   return {
     ok: true,
     signalDb,
-    measuredDb,
+    measuredDb: round1(measuredExact),
     marginDb,
     barrierLossDb: round1(barrierLossDb),
     bindingThresholdDb,
@@ -827,6 +925,27 @@ export function sourceList(): { fact: string; source: string; url: string; confi
         confidence: req.marginAboveAmbientDb.confidence,
       });
     }
+    // The averaging period is shown to the technician as the hint under the
+    // ambient field, so it is a published figure on screen and belongs here
+    // with the rest of them.
+    if (req.ambientAveragingSeconds) {
+      out.push({
+        fact: `${req.label}: ambient averaged over ${req.ambientAveragingSeconds.value} s`,
+        source: req.ambientAveragingSeconds.source,
+        url: req.ambientAveragingSeconds.url,
+        confidence: req.ambientAveragingSeconds.confidence,
+      });
+    }
+  }
+  // Clause numbers are facts from outside this file too, and the store listing
+  // they link to is not what establishes them.
+  for (const c of [AS_1670_1, AS_1670_4, AS_1670_4_INTELLIGIBILITY]) {
+    out.push({
+      fact: `${c.standard} clause ${c.clause} — ${c.title}`,
+      source: c.numberSource,
+      url: c.numberSourceUrl ?? c.url,
+      confidence: c.numberConfidence,
+    });
   }
   for (const b of BARRIERS) {
     out.push({
@@ -850,5 +969,32 @@ export function sourceList(): { fact: string; source: string; url: string; confi
 /** A tenth of a decibel is what a field meter reads. Anything finer is invented. */
 function round1(n: number): number {
   if (!Number.isFinite(n)) return n;
-  return Math.round((n + Number.EPSILON) * 10) / 10;
+  // Rounded away from zero on a half, so −13.05 dB reports as −13.1 and not as
+  // −13.0. Math.round on its own rounds a negative half towards zero, which
+  // shaves a tenth off every shortfall and never off any headroom.
+  return (Math.sign(n) || 1) * Math.round(Math.abs(snap(n)) * 10) / 10;
+}
+
+/**
+ * A tenth of a decibel, rounded down — used for headroom and nothing else.
+ *
+ * Headroom is the number a technician writes on the sheet, and it is the one
+ * number here that must never be flattered. Rounded to nearest, a room 0.04 dB
+ * short prints "0.0 dB in hand" beside a fail; rounded down it prints −0.1 and
+ * agrees with the verdict. Real headroom loses at most a tenth, which is inside
+ * what any of this is worth anyway.
+ */
+function floor1(n: number): number {
+  if (!Number.isFinite(n)) return n;
+  return Math.floor(snap(n) * 10) / 10;
+}
+
+/**
+ * Clears the float dust before rounding.
+ *
+ * Without it an exact 15 dB of headroom arriving as 14.999999999999998 floors
+ * to 14.9 — a tenth invented by binary arithmetic rather than by acoustics.
+ */
+function snap(n: number): number {
+  return Math.round(n * 1e6) / 1e6;
 }

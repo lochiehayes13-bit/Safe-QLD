@@ -20,12 +20,15 @@ import { useTheme } from '@/theme';
 import {
   Button, Card, Chip, EmptyState, H2, Rowed, Screen, StatTile, Txt,
 } from '@/components/ui';
+import { RecordGate } from '@/components/RecordGate';
 
 /** Site detail — the hub every other screen hangs off. */
 export default function SiteScreen() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [site, setSite] = useState<Site | null>(null);
+  // Loaded-and-absent is not the same as still loading. See RecordGate.
+  const [missing, setMissing] = useState(false);
   const [panels, setPanels] = useState<Panel[]>([]);
   const [reports, setReports] = useState<ServiceReport[]>([]);
   const [defects, setDefects] = useState<Defect[]>([]);
@@ -44,6 +47,7 @@ export default function SiteScreen() {
       queryPoints({ siteId: id, limit: 100000 }),
     ]);
     setSite(s);
+    setMissing(!s);
     setPanels(p);
     setReports(r);
     setDefects(d);
@@ -93,13 +97,7 @@ export default function SiteScreen() {
     );
   };
 
-  if (!site) {
-    return (
-      <Screen>
-        <Txt tone="muted">Loading…</Txt>
-      </Screen>
-    );
-  }
+  if (!site) return <RecordGate missing={missing} what="site" />;
 
   const openDefects = defects.filter((d) => d.status === 'open');
   const criticalDefects = openDefects.filter((d) => d.severity === 'critical');

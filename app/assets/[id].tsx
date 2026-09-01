@@ -14,6 +14,7 @@ import { loadPrefs } from '@/app-prefs';
 import { nowIso } from '@/db';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
+import { RecordGate } from '@/components/RecordGate';
 
 /**
  * Asset detail and timeline.
@@ -53,6 +54,8 @@ export default function AssetScreen() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [asset, setAsset] = useState<AssetRecord | null>(null);
+  // Loaded-and-absent is not the same as still loading. See RecordGate.
+  const [missing, setMissing] = useState(false);
   const [site, setSite] = useState<Site | null>(null);
   const [events, setEvents] = useState<AssetEvent[]>([]);
   const [note, setNote] = useState('');
@@ -61,6 +64,7 @@ export default function AssetScreen() {
     if (!id) return;
     const a = await getAsset(id);
     setAsset(a);
+    setMissing(!a);
     if (a) {
       const [s, e] = await Promise.all([getSite(a.siteId), assetTimeline(a.id)]);
       setSite(s);
@@ -87,7 +91,7 @@ export default function AssetScreen() {
     void load();
   };
 
-  if (!asset) return <Screen><Txt tone="muted">Loading…</Txt></Screen>;
+  if (!asset) return <RecordGate missing={missing} what="asset" />;
 
   const type = assetTypeById(asset.assetTypeId);
   const failures = events.filter((e) => e.kind === 'failed').length;

@@ -1479,14 +1479,40 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
     );
   }
 
-  // Which occurrence has already been done. Counting in whole months from the
-  // anchor and rounding is right for a schedule whose services land within a
-  // few weeks of their date; a service more than half an interval away from any
-  // scheduled date is caught below as a missed occurrence instead.
+  // Which occurrence has already been done.
+  //
+  // Rounding to the nearest occurrence — the obvious way — credits a service to
+  // an occurrence it happened a long way before. A five-yearly recorded three
+  // years after manufacture rounds to occurrence 1, so the app reports the next
+  // test in 2030 and the occurrence that fell due in 2025 disappears: a
+  // pressure vessel five years out of test, reading as compliant, with nothing
+  // in `missedOccurrences` to show it. That is the exact failure the anchor
+  // rule exists to stop, arriving through the back door.
+  //
+  // So a service is only counted against an occurrence it fell within a quarter
+  // of the interval of — six weeks on a six-monthly, fifteen months on a
+  // five-yearly. Inside that it is an early service and counts; outside it, the
+  // occurrence is still outstanding and a note says which service was not
+  // enough to satisfy it. This errs early, in the same direction as everything
+  // else in this function.
+  const EARLY_CREDIT_FRACTION = 0.25;
   let doneOccurrence = 0;
+  let earlyCredit: { months: number; occurrence: number } | undefined;
+  let notCredited: { months: number; occurrence: number } | undefined;
   if (manufactured && lastDone) {
-    const elapsed = monthsBetween(anchor.earliest, lastDone.earliest);
-    doneOccurrence = Math.max(0, Math.round(elapsed / spec.intervalMonths));
+    const elapsed = Math.max(0, monthsBetween(anchor.earliest, lastDone.earliest));
+    const whole = Math.floor(elapsed / spec.intervalMonths);
+    const remainder = elapsed - whole * spec.intervalMonths;
+    const monthsShortOfNext = spec.intervalMonths - remainder;
+    if (remainder === 0) {
+      doneOccurrence = whole;
+    } else if (monthsShortOfNext <= spec.intervalMonths * EARLY_CREDIT_FRACTION) {
+      doneOccurrence = whole + 1;
+      earlyCredit = { months: monthsShortOfNext, occurrence: doneOccurrence };
+    } else {
+      doneOccurrence = whole;
+      notCredited = { months: monthsShortOfNext, occurrence: whole + 1 };
+    }
   }
 
   // The occurrence that ought to have been done by now, from the anchor alone.
@@ -1520,6 +1546,22 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
     notes.push(
       `${missedOccurrences} occurrences of this activity have fallen due since the last recorded one. The date shown `
       + 'is the oldest one still outstanding, not the most recent.',
+    );
+  }
+  if (notCredited && lastDone) {
+    notes.push(
+      `The last one recorded, ${lastDone.label}, sits between scheduled dates — ${notCredited.months} months before `
+      + `occurrence ${notCredited.occurrence}, which is more than a quarter of the interval. It has not been counted `
+      + 'as that occurrence, so that occurrence is still outstanding. Under the anchor rule a service done well '
+      + 'before a scheduled date does not satisfy it.',
+    );
+  }
+  if (earlyCredit && lastDone) {
+    notes.push(
+      `The last one recorded, ${lastDone.label}, was ${earlyCredit.months} month`
+      + `${earlyCredit.months === 1 ? '' : 's'} before occurrence ${earlyCredit.occurrence} fell due and has been `
+      + 'counted as it. No tolerance window is being asserted by that — it is close enough to the date that reading '
+      + 'it as the next one instead would report a service that never happened.',
     );
   }
   if (due.precision !== 'day') {
@@ -2434,7 +2476,7 @@ export function rollupSite(entries: RegisterEntry[], todayIso: string, horizonMo
   }
   if (condemnable.length) {
     caveats.push(
-      `${condemnable.length} ${condemnable.length === 1 ? 'asset is' : 'assets are'} not serviceable at any price and `
+      `${condemnable.length} ${condemnable.length === 1 ? 'asset is' : 'assets are'} not serviceable at all and `
       + 'must come off the wall: see the condemnable list. They are counted in the site total and in their type, and '
       + 'left out of every due count — a service quoted on one of them is work that must not be carried out.',
     );

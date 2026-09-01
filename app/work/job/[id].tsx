@@ -10,6 +10,7 @@ import type { Defect, Site } from '@/domain/types';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Chip, Divider, H2, Label, Rowed, Screen, StatTile, Txt } from '@/components/ui';
+import { RecordGate } from '@/components/RecordGate';
 
 /**
  * Job detail — the site briefing.
@@ -22,6 +23,8 @@ export default function JobScreen() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [job, setJob] = useState<JobRecord | null>(null);
+  // Loaded-and-absent is not the same as still loading. See RecordGate.
+  const [missing, setMissing] = useState(false);
   const [site, setSite] = useState<Site | null>(null);
   const [defects, setDefects] = useState<Defect[]>([]);
   const [assetCount, setAssetCount] = useState(0);
@@ -32,6 +35,7 @@ export default function JobScreen() {
     void (async () => {
       const j = await getJob(id);
       setJob(j);
+      setMissing(!j);
       if (j?.siteId) {
         const [s, d, a, k] = await Promise.all([
           getSite(j.siteId),
@@ -44,7 +48,7 @@ export default function JobScreen() {
     })();
   }, [id]);
 
-  if (!job) return <Screen><Txt tone="muted">Loading…</Txt></Screen>;
+  if (!job) return <RecordGate missing={missing} what="job" />;
 
   const critical = defects.filter((d) => d.severity === 'critical');
 

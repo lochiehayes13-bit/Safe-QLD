@@ -24,6 +24,7 @@ import { useTheme } from '@/theme';
 import {
   Banner, Card, Chip, Divider, EmptyState, Field, H2, Label, ResultBlock, Rowed, Screen, StatTile, Txt,
 } from '@/components/ui';
+import { RecordGate } from '@/components/RecordGate';
 
 /**
  * One asset's measurements over its whole life.
@@ -61,6 +62,8 @@ export default function MeasurementTrendScreen() {
   const t = useTheme();
   const { id, key: keyParam } = useLocalSearchParams<{ id: string; key?: string }>();
   const [asset, setAsset] = useState<AssetRecord | null>(null);
+  // Loaded-and-absent is not the same as still loading. See RecordGate.
+  const [missing, setMissing] = useState(false);
   const [events, setEvents] = useState<AssetEvent[]>([]);
   const [selected, setSelected] = useState<string | undefined>(keyParam);
   const [thresholdText, setThresholdText] = useState('');
@@ -69,6 +72,7 @@ export default function MeasurementTrendScreen() {
     if (!id) return;
     const a = await getAsset(id);
     setAsset(a);
+    setMissing(!a);
     setEvents(a ? await assetTimeline(a.id, 500) : []);
   }, [id]);
 
@@ -106,7 +110,7 @@ export default function MeasurementTrendScreen() {
     return (
       <>
         <Stack.Screen options={{ title: 'Measurement trend' }} />
-        <Screen><Txt tone="muted">Loading…</Txt></Screen>
+        <RecordGate missing={missing} what="asset" />
       </>
     );
   }

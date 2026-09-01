@@ -23,6 +23,7 @@ import { SignaturePad } from '@/components/SignaturePad';
 import {
   Banner, Button, Card, Chip, Divider, Field, H2, Rowed, Screen, Txt,
 } from '@/components/ui';
+import { RecordGate } from '@/components/RecordGate';
 
 /**
  * The annual occupier statement.
@@ -41,12 +42,18 @@ export default function OccupierStatementScreen() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [rec, setRec] = useState<OccupierStatement | null>(null);
+  // Loaded-and-absent is not the same as still loading. See RecordGate.
+  const [missing, setMissing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [prefilled, setPrefilled] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
-    if (id) setRec(await getOccupierStatement(id));
+    if (id) {
+      const found = await getOccupierStatement(id);
+      setRec(found);
+      setMissing(!found);
+    }
   }, [id]);
 
   useEffect(() => { void load(); }, [load]);
@@ -187,14 +194,7 @@ export default function OccupierStatementScreen() {
     return count.days ?? null;
   }, [deadline.due]);
 
-  if (!rec) {
-    return (
-      <>
-        <Stack.Screen options={{ title: 'Occupier statement' }} />
-        <Screen><Txt tone="muted">Loading…</Txt></Screen>
-      </>
-    );
-  }
+  if (!rec) return <RecordGate missing={missing} what="occupier statement" />;
 
   return (
     <>

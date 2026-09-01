@@ -25,6 +25,7 @@ import { useTheme } from '@/theme';
 import {
   Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Segmented, StatTile, Txt,
 } from '@/components/ui';
+import { RecordGate } from '@/components/RecordGate';
 
 /**
  * A fire system effectiveness assessment.
@@ -44,6 +45,8 @@ export default function AssessmentScreen() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [assessment, setAssessment] = useState<Assessment | null>(null);
+  // Loaded-and-absent is not the same as still loading. See RecordGate.
+  const [missing, setMissing] = useState(false);
   const [site, setSite] = useState<Site | null>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
   const [defects, setDefects] = useState({ open: 0, critical: 0 });
@@ -54,6 +57,7 @@ export default function AssessmentScreen() {
     if (!id) return;
     const a = await getAssessment(id);
     setAssessment(a);
+    setMissing(!a);
     if (!a) return;
     const [s, f, d] = await Promise.all([getSite(a.siteId), listFindings(id), listDefects(a.siteId)]);
     setSite(s);
@@ -176,9 +180,7 @@ export default function AssessmentScreen() {
     }
   };
 
-  if (!assessment) {
-    return <Screen><Txt tone="muted">Loading…</Txt></Screen>;
-  }
+  if (!assessment) return <RecordGate missing={missing} what="assessment" />;
 
   return (
     <>

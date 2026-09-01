@@ -27,6 +27,7 @@ import { SignaturePad } from '@/components/SignaturePad';
 import {
   Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
+import { RecordGate } from '@/components/RecordGate';
 
 /**
  * Form 72 — the Queensland statutory hydrant and sprinkler form.
@@ -102,6 +103,8 @@ export default function Form72Screen() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [form, setForm] = useState<StoredForm72 | null>(null);
+  // Loaded-and-absent is not the same as still loading. See RecordGate.
+  const [missing, setMissing] = useState(false);
   const [part, setPart] = useState<PartKey>('A');
   const [companyName, setCompanyName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -111,6 +114,7 @@ export default function Form72Screen() {
     void (async () => {
       const [f, prefs] = await Promise.all([getForm72(id), loadPrefs()]);
       setForm(f);
+      setMissing(!f);
       setCompanyName(prefs.companyName);
     })();
   }, [id]);
@@ -212,14 +216,7 @@ export default function Form72Screen() {
     );
   }, [form]);
 
-  if (!form) {
-    return (
-      <Screen>
-        <Stack.Screen options={{ title: 'Form 72' }} />
-        <Txt tone="muted">Loading…</Txt>
-      </Screen>
-    );
-  }
+  if (!form) return <RecordGate missing={missing} what="Form 72" />;
 
   return (
     <Screen>

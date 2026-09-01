@@ -1,5 +1,6 @@
 import {
   ACTIVITIES_ARE_INDEPENDENT,
+  ACTIVITY_ROUTINE_ID,
   ACTIVITY_SPECS,
   AS1851_SECTION_NOT_ESTABLISHED,
   COVERAGE_IS_NOT_A_DESIGN,
@@ -21,6 +22,7 @@ import {
   rollupSite,
   toSpan,
   type HoseFinding,
+  type HoseReelActivity,
   type RegisterEntry,
   type SourceId,
 } from '@/domain/hoseReel';
@@ -191,6 +193,40 @@ describe('how many reels a floor plausibly needs', () => {
     expect(notes).toMatch(/not a defect/);
   });
 
+  it('counts reels off the areas it printed, so the client redoing the division gets the same answer', () => {
+    // The areas are rounded for display. A count worked out from an unrounded
+    // radius alongside them can come out a reel lower than the one the printed
+    // numbers give, and lower is the flattering direction.
+    for (const hose of [17.55, 24.05, 30.05, 36]) {
+      for (const area of [3650, 5027, 9999, 40_000]) {
+        const e = estimateReels(area, hose);
+        if (isRefused(e)) throw new Error(e.reason);
+        expect(e.idealMinimum).toBe(Math.ceil(area / e.coverage.discAreaM2));
+        expect(e.gridEstimate).toBe(Math.ceil(area / e.coverage.gridAreaM2));
+      }
+    }
+  });
+
+  it('calls only the disc count a lower bound, because a hexagonal layout beats a square grid', () => {
+    // A square grid gets 2r² out of a reel; offsetting the rows gets 3√3/2 r²,
+    // which is more. Calling the grid figure a lower bound would be asserting
+    // that no layout does better, and one does.
+    const e = estimateReels(10_000, 36);
+    if (isRefused(e)) throw new Error(e.reason);
+    const notes = e.notes.join(' ');
+    expect(notes).toMatch(/bare-floor minimum is a true lower bound/);
+    expect(notes).toMatch(/grid figure is not a lower bound/);
+    const hexagonal = Math.ceil(10_000 / ((3 * Math.sqrt(3)) / 2) / (40 * 40));
+    expect(hexagonal).toBeLessThan(e.gridEstimate);
+    expect(hexagonal).toBeGreaterThanOrEqual(e.idealMinimum);
+  });
+
+  it('writes a single installed reel as one reel and not as "1 reels"', () => {
+    const e = estimateReels(400, 36, { installed: 1 });
+    if (isRefused(e)) throw new Error(e.reason);
+    expect(e.notes.join(' ')).toMatch(/1 reel is installed/);
+  });
+
   it('refuses a floor area it does not have, and points at the compartment rather than the building', () => {
     const e = estimateReels(0, 36);
     expect(isRefused(e)).toBe(true);
@@ -341,6 +377,20 @@ describe('checking a measured flow against a supplied duty', () => {
     expect(r.notes.join(' ')).toMatch(/Only a flow duty was supplied/);
   });
 
+  it('says the pressure figure belongs at the reel inlet, because the published duty is quoted there', () => {
+    // 220 kPa is the supply condition the discharge is measured under, not a
+    // number the nozzle has to beat. Read at the far end of 36 m of 19 mm hose
+    // it fails a reel for the friction loss the flow test already measures.
+    const duty = publishedDuty(19);
+    if (isRefused(duty)) throw new Error(duty.reason);
+    expect(duty.pressureMeasuredAt).toMatch(/inlet to the reel assembly, not at the nozzle/);
+
+    const r = checkFlow({ measuredRunningPressureKpa: 300, dutyPressureKpa: 220 });
+    if (isRefused(r)) throw new Error(r.reason);
+    expect(r.pressure.label).toMatch(/at the reel inlet/);
+    expect(r.notes.join(' ')).toMatch(/read at the inlet to the reel/);
+  });
+
   it('tells the technician to test the worst reel, not the one by the riser', () => {
     const r = checkFlow({ measuredFlowLitresPerMinute: 24, dutyFlowLitresPerSecond: 0.33 });
     if (isRefused(r)) throw new Error(r.reason);
@@ -429,12 +479,24 @@ describe('what condemns a hose and what a person still has to decide', () => {
 
 // ===========================================================================
 
-describe('the six-monthly and the five-yearly are two different jobs', () => {
-  it('never lets one activity discharge the obligation for the other', () => {
-    expect(discharges('five-yearly', 'six-monthly')).toBe(false);
-    expect(discharges('six-monthly', 'five-yearly')).toBe(false);
-    expect(discharges('six-monthly', 'six-monthly')).toBe(true);
-    expect(discharges('five-yearly', 'five-yearly')).toBe(true);
+describe('the three routines a hose reel carries are three different jobs', () => {
+  it('never lets one activity discharge the obligation for any other', () => {
+    const all = Object.keys(ACTIVITY_SPECS) as HoseReelActivity[];
+    for (const performed of all) {
+      for (const obligation of all) {
+        expect(discharges(performed, obligation)).toBe(performed === obligation);
+      }
+    }
+  });
+
+  it('carries the yearly the register actually runs, and not only the two that are easy to name', () => {
+    // Safe QLD's own hose reel export of 1/9/2026 has 804 reels on it: 802 with
+    // a six-monthly date, 791 with a yearly and 630 with a five-yearly. A module
+    // that models two of the three reports a site as clear with a whole
+    // routine missing from the page, which is the same failure as absorbing one
+    // routine into another and is harder to see.
+    expect(Object.keys(ACTIVITY_SPECS).sort()).toEqual(['five-yearly', 'six-monthly', 'yearly']);
+    expect(ACTIVITY_SPECS.yearly.intervalMonths).toBe(12);
   });
 
   it('holds the intervals in months so nothing has to guess what "five-yearly" means', () => {
@@ -442,9 +504,22 @@ describe('the six-monthly and the five-yearly are two different jobs', () => {
     expect(ACTIVITY_SPECS['five-yearly'].intervalMonths).toBe(60);
   });
 
-  it('says of each activity what the other one cannot find', () => {
+  it('says of each activity what the others cannot find, and what says it runs at that interval', () => {
     expect(ACTIVITY_SPECS['six-monthly'].doesNotCover).toMatch(/no test pressure/i);
     expect(ACTIVITY_SPECS['five-yearly'].doesNotCover).toMatch(/stop valve/);
+    for (const id of Object.keys(ACTIVITY_SPECS) as HoseReelActivity[]) {
+      expect(ACTIVITY_SPECS[id].evidence.length).toBeGreaterThan(40);
+    }
+  });
+
+  it('admits the yearly has no seeded routine rather than pointing it at the six-monthly one', () => {
+    // Aiming it at the nearest routine would put six-monthly test items on a
+    // yearly record, which is the conflation this module exists to stop one
+    // level down.
+    expect(ACTIVITY_ROUTINE_ID['six-monthly']).toBe('fhr-six-monthly');
+    expect(ACTIVITY_ROUTINE_ID['five-yearly']).toBe('hose-reel-five-yearly');
+    expect(ACTIVITY_ROUTINE_ID.yearly).toBeUndefined();
+    expect(ACTIVITY_SPECS.yearly.confidence).toBe('low');
   });
 });
 
@@ -581,6 +656,36 @@ describe('when the next one falls due', () => {
     if (isRefused(d)) expect(d.whatToDo).toMatch(/reads as compliant for years/);
   });
 
+  it('does not credit a service four months late with the occurrence that had not fallen due yet', () => {
+    // Anchor 1/1/2020, six-monthly. Occurrence 1 fell due 1/7/2020 and was done
+    // on 1/11/2020. Crediting the nearest occurrence instead of the ones that
+    // had actually fallen due hands the reel the January 2021 service as well,
+    // and on 1/2/2021 it reads "next due July 2021, nothing outstanding" — a
+    // whole six-monthly skipped and twelve months between services, with every
+    // line of the record compliant.
+    const d = nextDue({
+      activity: 'six-monthly',
+      commissioned: '01/01/2020',
+      lastDone: '01/11/2020',
+      today: '2021-02-01',
+    });
+    if (isRefused(d)) throw new Error(d.reason);
+    expect(d.occurrence).toBe(2);
+    expect(d.due.earliest).toBe('2021-01-01');
+    expect(d.state).toBe('overdue');
+  });
+
+  it("does not say a reel has never been serviced when the date it is counting from is a service", () => {
+    // The anchor here IS the first recorded six-monthly. Reading "ever
+    // recorded" off the last-service field alone printed a flat contradiction
+    // on a document a client reads.
+    const d = nextDue({ activity: 'six-monthly', firstService: '01/01/2020', today: TODAY });
+    if (isRefused(d)) throw new Error(d.reason);
+    expect(d.anchoredTo).toBe('first-service');
+    expect(d.everRecorded).toBe(true);
+    expect(d.notes.join(' ')).not.toMatch(/has ever been recorded/);
+  });
+
   it('reminds the reader on every due date that the other activity is not covered by this one', () => {
     const d = nextDue({ activity: 'six-monthly', commissioned: '01/01/2020', today: TODAY });
     if (isRefused(d)) throw new Error(d.reason);
@@ -620,6 +725,7 @@ describe('the site rollup', () => {
       hoseLengthM: 36,
       commissioned: '01/01/2015',
       lastSixMonthly: '01/07/2026',
+      lastYearly: '01/07/2026',
       lastFiveYearly: '01/01/2020',
       findings: [],
       fullyDeployed: true,
@@ -630,6 +736,7 @@ describe('the site rollup', () => {
       hoseLengthM: 30,
       commissioned: '01/01/2015',
       lastSixMonthly: '01/07/2026',
+      lastYearly: '01/07/2026',
       // Never pressure tested. This is the reel the whole module is about.
       findings: ['access-obstructed'],
       fullyDeployed: true,
@@ -639,6 +746,7 @@ describe('the site rollup', () => {
       location: 'Plant room',
       commissioned: '01/01/2015',
       lastSixMonthly: '01/07/2026',
+      lastYearly: '01/07/2026',
       lastFiveYearly: '01/01/2020',
       findings: ['perished-or-cracked'],
       fullyDeployed: true,
@@ -662,17 +770,42 @@ describe('the site rollup', () => {
     expect(five.overdue).toBeGreaterThanOrEqual(1);
   });
 
-  it('keeps the two activities in separate buckets instead of adding them into one number', () => {
+  it('keeps every activity in its own bucket instead of adding them into one number', () => {
     const r = rollupSite(entries, TODAY);
-    expect(r.byActivity.map((b) => b.activity)).toEqual(['six-monthly', 'five-yearly']);
+    expect(r.byActivity.map((b) => b.activity)).toEqual(['six-monthly', 'yearly', 'five-yearly']);
     const six = r.byActivity.find((b) => b.activity === 'six-monthly')!;
     expect(six.overdue).toBe(0);
     expect(six.dueWithinHorizon).toBe(3);
   });
 
+  it('rolls up every activity the module knows about, because a routine missing from a rollup reads as a clean site', () => {
+    // The failure this guards is not arithmetic. A rollup that iterates two of
+    // three routines produces a page with nothing outstanding on it, and the
+    // routine that is not on the page is the one nobody does.
+    const r = rollupSite(entries, TODAY);
+    const rolled = r.byActivity.map((b) => b.activity).sort();
+    const known = (Object.keys(ACTIVITY_SPECS) as HoseReelActivity[]).sort();
+    expect(rolled).toEqual(known);
+  });
+
+  it('schedules the yearly off the yearly column, so a reel serviced last month is not reported as owing nothing', () => {
+    // Every reel here was six-monthlied in July 2026. The yearly is a separate
+    // column and a separate schedule, and dropping it would take a routine that
+    // 791 of the 804 reels on this book carry off the page entirely.
+    const yearly = rollupSite(entries, TODAY).byActivity.find((b) => b.activity === 'yearly')!;
+    expect(yearly.overdue + yearly.dueWithinHorizon + yearly.later + yearly.unknown).toBe(4);
+
+    const noYearlyRecord = rollupSite(
+      [{ ...entries[0]!, lastYearly: undefined }],
+      TODAY,
+    ).byActivity.find((b) => b.activity === 'yearly')!;
+    expect(noYearlyRecord.neverRecorded).toBe(1);
+    expect(noYearlyRecord.overdue).toBe(1);
+  });
+
   it('counts a reel it cannot schedule as unknown with its reason, never as compliant', () => {
     const r = rollupSite(entries, TODAY);
-    expect(r.unknown).toBe(2); // FHR-04, both activities
+    expect(r.unknown).toBe(3); // FHR-04, all three activities
     const six = r.byActivity.find((b) => b.activity === 'six-monthly')!;
     expect(six.unknownReasons[0]!.count).toBe(1);
     expect(six.unknownReasons[0]!.reason).toMatch(/Nothing readable to count from/);

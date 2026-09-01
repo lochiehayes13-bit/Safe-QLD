@@ -9,6 +9,7 @@ import {
 import { nowIso } from '@/db';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
+import { RecordGate } from '@/components/RecordGate';
 
 /**
  * Live impairment.
@@ -21,10 +22,17 @@ export default function ImpairmentScreen() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [rec, setRec] = useState<ImpairmentRecord | null>(null);
+  // Loaded-and-absent is not the same as still loading. See RecordGate.
+  const [missing, setMissing] = useState(false);
   const [, tick] = useState(0);
 
   useEffect(() => {
-    if (id) void getImpairment(id).then(setRec);
+    if (id) {
+      void getImpairment(id).then((found) => {
+        setRec(found);
+        setMissing(!found);
+      });
+    }
   }, [id]);
 
   useEffect(() => {
@@ -42,9 +50,7 @@ export default function ImpairmentScreen() {
     });
   };
 
-  if (!rec) {
-    return <Screen><Txt tone="muted">Loading…</Txt></Screen>;
-  }
+  if (!rec) return <RecordGate missing={missing} what="impairment record" />;
 
   const ms = impairmentElapsedMs(rec);
   const hours = Math.floor(ms / 3_600_000);

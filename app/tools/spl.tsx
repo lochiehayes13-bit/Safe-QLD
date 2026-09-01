@@ -120,15 +120,24 @@ function CoverageView() {
   );
 
   const requirement = SPL_REQUIREMENTS[occupancy];
-  const barrierLoss = barrierIds.reduce(
-    (sum, id) => sum + (BARRIERS.find((b) => b.id === id)?.lossDb.value ?? 0),
-    0,
-  );
+
+  // Taken off the verdict rather than added up again here. A second copy of the
+  // barrier arithmetic is a second place for it to disagree, and the copy that
+  // was here fell back to zero for an id it did not recognise — the one thing
+  // the module refuses to do.
+  const barrierLoss = result.ok ? result.barrierLossDb : 0;
 
   // What a device would have to be rated at to fix a failing room, and how far
   // the one already there actually reaches. Both are the next question after a
   // fail, so neither is hidden behind another screen.
-  const reach = maxDistanceForLevel(num(ratedDb), num(referenceDistanceM), result.ok ? result.bindingThresholdDb : Number.NaN);
+  //
+  // Reach carries the barriers with it. A closed door costs the same 20 dB at
+  // every distance, so it comes off the rating — leave it out and this card
+  // says the sounder reaches 17.8 m directly underneath a banner saying the
+  // bedhead is short at 8 m, and the technician believes the reassuring one.
+  const reach = result.ok
+    ? maxDistanceForLevel(num(ratedDb) - barrierLoss, num(referenceDistanceM), result.bindingThresholdDb)
+    : undefined;
   const needed = result.ok
     ? requiredRatedDb(result.bindingThresholdDb, num(referenceDistanceM), num(distanceM), barrierLoss)
     : undefined;
@@ -191,10 +200,17 @@ function CoverageView() {
             <Divider />
             <Rowed gap={2} wrap>
               {requirement.clauses.map((c) => (
-                <Chip key={`${c.standard}${c.clause}`} label={`${c.standard} cl ${c.clause}`} />
+                <Chip key={`${c.standard}${c.clause}`} label={`${c.standard} cl ${c.clause}`} tone={TONE_FOR[c.numberConfidence]} />
               ))}
               <Chip label={`${requirement.minimumDb.confidence} confidence`} tone={TONE_FOR[requirement.minimumDb.confidence]} />
             </Rowed>
+            {/* A clause number is a fact like any other. The one nothing public
+                confirms says so here rather than being cited as if it were settled. */}
+            {requirement.clauses.filter((c) => c.numberConfidence !== 'high' && c.note).map((c) => (
+              <Txt key={`${c.standard}${c.clause}note`} size="xs" tone="faint" style={{ lineHeight: 17, marginTop: t.space(1.5) }}>
+                {c.standard} cl {c.clause}: {c.note}
+              </Txt>
+            ))}
             <Txt size="xs" tone="faint" style={{ lineHeight: 17, marginTop: t.space(2) }}>
               {requirement.measurementPoint}
             </Txt>
@@ -211,10 +227,16 @@ function CoverageView() {
               ) : null}
               {reach !== undefined ? (
                 <Txt size="sm" tone="muted" style={{ lineHeight: 19, marginTop: t.space(1.5) }}>
-                  The device already there reaches the pass mark out to about {reach.toFixed(1)} m in free field — the
-                  listening position is {num(distanceM)} m away.
+                  The device already there reaches the pass mark out to about {reach.toFixed(1)} m in free field
+                  {barrierLoss ? ` through ${barrierLoss} dB of barrier` : ''} — the listening position is{' '}
+                  {num(distanceM)} m away.
                 </Txt>
-              ) : null}
+              ) : (
+                <Txt size="sm" tone="muted" style={{ lineHeight: 19, marginTop: t.space(1.5) }}>
+                  This device does not reach the pass mark at any distance{barrierLoss ? ' through the barriers set' : ''},
+                  not even at the point it was rated at. There is no spacing that fixes it.
+                </Txt>
+              )}
               <Txt size="xs" tone="faint" style={{ lineHeight: 17, marginTop: t.space(2) }}>
                 Adding a second identical device at the same point buys 3 dB, not double. Ten of them buy 10 dB.
               </Txt>
@@ -324,9 +346,24 @@ function AddView() {
     { key: `l${++addSeq}`, value: '85' },
   ]);
 
-  const parsed = levels.map((l) => num(l.value)).filter(Number.isFinite);
-  const total = addLevels(parsed);
+  // A field with something unreadable in it stops the sum. Filtering it out
+  // would drop a device the technician said was there and print a total that
+  // looks finished — the quiet kind of wrong answer, because nothing on screen
+  // would say a source went missing.
+  const entered = levels.map((l, i) => ({ n: i + 1, raw: l.value.trim() })).filter((l) => l.raw !== '');
+  const unreadable = entered.filter((l) => !Number.isFinite(Number(l.raw)));
+  const blanks = levels.length - entered.length;
+  const parsed = entered.filter((l) => Number.isFinite(Number(l.raw))).map((l) => Number(l.raw));
+  const total = unreadable.length ? undefined : addLevels(parsed);
   const arithmetic = parsed.reduce((a, b) => a + b, 0);
+
+  const detail = unreadable.length
+    ? `Source ${unreadable.map((l) => l.n).join(', ')} is not a level this can read. Nothing is combined until it `
+      + 'is — a source that cannot be read is not a source of zero.'
+    : total === undefined
+      ? 'Enter at least one level. An empty list is not 0 dB — 0 dB is roughly the threshold of hearing, not silence.'
+      : `Adding them as ordinary numbers would give ${arithmetic.toFixed(1)}, which is not a sound pressure level at `
+        + `all.${blanks ? ` ${blanks} empty ${blanks === 1 ? 'field is' : 'fields are'} not counted.` : ''}`;
 
   return (
     <>
@@ -335,12 +372,12 @@ function AddView() {
         value={total === undefined ? '—' : total.toFixed(1)}
         unit="dB(A)"
         tone={total === undefined ? 'muted' : 'accent'}
-        detail={
-          total === undefined
-            ? 'Enter at least one level. An empty list is not 0 dB — 0 dB is roughly the threshold of hearing, not silence.'
-            : `Adding them as ordinary numbers would give ${arithmetic.toFixed(1)}, which is not a sound pressure level at all.`
-        }
+        detail={detail}
       />
+
+      {unreadable.length ? (
+        <Banner tone="warn" title="A source cannot be read" body={detail} />
+      ) : null}
 
       <Banner
         tone="info"

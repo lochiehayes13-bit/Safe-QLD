@@ -2,6 +2,7 @@ import {
   BARRIERS,
   FREE_FIELD_INDOOR_LIMIT_M,
   NOT_AN_ACOUSTIC_ASSESSMENT,
+  QFES_CONCESSION_POSITION,
   SOU_DOOR_CONCESSIONS,
   SPL_REQUIREMENTS,
   addLevels,
@@ -304,6 +305,26 @@ describe('requirement thresholds', () => {
     ]);
     for (const c of req.clauses) expect(c.url).toContain('store.standards.org.au');
   });
+
+  it('says how well each clause NUMBER is established, and never on the strength of the shop listing', () => {
+    // A store product page proves the standard exists and nothing else. Citing
+    // a clause number to a client on the strength of a shop listing is how the
+    // wrong clause ends up in a report, so the number carries its own source.
+    const [occupantWarning, loudspeakers] = SPL_REQUIREMENTS['non-sleeping'].clauses;
+
+    // AS 1670.1 cl 3.22 is named by number in a Queensland government
+    // publication, so this one is genuinely established.
+    expect(occupantWarning!.numberConfidence).toBe('high');
+    expect(occupantWarning!.numberSourceUrl).toContain('fire.qld.gov.au');
+
+    // The loudspeaker output clause is not. Public references to the 2004
+    // edition put it elsewhere and nothing free names it in the 2018 edition.
+    expect(loudspeakers!.numberConfidence).toBe('low');
+    expect(loudspeakers!.note).toContain('unconfirmed');
+    for (const c of SPL_REQUIREMENTS['non-sleeping'].clauses) {
+      expect(c.numberSourceUrl ?? '').not.toContain('store.standards.org.au');
+    }
+  });
 });
 
 describe('sole-occupancy unit door concession', () => {
@@ -316,6 +337,28 @@ describe('sole-occupancy unit door concession', () => {
     expect(detectors.atDoorDb.value).toBe(100);
     expect(alarms.atDoorDb.confidence).toBe('high');
     expect(alarms.atDoorDb.url).toContain('fire.qld.gov.au');
+  });
+
+  it('cites the concession at clause 7, not the clause 5 the QFES title refers to', () => {
+    // The QFES statement is titled "…for NCC Specification E2.2a – clause 5"
+    // because clause 5 is the system type it is arguing about. The concession
+    // itself is clause 7(a) and (b). Citing clause 5 as the source of the 85
+    // and 100 dB(A) figures points a client at the one clause QFES says the
+    // concession does NOT reach.
+    for (const c of SOU_DOOR_CONCESSIONS) {
+      expect(c.atDoorDb.source).toContain('clause 7');
+      expect(c.atDoorDb.source).not.toContain('clause 5');
+    }
+  });
+
+  it("explains the Queensland position by the cross-reference it actually turns on", () => {
+    // QFES' reasoning is specific and checkable: the concession is written for
+    // a clause 4(b) install, a clause 5 system uses alarms instead of
+    // detectors, so it never satisfies clause 4(b). "Not the arrangement it was
+    // written for" is a paraphrase a client cannot check.
+    expect(QFES_CONCESSION_POSITION).toContain('clause 4(b)');
+    expect(QFES_CONCESSION_POSITION).toContain('clause 7(b)');
+    expect(QFES_CONCESSION_POSITION).toContain('AS 1670.1 clause 3.22');
   });
 });
 
@@ -416,6 +459,50 @@ describe('coverageVerdict', () => {
     if (r.ok) throw new Error('unreachable');
     expect(r.error).toContain('No attenuation figure');
     expect(r.error).toContain('Measure through it instead');
+  });
+
+  it('refuses an unreadable second source rather than quietly leaving it out', () => {
+    // The mirror image of the unknown barrier. A dropped source lowers the
+    // answer instead of raising it, but nothing on screen says a device the
+    // technician listed has gone missing from the sum.
+    const r = coverageVerdict({
+      ...SOUNDER, distanceM: 10, ambientDb: 55, occupancy: 'non-sleeping', requiredMarginDb: 10,
+      otherSourcesDb: [80, Number.NaN],
+    });
+    expect(r.ok).toBe(false);
+    if (r.ok) throw new Error('unreachable');
+    expect(r.error).toContain('not a source of zero');
+  });
+
+  it('does not let rounding to the tenth of a decibel turn a shortfall into a pass', () => {
+    // 92 dB(A) at 3.001 m is 82.4959… dB, four hundredths under a 82.5 dB pass
+    // mark. Rounded to the tenth first it becomes 82.5 and the room passes on
+    // the display format rather than on the sound in it.
+    const r = pass({
+      ratedDb: 92, referenceDistanceM: 1, distanceM: 3.001,
+      ambientDb: 72.5, occupancy: 'non-sleeping', requiredMarginDb: 10,
+    });
+    expect(r.bindingThresholdDb).toBe(82.5);
+    expect(r.verdict).toBe('fail');
+    // And the headroom shown agrees with the verdict rather than reading 0.0.
+    expect(r.headroomDb).toBeLessThan(0);
+  });
+
+  it('rounds real headroom down, never up', () => {
+    // A tenth of a decibel of invented headroom is not worth having; a tenth
+    // of invented shortfall costs nothing. So the rounding only ever goes one
+    // way, and an exact figure is left exactly where it is.
+    const exact = pass({ ...SOUNDER, distanceM: 10, ambientDb: 55, occupancy: 'non-sleeping', requiredMarginDb: 10 });
+    expect(exact.headroomDb).toBe(15);
+  });
+
+  it('says both thresholds decide it when the ambient and margin land on the floor', () => {
+    // 55 dB(A) ambient plus a 10 dB margin is exactly the 65 dB(A) floor. The
+    // old wording claimed the floor sat "above" a figure identical to it.
+    const r = pass({ ...SOUNDER, distanceM: 10, ambientDb: 55, occupancy: 'non-sleeping', requiredMarginDb: 10 });
+    expect(r.bindingThresholdDb).toBe(65);
+    expect(r.bindingReason).toContain('same number');
+    expect(r.bindingReason).not.toContain('above the');
   });
 
   it('refuses a negative margin, which would let a signal quieter than ambient pass', () => {

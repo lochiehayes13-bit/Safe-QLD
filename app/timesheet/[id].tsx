@@ -21,6 +21,7 @@ import { useTheme } from '@/theme';
 import {
   Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Segmented, StatTile, Txt,
 } from '@/components/ui';
+import { RecordGate } from '@/components/RecordGate';
 
 /**
  * Weekly timesheet.
@@ -33,6 +34,8 @@ export default function TimesheetScreen() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [sheet, setSheet] = useState<Timesheet | null>(null);
+  // Loaded-and-absent is not the same as still loading. See RecordGate.
+  const [missing, setMissing] = useState(false);
   const [sites, setSites] = useState<Site[]>([]);
   const [busy, setBusy] = useState(false);
   const [showIssues, setShowIssues] = useState(true);
@@ -43,7 +46,10 @@ export default function TimesheetScreen() {
 
   useEffect(() => {
     if (!id) return;
-    void getTimesheet(id).then(setSheet);
+    void getTimesheet(id).then((found) => {
+      setSheet(found);
+      setMissing(!found);
+    });
     void listSites().then(setSites);
     void loadPrefs().then(setPrefs);
     void loadRateCard().then(setCard);
@@ -118,10 +124,14 @@ export default function TimesheetScreen() {
     }
   };
 
-  if (!sheet || !totals) {
+  // `totals` is derived from the sheet, so a missing sheet is the only reason
+  // both are absent — but a sheet that loaded with no derivable totals is a
+  // different fault, and this does not claim the record is gone for it.
+  if (!sheet) return <RecordGate missing={missing} what="timesheet" />;
+  if (!totals) {
     return (
       <Screen>
-        <Txt tone="muted">Loading…</Txt>
+        <Txt tone="muted">Working out the week&rsquo;s totals…</Txt>
       </Screen>
     );
   }

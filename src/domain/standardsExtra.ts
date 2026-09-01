@@ -168,7 +168,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
   },
   'as-2419-1-2005|4.2': {
     covers:
-      'The minimum quantity of water the source has to hold, expressed as a duration at the required flow rather than as a tank size. This is the figure the four-hour supply argument turns on, and it is why an on-site tank may be smaller where the town main can top it up while the system runs.',
+      'The minimum quantity of water the source has to hold, expressed as a duration at the required flow rather than as a tank size. Read the duration off the clause, not off memory: it is why an on-site tank may be smaller where the town main can top it up while the system runs, and why an off-site source only counts for the part of the duration it can actually sustain.',
     appFeature: 'tools/hydrant',
   },
   'as-2419-1-2005|4.3': {
@@ -758,7 +758,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
   },
   'as-2293-set-2005|4.2': {
     covers:
-      'Single-point (self-contained) fittings: the test switch that simulates a supply failure, where it may be and why it must not be able to be left in the test position, and the charger indicator that has to be visible however the fitting is mounted. The two things a technician actually touches on a six-monthly.',
+      'Single-point (self-contained) fittings: the test switch that simulates a supply failure, where it may be and why it must not be able to be left in the test position, and the charger indicator that has to be visible however the fitting is mounted. The two things a technician actually touches on a routine service.',
     appFeature: 'tools/emergency-lighting',
   },
   'as-2293-set-2005|4.3': {
@@ -1262,10 +1262,16 @@ export function withClauseNotes(
  * Two sources, because they answer different questions. The consolidation on
  * the Queensland legislation register is the law as it stands; the 2012 reprint
  * is the copy Safe QLD holds and the one the index was read from. The section
- * numbers and headings of the whole of Part 5, and the repeal of sections 51 and
- * 52, were confirmed against the current consolidation, and four sections had
- * their operative wording quoted back and matched character for character. Every
- * entry says which of those it is rather than implying the stronger one.
+ * numbers and headings of the whole of Part 5 and Part 5A, and the repeal of
+ * sections 51 and 52, were confirmed against the current consolidation, and
+ * seven sections had their operative wording quoted back and matched character
+ * for character. Every entry says which of those it is rather than implying the
+ * stronger one.
+ *
+ * Reading Part 5A off the reprint is not possible — it is not in the reprint.
+ * That is the standing hazard with a held copy: it can only be wrong by
+ * omission, and an omission looks exactly like a section that does not exist.
+ * Anything still marked `reprint-2c-2012` carries that risk and says so.
  */
 export const BFSR_CITATION = {
   title: 'Building Fire Safety Regulation 2008 (Qld)',
@@ -1337,7 +1343,14 @@ export interface BfsrSection {
  * Not the whole regulation — the fee parts and most of the transitional
  * provisions are left out because nothing in this app touches them, and an index
  * padded with sections nobody uses makes the ones that matter harder to find.
- * Part 5 is complete.
+ * Part 5 and Part 5A are both complete.
+ *
+ * Part 5A does not appear in Safe QLD's 2012 reprint at all: it was inserted
+ * with the Queensland domestic smoke alarm reforms, and sections 55C to 55E are
+ * what a technician is actually being asked about when a landlord rings about
+ * alarms in a rental. Indexing the regulation off the reprint alone would have
+ * left the app answering "no such section" to the three sections it gets asked
+ * about most, so they are read from the current consolidation.
  */
 export const BFSR_2008: BfsrSection[] = [
   {
@@ -1644,13 +1657,57 @@ export const BFSR_2008: BfsrSection[] = [
   {
     section: '55B',
     part: 'Part 5 — Prescribed fire safety installations',
-    heading: 'Record keeping requirements for occupiers of particular buildings',
+    // The current consolidation hyphenates this heading; the 2012 reprint does
+    // not. A heading gets copied onto a report, so it follows the register.
+    heading: 'Record-keeping requirements for occupiers of particular buildings',
     duty: ['occupier'],
     requires:
       'For budget accommodation buildings and buildings used for residential services that need a fire safety management plan, the record of maintenance and the occupier statements have to be kept WITH that plan. On those sites the paperwork lives in a particular place, and leaving it in the panel cupboard is its own breach.',
     maxPenaltyUnits: 20,
     appFeature: 'occupier',
     verified: 'reprint-2c-2012',
+  },
+  {
+    section: '55C',
+    part: 'Part 5A — Smoke alarms for domestic dwellings',
+    heading: 'Required places for installation of smoke alarms—Act, s 147Z',
+    // The duty is in the Fire Services Act, not here. This section only
+    // prescribes the places, so claiming it binds an owner would overstate it.
+    duty: [],
+    requires:
+      'Where a smoke alarm has to go in a domestic dwelling: every bedroom, the hallway serving bedrooms on a storey (or the space between a bedroom and the rest of the dwelling where there is no hallway), and the likely path of travel out of any storey with no bedrooms. Subsection (3) then fixes the mounting position, and it is the half that gets missed — the alarm is in the right room and still on the wrong part of the ceiling.',
+    elements: [
+      { para: '(2)(a)', requires: 'Each bedroom.' },
+      { para: '(2)(b)(i)', requires: 'For a storey with bedrooms, the hallway any of those bedrooms opens onto by a door.' },
+      { para: '(2)(b)(ii)', requires: 'For a bedroom on that storey with no door to a hallway, a part of the storey between the bedroom and the rest of the dwelling.' },
+      { para: '(2)(c)', requires: 'For a storey with no bedrooms, the most likely path of travel out of the storey.' },
+      { para: '(3)', requires: 'The mounting position itself — ceiling where practicable, the clearances from walls, corners, light fittings, air outlets and ceiling fan blades, and the sloping-ceiling and stairwell cases.' },
+    ],
+    text:
+      '(3) A place where a smoke alarm is installed—(a) must be on—(i) if it is practicable to mount a smoke alarm on a ceiling—the ceiling; or (ii) if subparagraph (i) does not apply and an exposed joist or beam has a depth of no more than 300mm when measured from the ceiling—the underside of the exposed joist or beam; or (iii) otherwise—a wall in an area that is between 100mm and 300mm from the ceiling and more than 300mm from the corner of 2 walls; and (b) if the smoke alarm is installed on a ceiling that slopes—must be in an area of the ceiling that is between 500mm and 1,500mm from the apex of the ceiling; and (c) must not be—(i) within 300mm of a light fitting; and (ii) if the smoke alarm is installed on a ceiling—within 300mm of a corner of the ceiling and a wall; and (iii) if the smoke alarm is installed in a stairwell—where smoke rising in the stairwell will not reach the smoke alarm because of an obstruction; and (iv) within 400mm of an opening from which air is supplied from an air conditioner or forced air ventilation; and (v) within 400mm of the blades of a ceiling fan.',
+    verified: 'current-consolidation',
+  },
+  {
+    section: '55D',
+    part: 'Part 5A — Smoke alarms for domestic dwellings',
+    heading: 'Ways of powering smoke alarms—Act, s 147Z',
+    duty: [],
+    requires:
+      'The only two ways a smoke alarm in a domestic dwelling may be powered: hardwired to the dwelling supply, or a non-removable battery built to last the alarm’s service life without recharging. A nine-volt replaceable battery is neither, which is what makes half the alarms found in older Queensland houses non-compliant rather than merely old.',
+    text:
+      'For section 147Z(5)(a) of the Act, the ways prescribed for powering a smoke alarm are—(a) hardwiring the smoke alarm to the domestic dwelling’s electricity supply; or (b) a battery that is—(i) built into the smoke alarm in a way that prevents the battery being removed; and (ii) manufactured to power the smoke alarm for at least 10 years without being recharged.',
+    verified: 'current-consolidation',
+  },
+  {
+    section: '55E',
+    part: 'Part 5A — Smoke alarms for domestic dwellings',
+    heading: 'Other requirements for smoke alarms—Act, s 147Z',
+    duty: [],
+    requires:
+      'What the alarm itself has to be: compliant with the smoke alarm product standard, photoelectric, and not also ionisation. The third limb is the one that catches people out — a dual sensor head is expressly excluded, so swapping an old ionisation alarm for a combination unit does not answer this section.',
+    text:
+      '(1) For section 147Z(5)(b) of the Act, the other requirements prescribed are that a smoke alarm must—(a) comply with AS 3786–2014; and (b) contain a photoelectric sensor; and (c) not also contain an ionisation sensor.',
+    verified: 'current-consolidation',
   },
   {
     section: '70',
@@ -1790,6 +1847,19 @@ export interface BfsrDefinition {
   source: string;
   meaning: string;
   note?: string;
+  /**
+   * How far this entry has been checked, on the same scale as a section.
+   *
+   * A dictionary entry ages worse than an operative section, because it is
+   * mostly cross-references to other instruments and those get renamed and
+   * repealed underneath it. "Appropriately qualified person" is the example:
+   * the 2012 reprint pointed at the Queensland Building Services Authority
+   * Regulation 2003 and the Plumbing and Drainage Regulation 2003, and both
+   * have since been replaced. A technician sent to the wrong regulation to
+   * check their own licence class gets a confident wrong answer, so the
+   * verification travels with the entry rather than being assumed.
+   */
+  verified: BfsrVerification;
 }
 
 /**
@@ -1804,9 +1874,10 @@ export const BFSR_DEFINITIONS: BfsrDefinition[] = [
     term: 'appropriately qualified person',
     source: 'schedule 3',
     meaning:
-      'A person holding a licence of a class, type or endorsement named in the plumbing and drainage or building services regulations, whose scope of work includes maintaining installations of that type. Water-based installations — sprinklers and hydrants including boosters — are licensed differently from everything else.',
+      'A person holding a licence of a class or type, or with an endorsement, named in the Queensland Building and Construction Commission Regulation 2018 — or, for a water-based installation, in that regulation or in the Plumbing and Drainage Regulation 2019 — and for which the scope of work includes maintaining installations of that type. Water-based installations, being sprinklers and hydrants including boosters, are licensed differently from everything else.',
     note:
-      'The scope-of-work limb is the one that bites: holding a licence is not enough if it does not cover the installation being worked on.',
+      'The scope-of-work limb is the one that bites: holding a licence is not enough if it does not cover the installation being worked on. The named regulations are the current ones — the 2012 reprint still points at the repealed Queensland Building Services Authority Regulation 2003 and Plumbing and Drainage Regulation 2003, so a licence class quoted from an old copy will not be found.',
+    verified: 'current-consolidation',
   },
   {
     term: 'maintenance',
@@ -1815,6 +1886,7 @@ export const BFSR_DEFINITIONS: BfsrDefinition[] = [
       'For a prescribed fire safety installation, the inspection and testing, or repair, necessary to ensure it continues to operate at its original performance level and in accordance with any relevant Australian Standards.',
     note:
       '"Original performance level" is the benchmark, which is why a missing baseline or commissioning record is a real problem and not just untidy filing.',
+    verified: 'current-consolidation',
   },
   {
     term: 'water-based fire safety installation',
@@ -1822,6 +1894,7 @@ export const BFSR_DEFINITIONS: BfsrDefinition[] = [
     meaning:
       'A prescribed fire safety installation consisting of sprinklers, including wall-wetting sprinklers, or fire hydrants, including hydrant boosters.',
     note: 'The category that determines which licence class an appropriately qualified person needs.',
+    verified: 'current-consolidation',
   },
   {
     term: 'prescribed document',
@@ -1829,29 +1902,34 @@ export const BFSR_DEFINITIONS: BfsrDefinition[] = [
     meaning:
       'A record of a review of a fire and evacuation plan, a fire and evacuation instruction record, an evacuation practice record, or a record of maintenance.',
     note: 'These are the documents the two-year retention and the hand-over duty in section 72 attach to.',
+    verified: 'current-consolidation',
   },
   {
     term: 'prescribed fire safety installation',
-    source: 'schedule 3, by reference to the Fire Services Act 1990',
+    source: 'schedule 3, by reference to the Fire Services Act 1990, section 146J',
     meaning:
       'Defined by reference to the Fire Services Act rather than by a list inside this regulation. The working list of what has to be maintained comes from QDC MP 6.1, which is also what the occupier statement enumerates.',
+    verified: 'current-consolidation',
   },
   {
     term: 'obstruct',
     source: 'schedule 3',
     meaning:
       'In relation to an evacuation route, includes hindering a person’s use of the route. It is broader than blocking it — something that merely slows people down can obstruct.',
+    verified: 'current-consolidation',
   },
   {
     term: 'occupier statement',
     source: 'section 55A(1)',
     meaning:
       'A statement the occupier prepares, at the intervals QDC MP 6.1 sets, about the maintenance of each prescribed fire safety installation for the building.',
+    verified: 'current-consolidation',
   },
   {
     term: 'record of maintenance',
     source: 'schedule 3, by reference to section 55(1)',
     meaning: 'The record the occupier must keep for the maintenance of each prescribed fire safety installation.',
+    verified: 'current-consolidation',
   },
 ];
 
@@ -1859,4 +1937,12 @@ export const BFSR_DEFINITIONS: BfsrDefinition[] = [
 export function bfsrDefinition(term: string): BfsrDefinition | undefined {
   const wanted = term.trim().toLowerCase();
   return BFSR_DEFINITIONS.find((d) => d.term === wanted);
+}
+
+/** Where a dictionary entry was read, and what it is worth. Undefined for a term this index does not carry. */
+export function bfsrDefinitionSource(
+  term: string,
+): { source: string; asAt: string; confidence: NoteConfidence } | undefined {
+  const entry = bfsrDefinition(term);
+  return entry ? BFSR_VERIFICATION[entry.verified] : undefined;
 }

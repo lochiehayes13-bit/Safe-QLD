@@ -21,6 +21,7 @@ import { useTheme } from '@/theme';
 import {
   Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
+import { RecordGate } from '@/components/RecordGate';
 import { SignaturePad } from '@/components/SignaturePad';
 
 /**
@@ -37,6 +38,8 @@ export default function ReportScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [report, setReport] = useState<ServiceReport | null>(null);
+  // Loaded-and-absent is not the same as still loading. See RecordGate.
+  const [missing, setMissing] = useState(false);
   const [site, setSite] = useState<Site | null>(null);
   const [panel, setPanel] = useState<Panel | null>(null);
   const [rows, setRows] = useState<TestRow[]>([]);
@@ -53,6 +56,7 @@ export default function ReportScreen() {
     if (!id) return;
     const r = await getReport(id);
     setReport(r);
+    setMissing(!r);
     if (!r) return;
     const [s, p, tr, cr, df] = await Promise.all([
       getSite(r.siteId),
@@ -204,7 +208,7 @@ export default function ReportScreen() {
     }
   };
 
-  if (!report) return <Screen><Txt tone="muted">Loading…</Txt></Screen>;
+  if (!report) return <RecordGate missing={missing} what="service report" />;
 
   return (
     <>

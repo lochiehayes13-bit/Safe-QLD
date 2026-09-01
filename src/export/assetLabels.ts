@@ -266,7 +266,14 @@ function quietZoneMm(narrowMm: number): number {
   return Math.max(QUIET_ZONE_MODULES * narrowMm, QUIET_ZONE_MIN_MM);
 }
 
-/** Total width of a symbol in narrow-element widths, including quiet zones. */
+/**
+ * Total width of a symbol in narrow-element widths, counting a quiet zone of
+ * ten modules at each end.
+ *
+ * Nominal only. The quiet zone the specification actually requires is the
+ * greater of ten modules and 2.54 mm, so planBarcode takes the bar region from
+ * this figure and adds the real quiet zone itself.
+ */
 export function code39WidthModules(characterCount: number, ratio: number): number {
   const perCharacter = 6 + 3 * ratio;
   return QUIET_ZONE_MODULES * 2 + characterCount * perCharacter + (characterCount - 1);
@@ -334,7 +341,7 @@ export function code39Svg(data: string, plan: BarcodePlan): string | undefined {
   }
 
   const { ratio, narrowMm, heightMm } = plan;
-  const quiet = plan.quietZoneMm ?? quietZoneMm(narrowMm);
+  const quiet = plan.quietZoneMm;
   const rects: string[] = [];
   let x = quiet;
 

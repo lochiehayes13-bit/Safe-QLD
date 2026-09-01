@@ -24,6 +24,7 @@ import {
   type Refused,
   type SourceId,
 } from '@/domain/hoseReel';
+import { qldIsoDay } from '@/domain/qldTime';
 import { useTheme } from '@/theme';
 import {
   Banner, Card, Chip, Divider, Field, H2, Label, ResultBlock, Rowed, Screen, Segmented, StatTile, Txt,
@@ -281,6 +282,7 @@ function FlowView() {
               {published.atInletPressureKpa} kPa
             </Txt>
           </Rowed>
+          <Txt size="xs" tone="muted" style={{ lineHeight: 17 }}>{published.pressureMeasuredAt}</Txt>
           {published.disagreement ? (
             <Txt size="xs" tone="warn" style={{ lineHeight: 17 }}>{published.disagreement}</Txt>
           ) : null}
@@ -314,7 +316,7 @@ function FlowView() {
         </View>
         <View style={{ flex: 1 }}>
           <Field
-            label="Running pressure"
+            label="Pressure at the reel inlet"
             value={pressureText}
             onChangeText={setPressureText}
             keyboardType="decimal-pad"
@@ -324,7 +326,9 @@ function FlowView() {
       </Rowed>
       <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
         Hose fully run out, at the hydraulically most disadvantaged reel. Running pressure while water is flowing —
-        static pressure with the nozzle shut proves nothing.
+        static pressure with the nozzle shut proves nothing. Read the pressure at the inlet to the reel, which is
+        where the published duty is quoted; a gauge on the nozzle end of 36 m of hose reads far lower and fails a reel
+        for the friction loss the flow test already measures.
       </Txt>
 
       {isRefused(result) ? (
@@ -409,7 +413,11 @@ function DueView() {
   const [activity, setActivity] = useState<HoseReelActivity>('six-monthly');
   const [commissioned, setCommissioned] = useState('');
   const [lastDone, setLastDone] = useState('');
-  const [today, setToday] = useState(new Date().toISOString().slice(0, 10));
+  // The Queensland date, not the UTC one. toISOString() is UTC, and Queensland
+  // runs ten hours ahead of it: from two in the afternoon until midnight the
+  // UTC date is still yesterday, so a reel that came due today would read as
+  // upcoming for the second half of every working day.
+  const [today, setToday] = useState(qldIsoDay(new Date().toISOString()) ?? '');
 
   const spec = ACTIVITY_SPECS[activity];
   const result = useMemo(
@@ -422,10 +430,9 @@ function DueView() {
       <Segmented
         value={activity}
         onChange={setActivity}
-        options={[
-          { value: 'six-monthly', label: ACTIVITY_LABEL['six-monthly'] },
-          { value: 'five-yearly', label: ACTIVITY_LABEL['five-yearly'] },
-        ]}
+        options={(Object.keys(ACTIVITY_SPECS) as HoseReelActivity[])
+          .sort((a, b) => ACTIVITY_SPECS[a].intervalMonths - ACTIVITY_SPECS[b].intervalMonths)
+          .map((a) => ({ value: a, label: ACTIVITY_LABEL[a] }))}
       />
 
       <Card style={{ gap: t.space(1.5) }}>
@@ -434,6 +441,10 @@ function DueView() {
         <Rowed gap={2} align="flex-start">
           <MaterialCommunityIcons name="alert-circle-outline" size={16} color={t.color.warn} style={{ marginTop: 2 }} />
           <Txt size="xs" tone="muted" style={{ flex: 1, lineHeight: 17 }}>{spec.doesNotCover}</Txt>
+        </Rowed>
+        <Rowed gap={2} align="flex-start">
+          <Chip label={spec.confidence} tone={CONFIDENCE_TONE(spec.confidence)} />
+          <Txt size="xs" tone="faint" style={{ flex: 1, lineHeight: 17 }}>{spec.evidence}</Txt>
         </Rowed>
       </Card>
 

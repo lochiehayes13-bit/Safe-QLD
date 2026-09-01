@@ -353,6 +353,46 @@ describe('nextDue — the anchor rule', () => {
     expect(r.daysUntil.latest).toBeLessThan(0);
   });
 
+  it('does not let an off-schedule service swallow the occurrence it came nowhere near', () => {
+    // Manufactured June 2015, a five-yearly recorded June 2018 — three years
+    // into a five year cycle. Rounded to the nearest occurrence that service
+    // counts as the 2020 test, the app answers "next due 2025", and by today it
+    // has quietly written off both the 2020 and the 2025 tests on a pressure
+    // vessel. The occurrence it did not reach is still outstanding and it says
+    // which service failed to satisfy it.
+    const r = nextDue({
+      activity: 'five-yearly',
+      type: 'dry-chemical-abe',
+      manufactured: '1/6/2015',
+      lastDone: '1/6/2018',
+      today: TODAY,
+    });
+    if (isRefused(r)) throw new Error(r.reason);
+    expect(r.occurrence).toBe(1);
+    expect(r.due.earliest).toBe('2020-06-01');
+    expect(r.state).toBe('overdue');
+    expect(r.missedOccurrences).toBe(2);
+    expect(r.notes.join(' ')).toContain('still outstanding');
+  });
+
+  it('still counts a service done a few weeks early as the occurrence it was for', () => {
+    // The other half of that rule, and the reason it is a quarter of the
+    // interval rather than nothing: a site whose six-monthly round runs a month
+    // ahead of the cylinder anniversary is not a month overdue every single
+    // time, which is what a strict reading would report across the whole book.
+    const r = nextDue({
+      activity: 'six-monthly',
+      type: 'dry-chemical-abe',
+      manufactured: '1/6/2015',
+      lastDone: '1/5/2026',
+      today: TODAY,
+    });
+    if (isRefused(r)) throw new Error(r.reason);
+    expect(r.due.earliest).toBe('2026-12-01');
+    expect(r.state).toBe('upcoming');
+    expect(r.notes.join(' ')).toContain('counted as it');
+  });
+
   it('reports the oldest outstanding occurrence, not the most recent one', () => {
     // An asset with no five-yearly ever recorded since 2010 is not "due in
     // 2030". Three tests have fallen due — 2015, 2020 and 2025 — and the date
@@ -880,9 +920,21 @@ describe('rollupSite — what this site is going to need', () => {
   it('counts work in assets and activities and refuses to put a price on it', () => {
     // Rates are commercial terms. The field app owes the office an accurate
     // count broken down finely enough to price; the price is applied elsewhere.
-    const r = rollupSite([entry('E1')], TODAY);
+    // Run over a site that exercises every caveat this function can add —
+    // unclassified rows, an unschedulable asset and a condemnable one — because
+    // a rollup with nothing wrong with it is the one case where the wording
+    // cannot leak a commercial term.
+    const r = rollupSite(
+      [
+        entry('E1'),
+        entry('E2', { typeText: '4.5kg DCP' }),
+        entry('E3', { typeText: 'BCF 1kg' }),
+        entry('E4', { manufactured: undefined, lastSixMonthly: undefined, lastYearly: undefined, lastFiveYearly: undefined }),
+      ],
+      TODAY,
+    );
     expect(r.caveats.join(' ')).toContain('not of money');
-    expect(JSON.stringify(r)).not.toMatch(/\$|\bcents\b|\bexGst\b|\bprice\b/i);
+    expect(JSON.stringify(r)).not.toMatch(/\$|\bcents\b|\bexGst\b|\bprice\b|\brate\b/i);
   });
 
   it('always says the register being right is an assumption', () => {

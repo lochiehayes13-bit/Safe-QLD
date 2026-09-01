@@ -179,6 +179,16 @@ describe('pitotFlow — refusals and warnings on the reading itself', () => {
     expect(r.issues.some((i) => i.title.includes('below'))).toBe(true);
   });
 
+  it('warns on a dead-zero pitot rather than reporting no flow without comment', () => {
+    // Zero on the pitot is far more often a tube out of the stream or a gauge
+    // left shut than a hydrant that genuinely delivers nothing, and "0.00 L/s"
+    // on its own is a number a report would print.
+    const r = pitotFlow({ pitotKpa: 0, outletDiameterMm: 65, outlet: 'rounded' });
+    if (isRefused(r)) throw new Error(r.reason);
+    expect(r.flowLpm).toBe(0);
+    expect(r.issues.some((i) => i.level === 'warning' && i.title.includes('below'))).toBe(true);
+  });
+
   it('warns above 30 psi, where the tube cannot be held steady in the jet', () => {
     const r = pitotFlow({ pitotKpa: 300, outletDiameterMm: 65, outlet: 'rounded' });
     if (isRefused(r)) throw new Error(r.reason);
@@ -359,6 +369,30 @@ describe('frictionLoss — pinned to a manufacturer’s published loss figures',
     expect(r.reason).toMatch(/coefficient|material/i);
   });
 
+  it('refuses a C value no material has, because a slipped decimal flatters the system', () => {
+    // C = 1400 for C = 140 cuts the estimated loss by about 99%. Every other
+    // guard in this module is about not flattering a marginal supply, and an
+    // unbounded C override is the one hole straight through all of them.
+    const r = frictionLoss({ flowLpm: 450, internalDiameterMm: 65, lengthM: 30, cOverride: 1400 });
+    expect(isRefused(r)).toBe(true);
+    if (!isRefused(r)) return;
+    expect(r.reason).toMatch(/decimal/i);
+    // 150 is a real design value and has to keep working.
+    expect(isRefused(frictionLoss({ flowLpm: 450, internalDiameterMm: 65, lengthM: 30, cOverride: 150 }))).toBe(false);
+  });
+
+  it('still reports a loss rate for a run whose length has not been entered yet', () => {
+    // Dividing the total by the length gives 0 kPa/m at zero length, and a hose
+    // does not stop having a loss rate because nobody has said how much of it is
+    // laid out. The total is zero; the rate is not.
+    const none = frictionLoss({ flowLpm: 450, internalDiameterMm: 65, lengthM: 0, conduit: 'layflat-hose' });
+    const thirty = frictionLoss({ flowLpm: 450, internalDiameterMm: 65, lengthM: 30, conduit: 'layflat-hose' });
+    if (isRefused(none) || isRefused(thirty)) throw new Error('both should calculate');
+    expect(none.pressureLossKpa).toBe(0);
+    expect(none.lossKpaPerM).toBeCloseTo(thirty.lossKpaPerM, 6);
+    expect(none.lossKpaPerM).toBeGreaterThan(0);
+  });
+
   it('refuses a zero diameter, a negative flow and a negative length', () => {
     expect(isRefused(frictionLoss({ flowLpm: 450, internalDiameterMm: 0, lengthM: 30, conduit: 'layflat-hose' }))).toBe(true);
     expect(isRefused(frictionLoss({ flowLpm: -1, internalDiameterMm: 65, lengthM: 30, conduit: 'layflat-hose' }))).toBe(true);
@@ -408,8 +442,10 @@ describe('pressureAtHydrant', () => {
     expect(r.arrivingKpa).toBeCloseTo(342.3, 1);
   });
 
-  it('says the outlet is dry rather than reporting a negative pressure as a result', () => {
-    // A negative kPa on a screen reads as a small number, not as "nothing comes out".
+  it('carries an error saying the outlet is dry, because a negative kPa on its own reads as a small number', () => {
+    // The shortfall is worth keeping — "you are 194 kPa short" is more use than
+    // "no" — but it cannot be the only thing on the screen, so the error issue
+    // is what the caller has to show.
     const r = pressureAtHydrant({ sourceKpa: 100, elevationRiseM: 30, frictionLossKpa: 0 });
     if (isRefused(r)) throw new Error(r.reason);
     expect(r.arrivingKpa).toBeLessThan(0);
@@ -533,6 +569,15 @@ describe('projectAvailableFlow — refusals', () => {
     expect(r.issues.some((i) => i.level === 'warning' && i.title.includes('25%'))).toBe(true);
   });
 
+  it('refuses a residual below zero, which is a typed minus sign and not a reading', () => {
+    // Left alone it makes the drawdown larger than the static itself, and every
+    // flow projected off it reads low — a fail on a system that was fine.
+    const r = projectAvailableFlow({ staticKpa: 600, residualKpa: -300, measuredFlowLpm: 500, targetResidualKpa: 350 });
+    expect(isRefused(r)).toBe(true);
+    if (!isRefused(r)) return;
+    expect(r.reason).toMatch(/sign/i);
+  });
+
   it("refuses a residual that read higher than the static, which is a procedure fault", () => {
     // Almost always the residual was taken before the hydrant was opened, or off
     // a different gauge. It is never a real supply.
@@ -637,20 +682,97 @@ describe('assessHydrant', () => {
     expect(r.issues.some((i) => i.title.includes('Could not project'))).toBe(true);
   });
 
-  it('fails a hydrant that is over the permitted maximum even though the flow was demonstrated', () => {
+  it('fails a hydrant flowing above the permitted maximum even though the duty was demonstrated', () => {
     // Too much pressure is a defect in the other direction — nobody can hold the
     // hose. A pass on flow alone would send that out as compliant.
     const r = assessHydrant({
       ...duty,
       measuredFlowLpm: 900,
-      measuredResidualKpa: 400,
-      staticKpa: 1400,
+      measuredResidualKpa: 1250,
       maxOutletKpa: 1200,
     });
     if (isRefused(r)) throw new Error(r.reason);
     expect(r.verdict).toBe('fail');
     expect(r.demonstrated).toBe(true);
-    expect(r.issues.some((i) => i.level === 'error' && i.title.includes('above the permitted maximum'))).toBe(true);
+    expect(r.issues.some((i) => i.level === 'error' && i.title.includes('Outlet pressure above'))).toBe(true);
+  });
+
+  it('does not fail a static that is above the flowing ceiling, because that is a different limit', () => {
+    // The Queensland document this module ships as a reference sets 1200 kPa at
+    // the outlet under design flow and 1300 kPa static with the pump running.
+    // A static of 1250 is inside what that document allows; failing it against
+    // the flowing figure writes up a defect the source does not support, which
+    // is a false statement in a report a client acts on.
+    const r = assessHydrant({
+      ...duty,
+      measuredFlowLpm: 900,
+      measuredResidualKpa: 400,
+      staticKpa: 1250,
+      maxOutletKpa: 1200,
+    });
+    if (isRefused(r)) throw new Error(r.reason);
+    expect(r.verdict).toBe('pass');
+    expect(r.issues.some((i) => i.level === 'warning' && i.title.includes('different limit'))).toBe(true);
+  });
+
+  it('fails a static over its own stated ceiling', () => {
+    const r = assessHydrant({
+      ...duty,
+      measuredFlowLpm: 900,
+      measuredResidualKpa: 400,
+      staticKpa: 1400,
+      maxStaticKpa: 1300,
+    });
+    if (isRefused(r)) throw new Error(r.reason);
+    expect(r.verdict).toBe('fail');
+    expect(r.issues.some((i) => i.level === 'error' && i.title.includes('Static pressure above'))).toBe(true);
+  });
+
+  it('fails on over-pressure even where the flow question could not be answered', () => {
+    // The flow test is incomplete — no static, and a shortfall — but the outlet
+    // was measured over its ceiling, and a measured defect does not become
+    // inconclusive because a different question went unanswered.
+    const r = assessHydrant({
+      ...duty,
+      measuredFlowLpm: 300,
+      measuredResidualKpa: 1250,
+      maxOutletKpa: 1200,
+    });
+    if (isRefused(r)) throw new Error(r.reason);
+    expect(r.verdict).toBe('fail');
+    expect(r.summary).toMatch(/regardless of the flow result/);
+  });
+
+  it("refuses a ceiling it cannot read rather than quietly not checking it", () => {
+    // The screen hands over whatever is in the field. A ceiling that arrives as
+    // NaN and is silently dropped produces a PASS on flow alone from a test the
+    // technician believes was checked against a maximum.
+    const over = { ...duty, measuredFlowLpm: 900, measuredResidualKpa: 1250 };
+    expect(isRefused(assessHydrant({ ...over, maxOutletKpa: Number.NaN }))).toBe(true);
+    expect(isRefused(assessHydrant({ ...over, maxStaticKpa: Number.NaN }))).toBe(true);
+    expect(isRefused(assessHydrant({ ...over, maxOutletKpa: 0 }))).toBe(true);
+    // And with the ceiling readable, the same test is a fail rather than a refusal.
+    const good = assessHydrant({ ...over, maxOutletKpa: 1200 });
+    expect(isRefused(good)).toBe(false);
+  });
+
+  it("refuses a static it cannot read instead of reporting that none was taken", () => {
+    // "Record the static and retest" sends a technician back to a site where the
+    // static was recorded — it was just typed with a letter in it.
+    const r = assessHydrant({ ...duty, measuredFlowLpm: 400, measuredResidualKpa: 500, staticKpa: Number.NaN });
+    expect(isRefused(r)).toBe(true);
+    if (!isRefused(r)) return;
+    expect(r.reason).toMatch(/static/i);
+  });
+
+  it('does not call a duty demonstrated when the flow was made but not at the pressure', () => {
+    // 10.3 L/s came out, which is over the duty, but at 100 kPa instead of 350.
+    // "Demonstrated" has to mean both halves of the duty at once, or a hydrant
+    // that dumps water at no useful pressure passes on the flow figure alone.
+    const r = assessHydrant({ ...duty, measuredFlowLpm: 620, measuredResidualKpa: 100 });
+    if (isRefused(r)) throw new Error(r.reason);
+    expect(r.demonstrated).toBe(false);
+    expect(r.verdict).toBe('indeterminate');
   });
 
   it("refuses to assess against a duty with no recorded source", () => {
@@ -703,6 +825,22 @@ describe('the published requirement references', () => {
     }
   });
 
+  it('says of every ceiling which state of the system it was written for', () => {
+    // 1300 kPa static with the pump running and 1200 kPa at the outlet under
+    // design flow are two different limits in the same document. A ceiling that
+    // does not say which one it is gets applied to whichever reading is to hand,
+    // and a static checked against the flowing figure is a defect nobody wrote.
+    for (const ref of REQUIREMENT_REFS.filter((r) => r.kind === 'maximum')) {
+      expect(['no-flow', 'design-flow', 'unstated']).toContain(ref.appliesAt);
+    }
+    // And where the source genuinely does not distinguish, that is recorded as
+    // "unstated" rather than guessed at — the WA guideline states one maximum
+    // for attack hydrants and never says whether it is measured flowing.
+    expect(requirementRef('wa-dfes-attack-max')!.appliesAt).toBe('unstated');
+    expect(requirementRef('qld-construction-max-static')!.appliesAt).toBe('no-flow');
+    expect(requirementRef('qld-construction-max-discharge')!.appliesAt).toBe('design-flow');
+  });
+
   it('has unique ids so a recorded assessment can be traced back to its figure', () => {
     const ids = REQUIREMENT_REFS.map((r) => r.id);
     expect(new Set(ids).size).toBe(ids.length);
@@ -746,6 +884,16 @@ describe('the published requirement references', () => {
     // and treating it as a duty would assess against a requirement nobody set.
     expect(refToDuty(requirementRef('qld-construction-max-discharge')!)).toBeNull();
     expect(refToDuty(requirementRef('wa-dfes-attack-min')!)).toBeNull();
+  });
+
+  it('refuses a maximum that does carry a flow figure, which is the case the null check alone misses', () => {
+    // Every maximum shipped today happens to have flowLps null, so the entries
+    // above pass on the missing flow and never touch the "is it a minimum"
+    // guard at all. A ceiling added later that states a flow — "no more than
+    // 1200 kPa at 10 L/s" — would sail straight through and be assessed as a
+    // duty of 10 L/s at 1200 kPa, which is not a requirement anybody wrote.
+    const ceilingWithAFlow = { ...requirementRef('qld-construction-max-discharge')!, flowLps: 10 };
+    expect(refToDuty(ceilingWithAFlow)).toBeNull();
   });
 
   it('returns nothing for a jurisdiction it holds no figures for', () => {

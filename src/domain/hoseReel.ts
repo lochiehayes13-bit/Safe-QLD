@@ -2,21 +2,25 @@ import { scheduledDate, type Frequency } from '@/domain/qldCompliance';
 import { parseImpreciseDate, type ImpreciseDate } from '@/parsers/assetRegister';
 
 /**
- * Fire hose reels — about a thousand assets, two routines, and no logic at all.
+ * Fire hose reels — about a thousand assets, three routines, and no logic at all.
  *
  * A hose reel is the simplest thing Safe QLD services and that is exactly why
- * it goes wrong. Nobody argues about a hose reel. It gets a tick at six months
- * and a tick at five years, and the four ways that ticking goes wrong are what
- * this module exists to stop.
+ * it goes wrong. Nobody argues about a hose reel. It gets a tick at six months,
+ * a tick at twelve and a tick at five years, and the four ways that ticking
+ * goes wrong are what this module exists to stop.
  *
- *  1. **The five-yearly quietly absorbed into the six-monthly.** They are
+ *  1. **A longer routine quietly absorbed into a shorter one.** They are
  *     different activities. The six-monthly is an operational check — run it
  *     out, flow it, look at it. The five-yearly puts the hose under test
  *     pressure, which is the only activity that finds a hose about to split
  *     under a person's hands. A scheduler that treats "serviced in March" as
- *     satisfying both puts an untested hose on a wall for a decade, and every
- *     line of the record looks compliant. Nothing here lets one discharge the
- *     other: see `discharges()`, which is deliberately as blunt as it looks.
+ *     satisfying all of them puts an untested hose on a wall for a decade, and
+ *     every line of the record looks compliant. Nothing here lets one discharge
+ *     another: see `discharges()`, which is deliberately as blunt as it looks.
+ *     The same trap has a second mouth — a module that only *models* two of the
+ *     three routines reports a site as clear while a whole routine is missing
+ *     from the page. The activity list is taken from the register's own
+ *     columns, and the rollup iterates whatever is in it.
  *
  *  2. **Drift.** Scheduling from the last service instead of from the anchor
  *     makes lateness compound. Six-monthlies drift fastest of anything on the
@@ -103,13 +107,14 @@ export const SOURCES: Record<SourceId, Source> = {
   },
   as1851: {
     id: 'as1851',
-    what: 'That fire hose reels carry a routine service regime with a six-monthly and a five-yearly activity',
+    what: 'That fire hose reels carry a routine service regime with a six-monthly, a yearly and a five-yearly activity',
     ref: 'AS 1851-2012, Routine service of fire protection systems and equipment',
     url: 'https://www.standards.org.au/standards-catalogue/standard-details?designation=as-1851-2012',
     confidence: 'medium',
     basis:
-      'The existence and the frequency of the two activities is corroborated by the routines Safe QLD already runs '
-      + 'against these assets. The section number is NOT established: the public sources reached disagree about which '
+      "The existence and the frequency of the three activities is corroborated by Safe QLD's own hose reel register "
+      + '— of the 804 reels in the export of 1/9/2026, 802 carry a six-monthly date, 791 a yearly and 630 a '
+      + 'five-yearly. The section number is NOT established: the public sources reached disagree about which '
       + 'section of AS 1851-2012 fire hose reels sit in, and several of them place the flow test annually rather than '
       + 'six-monthly. This module therefore prints no section number and no item number — see '
       + 'AS1851_SECTION_NOT_ESTABLISHED — and the method is transcribed from the purchased copy by the licence holder.',
@@ -357,13 +362,20 @@ export interface ReelEstimate {
   coverage: Coverage;
   floorAreaM2: number;
   /**
-   * Area divided by the disc. The absolute floor: unreachable in a real
-   * building because it assumes circles tessellate and no wall exists.
+   * Area divided by the disc. The absolute floor: no arrangement of reels of
+   * this reach covers this area with fewer, because no reel covers more than
+   * its own disc. Unreachable in a real building, which is the point of it.
    */
   idealMinimum: number;
   /**
-   * Area divided by the inscribed square. What a grid of reels laid out to
-   * leave no gap actually needs, before obstructions.
+   * Area divided by the inscribed square. What a square grid of reels laid out
+   * to leave no gap needs, before obstructions.
+   *
+   * This one is NOT a lower bound and must not be described as one. A square
+   * grid is not the best covering there is — offsetting the rows into a
+   * hexagonal pattern gets 3√3/2 r² out of each reel against this 2r², so a
+   * cleverer layout beats this number. It is a working figure for the layout
+   * anybody actually installs, bracketed above the true floor.
    */
   gridEstimate: number;
   /** How many reels are actually installed, where the caller knows. */
@@ -378,10 +390,12 @@ export interface ReelEstimate {
 /**
  * A plausible reel count for a floor area, given as a range and never as an answer.
  *
- * The two numbers bracket the truth from below. If a floor of 4,000 m² has one
- * reel on it, both numbers say so and the conversation with the client is easy.
- * If it has four, this function has nothing useful to say and admits it — the
- * question is then about where they are, which needs a plan.
+ * The two numbers bracket the truth. The disc count is a genuine floor —
+ * nothing covers the area with fewer reels of this reach. The grid count is the
+ * layout somebody actually installs and sits above that floor. If a floor of
+ * 4,000 m² has one reel on it, both numbers say so and the conversation with
+ * the client is easy. If it has four, this function has nothing useful to say
+ * and admits it — the question is then about where they are, which needs a plan.
  *
  * The comparison against what is installed is only ever made in the shortfall
  * direction. Reporting a site as "over-provided" would be this app second-
@@ -406,14 +420,20 @@ export function estimateReels(
     };
   }
 
-  const radius = cov.radiusM;
-  const idealMinimum = Math.ceil(floorAreaM2 / (Math.PI * radius * radius));
-  const gridEstimate = Math.ceil(floorAreaM2 / (2 * radius * radius));
+  // Divided by the areas this function is about to publish, not by a second
+  // radius worked out alongside them. Coverage rounds its areas for display; a
+  // count derived from an unrounded radius can differ from the one a client
+  // gets dividing the two printed numbers on the back of an envelope, and on a
+  // marginal floor that difference is a whole reel in the flattering direction.
+  const idealMinimum = Math.ceil(floorAreaM2 / cov.discAreaM2);
+  const gridEstimate = Math.ceil(floorAreaM2 / cov.gridAreaM2);
 
   const notes = [...cov.notes];
   notes.push(
-    'Both counts are lower bounds. Neither accounts for a wall, a doorway, a rack or a change of level, and every one '
-    + 'of those adds reels rather than removing them.',
+    'The bare-floor minimum is a true lower bound — no arrangement of reels this size covers this area with fewer. '
+    + 'The grid figure is not a lower bound: it is what a square grid needs, and a hexagonal layout covers more floor '
+    + 'per reel than a square one does. Neither accounts for a wall, a doorway, a rack or a change of level, and '
+    + 'every one of those adds reels rather than removing them.',
   );
   if (floorAreaM2 > 500) {
     notes.push(
@@ -433,8 +453,9 @@ export function estimateReels(
         + 'building, and it holds however the reels are arranged.';
     } else {
       notes.push(
-        `${installed} reels are installed, which is at or above the bare-floor minimum. That is not a finding either `
-        + 'way: whether they actually cover the floor depends on where they are, which needs a plan.',
+        `${installed} reel${installed === 1 ? ' is' : 's are'} installed, which is at or above the bare-floor `
+        + 'minimum. That is not a finding either way: whether they actually cover the floor depends on where they '
+        + 'are, which needs a plan.',
       );
     }
   }
@@ -463,8 +484,23 @@ export interface DutySpec {
   /** Nominal hose diameter, which is what the published figures are indexed by. */
   nominalHoseDiameterMm: number;
   minimumFlowLitresPerSecond: number;
-  /** The inlet pressure the flow figure is quoted at. Flow without a pressure is not a duty. */
+  /**
+   * The pressure at the **inlet to the reel assembly** that the flow figure is
+   * quoted at. Flow without a pressure is not a duty.
+   *
+   * This is not a nozzle pressure and it is not a minimum the reel has to beat.
+   * It is the supply condition the discharge is measured under: put this at the
+   * inlet and the reel must give the flow. Reading it at the nozzle instead
+   * fails a perfectly good reel, because most of it is lost down 36 m of 19 mm
+   * hose — which is exactly the loss the flow test is there to find.
+   */
   atInletPressureKpa: number;
+  /**
+   * Where the pressure figure has to be read for the duty to mean anything.
+   * Carried as data so a screen cannot put the figure in a box labelled
+   * something else.
+   */
+  pressureMeasuredAt: string;
   confidence: Confidence;
   sourceIds: SourceId[];
   /** Set where the sources reached do not agree about this figure. */
@@ -489,6 +525,11 @@ export const PUBLISHED_DUTIES: DutySpec[] = [
     nominalHoseDiameterMm: 19,
     minimumFlowLitresPerSecond: 0.33,
     atInletPressureKpa: 220,
+    pressureMeasuredAt:
+      'At the inlet to the reel assembly, not at the nozzle. A gauge on the nozzle end of 36 m of 19 mm hose reads a '
+      + 'long way below the inlet, and treating that reading as the duty fails a reel that is doing its job. AS 2441 '
+      + 'Table 6.1 also states a tolerance on this pressure which is not reproduced here — read it from the office '
+      + 'copy before arguing about a marginal result.',
     confidence: 'low',
     sourceIds: ['alexon-reels', 'as2441', 'firehosereels-au'],
     disagreement:
@@ -554,7 +595,13 @@ export interface FlowCheck {
 export interface FlowCheckInput {
   /** Measured at the nozzle with the hose fully run out. Litres per minute, which is what the routine records. */
   measuredFlowLitresPerMinute?: number;
-  /** Running pressure at the same moment, not static pressure with the nozzle shut. */
+  /**
+   * Running pressure at the reel inlet at the same moment — not static pressure
+   * with the nozzle shut, and not a reading off the nozzle end of the hose.
+   * The published duty is quoted at an inlet pressure, so a nozzle reading
+   * compared against it fails a reel for the hose friction the test is
+   * measuring in the first place.
+   */
   measuredRunningPressureKpa?: number;
   /** The duty the reel has to meet. Supplied by the technician — this module never assumes one. */
   dutyFlowLitresPerSecond?: number;
@@ -644,7 +691,7 @@ export function checkFlow(input: FlowCheckInput): FlowCheck | Refused {
   const requiredKpa = isFinitePositive(input.dutyPressureKpa) ? input.dutyPressureKpa : undefined;
 
   const pressure: ComponentCheck = {
-    label: 'Running pressure',
+    label: 'Running pressure at the reel inlet',
     unit: 'kPa',
     measured: measuredKpa !== undefined ? round1(measuredKpa) : undefined,
     required: requiredKpa !== undefined ? round1(requiredKpa) : undefined,
@@ -694,6 +741,11 @@ export function checkFlow(input: FlowCheckInput): FlowCheck | Refused {
     notes.push(
       'The pressure figure must be the running pressure taken while water is flowing. Static pressure with the nozzle '
       + 'shut proves nothing about a reel and is usually much higher.',
+    );
+    notes.push(
+      'It must also be read at the inlet to the reel, because that is where the published duty is quoted. A gauge on '
+      + 'the nozzle end of 36 m of hose reads far lower, and comparing that against an inlet figure fails a reel for '
+      + 'the friction loss the flow test already accounts for.',
     );
   }
   notes.push(
@@ -1206,13 +1258,6 @@ export function toSpan(value: string | ImpreciseDate | undefined): DateSpan | un
   return undefined;
 }
 
-/** Whole months between two ISO dates, ignoring the day. Negative when b precedes a. */
-function monthsBetween(aIso: string, bIso: string): number {
-  const [ay, am] = aIso.split('-').map(Number);
-  const [by, bm] = bIso.split('-').map(Number);
-  return (by! - ay!) * 12 + (bm! - am!);
-}
-
 function daysBetween(fromIso: string, toIso: string): number {
   const from = Date.parse(`${fromIso}T00:00:00Z`);
   const to = Date.parse(`${toIso}T00:00:00Z`);
@@ -1223,21 +1268,31 @@ function daysBetween(fromIso: string, toIso: string): number {
 // The two routines, and the rule that they are two
 // ===========================================================================
 
-export type HoseReelActivity = 'six-monthly' | 'five-yearly';
+export type HoseReelActivity = 'six-monthly' | 'yearly' | 'five-yearly';
 
 export const ACTIVITY_LABEL: Record<HoseReelActivity, string> = {
   'six-monthly': 'Six-monthly',
+  yearly: 'Yearly',
   'five-yearly': 'Five-yearly',
 };
 
-/** The routine ids these correspond to in the seeded routine list. */
-export const ACTIVITY_ROUTINE_ID: Record<HoseReelActivity, string> = {
+/**
+ * The routine ids these correspond to in the seeded routine list.
+ *
+ * The yearly has no seeded routine yet, and that is recorded as undefined
+ * rather than pointed at the nearest one. Aiming it at the six-monthly routine
+ * would put six-monthly test items on a yearly record, which is the same
+ * conflation this module exists to stop, one level down.
+ */
+export const ACTIVITY_ROUTINE_ID: Record<HoseReelActivity, string | undefined> = {
   'six-monthly': 'fhr-six-monthly',
+  yearly: undefined,
   'five-yearly': 'hose-reel-five-yearly',
 };
 
 const ACTIVITY_FREQUENCY: Record<HoseReelActivity, Frequency> = {
   'six-monthly': 'six-monthly',
+  yearly: 'yearly',
   'five-yearly': 'five-yearly',
 };
 
@@ -1249,12 +1304,27 @@ export interface ActivitySpec {
   purpose: string;
   /** What it does NOT cover. The reason this module exists in this shape. */
   doesNotCover: string;
+  /**
+   * What says this activity is run at this interval, in one line, with a count
+   * behind it where there is one. The frequencies are not taken from a
+   * published schedule table — see AS1851_SECTION_NOT_ESTABLISHED — so the
+   * evidence that actually stands behind each one is carried here rather than
+   * left implied by the fact that the row exists.
+   */
+  evidence: string;
   confidence: Confidence;
   sourceIds: SourceId[];
 }
 
 /**
- * The two activities, described by what each one finds that the other cannot.
+ * The three activities, described by what each one finds that the others cannot.
+ *
+ * There are three, not two, and getting that wrong was worth catching. Safe
+ * QLD's own hose reel register carries a six-monthly, a yearly and a
+ * five-yearly column, and the yearly is filled in on nearly every asset on the
+ * book. A module that models two of them and then reports what a site owes is
+ * committing the exact failure it was written to prevent — a whole routine
+ * silently absent from a rollup that reads complete.
  *
  * No item numbers, no schedule table, no clause text — the frequencies and the
  * shape of each activity, which is what a scheduler needs and all this app can
@@ -1272,8 +1342,31 @@ export const ACTIVITY_SPECS: Record<HoseReelActivity, ActivitySpec> = {
     doesNotCover:
       'It puts no test pressure into the hose. A hose can pass every six-monthly for five years and still fail the '
       + 'moment it is pressure tested, because running pressure is not test pressure.',
+    evidence:
+      "Safe QLD's own hose reel register carries a six-monthly column, populated on 802 of the 804 reels in the "
+      + 'export of 1/9/2026. The interval is the interval the company runs; the AS 1851 section and item behind it '
+      + 'are not established here.',
     confidence: 'medium',
     sourceIds: ['as1851', 'as2441'],
+  },
+  yearly: {
+    activity: 'yearly',
+    label: 'Yearly',
+    intervalMonths: 12,
+    purpose:
+      'The annual attendance the register carries alongside the six-monthlies. On this book it is where the flow '
+      + 'test is recorded on the reels that have an annual flow test column filled in at all.',
+    doesNotCover:
+      'It is not the pressure test and it is not one of the six-monthlies. Its own scope is the weakest thing in '
+      + 'this module: what the yearly consists of is not established from any source this app can cite, only that '
+      + 'the register runs one. Treat the scope as unknown and work to the office copy of the routine.',
+    evidence:
+      "Safe QLD's own hose reel register carries a yearly column, populated on 791 of the 804 reels in the export of "
+      + '1/9/2026, and a separate annual flow test column on 85 of them. Several public sources reached also place '
+      + 'the hose reel flow test at a yearly frequency rather than six-monthly. No AS 1851 section, item or scope is '
+      + 'asserted for it.',
+    confidence: 'low',
+    sourceIds: ['as1851'],
   },
   'five-yearly': {
     activity: 'five-yearly',
@@ -1284,8 +1377,12 @@ export const ACTIVITY_SPECS: Record<HoseReelActivity, ActivitySpec> = {
       + 'It answers "will this hose still hold pressure", which is a question about the hose itself rather than about '
       + 'the water supply.',
     doesNotCover:
-      'It is not a substitute for the six-monthlies either. A hose tested in March says nothing about a stop valve '
-      + 'somebody shuts in July.',
+      'It is not a substitute for the six-monthlies or the yearly either. A hose tested in March says nothing about '
+      + 'a stop valve somebody shuts in July.',
+    evidence:
+      "Safe QLD's own hose reel register carries a five-yearly column, populated on 630 of the 804 reels in the "
+      + 'export of 1/9/2026 — the 174 blanks are reels with no pressure test on record, which is the finding this '
+      + 'module was written around.',
     confidence: 'medium',
     sourceIds: ['as1851', 'as-nzs-1221'],
   },
@@ -1311,8 +1408,8 @@ export function discharges(performed: HoseReelActivity, obligation: HoseReelActi
 }
 
 export const ACTIVITIES_ARE_INDEPENDENT =
-  'The six-monthly and the five-yearly are separate activities with separate records. Attending a reel for one does '
-  + 'not satisfy the other, and a five-yearly carried out on the same day as a six-monthly is two records, not one.';
+  'The six-monthly, the yearly and the five-yearly are separate activities with separate records. Attending a reel '
+  + 'for one does not satisfy any other, and two of them carried out on the same day are two records, not one.';
 
 // ===========================================================================
 // When the next one falls due
@@ -1489,14 +1586,30 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
     );
   }
 
-  // Which occurrence has already been done. Rounding in whole intervals is
-  // right for a schedule whose services land within weeks of their date; a
-  // service more than half an interval from any scheduled date shows up as a
-  // missed occurrence below instead of being quietly absorbed.
+  // Which occurrence the last service discharged.
+  //
+  // Only occurrences that had certainly already fallen due when the service
+  // happened. Rounding to the nearest occurrence instead is the trap: a
+  // six-monthly anchored on 1/1/2020 and last done on 1/11/2020 is four months
+  // late for the July occurrence, but 10 months is nearer 12 than 6, so
+  // rounding credits it with the January 2021 one as well. The reel then reads
+  // "next due July 2021, nothing outstanding" — a whole six-monthly skipped,
+  // twelve months between services, and every line of the record compliant.
+  // That is the drift this module exists to catch, arriving through the back
+  // door of a Math.round.
+  //
+  // Counting only what had certainly fallen due errs the other way: a service
+  // done early is not credited with the occurrence it was early for, so the
+  // reel reads due again on the anchor date. That reports work slightly sooner
+  // than it is owed, which is the safe direction and the same direction the
+  // missing tolerance window already errs in.
   let doneOccurrence = 0;
   if (anchoredTo !== 'last-service' && lastDone) {
-    const elapsed = monthsBetween(anchor.earliest, lastDone.earliest);
-    doneOccurrence = Math.max(0, Math.round(elapsed / spec.intervalMonths));
+    while (doneOccurrence < 500) {
+      const span = advance(anchor, frequency, doneOccurrence + 1);
+      if (!span || span.latest > lastDone.earliest) break;
+      doneOccurrence += 1;
+    }
   }
 
   // The occurrence that ought to have been done by now, from the anchor alone.
@@ -1527,7 +1640,13 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
       + 'one. The date given is the oldest one still outstanding, not the most recent.',
     );
   }
-  if (!lastDone) {
+  // A first service IS a record of this activity — it is what "first service"
+  // means. Reading `everRecorded` off `lastDone` alone put "no six-monthly has
+  // ever been recorded" on a reel whose first six-monthly was the very date
+  // being counted from, which is a false statement on a document a client
+  // reads.
+  const everRecorded = !!lastDone || anchoredTo === 'first-service';
+  if (!everRecorded) {
     notes.push(
       `No ${spec.label.toLowerCase()} has ever been recorded against this reel. The date given is the first one due `
       + 'after the anchor, which on an old installation will be a long way in the past — and it is.',
@@ -1558,7 +1677,7 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
     occurrence,
     due,
     state,
-    everRecorded: !!lastDone,
+    everRecorded,
     daysUntil: { earliest: daysBetween(today, due.earliest), latest: daysBetween(today, due.latest) },
     missedOccurrences,
     notes,
@@ -1578,6 +1697,8 @@ export interface RegisterEntry {
   hoseLengthM?: number;
   commissioned?: string | ImpreciseDate;
   lastSixMonthly?: string | ImpreciseDate;
+  /** The register's own yearly column. Its own column, its own schedule. */
+  lastYearly?: string | ImpreciseDate;
   /** The register's own five-yearly column. Never inferred from the six-monthly. */
   lastFiveYearly?: string | ImpreciseDate;
   /** Findings recorded at the last attendance. */
@@ -1634,7 +1755,16 @@ function addMonthsIso(iso: string, months: number): string {
   return isoDate(ty, tm, Math.min(d!, daysInMonth(ty, tm)));
 }
 
-const ROLLUP_ACTIVITIES: HoseReelActivity[] = ['six-monthly', 'five-yearly'];
+/**
+ * Every activity the register carries, in interval order.
+ *
+ * Derived from the ACTIVITY_SPECS keys rather than written out again, so that
+ * adding a routine to the specs cannot leave the rollup silently reporting on a
+ * subset of them. A rollup missing a routine reads exactly like a rollup with
+ * nothing outstanding on it.
+ */
+const ROLLUP_ACTIVITIES: HoseReelActivity[] = (Object.keys(ACTIVITY_SPECS) as HoseReelActivity[])
+  .sort((a, b) => ACTIVITY_SPECS[a].intervalMonths - ACTIVITY_SPECS[b].intervalMonths);
 
 /**
  * What this site owes, split by activity and never merged.
@@ -1678,11 +1808,14 @@ export function rollupSite(entries: RegisterEntry[], todayIso: string, horizonMo
   for (const entry of entries) {
     for (const activity of ROLLUP_ACTIVITIES) {
       const bucket = byActivity.find((b) => b.activity === activity)!;
-      // The five-yearly is assessed from the five-yearly column alone. Falling
-      // back to the six-monthly here would be the exact conflation this module
-      // exists to prevent, and it would report every reel on the book as
-      // current.
-      const lastDone = activity === 'six-monthly' ? entry.lastSixMonthly : entry.lastFiveYearly;
+      // Each activity is assessed from its own column alone. Falling back to a
+      // shorter interval here would be the exact conflation this module exists
+      // to prevent, and it would report every reel on the book as current.
+      const lastDone = activity === 'six-monthly'
+        ? entry.lastSixMonthly
+        : activity === 'yearly'
+          ? entry.lastYearly
+          : entry.lastFiveYearly;
       const assessment = nextDue({
         activity,
         commissioned: entry.commissioned,

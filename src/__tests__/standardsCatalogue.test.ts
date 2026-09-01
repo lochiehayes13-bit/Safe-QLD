@@ -13,6 +13,7 @@ import {
   CRITICAL_DEFECT_TEST,
   NOTE_SOURCES,
   bfsrDefinition,
+  bfsrDefinitionSource,
   bfsrElement,
   bfsrSection,
   bfsrSectionSource,
@@ -51,6 +52,11 @@ import { validateMaintenanceRecord, type MaintenanceRecord } from '@/domain/qldC
  * may be reproduced — and every indexed section has to match it exactly. It also
  * carries the two sections that were repealed, so citing one of those fails
  * rather than passing as "not in the index yet".
+ *
+ * The contents below are the CURRENT consolidation's, not the 2012 reprint's.
+ * That distinction has teeth: Part 5A — the domestic smoke alarm sections — is
+ * not in the reprint at all, and an earlier version of this file listed s.55C
+ * among the numbers "the regulation does not have".
  */
 
 // ---------------------------------------------------------------------------
@@ -118,7 +124,10 @@ const REGULATION_CONTENTS: Record<string, string> = {
   '54': 'Maintenance of prescribed fire safety installations',
   '55': 'Keeping record of maintenance',
   '55A': 'Occupier statements',
-  '55B': 'Record keeping requirements for occupiers of particular buildings',
+  '55B': 'Record-keeping requirements for occupiers of particular buildings',
+  '55C': 'Required places for installation of smoke alarms—Act, s 147Z',
+  '55D': 'Ways of powering smoke alarms—Act, s 147Z',
+  '55E': 'Other requirements for smoke alarms—Act, s 147Z',
   '56': 'Meaning of special fire service fee',
   '57': 'Payment of fees and costs for assessment services',
   '70': 'False or misleading documents',
@@ -132,8 +141,15 @@ const REGULATION_CONTENTS: Record<string, string> = {
   '86': 'Keeping former records',
 };
 
-/** Section numbers the regulation does not have. 51 and 52 were repealed. */
-const NOT_IN_THE_REGULATION = ['51', '52', '99', '55C', '0'];
+/**
+ * Section numbers the regulation does not have.
+ *
+ * 51 and 52 were repealed. 99 is past the end of the instrument, which stops at
+ * section 91. 55C is deliberately NOT in this list: it exists, it is the smoke
+ * alarm placement section, and an earlier version of this file asserted it did
+ * not — which is exactly the false statement about the law the index is for.
+ */
+const NOT_IN_THE_REGULATION = ['51', '52', '99', '92', '0'];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -257,14 +273,49 @@ describe('no description is empty or a restatement of the clause title', () => {
   });
 
   it('reads as prose rather than as a transcription', () => {
-    // The standards are copyright and are never reproduced. A giveaway of
-    // transcription is a clause that opens with the drafting voice, so those
-    // openings are barred outright.
-    const forbidden = [/^shall\b/, /^the following\b/, /^\(a\)/, /^requirements are\b/];
+    // The standards are copyright and are never reproduced. An earlier version
+    // of this test only looked at the FIRST WORD of a description, which meant
+    // a whole clause pasted in verbatim passed as long as it did not happen to
+    // begin "shall" — the check could not fail on the thing it was for. The
+    // drafting voice is now barred anywhere in a description.
+    //
+    // "must" is deliberately not on the list: it is the Queensland
+    // regulation's verb and reads naturally in our own prose. "Shall" is the
+    // Australian Standards verb and appears nowhere in writing of our own.
+    const forbidden = [
+      /\bshall\b/,
+      /^the following\b/,
+      /\(a\)\s*(the|a|an)\b/,
+      /^requirements are\b/,
+      /\bshall be deemed\b/,
+      /\bin accordance with the requirements of\b/,
+    ];
     for (const [key, note] of Object.entries(CLAUSE_NOTES)) {
       for (const pattern of forbidden) {
-        expect({ key, matched: pattern.test(note.covers.trim().toLowerCase()) })
-          .toEqual({ key, matched: false });
+        expect({ key, pattern: String(pattern), matched: pattern.test(note.covers.trim().toLowerCase()) })
+          .toEqual({ key, pattern: String(pattern), matched: false });
+      }
+    }
+  });
+
+  it('names what a clause measures without ever giving the figure', () => {
+    // The rule the whole module rests on, made checkable. A description may say
+    // "the sound pressure level the warning signal has to reach"; it may never
+    // say the level. A leaked threshold is a licensed table redistributed, and
+    // it is also the sort of half-remembered number that gets written onto a
+    // service report and defended.
+    //
+    // Both spellings are caught, because the one that actually got through was
+    // spelled out: a note on the hydrant water supply clause named the required
+    // duration in words, which no digit-hunting check would have seen.
+    const digitThenUnit =
+      /\b\d+(?:\.\d+)?\s*(?:mm|cm|km|kPa|MPa|kg|lx|lux|dBA|dB|°C|Ah|kW|V|W|L\/s|L|m|h|s|min|%)\b/;
+    const wordThenUnit =
+      /\b(?:one|two|three|four|five|six|seven|eight|nine|ten|twelve|fifteen|twenty|thirty|sixty|ninety)[\s-](?:hour|hours|minute|minutes|second|seconds|metre|metres|litre|litres|degree|degrees|lux|decibel|decibels|per ?cent|percent)\b/i;
+    for (const [key, note] of Object.entries(CLAUSE_NOTES)) {
+      for (const pattern of [digitThenUnit, wordThenUnit]) {
+        const found = pattern.exec(note.covers);
+        expect({ key, threshold: found?.[0] ?? null }).toEqual({ key, threshold: null });
       }
     }
   });
@@ -301,15 +352,23 @@ describe('every description can say where it came from', () => {
     expect(clauseNoteSource('as-2293-set-2005|2.2')?.confidence).toBe('high');
   });
 
-  it('has no provenance entry for a document with no notes', () => {
+  it('has no provenance entry for a document nobody wrote up', () => {
     // A source recorded for a document nobody wrote up is a claim about work
     // that was never done.
-    const documented = new Set(
+    //
+    // Two documents are documented in the catalogue itself rather than here, so
+    // their provenance is recorded but unreachable through clauseNoteSource.
+    // That exemption is checked rather than waved through — a document claiming
+    // a reading has to have descriptions SOMEWHERE, or the claim is empty.
+    const noted = new Set(
       Object.keys(CLAUSE_NOTES).map((k) => parseClauseNoteKey(k)?.docId ?? ''),
     );
+    const describedInCatalogue = new Set(
+      STANDARDS.filter((d) => d.clauses.some((c) => c.covers)).map((d) => d.id),
+    );
     for (const docId of Object.keys(NOTE_SOURCES)) {
-      if (docId === 'as-1851-2012' || docId === 'qdc-mp-6-1') continue; // described in the catalogue itself
-      expect({ docId, hasNotes: documented.has(docId) }).toEqual({ docId, hasNotes: true });
+      expect({ docId, described: noted.has(docId) || describedInCatalogue.has(docId) })
+        .toEqual({ docId, described: true });
     }
   });
 
@@ -462,8 +521,20 @@ describe('the legislation index cites sections that exist in the regulation', ()
   });
 
   it('indexes the whole of Part 5, which is where the obligations are', () => {
-    const partFive = BFSR_2008.filter((s) => s.part.startsWith('Part 5')).map((s) => s.section);
-    expect(partFive.sort()).toEqual(['49', '50', '53', '54', '55', '55A', '55B']);
+    // startsWith('Part 5') would quietly swallow Part 5A as well, so the part
+    // is matched exactly — the two parts are separately complete and a filter
+    // that merged them would hide either one going missing.
+    const partFive = BFSR_2008.filter((s) => s.part === 'Part 5 — Prescribed fire safety installations');
+    expect(partFive.map((s) => s.section).sort()).toEqual(['49', '50', '53', '54', '55', '55A', '55B']);
+  });
+
+  it('indexes the whole of Part 5A, which is the smoke alarm law it gets asked about', () => {
+    // Part 5A is not in Safe QLD's 2012 reprint. Indexing from the reprint
+    // alone would have the app answer "no such section" to s.55C, which is the
+    // section every landlord and property manager question is really about.
+    const partFiveA = BFSR_2008.filter((s) => s.part === 'Part 5A — Smoke alarms for domestic dwellings');
+    expect(partFiveA.map((s) => s.section).sort()).toEqual(['55C', '55D', '55E']);
+    expect(bfsrSectionStatus('55C')).toBe('in-force');
   });
 
   it('lists no section twice', () => {
@@ -497,7 +568,7 @@ describe('the legislation index cites sections that exist in the regulation', ()
     // Four sections had their operative wording quoted back from the register
     // and matched. Nothing else may claim it.
     const strong = BFSR_2008.filter((s) => s.verified === 'current-consolidation').map((s) => s.section);
-    expect(strong.sort()).toEqual(['49', '53', '54', '55A']);
+    expect(strong.sort()).toEqual(['49', '53', '54', '55A', '55C', '55D', '55E']);
     for (const section of BFSR_2008) {
       if (section.verified !== 'current-consolidation') continue;
       expect(typeof section.text).toBe('string');
@@ -600,6 +671,40 @@ describe('the deadlines the app runs clocks against', () => {
   });
 });
 
+describe('the smoke alarm sections a landlord actually rings about', () => {
+  it('carries the mounting position, which is the half people get wrong', () => {
+    // The alarm is in the right room and still on the wrong part of the
+    // ceiling. This is Crown material and the exact clearances decide it, so
+    // subsection (3) is reproduced rather than summarised.
+    const s55c = bfsrSection('55C');
+    expect(s55c?.heading).toBe('Required places for installation of smoke alarms—Act, s 147Z');
+    expect(s55c?.text).toContain('within 400mm of the blades of a ceiling fan');
+    expect(bfsrElement('55C', '(2)(a)')?.requires).toContain('bedroom');
+  });
+
+  it('rules out the replaceable nine-volt battery, which is why old alarms fail', () => {
+    const s55d = bfsrSection('55D');
+    expect(s55d?.text).toContain('prevents the battery being removed');
+    expect(s55d?.text).toContain('at least 10 years without being recharged');
+  });
+
+  it('rules out a dual-sensor head, not just an ionisation one', () => {
+    // Swapping an ionisation alarm for a combination unit does not answer the
+    // section, and that is the substitution a hardware shop will suggest.
+    expect(bfsrSection('55E')?.text).toContain('not also contain an ionisation sensor');
+    expect(bfsrSection('55E')?.text).toContain('contain a photoelectric sensor');
+  });
+
+  it('states that the duty itself lives in the Act, not in these sections', () => {
+    // These sections prescribe places, power and product for section 147Z of
+    // the Fire Services Act. Naming a duty holder here would put the obligation
+    // in the wrong instrument, so the duty list is empty on purpose.
+    for (const section of ['55C', '55D', '55E']) {
+      expect({ section, duty: bfsrSection(section)?.duty }).toEqual({ section, duty: [] });
+    }
+  });
+});
+
 describe('the record of maintenance field list', () => {
   it('carries every paragraph of section 55 that a record has to satisfy', () => {
     const paragraphs = bfsrSection('55')?.elements?.map((e) => e.para) ?? [];
@@ -666,5 +771,30 @@ describe('the dictionary entries that decide arguments on site', () => {
       expect(entry.meaning.trim().length).toBeGreaterThan(40);
       expect(entry.source.trim()).not.toBe('');
     }
+  });
+
+  it('says where every definition was read and what it is worth', () => {
+    // A dictionary entry is mostly cross-references to other instruments, and
+    // those get renamed underneath it — so a definition without a verification
+    // is a claim nobody can age-check. This is the same discipline the sections
+    // already have, applied to the entries a licence argument turns on.
+    for (const entry of BFSR_DEFINITIONS) {
+      const source = bfsrDefinitionSource(entry.term);
+      expect({ term: entry.term, defined: source !== undefined }).toEqual({ term: entry.term, defined: true });
+      expect(['high', 'medium', 'low']).toContain(source?.confidence);
+    }
+    expect(bfsrDefinitionSource('critical defect')).toBeUndefined();
+  });
+
+  it('points a licence question at the regulations that are actually in force', () => {
+    // The 2012 reprint names the Queensland Building Services Authority
+    // Regulation 2003 and the Plumbing and Drainage Regulation 2003. Both are
+    // repealed. A technician sent to look up their own class in a repealed
+    // regulation finds nothing and concludes they are unlicensed, or worse,
+    // finds an old copy and quotes a class that no longer means anything.
+    const entry = bfsrDefinition('appropriately qualified person');
+    expect(entry?.meaning).toContain('Queensland Building and Construction Commission Regulation 2018');
+    expect(entry?.meaning).toContain('Plumbing and Drainage Regulation 2019');
+    expect(entry?.verified).toBe('current-consolidation');
   });
 });

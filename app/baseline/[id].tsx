@@ -16,6 +16,7 @@ import { useTheme } from '@/theme';
 import {
   Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
+import { RecordGate } from '@/components/RecordGate';
 
 /**
  * Baseline data form.
@@ -28,6 +29,8 @@ export default function BaselineScreen() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [b, setB] = useState<BaselineData | null>(null);
+  // Loaded-and-absent is not the same as still loading. See RecordGate.
+  const [missing, setMissing] = useState(false);
   const [site, setSite] = useState<Site | null>(null);
   const [open, setOpen] = useState<string | null>('SYSTEM DETAILS');
   const [busy, setBusy] = useState(false);
@@ -36,6 +39,7 @@ export default function BaselineScreen() {
     if (!id) return;
     void getBaseline(id).then(async (rec) => {
       setB(rec);
+      setMissing(!rec);
       if (rec) setSite(await getSite(rec.siteId));
     });
   }, [id]);
@@ -91,13 +95,7 @@ export default function BaselineScreen() {
     }
   };
 
-  if (!b) {
-    return (
-      <Screen>
-        <Txt tone="muted">Loading…</Txt>
-      </Screen>
-    );
-  }
+  if (!b) return <RecordGate missing={missing} what="baseline record" />;
 
   const section = (title: string, children: React.ReactNode) => (
     <Card key={title}>
