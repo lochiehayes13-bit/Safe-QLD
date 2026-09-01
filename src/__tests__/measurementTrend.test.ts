@@ -588,6 +588,24 @@ describe('projectToThreshold', () => {
     expect(projection.assumption).toMatch(/when to look again, not as when it fails/);
   });
 
+  it('counts a reading exactly on the threshold as already past it', () => {
+    /*
+     * The difference between telling somebody a hydrant is already under its
+     * minimum and telling them it will be in nine months. A minimum is a floor:
+     * sitting exactly on it is not clearance, and the projection says "at or
+     * past" for that reason.
+     */
+    const onIt = trendMeasurements(series({ points: yearly([700, 583, 466, 350]) }));
+    const crossed = projectToThreshold(onIt, { value: 350, unit: 'kPa' }, { today: TODAY });
+    expect(crossed.status).toBe('crossed');
+    expect(crossed.label).toMatch(/Already at or past 350/);
+
+    // One kilopascal of clearance is still clearance, and gets a projection.
+    const justAbove = trendMeasurements(series({ points: yearly([700, 583, 466, 351]) }));
+    expect(projectToThreshold(justAbove, { value: 350, unit: 'kPa' }, { today: TODAY }).status)
+      .not.toBe('crossed');
+  });
+
   it('never claims a week even when the readings fall exactly on a line', () => {
     // Four gauge readings landing on a perfect line is luck. Zero statistical
     // uncertainty would name a date, and a named date gets booked.
