@@ -32,6 +32,7 @@ export function complianceFrequency(f: RoutineFrequency): ComplianceFrequency | 
     case 'six-monthly': return 'six-monthly';
     case 'annual': return 'yearly';
     case 'five-yearly': return 'five-yearly';
+    case 'ten-yearly': return 'ten-yearly';
     // A commissioning activity happens once and is not scheduled again; a
     // quarterly routine is a Safe QLD interval with no Section 6 table behind
     // it. Neither has a tolerance this can assert.

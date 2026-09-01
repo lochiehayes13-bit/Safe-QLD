@@ -130,6 +130,24 @@ export const ASSET_TYPES: AssetTypeDef[] = [
     ],
   },
   {
+    // Distinct from a detector on a panel loop, and not a nicety: a standalone
+    // alarm has no panel behind it, is tested by pressing its own button, and
+    // is replaced on a date stamped on the unit rather than serviced. In a real
+    // register these outnumber loop devices on the residential book of work.
+    id: 'smoke-alarm', label: 'Smoke / heat alarm (standalone)', system: 'detection',
+    icon: 'smoke-detector-variant', codePrefix: 'ALM',
+    attributes: [
+      { key: 'alarmType', label: 'Type', type: 'select', summary: true,
+        options: ['Photoelectric smoke', 'Ionisation smoke', 'Heat', 'Combination'] },
+      { key: 'powerSource', label: 'Power', type: 'select', summary: true,
+        options: ['240 V with battery backup', '240 V', '10-year lithium', 'Replaceable battery'] },
+      { key: 'interconnected', label: 'Interconnected', type: 'select',
+        options: ['Wired', 'Wireless', 'Not interconnected'] },
+      { key: 'expiryDate', label: 'Replace by', type: 'date', summary: true },
+      CONDITION, ACCESS,
+    ],
+  },
+  {
     id: 'mcp', label: 'Manual call point', system: 'detection', icon: 'gesture-tap-button',
     codePrefix: 'MCP',
     attributes: [

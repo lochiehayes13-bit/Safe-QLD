@@ -16,7 +16,18 @@ import type { SystemKind } from './assetTypes';
  * rather than trusted from here.
  */
 
-export type Frequency = 'monthly' | 'quarterly' | 'six-monthly' | 'annual' | 'five-yearly' | 'commissioning';
+export type Frequency =
+  | 'monthly'
+  | 'quarterly'
+  | 'six-monthly'
+  | 'annual'
+  | 'five-yearly'
+  // Ten-yearly was missing until a real asset register turned up using it:
+  // special hazard systems and fire-detection water storage tanks both carry a
+  // ten-yearly interval, and without it those assets have a routine the app
+  // cannot express. The compliance side already had the interval.
+  | 'ten-yearly'
+  | 'commissioning';
 
 export type SourceKind = 'standard' | 'manufacturer' | 'qdc' | 'ncc' | 'legislation' | 'internal';
 
@@ -35,6 +46,7 @@ export const FREQUENCY_LABEL: Record<Frequency, string> = {
   'six-monthly': 'Six-monthly',
   annual: 'Annual',
   'five-yearly': 'Five-yearly',
+  'ten-yearly': 'Ten-yearly',
   commissioning: 'Commissioning',
 };
 
