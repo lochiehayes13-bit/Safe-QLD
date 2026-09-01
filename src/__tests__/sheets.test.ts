@@ -1,9 +1,9 @@
 import {
-  checkSheet, defectSheet, pointSheet, reportCoverSheet, testResultSheet, zoneSheet,
-  type ReportBundle,
+  causeEffectMatrixSheet, checkSheet, defectSheet, pointSheet, reportCoverSheet,
+  testResultSheet, zoneSheet, type ReportBundle,
 } from '@/export/sheets';
 import type {
-  CheckRow, Defect, Panel, Point, ServiceReport, Site, TestResult, TestRow, Zone,
+  CauseEffectRule, CheckRow, Defect, Panel, Point, ServiceReport, Site, TestResult, TestRow, Zone,
 } from '@/domain/types';
 
 /**
@@ -92,6 +92,24 @@ describe('the summary sheet on a service record', () => {
     expect(beside(clean, 'Not tested')).toMatchObject({ v: 0, style: 'default' });
   });
 
+  it('counts the critical defects apart from the rest', () => {
+    /*
+     * The figure on this sheet that decides whether anybody reads the rest of
+     * it. A critical defect obliges a written notice to the occupier within
+     * twenty-four hours and rectification within a month; a non-critical one
+     * obliges neither, and the summary is where the difference is first seen.
+     */
+    const defect = (severity: Defect['severity'], id: string): Defect => ({
+      id, siteId: 's1', location: 'Level 2', description: 'x', severity,
+      status: 'open', raisedAt: '2026-07-03T00:00:00.000Z', photos: [],
+    });
+    const s = reportCoverSheet(bundle(rows, [
+      defect('critical', 'd1'), defect('non-critical', 'd2'), defect('critical', 'd3'),
+    ]));
+    expect(beside(s, 'Defects raised')).toBe(3);
+    expect(beside(s, 'Critical defects')).toMatchObject({ v: 2 });
+  });
+
   it('carries the site and the service as written', () => {
     const s = reportCoverSheet(bundle(rows));
     expect(beside(s, 'Site')).toBe('An Example Building');
@@ -132,6 +150,19 @@ describe('the result column on the test sheet', () => {
     const s = testResultSheet([testRow('pass', { loopNumber: 1, address: 7 })]);
     expect(s.rows[1]![1]).toBe('L1.007');
     expect(testResultSheet([testRow('pass')]).rows[1]![1]).toBe('');
+  });
+
+  it('needs both halves of a loop address before it prints one', () => {
+    /*
+     * A loop with no address is half an address, and "L1.undefined" on a test
+     * sheet is worse than a blank: it looks like a device somebody could go and
+     * find. The point reference is used instead where there is one.
+     */
+    expect(testResultSheet([testRow('pass', { loopNumber: 1 })]).rows[1]![1]).toBe('');
+    expect(testResultSheet([testRow('pass', { loopNumber: 1, pointRef: '0.4.O1' })]).rows[1]![1])
+      .toBe('0.4.O1');
+    // An address with no loop is still an address, and panel points have one.
+    expect(testResultSheet([testRow('pass', { address: 7 })]).rows[1]![1]).toBe('7');
   });
 });
 
@@ -205,5 +236,50 @@ describe('the zone and point sheets', () => {
     expect(zoneSheet(panel, [zone()]).rows[1]!.slice(-1)[0]).toBe('In use');
     expect(pointSheet(panel, [point({ unused: true })]).rows[1]!.slice(-1)[0])
       .toMatchObject({ v: 'Unused' });
+  });
+});
+
+/**
+ * The cause and effect matrix.
+ *
+ * It is the document somebody checks a commissioned panel against, so a cell
+ * that says the wrong thing describes a building that does not exist. The two
+ * marks are not interchangeable: X is an effect that operates, C is one that
+ * operates only under a condition written somewhere else, and reading a C as an
+ * X is reading a conditional evacuation as an unconditional one.
+ */
+describe('the cause and effect matrix', () => {
+  const panel: Panel = {
+    id: 'p1', siteId: 's1', name: 'FIP', brand: 'ampac', source: 'config-import',
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+  const rule = (state: 'operates' | 'conditional' | 'not-linked', delaySeconds?: number): CauseEffectRule => ({
+    id: 'r1', panelId: 'p1', causeLabel: 'Zone 12 Alarm', causeKind: 'zone-alarm', causeZoneNumber: 12,
+    effects: [{ id: 'e1', effectLabel: 'Evacuation', effectKind: 'evacuation', state, delaySeconds }],
+  });
+
+  it('tells an unconditional effect from a conditional one', () => {
+    const operates = causeEffectMatrixSheet(panel, [rule('operates')]);
+    expect(operates.rows[1]!.slice(-1)[0]).toMatchObject({ v: 'X', style: 'pass' });
+    const conditional = causeEffectMatrixSheet(panel, [rule('conditional')]);
+    expect(conditional.rows[1]!.slice(-1)[0]).toMatchObject({ v: 'C', style: 'warn' });
+  });
+
+  it('puts the delay in the cell, because a delay is part of the effect', () => {
+    const s = causeEffectMatrixSheet(panel, [rule('operates', 30)]);
+    expect(s.rows[1]!.slice(-1)[0]).toMatchObject({ v: 'X 30s' });
+  });
+
+  it('leaves a cell empty where the cause does not drive the effect', () => {
+    const s = causeEffectMatrixSheet(panel, [rule('not-linked')]);
+    expect(s.rows[1]!.slice(-1)[0]).toBe('');
+  });
+
+  it('says what the marks mean on the sheet itself', () => {
+    // The matrix is read away from this app, by somebody who has not been told.
+    const s = causeEffectMatrixSheet(panel, [rule('operates')]);
+    const legend = JSON.stringify(s.rows.slice(-1));
+    expect(legend).toContain('X = operates');
+    expect(legend).toContain('C = conditional');
   });
 });
