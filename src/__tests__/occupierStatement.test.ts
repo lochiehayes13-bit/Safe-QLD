@@ -541,6 +541,61 @@ describe('refusing to count what it does not know', () => {
     }
     expect(publicHolidaysOn('2026-07-06')).toEqual([]);
   });
+
+  it('has a holiday table that agrees with the rules it says it follows', () => {
+    /*
+     * The table is typed in from the state's published dates, and a mistyped
+     * date is a silently wrong statutory deadline that nothing else here would
+     * catch — every count over it would be confidently one day out.
+     *
+     * The module states the rules it followed; this holds the data against
+     * them. It is not a substitute for the published list, and it deliberately
+     * does not project past the table: the point is that what was typed in
+     * matches what was meant.
+     */
+    const on = (date: string) => QLD_PUBLIC_HOLIDAYS.filter((h) => h.date === date);
+    const dow = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay();
+    const years = [...new Set(QLD_PUBLIC_HOLIDAYS.map((h) => h.date.slice(0, 4)))];
+    expect(years).toEqual(['2025', '2026', '2027', '2028', '2029']);
+
+    for (const y of years) {
+      /*
+       * Anzac Day shifts only when it falls on a Sunday — a Saturday one stays
+       * on the Saturday, which is the half people get wrong because most other
+       * states substitute both.
+       */
+      const anzac = dow(`${y}-04-25`) === 0 ? `${y}-04-26` : `${y}-04-25`;
+      expect(on(anzac).map((h) => h.name)).toContain('Anzac Day');
+      if (anzac !== `${y}-04-25`) expect(on(`${y}-04-25`)).toEqual([]);
+
+      // Labour Day is the first Monday in May, the King's Birthday the first
+      // Monday in October.
+      for (const [month, name] of [['05', 'Labour Day'], ['10', "King's Birthday"]] as const) {
+        const first = [1, 2, 3, 4, 5, 6, 7]
+          .map((d) => `${y}-${month}-${String(d).padStart(2, '0')}`)
+          .find((d) => dow(d) === 1)!;
+        expect(on(first).map((h) => h.name)).toContain(name);
+      }
+
+      // Christmas Eve is a part day and Christmas Day is not.
+      expect(on(`${y}-12-24`).every((h) => h.partDay)).toBe(true);
+      expect(on(`${y}-12-25`).some((h) => h.partDay)).toBe(false);
+
+      // Christmas or Boxing Day on a weekend earns an appointed extra day.
+      const weekendXmas = [`${y}-12-25`, `${y}-12-26`].some((d) => dow(d) === 0 || dow(d) === 6);
+      const extras = QLD_PUBLIC_HOLIDAYS
+        .filter((h) => h.date.startsWith(`${y}-12-2`) && /additional day/.test(h.name));
+      expect(extras.length > 0).toBe(weekendXmas);
+      for (const e of extras) expect([1, 2]).toContain(dow(e.date));
+
+      // The Ekka is Brisbane's alone, one day, and always a Wednesday.
+      const ekka = QLD_PUBLIC_HOLIDAYS.filter(
+        (h) => h.date.startsWith(y) && h.name === 'Royal Queensland Show');
+      expect(ekka).toHaveLength(1);
+      expect(ekka[0]!.scope).toBe('brisbane-area');
+      expect(dow(ekka[0]!.date)).toBe(3);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
