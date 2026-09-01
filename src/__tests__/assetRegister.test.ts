@@ -28,6 +28,17 @@ const row = (cells: Partial<Record<string, string>>): string => {
   }).join(',');
 };
 
+/**
+ * The day these fixtures are read on.
+ *
+ * The overhaul column is judged against a calendar day — a test cannot have
+ * been last done in a month still to come — so a fixture containing one has an
+ * answer that depends on when it is read. Pinned rather than left to the clock,
+ * because a suite that passes today and fails in 2031 is a suite nobody trusts
+ * the day it goes red.
+ */
+const READ_ON = '2026-09-01T21:00:00.000Z';
+
 const REGISTER = [
   HEADER,
   row({ 'Asset ID': '14211', 'Site ID': '255', 'Site Name': 'Star of the Sea', 'Walk Order': '6',
@@ -62,6 +73,19 @@ describe('reading a day-first date', () => {
   it('expands a two-digit year the way a service record means it', () => {
     expect(parseAuDate('1/2/23')).toBe('2023-02-01');
     expect(parseAuDate('1/2/99')).toBe('1999-02-01');
+    /*
+     * The pivot itself, both sides of it. Two-digit years are all over the real
+     * register — "1/2/23", "31/07/26", "1/9/21" — and where the split falls is
+     * a fifty-year decision made by one character. Sixty-nine is 2069 and
+     * seventy is 1970: for a fire door installed in the seventies that is the
+     * only reading that makes sense, and for a due date in the twenties so is
+     * the other one.
+     *
+     * Written down because nothing else says where the line is. Moving it by
+     * one changes nothing any other test in this file asserts.
+     */
+    expect(parseAuDate('1/2/69')).toBe('2069-02-01');
+    expect(parseAuDate('1/2/70')).toBe('1970-02-01');
   });
 
   it('refuses a date that is not a real day rather than rolling it over', () => {
@@ -146,7 +170,7 @@ describe('recognising a register', () => {
 });
 
 describe('reading a register', () => {
-  const parsed = () => parseAssetRegister(REGISTER, 'portable_and_wheeled_fire_extinguishers.csv');
+  const parsed = () => parseAssetRegister(REGISTER, 'portable_and_wheeled_fire_extinguishers.csv', READ_ON);
 
   it('maps rows to assets of the right type', () => {
     const r = parsed();
@@ -248,8 +272,154 @@ describe('reporting what looks wrong in the source', () => {
 });
 
 function parsed_warnings(): string {
-  return parseAssetRegister(REGISTER, 'extinguishers.csv').warnings.join(' ');
+  return parseAssetRegister(REGISTER, 'extinguishers.csv', READ_ON).warnings.join(' ');
 }
+
+/**
+ * The boundaries of the overhaul reader.
+ *
+ * Free text typed by technicians over many years, so every one of these bounds
+ * is a decision about which of two readings a cell gets. None of them was
+ * written down, and each is one character wide.
+ */
+describe('what the overhaul column will and will not read', () => {
+  it('splits a bare two-digit year at seventy, the same as a full date does', () => {
+    // The same pivot as parseAuDate, in a second implementation of it. They can
+    // drift apart silently, so both are pinned.
+    expect(parseImpreciseDate('69')).toMatchObject({ year: 2069, precision: 'year' });
+    expect(parseImpreciseDate('70')).toMatchObject({ year: 1970, precision: 'year' });
+  });
+
+  it('takes a four-digit year as written, leading zero and all', () => {
+    expect(parseImpreciseDate('1999')).toMatchObject({ year: 1999, precision: 'year' });
+    // Not a two-digit year of "01" with a nought on the front.
+    expect(parseImpreciseDate('0100')).toMatchObject({ precision: 'unreadable' });
+  });
+
+  it('accepts the first and last plausible service year and nothing outside them', () => {
+    /*
+     * A bare number is only read as a year at all because the register really
+     * does record one. Outside the range it is far more likely to be a tag
+     * number or a quantity, and a tag number read as a year sets a clock.
+     */
+    expect(parseImpreciseDate('1970')).toMatchObject({ year: 1970, precision: 'year' });
+    expect(parseImpreciseDate('2100')).toMatchObject({ year: 2100, precision: 'year' });
+    expect(parseImpreciseDate('1969')).toMatchObject({ precision: 'unreadable' });
+    expect(parseImpreciseDate('2101')).toMatchObject({ precision: 'unreadable' });
+  });
+
+  it('accepts January and December in a month-and-year cell', () => {
+    expect(parseImpreciseDate('1/20')).toMatchObject({ year: 2020, month: 1, precision: 'month' });
+    expect(parseImpreciseDate('12/20')).toMatchObject({ year: 2020, month: 12, precision: 'month' });
+    // Thirteen is not a month, and reading it as a day would invent one.
+    expect(parseImpreciseDate('13/20')).toMatchObject({ precision: 'unreadable' });
+    expect(parseImpreciseDate('0/20')).toMatchObject({ precision: 'unreadable' });
+  });
+});
+
+/**
+ * A last test that has not happened yet.
+ *
+ * This column is the record of when the five- or ten-yearly test was **last
+ * done**, and their real register has dates in it that are years away. The
+ * extinguisher export has 359 rows reading "1/6/29", "1/9/29" and "1/03/2030";
+ * three hydrants at Baldwin Living Northside have a whole cell of "30", which
+ * is that hydrant's asset number typed into the wrong column and which this
+ * reader was perfectly happy to call the year 2030.
+ *
+ * Believed, that is the worst failure this app has available to it. The next
+ * test falls due five years after the last one, so a pressure test recorded as
+ * 2030 is next due in 2035: the asset imports, sits on its site looking exactly
+ * like every other asset, and never appears as due in the working life of
+ * anybody who will use this. A date wrong in the other direction makes an asset
+ * permanently overdue, and somebody chases that within a week.
+ *
+ * So the reading is refused and the cell kept verbatim. The office still sees
+ * what was typed — they are the only ones who can correct it — and the schedule
+ * falls back to the register's own due column, which is the right answer.
+ */
+describe('an overhaul date that has not happened yet', () => {
+  const read = (cell: string) => parseImpreciseDate(cell, '2026-09-01');
+
+  it('refuses a full date in the future and keeps what the cell said', () => {
+    expect(read('1/6/29')).toEqual({ raw: '1/6/29', precision: 'unreadable' });
+    expect(read('1/03/2030')).toEqual({ raw: '1/03/2030', precision: 'unreadable' });
+  });
+
+  it('refuses the asset number somebody typed into the column', () => {
+    // "30" against asset 30. Read as a year it is 2030 and it moves a hydrant's
+    // pressure test to 2035.
+    expect(read('30')).toEqual({ raw: '30', precision: 'unreadable' });
+  });
+
+  it('accepts today, and the month and year that today is in', () => {
+    /*
+     * The test done this morning is the common case, and a rule that refused it
+     * would be worse than the one it replaced. A month or a year is judged by
+     * its first day, because a cell reading "09/26" in September is a real
+     * record of a test done earlier this month.
+     */
+    expect(read('1/9/2026')).toMatchObject({ precision: 'day', iso: '2026-09-01' });
+    expect(read('09/26')).toMatchObject({ precision: 'month', year: 2026, month: 9 });
+    expect(read('26')).toMatchObject({ precision: 'year', year: 2026 });
+    // And the month before it, which is the one the pivot could take away.
+    expect(read('06/26')).toMatchObject({ precision: 'month', year: 2026, month: 6 });
+  });
+
+  it('refuses the day after today, and the month after this one', () => {
+    expect(read('2/9/2026')).toEqual({ raw: '2/9/2026', precision: 'unreadable' });
+    expect(read('10/26')).toEqual({ raw: '10/26', precision: 'unreadable' });
+    expect(read('Oct-26')).toEqual({ raw: 'Oct-26', precision: 'unreadable' });
+    expect(read('27')).toEqual({ raw: '27', precision: 'unreadable' });
+  });
+
+  it('reads the same cell without a day given, which is what the rule is for', () => {
+    // Without the day there is nothing to judge against, and the reader is the
+    // one it always was. This is why the day is threaded through the parse
+    // rather than fetched inside the reader.
+    expect(parseImpreciseDate('1/6/29')).toMatchObject({ precision: 'day', iso: '2029-06-01' });
+    expect(parseImpreciseDate('30')).toMatchObject({ precision: 'year', year: 2030 });
+  });
+
+  it('says so on the import, naming a cell somebody can go and find', () => {
+    const csv = [
+      HEADER,
+      row({ 'Asset ID': '1', 'Site ID': '9', 'Site Name': 'Baldwin Living Northside', 'Walk Order': '1',
+            'Asset #': '30', 'Last 5 Yearly': '30', '5 Yearly': '1/11/2030', Yearly: '1/11/2026' }),
+      row({ 'Asset ID': '2', 'Site ID': '9', 'Site Name': 'Baldwin Living Northside', 'Walk Order': '2',
+            'Last 5 Yearly': '1/2/23', '5 Yearly': '1/2/2028', Yearly: '1/11/2026' }),
+    ].join('\r\n');
+    const r = parseAssetRegister(csv, 'extinguishers.csv', READ_ON);
+
+    const warning = r.warnings.find((w) => w.includes('in the future'))!;
+    expect(warning).toContain('1 overhaul date is in the future');
+    expect(warning).toContain('"30"');
+    expect(warning).toContain('asset 30');
+    // The consequence, not just the count. A count reads as a parse complaint.
+    expect(warning).toContain('five years past it');
+
+    // Refused on the asset, and the good one beside it untouched.
+    expect(r.assets[0]!.lastOverhaul).toEqual({ raw: '30', precision: 'unreadable' });
+    expect(r.assets[1]!.lastOverhaul).toMatchObject({ precision: 'day', iso: '2023-02-01' });
+  });
+
+  it('names the site where the register carries no tag for the asset', () => {
+    // Most of the extinguisher rows this fires on have an empty Asset # column,
+    // and "asset undefined" sends nobody anywhere.
+    const csv = [
+      HEADER,
+      row({ 'Asset ID': '1', 'Site ID': '9', 'Site Name': 'Logan DC', 'Walk Order': '1',
+            'Last 5 Yearly': '1/03/2030', Yearly: '1/3/2027' }),
+    ].join('\r\n');
+    const warning = parseAssetRegister(csv, 'extinguishers.csv', READ_ON)
+      .warnings.find((w) => w.includes('in the future'))!;
+    expect(warning).toContain('an asset at Logan DC');
+  });
+
+  it('says nothing where every overhaul date is in the past', () => {
+    expect(parsed_warnings()).not.toMatch(/in the future/);
+  });
+});
 
 /**
  * Against the real register when it is present. This is Safe QLD's live book of
@@ -284,6 +454,37 @@ describeReal('against the real register', () => {
       const r = parseAssetRegister(readFileSync(path, 'utf8'), path);
       expect([path, r.warnings.filter((w) => /not in day\/month\/year form/.test(w))]).toEqual([path, []]);
     }
+  });
+
+  it('leaves no overhaul date in the future anywhere in it', () => {
+    /*
+     * The reason the rule exists, measured on the file it was found in. Read
+     * on the day the register was exported, 362 cells across two systems record
+     * a test that had not happened — 359 extinguishers and three hydrants —
+     * and every one of them would have pushed its next pressure test past the
+     * working life of the people using this.
+     *
+     * Asserted as none remaining rather than as the count, because the count is
+     * a fact about a file that is not in this repository and will change the
+     * next time it is exported. What must not change is that none of them is
+     * believed.
+     */
+    let refused = 0;
+    for (const path of registers) {
+      const r = parseAssetRegister(readFileSync(path, 'utf8'), path, READ_ON);
+      const ahead = r.assets
+        .filter((a) => a.lastOverhaul?.year !== undefined)
+        .filter((a) => {
+          const o = a.lastOverhaul!;
+          const first = o.iso ?? `${o.year}-${String(o.month ?? 1).padStart(2, '0')}-01`;
+          return first > READ_ON.slice(0, 10);
+        })
+        .map((a) => a.lastOverhaul!.raw);
+      expect([path, ahead]).toEqual([path, []]);
+      refused += r.warnings.some((w) => w.includes('in the future')) ? 1 : 0;
+    }
+    // And it is finding them, rather than the registers having none.
+    expect(refused).toBeGreaterThan(0);
   });
 });
 

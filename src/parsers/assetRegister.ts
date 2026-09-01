@@ -1,4 +1,5 @@
 import type { Frequency } from '@/seed/serviceRoutines';
+import { qldIsoDay } from '@/domain/qldTime';
 import { parseDelimited } from './csv';
 
 /**
@@ -283,7 +284,7 @@ function fourDigitYear(raw: number): number {
 }
 
 /** Reads the overhaul column to whatever precision it carries. */
-export function parseImpreciseDate(value: string | undefined): ImpreciseDate | undefined {
+function readImpreciseDate(value: string | undefined): ImpreciseDate | undefined {
   const raw = (value ?? '').trim();
   if (!raw) return undefined;
   if (BLANK.test(raw)) return { raw, precision: 'unreadable' };
@@ -323,6 +324,58 @@ export function parseImpreciseDate(value: string | undefined): ImpreciseDate | u
   return { raw, precision: 'unreadable' };
 }
 
+/**
+ * The first day the recorded period could have been, as yyyy-mm-dd.
+ *
+ * A month-precision reading covers a whole month and a year-precision reading a
+ * whole year, so the question "could this have happened yet" is asked of the
+ * earliest day in it. "06/26" read in September 2026 is a real record of a test
+ * done in June; it is only impossible once the whole month is still to come.
+ */
+function earliestDay(date: ImpreciseDate): string | undefined {
+  if (date.iso) return date.iso;
+  if (date.year === undefined) return undefined;
+  const y = String(date.year).padStart(4, '0');
+  return `${y}-${String(date.month ?? 1).padStart(2, '0')}-01`;
+}
+
+/**
+ * Reads the overhaul column, refusing a test that has not happened yet.
+ *
+ * This column records when the five- or ten-yearly test was **last done**, and
+ * the real register has dates in it that are years away: extinguishers reading
+ * "1/6/29" and "1/03/2030", and three hydrants at one site whose whole cell is
+ * "30" — the asset number, typed into the wrong column, which this reader was
+ * perfectly happy to call the year 2030.
+ *
+ * Read as fact, that is the worst possible failure of this app. The next test
+ * falls due five years after the last one, so a pressure test recorded as 2030
+ * is next due in 2035: the asset imports, sits on its site looking completely
+ * normal, and never once appears as due in the lifetime of anybody using this.
+ * A wrong date in the other direction makes an asset permanently overdue, which
+ * somebody notices within a week.
+ *
+ * So the value is refused rather than believed, and the cell is kept verbatim
+ * in `raw` — it still shows against the asset, and it is what the office needs
+ * to go and fix the source system. What it no longer does is start a clock.
+ *
+ * `notAfter` is a Queensland calendar day. It is a parameter rather than a call
+ * to the clock because this is a parser: given the same file and the same day
+ * it gives the same answer, and the day the register was read is a fact about
+ * the import, not about this function.
+ */
+export function parseImpreciseDate(
+  value: string | undefined,
+  notAfter?: string,
+): ImpreciseDate | undefined {
+  const read = readImpreciseDate(value);
+  if (!read || !notAfter) return read;
+  const earliest = earliestDay(read);
+  // Kept as `raw` with no precision: the cell said something, and this reader
+  // does not understand it as a date a test was done on.
+  return earliest && earliest > notAfter ? { raw: read.raw, precision: 'unreadable' } : read;
+}
+
 /** Which register this is, from the file name and then the column set. */
 export function detectSystem(fileName: string, headers: string[]): SystemDef | undefined {
   const name = fileName.toLowerCase().replace(/[_\s]+/g, '-');
@@ -339,8 +392,14 @@ export function isAssetRegister(text: string): boolean {
   return lower.includes('site name') && lower.includes('walk order');
 }
 
-export function parseAssetRegister(text: string, fileName = ''): ParsedRegister {
+export function parseAssetRegister(
+  text: string,
+  fileName = '',
+  /** The instant the register was read, for judging whether a test has happened yet. */
+  asAt: string = new Date().toISOString(),
+): ParsedRegister {
   const warnings: string[] = [];
+  const today = qldIsoDay(asAt);
   const grid = parseDelimited(text);
   const rows = grid.slice(1);
   if (grid.length < 2) {
@@ -389,6 +448,8 @@ export function parseAssetRegister(text: string, fileName = ''): ParsedRegister 
   const assets: RegisterAsset[] = [];
   const siteCounts = new Map<string, RegisterSite>();
   let unreadableDates = 0;
+  /** Overhaul cells refused for recording a test that has not happened yet. */
+  const notYet: { raw: string; where: string }[] = [];
 
   for (const row of rows) {
     const siteName = clean(at(row, 'site name'));
@@ -414,6 +475,19 @@ export function parseAssetRegister(text: string, fileName = ''): ParsedRegister 
     const walkOrderRaw = clean(at(row, 'walk order'));
     const walkOrder = walkOrderRaw !== undefined ? Number.parseInt(walkOrderRaw, 10) : undefined;
 
+    const overhaulRaw = overhaulIndex >= 0 ? row[overhaulIndex] : undefined;
+    const lastOverhaul = parseImpreciseDate(overhaulRaw, today);
+    // Only where the day rule is what refused it. Reading the cell a second
+    // time without the day says whether this was a date at all, and it happens
+    // for a handful of rows in a register of twelve thousand.
+    if (lastOverhaul?.precision === 'unreadable' && parseImpreciseDate(overhaulRaw)?.year !== undefined) {
+      // Named by tag where the register carries one. Most of the extinguisher
+      // rows this fires on have an empty Asset # column, so the site is what is
+      // left to go looking with.
+      const tag = clean(at(row, 'asset #')) ?? clean(at(row, 'asset number'));
+      notYet.push({ raw: lastOverhaul.raw, where: tag ? `asset ${tag}` : `an asset at ${siteName}` });
+    }
+
     assets.push({
       externalId: clean(at(row, 'asset id')),
       siteExternalId: clean(at(row, 'site id')),
@@ -425,7 +499,7 @@ export function parseAssetRegister(text: string, fileName = ''): ParsedRegister 
       notes: clean(at(row, 'notes')) ?? clean(at(row, 'notes/height')),
       serviceStartDate: parseAuDate(at(row, 'service start date')),
       schedule,
-      lastOverhaul: overhaulIndex >= 0 ? parseImpreciseDate(row[overhaulIndex]) : undefined,
+      lastOverhaul,
       system: def?.system ?? 'unknown',
       assetTypeId: def?.assetTypeId ?? 'unknown',
       extra,
@@ -495,6 +569,25 @@ export function parseAssetRegister(text: string, fileName = ''): ParsedRegister 
       `interval recorded (${breakdown}${kinds.size > 3 ? ', and others' : ''}). They import and are ` +
       `visible on their site, but nothing makes them due, so they will not appear in the due list ` +
       `or in a month plan until an interval is set in the source system.`,
+    );
+  }
+
+  /*
+   * A last test that has not happened yet.
+   *
+   * Loud rather than quiet, because the asset itself will not look wrong. The
+   * date is refused, so the routine has no last-done against it and falls back
+   * to whatever the register's own due column says — which is the right answer,
+   * but only the office can fix the cell, and only if somebody tells them.
+   */
+  if (notYet.length) {
+    const example = notYet[0]!;
+    warnings.push(
+      `${notYet.length} overhaul ${notYet.length === 1 ? 'date is' : 'dates are'} in the future — ` +
+      `for example "${example.raw}" against ${example.where}. A test cannot have been last done ` +
+      `on a day that has not come, so ${notYet.length === 1 ? 'it has' : 'these have'} been left unset ` +
+      `rather than counted as done, which would put the next one five years past it. The cell is kept ` +
+      `against the asset so it can be corrected in the source system.`,
     );
   }
 
