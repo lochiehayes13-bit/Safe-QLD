@@ -173,12 +173,16 @@ export default function SettingsScreen() {
     try {
       const r = await pullFromSimpro(configFor(), setProgress);
       setSyncState(await readAllSyncState());
+      setCard(await loadRateCard());
       const incremental = Object.entries(r.modes)
         .filter(([, mode]) => mode === 'incremental')
         .map(([resource]) => resource);
       const lines = [
         `${r.sitesAdded} sites added, ${r.sitesUpdated} updated`,
         `${r.jobsAdded + r.jobsUpdated} jobs synced`,
+        r.ratesRead || r.feesRead
+          ? `${r.ratesRead} labour rate${r.ratesRead === 1 ? '' : 's'} and ${r.feesRead} service fee${r.feesRead === 1 ? '' : 's'} read`
+          : 'No rate card came back — the figures in Settings are still used.',
         incremental.length
           ? `Only changes were fetched for ${incremental.join(' and ')}.`
           : 'Everything was fetched — this was a full sync.',

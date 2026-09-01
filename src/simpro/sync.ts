@@ -3,6 +3,7 @@ import { SimproResources } from './resources';
 import { assessIncremental, newestChange, planIncremental, type SyncResource } from './incremental';
 import { readSyncState, writeSyncState } from './watermark';
 import { createSite, listSites, updateSite } from '@/db/repo';
+import { saveRateCard } from '@/db/rateCardRepo';
 import { upsertJob, enqueueSync, pendingSync, markSynced, markSyncFailed, type JobRecord } from '@/db/opsRepo';
 import type { Site } from '@/domain/types';
 
@@ -26,6 +27,9 @@ export interface SyncResult {
   sitesUpdated: number;
   jobsAdded: number;
   jobsUpdated: number;
+  /** Labour rates and service fees read from the office system's setup. */
+  ratesRead: number;
+  feesRead: number;
   errors: string[];
   /**
    * Whether each resource actually came down incrementally.
@@ -55,11 +59,12 @@ export async function pullFromSimpro(
   const api = new SimproResources(client);
   const result: SyncResult = {
     sitesAdded: 0, sitesUpdated: 0, jobsAdded: 0, jobsUpdated: 0,
+    ratesRead: 0, feesRead: 0,
     errors: [], modes: {}, notes: [],
   };
   const startedAt = new Date().toISOString();
 
-  onProgress?.({ stage: 'Reading sites', done: 0, total: 2 });
+  onProgress?.({ stage: 'Reading sites', done: 0, total: 3 });
 
   // Ask only for what changed since the last successful sync. At nine hundred
   // sites a full pull every time is slow enough that it stops being done, which
@@ -136,7 +141,7 @@ export async function pullFromSimpro(
     }, startedAt);
   }
 
-  onProgress?.({ stage: 'Reading jobs', done: 1, total: 2 });
+  onProgress?.({ stage: 'Reading jobs', done: 1, total: 3 });
 
   const jobState = await readSyncState('jobs');
   const jobPlan = planIncremental('jobs', jobState.lastChangeSeenAt, { force: options?.force });
@@ -171,7 +176,41 @@ export async function pullFromSimpro(
     result.errors.push(describe(e, 'jobs'));
   }
 
-  onProgress?.({ stage: 'Done', done: 2, total: 2 });
+  onProgress?.({ stage: 'Reading rates', done: 2, total: 3 });
+
+  // Always whole: the setup endpoints carry no modification date, so there is
+  // nothing to ask "what changed" against. It is cheap — a rate card is tens of
+  // records, not thousands — and it is the data a wrong copy costs most.
+  const errorsBeforeRates = result.errors.length;
+  try {
+    const card = await api.rateCard();
+    for (const u of card.unreadable) {
+      result.errors.push(`${u.what}: ${u.error}`);
+    }
+    if (card.rates.length || card.fees.length) {
+      await saveRateCard(card.rates, card.fees);
+      result.ratesRead = card.rates.length;
+      result.feesRead = card.fees.length;
+      result.notes.push(...card.notes);
+      // Worth carrying up: a rate filed one letter out is never selected for
+      // anyone, and nothing else in the app will ever mention it.
+      result.notes.push(...card.suspect);
+    }
+    result.modes.rates = 'full';
+    if (result.errors.length === errorsBeforeRates) {
+      await writeSyncState({
+        resource: 'rates',
+        lastSyncedAt: startedAt,
+        lastChangeSeenAt: startedAt,
+        lastRecordCount: card.rates.length + card.fees.length,
+        mode: 'full',
+      }, startedAt);
+    }
+  } catch (e) {
+    result.errors.push(describe(e, 'rates'));
+  }
+
+  onProgress?.({ stage: 'Done', done: 3, total: 3 });
   return result;
 }
 

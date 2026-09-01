@@ -121,7 +121,13 @@ export function newestChange(
 // technician and a three-week-old due list that looks current.
 // ---------------------------------------------------------------------------
 
-export type SyncResource = 'sites' | 'jobs' | 'assets' | 'employees';
+/**
+ * Rates are in this list but never come down incrementally: the setup endpoints
+ * carry no modification date, so the card is always read whole. It is recorded
+ * here anyway so "how current is this device" covers the figures a quote is
+ * built from, which are the ones it is most costly to have stale.
+ */
+export type SyncResource = 'sites' | 'jobs' | 'assets' | 'employees' | 'rates';
 
 export interface SyncState {
   resource: SyncResource;
