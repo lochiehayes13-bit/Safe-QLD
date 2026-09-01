@@ -1,6 +1,6 @@
 import type { CauseEffectRule, Panel, TestRow } from '@/domain/types';
 import { DEVICE_TYPE_LABEL } from '@/parsers/deviceType';
-import { EFFECT_LABEL, formatAuDate, type ReportBundle } from './sheets';
+import { formatAuDate, matrixColumns, type ReportBundle } from './sheets';
 
 /**
  * HTML report templates rendered to PDF by expo-print.
@@ -285,17 +285,9 @@ ${statutory ? `<h2>Record of maintenance</h2>
 
 /** Renders a cause-and-effect matrix as a landscape PDF. */
 export function causeEffectHtml(panel: Panel, rules: CauseEffectRule[], siteName: string, generatedAt: string): string {
-  const columns: { key: string; label: string }[] = [];
-  const seen = new Set<string>();
-  for (const r of rules) {
-    for (const e of r.effects) {
-      const key = `${e.effectKind}|${e.effectLabel}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        columns.push({ key, label: e.effectLabel || EFFECT_LABEL[e.effectKind] });
-      }
-    }
-  }
+  // The same columns the workbook's matrix uses, from the same function. The
+  // two are issued together and describe one panel.
+  const columns = matrixColumns(rules);
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${BASE_CSS}
   @page { size: A4 landscape; margin: 10mm; }

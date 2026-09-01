@@ -1,7 +1,8 @@
 import {
-  causeEffectMatrixSheet, checkSheet, defectSheet, pointSheet, reportCoverSheet,
+  causeEffectMatrixSheet, checkSheet, defectSheet, matrixColumns, pointSheet, reportCoverSheet,
   testResultSheet, zoneSheet, type ReportBundle,
 } from '@/export/sheets';
+import { causeEffectHtml } from '@/export/pdf';
 import type {
   CauseEffectRule, CheckRow, Defect, Panel, Point, ServiceReport, Site, TestResult, TestRow, Zone,
 } from '@/domain/types';
@@ -281,5 +282,96 @@ describe('the cause and effect matrix', () => {
     const legend = JSON.stringify(s.rows.slice(-1));
     expect(legend).toContain('X = operates');
     expect(legend).toContain('C = conditional');
+  });
+});
+
+/**
+ * The matrix is issued twice, and both copies describe one panel.
+ *
+ * It goes out as a sheet in the workbook and as a landscape PDF, and the two
+ * were deriving their columns from identical copies of the same loop. They
+ * agreed, and nothing said they had to — an edit to one would have produced a
+ * spreadsheet and a document of the same commissioned panel naming or ordering
+ * the effects differently, handed to the same client, with no way to tell which
+ * was right.
+ *
+ * This is the check that they keep saying the same thing, rather than that they
+ * happen to today.
+ */
+describe('the two renderings of one matrix', () => {
+  const panel: Panel = {
+    id: 'p1', siteId: 's1', name: 'FIP', brand: 'ampac', source: 'config-import',
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  const effect = (
+    label: string, kind: CauseEffectRule['effects'][number]['effectKind'],
+    state: 'operates' | 'conditional' | 'not-linked', delaySeconds?: number,
+  ) => ({ id: `e-${label}-${kind}`, effectLabel: label, effectKind: kind, state, delaySeconds });
+
+  const rules: CauseEffectRule[] = [
+    {
+      id: 'r1', panelId: 'p1', causeLabel: 'Zone 12 Alarm', causeKind: 'zone-alarm', causeZoneNumber: 12,
+      effects: [
+        effect('Evac tone', 'evacuation', 'operates'),
+        effect('Lift homing', 'lift-homing', 'conditional', 30),
+        effect('AC shutdown', 'plant-shutdown', 'not-linked'),
+      ],
+    },
+    {
+      id: 'r2', panelId: 'p1', causeLabel: 'Sprinkler flow', causeKind: 'sprinkler-flow', causeZoneNumber: 3,
+      effects: [
+        effect('Evac tone', 'evacuation', 'conditional'),
+        // A kind already seen under a different label is its own column.
+        effect('', 'plant-shutdown', 'operates'),
+      ],
+    },
+  ];
+
+  it('gives both documents the same effects, in the same order', () => {
+    const sheet = causeEffectMatrixSheet(panel, rules);
+    // The sheet leads with Cause, Type and Zone; the rest are the effects.
+    const fromSheet = sheet.rows[0]!.slice(3).map((c) => (c as { v: string }).v);
+    const fromPdf = [...causeEffectHtml(panel, rules, 'A Site', '2026-07-03T00:00:00.000Z')
+      .matchAll(/<th class="rot"><div>([^<]*)<\/div><\/th>/g)].map((m) => m[1]!);
+
+    expect(fromSheet).toEqual(matrixColumns(rules).map((c) => c.label));
+    expect(fromPdf).toEqual(fromSheet);
+    // And it is a real matrix, not an empty one agreeing with itself.
+    expect(fromSheet).toEqual(['Evac tone', 'Lift homing', 'AC shutdown', 'Plant shutdown']);
+  });
+
+  it('marks each cell the same way in both', () => {
+    /*
+     * X, C and blank have to mean the same thing on both documents. Reading a
+     * conditional evacuation as an unconditional one is the whole risk of this
+     * page, and it is the kind of drift that only shows when somebody compares
+     * the two — which nobody does until there is an incident.
+     */
+    const sheet = causeEffectMatrixSheet(panel, rules);
+    const sheetMarks = sheet.rows.slice(1, 3).map((row) => row.slice(3).map((cell) => {
+      const v = typeof cell === 'object' && cell !== null && 'v' in cell ? (cell as { v: string }).v : cell;
+      return String(v ?? '').replace(/\s+\d+s$/, '').trim();
+    }));
+
+    const html = causeEffectHtml(panel, rules, 'A Site', '2026-07-03T00:00:00.000Z');
+    const body = html.slice(html.indexOf('<tbody>'), html.indexOf('</tbody>'));
+    const pdfMarks = [...body.matchAll(/<tr>.*?<\/tr>/g)].map((row) =>
+      [...row[0]!.matchAll(/<td class="(mark|cond|blank)"[^>]*>([^<]*)/g)].map((m) => m[2]!.trim()));
+
+    expect(pdfMarks).toEqual(sheetMarks);
+    expect(sheetMarks).toEqual([['X', 'C', '', ''], ['C', '', '', 'X']]);
+  });
+
+  it('shows a delay on both, since a delay is part of the effect', () => {
+    const html = causeEffectHtml(panel, rules, 'A Site', '2026-07-03T00:00:00.000Z');
+    expect(html).toContain('30s');
+    expect(JSON.stringify(causeEffectMatrixSheet(panel, rules).rows)).toContain('C 30s');
+  });
+
+  it('says the same thing about a panel with no rules recorded', () => {
+    const html = causeEffectHtml(panel, [], 'A Site', '2026-07-03T00:00:00.000Z');
+    expect(html).toContain('No cause and effect rules have been recorded');
+    expect(matrixColumns([])).toEqual([]);
   });
 });

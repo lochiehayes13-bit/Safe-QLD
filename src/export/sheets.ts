@@ -287,8 +287,24 @@ const CELL_MARK: Record<string, string> = {
  * list, so a site with only three effects gets a three-column matrix instead of
  * fifteen mostly-empty ones.
  */
-export function causeEffectMatrixSheet(panel: Panel, rules: CauseEffectRule[]): Sheet {
-  const columns: { key: string; label: string }[] = [];
+export interface MatrixColumn {
+  /** Identifies the effect across rules, so one column holds one effect. */
+  key: string;
+  label: string;
+}
+
+/**
+ * The effect columns of a cause and effect matrix, in the order they appear.
+ *
+ * Shared because this matrix is issued twice — as a sheet in the workbook and
+ * as a landscape PDF — and the two were deriving their columns from identical
+ * copies of this loop. They agreed, and nothing said they had to: an edit to
+ * one would have produced a spreadsheet and a document of the same commissioned
+ * panel that name or order the effects differently, handed to the same client,
+ * with no way to tell which was right.
+ */
+export function matrixColumns(rules: readonly CauseEffectRule[]): MatrixColumn[] {
+  const columns: MatrixColumn[] = [];
   const seen = new Set<string>();
   for (const r of rules) {
     for (const e of r.effects) {
@@ -299,6 +315,11 @@ export function causeEffectMatrixSheet(panel: Panel, rules: CauseEffectRule[]): 
       }
     }
   }
+  return columns;
+}
+
+export function causeEffectMatrixSheet(panel: Panel, rules: CauseEffectRule[]): Sheet {
+  const columns = matrixColumns(rules);
 
   const header: Row = [H('Cause'), H('Type'), H('Zone'), ...columns.map((c) => H(c.label))];
   const rows: Row[] = [header];
