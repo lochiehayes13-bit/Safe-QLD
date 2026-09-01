@@ -260,7 +260,18 @@ function esc(s: string | number | undefined | null): string {
     .replace(/"/g, '&quot;');
 }
 
-const lines = (s: string | undefined): string => esc(s).replace(/\n/g, '<br />');
+/**
+ * A free-text box.
+ *
+ * The technician's own line breaks survive and everything else is escaped. A
+ * comment reflowed into one paragraph loses its second point, which on this
+ * form is routinely the one that matters — "held pressure" followed by "weep at
+ * the level 3 landing valve".
+ */
+function comment(text: string | undefined, part: PartResult | 'refer-to-report'): string {
+  if (!text?.trim()) return cell(undefined, part);
+  return esc(text).replace(/\n/g, '<br />');
+}
 
 /**
  * A value cell.
@@ -356,7 +367,7 @@ function partB(form: Form72): string {
     ${pair(['Boost Pressure (kPa)', cell(h.boostPressureKpa, r)], ['Test Pressure (kPa)', cell(h.testPressureKpa, r)])}
     ${pair(['Duration of Test (mins)', cell(h.durationMinutes, r)], ['End of Test Pressure (kPa)', cell(h.endPressureKpa, r)])}
     ${wide('Loss (if any) (L/min)', cell(h.lossLpm, r))}
-    ${wide('Comments', cell(lines(h.comments), r))}
+    ${wide('Comments', comment(h.comments, r))}
   </table>`;
 }
 
@@ -442,7 +453,7 @@ function partD(form: Form72): string {
     ${pair(['Static Pressure', cell(kpa(d.staticPressureKpa), r)], ['Pressure Zone Number', cell(d.pressureZone, r)])}
     ${wide('On-site pump set installed', `${tick('Yes', d.onSitePumpSet === true)}${tick('No', d.onSitePumpSet === false)}${
   d.onSitePumpSet === undefined ? ' <span class="missing">Not answered</span>' : ''}`)}
-    ${wide('Comment', cell(lines(d.comment), r))}
+    ${wide('Comment', comment(d.comment, r))}
   </table>
   ${table}
   ${extras.length
@@ -509,7 +520,7 @@ function partE(form: Form72, input: Form72DocumentInput): string {
     ${pair(['System requirements (L/s @ kPa)', cell(req, r)], ['Static pressure (kPa)', cell(b.staticPressureKpa, r)])}
     ${pair(['Pump inlet pressure (kPa)', cell(b.pumpInletKpa, r)], ['Pump discharge pressure (kPa)', cell(b.pumpDischargeKpa, r)])}
     ${pair(['Boost pressure (kPa)', cell(b.boostPressureKpa, r)], ['Calculated frictional loss (kPa)', lossCell])}
-    ${wide('Comments', cell(lines(b.comments), r))}
+    ${wide('Comments', comment(b.comments, r))}
   </table>
   ${r === 'na' ? '' : `<div class="stated">${esc(working)}</div>`}
   ${overloadBlock}`;
@@ -522,7 +533,7 @@ function partF(form: Form72): string {
   ${note(PART_F_NOTE)}
   <table class="grid">
     ${pair(['Pressure (kPa)', cell(f.pressureKpa, r)], ['Time held (mins)', cell(f.timeHeldMinutes, r)])}
-    ${wide('Comments', cell(lines(f.comments), r))}
+    ${wide('Comments', comment(f.comments, r))}
   </table>`;
 }
 
@@ -567,7 +578,7 @@ function partG(form: Form72): string {
     ${point(2, g.testPoints[1])}
     ${extra.map((p, i) => point(3 + i, p)).join('')}
     ${wide('Running Test — Installation gauge pressure (kPa)', cell(g.runningTestGaugeKpa, r))}
-    ${wide('Comments', cell(lines(g.comments), r))}
+    ${wide('Comments', comment(g.comments, r))}
   </table>
   ${extra.length
     ? `<div class="stated">${extra.length} further test point${extra.length === 1 ? '' : 's'} recorded. `
@@ -598,7 +609,7 @@ function partH(form: Form72): string {
     <tr><td class="k">System</td><td class="v" colspan="3">${
   tick('Pass', form.systemResult === 'pass')}${tick('Fail', form.systemResult === 'fail')}${
   form.systemResult === 'na' ? tick('N/A', true) : ''}</td></tr>
-    ${wide('System Notes', cell(lines(form.systemNotes), form.systemResult))}
+    ${wide('System Notes', comment(form.systemNotes, form.systemResult))}
   </table>`;
 }
 

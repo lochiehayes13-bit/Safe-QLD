@@ -206,12 +206,6 @@ function toIso(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-function addCalendarDays(d: Date, days: number): Date {
-  const out = new Date(d);
-  out.setUTCDate(out.getUTCDate() + days);
-  return out;
-}
-
 /**
  * Adds whole years, clamping 29 February into a non-leap year.
  *
