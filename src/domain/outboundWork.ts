@@ -164,24 +164,43 @@ const MIN_USEFUL_SECTION = 120;
 
 const QLD_UTC_OFFSET_HOURS = 10;
 
-/** The Queensland calendar date of an instant, as d/m/yyyy. Refuses what it cannot read. */
-export function qldDay(iso: string | undefined): string | undefined {
+/**
+ * The Queensland calendar date of an instant, as yyyy-mm-dd.
+ *
+ * Kept separate from the display form because dates that get arithmetic done to
+ * them — a rectification due one month on — must go into that arithmetic as the
+ * Queensland day, not the UTC one. A service finished at 8:30am in Brisbane is
+ * stamped 22:30 the previous day in UTC, and a month added to the wrong day
+ * produces a due date that is a day short of the one the regulation gives.
+ */
+export function qldIsoDay(iso: string | undefined): string | undefined {
   if (!iso) return undefined;
   const trimmed = iso.trim();
   // A date-only string is already a calendar date; shifting it would move it.
-  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(trimmed);
-  const ms = Date.parse(dateOnly ? `${trimmed}T00:00:00Z` : trimmed);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const ms = Date.parse(trimmed);
   if (Number.isNaN(ms)) return undefined;
-  const shifted = new Date(dateOnly ? ms : ms + QLD_UTC_OFFSET_HOURS * 3_600_000);
-  const y = shifted.getUTCFullYear();
-  const m = String(shifted.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(shifted.getUTCDate()).padStart(2, '0');
+  return new Date(ms + QLD_UTC_OFFSET_HOURS * 3_600_000).toISOString().slice(0, 10);
+}
+
+/** The Queensland calendar date of an instant, as d/m/yyyy. Refuses what it cannot read. */
+export function qldDay(iso: string | undefined): string | undefined {
+  const day = qldIsoDay(iso);
+  if (!day) return undefined;
+  const [y, m, d] = day.split('-');
   return `${d}/${m}/${y}`;
 }
 
-/** Date and time in Queensland, for the clocks a critical defect starts. */
+/**
+ * Date and time in Queensland, for the clocks a critical defect starts.
+ *
+ * A date with no time in it comes back undefined rather than as midnight or ten
+ * in the morning. "Notified 12/03/2026 10:00" that nobody recorded a time for is
+ * a fact invented by a formatter, and it would be read as evidence.
+ */
 export function qldMoment(iso: string | undefined): string | undefined {
   if (!iso) return undefined;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso.trim())) return undefined;
   const ms = Date.parse(iso.trim());
   if (Number.isNaN(ms)) return undefined;
   const day = qldDay(iso);
@@ -694,7 +713,7 @@ function reasonsLine(summary: ServiceSummary): string | undefined {
 function criticalBlock(defect: OutboundDefect, run: CompletedRoutineRun): string[] {
   const basis = criticalBasis(defect);
   const noticeDue = qldMoment(criticalNoticeDueAt(defect.raisedAt) ?? undefined);
-  const rectifyDue = qldDay(rectificationDueAt(run.completedAt) ?? undefined);
+  const rectifyDue = qldDay(rectificationDueAt(qldIsoDay(run.completedAt) ?? run.completedAt) ?? undefined);
   const lines = [
     `*** CRITICAL DEFECT *** ${defect.location.trim() || 'location not recorded'}`,
     defect.description.trim(),
@@ -1067,11 +1086,19 @@ export function planOutboundWork(
     run.routineLabel, run.frequency, run.system, run.technician, run.notes,
     summary.passed, summary.failed, summary.notTested,
     ...summary.notTestedReasons.map((r) => `${r.reason}:${r.count}`),
-    ...[...results]
-      .map((r) => `${r.assetNumber ?? r.assetId}|${r.outcome}|${r.notTestedReason ?? ''}|${r.notes ?? ''}`)
+    // Each field is canonicalised before it is composed, so a reason retyped with
+    // a trailing space is the same service and not a new one. Sorted, because the
+    // order rows came back in is not part of what was found.
+    ...results
+      .map((r) => [
+        canonical(r.assetNumber ?? r.assetId), r.outcome,
+        canonical(r.notTestedReason), canonical(r.notes),
+      ].join('|'))
       .sort(),
     ...sendableDefects
-      .map((d) => `${d.location}|${d.description}|${d.severity}|${d.status}`)
+      .map((d) => [
+        canonical(d.location), canonical(d.description), d.severity, d.status,
+      ].join('|'))
       .sort(),
   ];
   const serviceKey = outboundKey('SRV', serviceIdentity, serviceContent);
