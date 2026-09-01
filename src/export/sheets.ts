@@ -111,17 +111,30 @@ export function pointSheet(panel: Panel, points: Point[]): Sheet {
 // Test report
 // ---------------------------------------------------------------------------
 
+/**
+ * Untested says so.
+ *
+ * It printed as an empty cell, which is the one thing it must not be. "Not
+ * tested" is a stated outcome in this app — a distinct result with a required
+ * reason, because an inaccessible device is the commonest real outcome on an
+ * annual and calling one a pass hides a coverage gap. A blank cell hides it
+ * exactly as well, and on a sheet with an autofilter it hides it better: filter
+ * the Result column to Pass and Fail and the blanks vanish from the count
+ * without anybody deciding they should.
+ */
 const RESULT_LABEL: Record<TestRow['result'], string> = {
   pass: 'Pass',
   fail: 'FAIL',
   na: 'N/A',
-  untested: '',
+  untested: 'NOT TESTED',
 };
 
 function resultCell(r: TestRow['result']): Cell {
   return {
     v: RESULT_LABEL[r],
-    style: r === 'pass' ? 'pass' : r === 'fail' ? 'fail' : r === 'na' ? 'warn' : 'default',
+    // Marked like N/A rather than left plain. Neither is a failure and neither
+    // is a pass, and both are the rows somebody has to look at again.
+    style: r === 'pass' ? 'pass' : r === 'fail' ? 'fail' : 'warn',
   };
 }
 
@@ -158,10 +171,20 @@ export function reportCoverSheet(b: ReportBundle): Sheet {
     [H('Witnessed by'), report.witnessName ?? ''],
     [],
     [{ v: 'Results', style: 'title' }],
-    [H('Devices tested'), b.testRows.length],
+    /*
+     * "Devices tested" counted every row, including the ones nobody tested.
+     *
+     * On the summary sheet of a service record that is a coverage claim the
+     * body does not support: forty devices on the sheet with eight of them
+     * inaccessible is thirty-two tested, and the line said forty. The routine
+     * service report already counts these apart for the same reason — the
+     * summary must not claim a coverage the pages behind it do not show.
+     */
+    [H('Devices on this report'), b.testRows.length],
+    [H('Devices tested'), pass + fail],
     [H('Pass'), { v: pass, style: 'pass' }],
     [H('Fail'), { v: fail, style: fail ? 'fail' : 'default' }],
-    [H('N/A'), na],
+    [H('Not applicable'), na],
     [H('Not tested'), { v: untested, style: untested ? 'warn' : 'default' }],
     [H('Defects raised'), b.defects.length],
     [H('Critical defects'), { v: b.defects.filter((d) => d.severity === 'critical').length, style: 'fail' }],
