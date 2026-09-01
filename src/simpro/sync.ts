@@ -6,6 +6,8 @@ import { createSite, listSites, updateSite } from '@/db/repo';
 import { saveRateCard } from '@/db/rateCardRepo';
 import { upsertJob, enqueueSync, pendingSync, markSynced, markSyncFailed, type JobRecord } from '@/db/opsRepo';
 import { matchSiteByRefOrName } from '@/domain/siteNames';
+import { createAsset, findByExternalIds, updateAsset, type AssetRecord } from '@/db/assetRepo';
+import { mapSimproAsset, SIMPRO_ASSET_SOURCE } from './assetSync';
 import type { Site } from '@/domain/types';
 
 /**
@@ -35,6 +37,17 @@ export interface SyncResult {
   sitesUpdated: number;
   jobsAdded: number;
   jobsUpdated: number;
+  /** Customer assets read from the office system's register. */
+  assetsAdded: number;
+  assetsUpdated: number;
+  /**
+   * Assets skipped because their site is not held locally.
+   *
+   * Two thirds of the office's sites carry no assets at all, and a site that
+   * failed to match during this run leaves its assets with nowhere to go. Said
+   * out loud rather than counted as success.
+   */
+  assetsWithoutSite: number;
   /** Labour rates and service fees read from the office system's setup. */
   ratesRead: number;
   feesRead: number;
@@ -71,12 +84,13 @@ export async function pullFromSimpro(
   const api = new SimproResources(client);
   const result: SyncResult = {
     sitesAdded: 0, sitesUpdated: 0, jobsAdded: 0, jobsUpdated: 0,
+    assetsAdded: 0, assetsUpdated: 0, assetsWithoutSite: 0,
     ratesRead: 0, feesRead: 0,
     errors: [], modes: {}, notes: [],
   };
   const startedAt = new Date().toISOString();
 
-  onProgress?.({ stage: 'Reading sites', done: 0, total: 3 });
+  onProgress?.({ stage: 'Reading sites', done: 0, total: 4 });
 
   // Ask only for what changed since the last successful sync. At nine hundred
   // sites a full pull every time is slow enough that it stops being done, which
@@ -183,7 +197,7 @@ export async function pullFromSimpro(
     }, startedAt);
   }
 
-  onProgress?.({ stage: 'Reading jobs', done: 1, total: 3 });
+  onProgress?.({ stage: 'Reading jobs', done: 1, total: 4 });
 
   const jobState = await readSyncState('jobs');
   const jobPlan = planIncremental('jobs', jobState.lastChangeSeenAt, { force: options?.force });
@@ -221,7 +235,122 @@ export async function pullFromSimpro(
     result.errors.push(describe(e, 'jobs'));
   }
 
-  onProgress?.({ stage: 'Reading rates', done: 2, total: 3 });
+  onProgress?.({ stage: 'Reading assets', done: 2, total: 4 });
+
+  /*
+   * The register itself: 12,546 assets across 898 of the office's sites.
+   *
+   * Nothing pulled these before. The endpoint was written and never called, so
+   * a technician arriving on site had the site record and no idea what
+   * equipment was in the building — the one thing the job is about.
+   *
+   * The site index is seeded from every site held locally, not only from the
+   * ones this run happened to read. On an incremental sync a handful of sites
+   * come down and the rest of the index would be empty, so all but a few
+   * thousand assets would be filed as having no site and skipped.
+   */
+  const siteIdByRemote = new Map(siteIdByExternal);
+  for (const site of existing) {
+    const remoteId = site.externalSource === SIMPRO_SOURCE ? site.externalId : undefined;
+    const fromRef = site.siteRef?.startsWith('SIMPRO:') ? site.siteRef.slice('SIMPRO:'.length) : undefined;
+    const key = remoteId ?? fromRef;
+    if (key && !siteIdByRemote.has(key)) siteIdByRemote.set(key, site.id);
+  }
+
+  const assetState = await readSyncState('assets');
+  const assetPlan = planIncremental('assets', assetState.lastChangeSeenAt, { force: options?.force });
+  const errorsBeforeAssets = result.errors.length;
+  const unmappedTypes = new Set<string>();
+
+  try {
+    const { assets: remoteAssets, truncated } = await api.customerAssetsPaged(undefined, assetPlan.query);
+    if (truncated) {
+      // The ceiling was hit, so this is a partial register. Said plainly: a
+      // technician who trusts a short list walks past equipment.
+      result.notes.push(
+        `The asset read stopped at ${remoteAssets.length} records before reaching the end. `
+        + 'The register held locally is incomplete.',
+      );
+    }
+    const outcome = assessIncremental(remoteAssets, assetPlan, assetState.lastRecordCount);
+    result.modes.assets = outcome.mode;
+    if (outcome.note) result.notes.push(outcome.note);
+
+    const known = await findByExternalIds(SIMPRO_ASSET_SOURCE, remoteAssets.map((a) => a.id));
+
+    for (const [i, remote] of remoteAssets.entries()) {
+      if (i % 100 === 0) onProgress?.({ stage: 'Assets', done: i, total: remoteAssets.length });
+      try {
+        const mapped = mapSimproAsset(remote);
+        if (mapped.unmappedType) {
+          unmappedTypes.add(mapped.unmappedType);
+          continue;
+        }
+        const siteId = mapped.remoteSiteId ? siteIdByRemote.get(mapped.remoteSiteId) : undefined;
+        if (!siteId) {
+          result.assetsWithoutSite++;
+          continue;
+        }
+        const match = known.get(remote.id);
+        if (match) {
+          // Blanks only. A result the technician recorded on site outranks the
+          // office's copy of it, and this runs after every job.
+          const patch: Partial<AssetRecord> = {};
+          if (!match.locationNote && mapped.input.locationNote) patch.locationNote = mapped.input.locationNote;
+          if (!match.installedDate && mapped.input.installedDate) patch.installedDate = mapped.input.installedDate;
+          if (!match.lastServicedAt && mapped.input.lastServicedAt) patch.lastServicedAt = mapped.input.lastServicedAt;
+          if (!match.lastResult && mapped.input.lastResult) patch.lastResult = mapped.input.lastResult;
+          if (mapped.input.nextDueAt && match.nextDueAt !== mapped.input.nextDueAt) {
+            // The exception to blanks-only: when the next service falls due is
+            // the office's to set, and a stale date sends nobody or sends them
+            // to the wrong building on the wrong day.
+            patch.nextDueAt = mapped.input.nextDueAt;
+          }
+          if (Object.keys(patch).length) {
+            await updateAsset(match.id, patch);
+            result.assetsUpdated++;
+          }
+        } else {
+          await createAsset({ ...mapped.input, siteId, assetTypeId: mapped.input.assetTypeId });
+          result.assetsAdded++;
+        }
+      } catch (e) {
+        result.errors.push(describe(e, `asset ${remote.id}`));
+      }
+    }
+
+    if (unmappedTypes.size) {
+      result.notes.push(
+        `${unmappedTypes.size} Simpro asset type${unmappedTypes.size === 1 ? '' : 's'} did not match `
+        + `anything this app knows about and ${unmappedTypes.size === 1 ? 'was' : 'were'} skipped: `
+        + `${[...unmappedTypes].join(', ')}.`,
+      );
+    }
+    if (result.assetsWithoutSite) {
+      result.notes.push(
+        `${result.assetsWithoutSite} assets were skipped because their Simpro site is not held on `
+        + 'this device. Pull sites first, or run a forced sync.',
+      );
+    }
+
+    if (result.errors.length === errorsBeforeAssets) {
+      await writeSyncState({
+        resource: 'assets',
+        lastSyncedAt: startedAt,
+        ...nextWatermark(
+          remoteAssets as unknown as Record<string, unknown>[],
+          outcome.mode,
+          startedAt,
+          assetState,
+        ),
+        mode: outcome.mode,
+      }, startedAt);
+    }
+  } catch (e) {
+    result.errors.push(describe(e, 'assets'));
+  }
+
+  onProgress?.({ stage: 'Reading rates', done: 3, total: 4 });
 
   // Always whole: the setup endpoints carry no modification date, so there is
   // nothing to ask "what changed" against. It is cheap — a rate card is tens of
@@ -255,7 +384,7 @@ export async function pullFromSimpro(
     result.errors.push(describe(e, 'rates'));
   }
 
-  onProgress?.({ stage: 'Done', done: 3, total: 3 });
+  onProgress?.({ stage: 'Done', done: 4, total: 4 });
   return result;
 }
 
