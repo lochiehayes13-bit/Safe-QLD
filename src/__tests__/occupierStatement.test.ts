@@ -482,6 +482,48 @@ describe('refusing to count what it does not know', () => {
     expect(qldBusinessDaysBetween('2020-01-01', '2020-01-20').reason).toMatch(/outside that/);
   });
 
+  it('counts the Ekka as a holiday in Brisbane and as a working day outside it', () => {
+    /*
+     * Counting between two dates is the one that puts "3 business days left"
+     * on the statement list, and its locality handling was never exercised —
+     * only the forward count's was. The Royal Queensland Show is a Brisbane
+     * public holiday and an ordinary Wednesday in Rockhampton, and a day
+     * either way on that list is a day either way on a statutory obligation.
+     *
+     * 12 August 2026 is the show holiday, a Wednesday.
+     */
+    const span = (locality: 'brisbane-area' | 'elsewhere-in-queensland' | 'unknown') =>
+      qldBusinessDaysBetween('2026-08-11', '2026-08-13', { locality }).days;
+
+    expect(span('brisbane-area')).toBe(1);
+    expect(span('elsewhere-in-queensland')).toBe(2);
+  });
+
+  it('leaves the Brisbane holiday out of the count when it does not know where the site is', () => {
+    /*
+     * Applying a Brisbane holiday to a site that might be in Mount Isa would
+     * make up a deadline, so an unknown locality counts the day as worked.
+     *
+     * That direction overstates the days available rather than understating
+     * them, which is the wrong way round for a deadline — so it is said. The
+     * caveat names district show holidays specifically and warns the real
+     * number may be one or two fewer, which is the same warning this case
+     * needs.
+     */
+    const unknown = qldBusinessDaysBetween('2026-08-11', '2026-08-13');
+    expect(unknown.days).toBe(2);
+    expect(unknown.caveats.join(' ')).toMatch(/may be one or two fewer/);
+  });
+
+  it('counts Christmas Eve, which is a holiday only from six in the evening', () => {
+    /*
+     * A part-day holiday is still a business day — the act can be done in the
+     * morning. Treating it as a full one shortens every count spanning
+     * Christmas by a day, on a document with a statutory deadline.
+     */
+    expect(qldBusinessDaysBetween('2025-12-23', '2025-12-24').days).toBe(1);
+  });
+
   it('cites the definition a business day count rests on, both ways and when it refuses', () => {
     // A screen that says "three days late" is making a statutory claim, and the
     // definition it rests on is not this app's.
