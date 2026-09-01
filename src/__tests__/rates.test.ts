@@ -1,6 +1,7 @@
 import {
-  chargeForAttendance, formatCents, marginFraction, parseCents, roundCents,
-  selectFee, selectRate, suspectRateNames, type LabourRate, type ServiceFee,
+  chargeForAttendance, effectiveRateCard, formatCents, marginFraction, parseCents,
+  rateCardFrom, roundCents, selectFee, selectRate, suspectRateNames,
+  type LabourRate, type RateCardPrefs, type ServiceFee,
 } from '@/domain/rates';
 
 /**
@@ -59,6 +60,18 @@ describe('holding money', () => {
     expect(parseCents('$136.88')).toBe(13_688);
     expect(parseCents('136.8')).toBe(13_680);
     expect(parseCents('1,234.56')).toBe(123_456);
+  });
+
+  it('holds nought as nought, not as minus nought', () => {
+    /*
+     * A quote line at nought is a real thing — a fee waived, an hour inside an
+     * allowance. Minus nought is what a sign test applied at the wrong side of
+     * the boundary produces, and it prints as "-$0.00", which reads on a
+     * customer's quote as a credit nobody offered.
+     */
+    expect(roundCents(0)).toBe(0);
+    expect(formatCents(0)).toBe('$0.00');
+    expect(formatCents(roundCents(0))).toBe('$0.00');
   });
 
   it('refuses a figure it cannot read rather than returning zero', () => {
@@ -182,6 +195,30 @@ describe('saying what is missing rather than quoting anyway', () => {
     expect(c.warnings.join(' ')).toMatch(/no normal hours attendance fee/i);
   });
 
+  it('names the band the missing fee belongs to, so it can be set up', () => {
+    /*
+     * "No attendance fee is set up" sends somebody to a settings screen with
+     * two boxes on it. Naming the band sends them to the right one, and naming
+     * the wrong one is worse than naming neither.
+     */
+    const normal = chargeForAttendance({ rates: RATES, fees: [], hours: 'normal', minutesOnSite: 60 });
+    expect(normal.warnings[0]).toContain('normal hours attendance fee');
+
+    const after = chargeForAttendance({ rates: RATES, fees: [], hours: 'after-hours', minutesOnSite: 60 });
+    expect(after.warnings[0]).toContain('after hours attendance fee');
+  });
+
+  it('says nothing about a missing fee where the fee was deliberately skipped', () => {
+    /*
+     * Work inside a visit already being charged for. The fee is absent because
+     * somebody said so, and warning about it trains people to ignore warnings.
+     */
+    const out = chargeForAttendance({
+      rates: RATES, fees: [], hours: 'normal', minutesOnSite: 60, chargeAttendance: false,
+    });
+    expect(out.warnings.filter((w) => w.includes('attendance fee is set up'))).toEqual([]);
+  });
+
   it('warns rather than dropping unbilled time silently', () => {
     // Time worked and not charged is the same shape of error as a wrong rate,
     // and easier to miss.
@@ -232,5 +269,151 @@ describe('spotting a rate nobody will ever match', () => {
 
   it('ignores general rates, which have no customer to match', () => {
     expect(suspectRateNames(RATES.filter((r) => !r.customerName), ['Acme'])).toEqual([]);
+  });
+
+  it('catches a dropped character as well as a wrong one', () => {
+    // "Seqwater" filed as "Seqater". A substitution is the case that was
+    // tested; a typist is at least as likely to miss a key as hit the wrong one.
+    expect(suspectRateNames(
+      [rate({ id: 'x', name: 'Seqater Labour', customerName: 'Seqater' })], ['Seqwater'],
+    )).toHaveLength(1);
+  });
+
+  it('catches an extra character', () => {
+    expect(suspectRateNames(
+      [rate({ id: 'x', name: 'Seqwaterr Labour', customerName: 'Seqwaterr' })], ['Seqwater'],
+    )).toHaveLength(1);
+  });
+
+  it('stays quiet at two characters out, which is a different customer', () => {
+    /*
+     * The line has to be somewhere. Two edits reaches names that are genuinely
+     * different companies, and a warning against every roughly similar name is
+     * one nobody reads — which costs more than the miss, because the whole
+     * point is that the one real typo stands out.
+     */
+    expect(suspectRateNames(
+      [rate({ id: 'x', name: 'Seqwerer Labour', customerName: 'Seqwerer' })], ['Seqwater'],
+    )).toEqual([]);
+  });
+
+  it('stays quiet where the lengths differ by two', () => {
+    expect(suspectRateNames(
+      [rate({ id: 'x', name: 'Seq Labour', customerName: 'Seqwa' })], ['Seqwater'],
+    )).toEqual([]);
+  });
+});
+
+describe('turning the settings figures into a card', () => {
+  const prefs = (over: Partial<RateCardPrefs> = {}): RateCardPrefs => ({
+    normalHoursSellCents: 13_000,
+    afterHoursSellCents: 18_500,
+    attendanceNormalCents: 30_000,
+    attendanceNormalMinutes: 120,
+    attendanceAfterHoursCents: 57_500,
+    attendanceAfterHoursMinutes: 180,
+    ...over,
+  });
+
+  it('leaves out a rate set to zero rather than quoting a free hour', () => {
+    /*
+     * Nought in a settings box means "not set up", never "no charge". Carried
+     * through as a rate it produces a labour line at nought dollars, which
+     * reads on a quote as work deliberately not being charged for.
+     */
+    const card = rateCardFrom(prefs({ afterHoursSellCents: 0 }));
+    expect(card.rates.map((r) => r.hours)).toEqual(['normal']);
+  });
+
+  it('leaves out an attendance fee set to zero', () => {
+    const card = rateCardFrom(prefs({ attendanceAfterHoursCents: 0 }));
+    expect(card.fees.map((f) => f.hours)).toEqual(['normal']);
+  });
+
+  it('builds both bands where both are set', () => {
+    const card = rateCardFrom(prefs());
+    expect(card.rates).toHaveLength(2);
+    expect(card.fees).toHaveLength(2);
+  });
+});
+
+describe('saying which card the money came from', () => {
+  /*
+   * The source claim, and until now nothing checked it. The module promises a
+   * figure on a screen can always be traced to where it came from, and the
+   * mixed case is the one that matters: a Simpro key without setup scope
+   * commonly reads labour rates and not service fees, so half the card arrives
+   * from the office and half is what somebody typed into Settings months ago.
+   *
+   * Getting the note wrong is worse than having no note. "Rates came from the
+   * office system" over a stale typed figure is a false provenance on a number
+   * that ends up on a quote.
+   */
+  const prefs: RateCardPrefs = {
+    normalHoursSellCents: 13_000, afterHoursSellCents: 18_500,
+    attendanceNormalCents: 30_000, attendanceNormalMinutes: 120,
+    attendanceAfterHoursCents: 57_500, attendanceAfterHoursMinutes: 180,
+  };
+  const none: RateCardPrefs = {
+    normalHoursSellCents: 0, afterHoursSellCents: 0,
+    attendanceNormalCents: 0, attendanceNormalMinutes: 0,
+    attendanceAfterHoursCents: 0, attendanceAfterHoursMinutes: 0,
+  };
+
+  it('says so when the whole card came from the office', () => {
+    const card = effectiveRateCard({ rates: RATES, fees: FEES, pulledAt: '2026-08-30T04:00:00Z' }, prefs);
+    expect(card.rateSource).toBe('office');
+    expect(card.feeSource).toBe('office');
+    expect(card.note).toBe('Rates and attendance fees came from the office system. Pulled 2026-08-30.');
+  });
+
+  it('names each half separately where only the rates arrived', () => {
+    // The common real case: a key that can read rates but not service fees.
+    const card = effectiveRateCard({ rates: RATES, fees: [], pulledAt: '2026-08-30T04:00:00Z' }, prefs);
+    expect(card.rateSource).toBe('office');
+    expect(card.feeSource).toBe('settings');
+    expect(card.note).toBe(
+      'Labour rates came from the office system, attendance fees are the ones typed into Settings. '
+      + 'Pulled 2026-08-30.',
+    );
+  });
+
+  it('keeps a typed attendance fee when the office answered only for rates', () => {
+    // Throwing it away because the rates arrived would quietly stop charging
+    // attendances, which is the larger half of a short visit.
+    const card = effectiveRateCard({ rates: RATES, fees: [] }, prefs);
+    expect(card.fees).toHaveLength(2);
+    expect(card.fees[0]!.chargeCents).toBe(30_000);
+  });
+
+  it('says the figures are the typed ones when nothing was pulled', () => {
+    const card = effectiveRateCard({ rates: [], fees: [] }, prefs);
+    expect(card.rateSource).toBe('settings');
+    expect(card.feeSource).toBe('settings');
+    expect(card.note).toBe(
+      'Labour rates are the ones typed into Settings, attendance fees are the ones typed into Settings.',
+    );
+    expect(card.note).not.toContain('Pulled');
+  });
+
+  it('says plainly that there are no rates rather than showing a card of nothing', () => {
+    const card = effectiveRateCard({ rates: [], fees: [] }, none);
+    expect(card.rateSource).toBe('none');
+    expect(card.feeSource).toBe('none');
+    expect(card.note).toBe('No rates are set, so labour is shown as hours only.');
+  });
+
+  it('names the half that is missing where only one is', () => {
+    const card = effectiveRateCard({ rates: [], fees: [] }, { ...none, normalHoursSellCents: 13_000 });
+    expect(card.rateSource).toBe('settings');
+    expect(card.feeSource).toBe('none');
+    expect(card.note).toBe(
+      'Labour rates are the ones typed into Settings, no attendance fee is set.',
+    );
+  });
+
+  it('does not claim a pull date it was not given', () => {
+    const card = effectiveRateCard({ rates: RATES, fees: FEES }, prefs);
+    expect(card.note).toBe('Rates and attendance fees came from the office system.');
   });
 });
