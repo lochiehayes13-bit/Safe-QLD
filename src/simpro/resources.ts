@@ -11,11 +11,23 @@ import { buildRateCard, type RateCardImport, type RawLabourRate, type RawService
 
 // Simpro returns PascalCase keys; these mirror only what is actually read.
 interface RawRef { ID?: number; Name?: string }
+/** Simpro's contact block, shared by sites and employees. */
+interface RawContact {
+  GivenName?: string;
+  FamilyName?: string;
+  Email?: string;
+  WorkPhone?: string;
+  CellPhone?: string;
+  Position?: string;
+}
 interface RawSite {
   ID?: number;
   Name?: string;
   Address?: { Address?: string; City?: string; State?: string; PostalCode?: string };
   Customers?: RawRef[];
+  PrimaryContact?: RawContact;
+  Archived?: boolean;
+  DateModified?: string;
 }
 interface RawJob {
   ID?: number;
@@ -39,7 +51,7 @@ interface RawSchedule {
   Blocks?: { StartTime?: string; EndTime?: string }[];
   Job?: RawRef;
 }
-interface RawEmployee { ID?: number; Name?: string; Email?: string; Phone?: string; Position?: string }
+interface RawEmployee { ID?: number; Name?: string; Position?: string; PrimaryContact?: RawContact; Archived?: boolean }
 interface RawCustomerAsset {
   ID?: number;
   Name?: string;
@@ -48,7 +60,15 @@ interface RawCustomerAsset {
   SerialNumber?: string;
   ManufacturedDate?: string;
   InstallDate?: string;
+  StartDate?: string;
+  ParentID?: number | null;
+  Archived?: boolean;
+  DateModified?: string;
   CustomFields?: { CustomField?: RawRef; Value?: string }[];
+  /** Every frequency this asset is on, each with the date it is next due. */
+  ServiceLevels?: { ID?: number; Name?: string; ServiceDate?: string }[];
+  /** What the office recorded last time, which is not what this phone recorded. */
+  LastTest?: { Result?: string; Date?: string | null; ServiceLevel?: RawRef };
 }
 
 export interface SimproSite {
@@ -61,6 +81,18 @@ export interface SimproSite {
   state?: string;
   postcode?: string;
   customerName?: string;
+  /**
+   * The site's own contact, which the office already holds for most sites.
+   *
+   * Reports print Contact, Mobile and Email rows and those rows were blank on
+   * every report the app has ever produced — not because the office lacks the
+   * detail, but because the sync never asked for the field.
+   */
+  contactName?: string;
+  contactEmail?: string;
+  contactWorkPhone?: string;
+  contactMobile?: string;
+  archived?: boolean;
 }
 
 export interface SimproJob {
@@ -99,14 +131,31 @@ export interface SimproEmployee {
 }
 
 export interface SimproAsset {
+  /** The source's own modification timestamp, where it provides one. */
+  DateModified?: string;
   id: string;
   name: string;
   typeName?: string;
+  typeId?: string;
   siteName?: string;
   siteId?: string;
   serial?: string;
   installedDate?: string;
   custom: Record<string, string>;
+  /** Each frequency this asset is on, with the date the office says it is next due. */
+  serviceLevels: { id: string; name: string; dueAt?: string }[];
+  /**
+   * The office's record of the last test.
+   *
+   * Held separately from anything this phone recorded, and deliberately a free
+   * string: "No Test" is a real state on 7,263 of the 12,546 assets and a
+   * pass/fail boolean cannot hold it.
+   */
+  lastTestResult?: string;
+  lastTestAt?: string;
+  /** Set on sub-assets, e.g. a detector under a panel. */
+  parentId?: string;
+  archived?: boolean;
 }
 
 const str = (v: unknown): string | undefined => {
@@ -123,22 +172,54 @@ export class SimproResources {
    * last sync. Passed through rather than built here, because whether the
    * endpoint honours a filter is checked by the caller.
    */
-  async sites(maxRecords = 2000, query: Record<string, string> = {}): Promise<SimproSite[]> {
-    const raw = await this.client.listAll<RawSite>(
-      'sites/', { columns: 'ID,Name,Address,Customers,DateModified', ...query }, maxRecords,
+  /**
+   * @param query extra filters, used to ask only for what changed since the
+   * last sync. Passed through rather than built here, because whether the
+   * endpoint honours a filter is checked by the caller.
+   *
+   * The ceiling was 2,000 against a build holding 3,057 sites, so a full pull
+   * dropped a thousand of them and reported success — `listAll` returns a bare
+   * array and cannot say it stopped early. It is now above the real count with
+   * room to grow, and the caller that cares uses `sitesPaged`.
+   */
+  async sites(maxRecords = 20000, query: Record<string, string> = {}): Promise<SimproSite[]> {
+    return (await this.sitesPaged(maxRecords, query)).sites;
+  }
+
+  /** The same read, saying whether the ceiling cut it short. */
+  async sitesPaged(
+    maxRecords = 20000,
+    query: Record<string, string> = {},
+  ): Promise<{ sites: SimproSite[]; truncated: boolean }> {
+    const { items, truncated } = await this.client.listAllPaged<RawSite>(
+      'sites/',
+      { columns: 'ID,Name,Address,Customers,PrimaryContact,Archived,DateModified', ...query },
+      maxRecords,
     );
-    return raw.map((s) => ({
-      id: String(s.ID ?? ''),
-      name: str(s.Name) ?? 'Unnamed site',
-      address: str(s.Address?.Address),
-      suburb: str(s.Address?.City),
-      state: str(s.Address?.State) ?? 'QLD',
-      postcode: str(s.Address?.PostalCode),
-      customerName: str(s.Customers?.[0]?.Name),
-      // Kept so the caller can anchor the next incremental sync on the newest
-      // record rather than on the local clock.
-      DateModified: str((s as { DateModified?: unknown }).DateModified),
-    }));
+    return {
+      truncated,
+      sites: items.map((s) => {
+        const c = s.PrimaryContact;
+        const contactName = [str(c?.GivenName), str(c?.FamilyName)].filter(Boolean).join(' ');
+        return {
+          id: String(s.ID ?? ''),
+          name: str(s.Name) ?? 'Unnamed site',
+          address: str(s.Address?.Address),
+          suburb: str(s.Address?.City),
+          state: str(s.Address?.State) ?? 'QLD',
+          postcode: str(s.Address?.PostalCode),
+          customerName: str(s.Customers?.[0]?.Name),
+          contactName: contactName || undefined,
+          contactEmail: str(c?.Email),
+          contactWorkPhone: str(c?.WorkPhone),
+          contactMobile: str(c?.CellPhone),
+          archived: s.Archived === true,
+          // Kept so the caller can anchor the next incremental sync on the newest
+          // record rather than on the local clock.
+          DateModified: str(s.DateModified),
+        };
+      }),
+    };
   }
 
   async jobs(query: Record<string, string | number> = {}, maxRecords = 1000): Promise<SimproJob[]> {
@@ -185,19 +266,50 @@ export class SimproResources {
   }
 
   async employees(maxRecords = 500): Promise<SimproEmployee[]> {
-    const raw = await this.client.listAll<RawEmployee>('employees/', { columns: 'ID,Name,Email,Phone,Position' }, maxRecords);
+    // Email and Phone are not columns on this endpoint — asking for them
+    // returns 422 "Invalid columns found" and the whole read fails. Contact
+    // detail lives under PrimaryContact, as it does on sites.
+    const raw = await this.client.listAll<RawEmployee>(
+      'employees/', { columns: 'ID,Name,Position,PrimaryContact,Archived' }, maxRecords,
+    );
     return raw.map((e) => ({
       id: String(e.ID ?? ''),
       name: str(e.Name) ?? 'Unnamed',
-      email: str(e.Email),
-      phone: str(e.Phone),
+      email: str(e.PrimaryContact?.Email),
+      phone: str(e.PrimaryContact?.CellPhone) ?? str(e.PrimaryContact?.WorkPhone),
       position: str(e.Position),
     }));
   }
 
-  async customerAssets(maxRecords = 5000): Promise<SimproAsset[]> {
-    const raw = await this.client.listAll<RawCustomerAsset>('customerAssets/', {}, maxRecords);
-    return raw.map((a) => {
+  /**
+   * Every customer asset, with the detail a technician actually needs.
+   *
+   * This previously sent no `columns` at all, which returns the thin list shape
+   * — ID, AssetType, Site and ServiceLevels without dates — so location, tag
+   * number, equipment type and last test result were never fetched. Asking for
+   * them by name is what makes one request per 250 assets carry the whole
+   * record, instead of 12,546 follow-up reads for the detail.
+   *
+   * The ceiling was 5,000 against 12,546 assets and silently dropped the rest.
+   */
+  async customerAssets(maxRecords = 30000, query: Record<string, string> = {}): Promise<SimproAsset[]> {
+    return (await this.customerAssetsPaged(maxRecords, query)).assets;
+  }
+
+  /** The same read, saying whether the ceiling cut it short. */
+  async customerAssetsPaged(
+    maxRecords = 30000,
+    query: Record<string, string> = {},
+  ): Promise<{ assets: SimproAsset[]; truncated: boolean }> {
+    const { items, truncated } = await this.client.listAllPaged<RawCustomerAsset>(
+      'customerAssets/',
+      {
+        columns: 'ID,AssetType,Site,ServiceLevels,LastTest,CustomFields,StartDate,ParentID,Archived,DateModified',
+        ...query,
+      },
+      maxRecords,
+    );
+    const assets = items.map((a) => {
       const custom: Record<string, string> = {};
       for (const f of a.CustomFields ?? []) {
         const key = str(f.CustomField?.Name);
@@ -205,16 +317,29 @@ export class SimproResources {
         if (key && value) custom[key] = value;
       }
       return {
+        DateModified: str(a.DateModified),
         id: String(a.ID ?? ''),
-        name: str(a.Name) ?? 'Unnamed asset',
+        // The endpoint returns no Name for an asset; the office identifies one
+        // by its type and its Location custom field, so fall back to those
+        // rather than printing "Unnamed asset" 12,546 times.
+        name: str(a.Name) ?? str(custom['Location']) ?? str(a.AssetType?.Name) ?? 'Unnamed asset',
         typeName: str(a.AssetType?.Name),
+        typeId: a.AssetType?.ID !== undefined ? String(a.AssetType.ID) : undefined,
         siteName: str(a.Site?.Name),
         siteId: a.Site?.ID !== undefined ? String(a.Site.ID) : undefined,
         serial: str(a.SerialNumber),
-        installedDate: str(a.InstallDate),
+        installedDate: str(a.InstallDate) ?? str(a.StartDate),
+        parentId: a.ParentID !== undefined && a.ParentID !== null ? String(a.ParentID) : undefined,
+        archived: a.Archived === true,
+        lastTestResult: str(a.LastTest?.Result),
+        lastTestAt: str(a.LastTest?.Date ?? undefined),
+        serviceLevels: (a.ServiceLevels ?? [])
+          .filter((l) => l.ID !== undefined)
+          .map((l) => ({ id: String(l.ID), name: str(l.Name) ?? '', dueAt: str(l.ServiceDate) })),
         custom,
       };
     });
+    return { assets, truncated };
   }
 
   /** Adds a note to a job — how a technician's field finding reaches the office. */
@@ -230,7 +355,9 @@ export class SimproResources {
     lines: { partNumber: string; description: string; quantity: number }[];
     notes?: string;
   }): Promise<{ id?: string }> {
-    const { data } = await this.client.request<{ ID?: number }>('POST', 'purchaseOrders/', {
+    // Simpro's route is `vendorOrders/`; `purchaseOrders/` returns 404 "Invalid
+    // route", so every order raised from the app was silently failing to post.
+    const { data } = await this.client.request<{ ID?: number }>('POST', 'vendorOrders/', {
       body: {
         Vendor: payload.vendorId,
         Job: payload.jobId ? Number(payload.jobId) : undefined,
@@ -270,9 +397,19 @@ export class SimproResources {
   async rateCard(): Promise<RateCardImport & { unreadable: { what: string; error: string }[] }> {
     const unreadable: { what: string; error: string }[] = [];
 
-    const tryList = async <T>(what: string, path: string): Promise<T[]> => {
+    /**
+     * `columns` is not optional here.
+     *
+     * Both of these endpoints answer a bare list with nothing but ID and Name —
+     * no cost, no markup, no charge, no included time. So the pull succeeded,
+     * found the rates, and imported a card with every figure missing, which
+     * `buildRateCard` then discarded as unusable. The result was an empty rate
+     * card and a message saying Simpro had no rates to give, on a build that
+     * has six of them.
+     */
+    const tryList = async <T>(what: string, path: string, columns: string): Promise<T[]> => {
       try {
-        return await this.client.listAll<T>(path, {}, 1000);
+        return await this.client.listAll<T>(path, { columns }, 1000);
       } catch (e) {
         unreadable.push({ what, error: e instanceof Error ? e.message : String(e) });
         return [];
@@ -280,8 +417,19 @@ export class SimproResources {
     };
 
     const [rates, fees] = await Promise.all([
-      tryList<RawLabourRate>('Labour rates', 'setup/labor/laborRates/'),
-      tryList<RawServiceFee>('Service fees', 'setup/labor/serviceFees/'),
+      tryList<RawLabourRate>(
+        'Labour rates',
+        'setup/labor/laborRates/',
+        'ID,Name,CostRate,Markup,Multiplier,TaxCode,IsDefault,Archived',
+      ),
+      // Narrower than the labour rate set on purpose: this endpoint rejects
+      // `TaxCode` and `Amount` outright with 422, and one bad name fails the
+      // whole read rather than being ignored.
+      tryList<RawServiceFee>(
+        'Service fees',
+        'setup/labor/serviceFees/',
+        'ID,Name,Price,LaborTime,SalesTaxCode,Archived',
+      ),
     ]);
 
     let customers: string[] = [];

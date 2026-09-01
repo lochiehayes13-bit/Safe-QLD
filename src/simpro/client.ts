@@ -28,6 +28,16 @@ const EXPIRY_MARGIN_SECONDS = 120;
 /** The build limit is 10/sec; pacing below it leaves headroom for office traffic. */
 const REQUESTS_PER_SECOND = 8;
 
+/**
+ * The endpoints without which the app cannot do its job.
+ *
+ * Deliberately shorter than the full probe list. A key that cannot read
+ * catalogs or vendors is merely limited — ordering parts will not work — but a
+ * key that cannot read sites or customer assets cannot show a technician what
+ * they are standing in front of, and calling that "connected" wastes a trip.
+ */
+const REQUIRED_ENDPOINTS = ['Sites', 'Customer assets', 'Jobs', 'Customers'];
+
 export interface SimproConfig {
   /** Host you log into Simpro with, e.g. "safeqld.simprosuite.com". */
   buildDomain: string;
@@ -118,9 +128,13 @@ export class SimproClient {
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
+      // Simpro answers bad client credentials with 400 and an `invalid_client`
+      // body, not 401. Matching only on 401 meant the one error a person can
+      // actually fix surfaced as a raw HTTP dump with a JSON blob in it.
+      const badCredentials = res.status === 401 || (res.status === 400 && text.includes('invalid_client'));
       throw new SimproError(
-        res.status === 401
-          ? 'Simpro rejected the client ID or secret. Check them in Settings.'
+        badCredentials
+          ? 'Simpro rejected the client ID or secret. Check them in Settings, and confirm the secret has not been regenerated.'
           : `Could not get a Simpro token (HTTP ${res.status}). ${text.slice(0, 200)}`,
         res.status,
       );
@@ -270,7 +284,9 @@ export class SimproClient {
       { name: 'Schedules', path: 'schedules/' },
       { name: 'Timesheets', path: 'timesheets/' },
       { name: 'Customer assets', path: 'customerAssets/' },
-      { name: 'Purchase orders', path: 'purchaseOrders/' },
+      // Simpro calls these vendor orders. `purchaseOrders/` is not a route and
+      // answers 404, which made a working key look half-broken in the report.
+      { name: 'Purchase orders', path: 'vendorOrders/' },
       { name: 'Vendors', path: 'vendors/' },
       { name: 'Catalogs', path: 'catalogs/' },
     ];
@@ -297,5 +313,74 @@ export class SimproClient {
   async listCompanies(): Promise<{ ID: number; Name: string }[]> {
     const { data } = await this.request<{ ID: number; Name: string }[]>('GET', `${this.apiRoot}/companies/`);
     return data;
+  }
+
+  /**
+   * The whole setup in one action: authenticate, find the company, check access.
+   *
+   * Setting this up by hand used to mean four typed fields and then running the
+   * test twice — the first run only discovered the company ID and told you to
+   * run it again, because the client had already been built with the old blank
+   * one. On a phone, in a van, that reads as broken. So the discovery happens
+   * here, against a client that is rebuilt with the ID it just found, and the
+   * caller gets one answer.
+   *
+   * The three stages are reported separately because they fail for different
+   * reasons and want different fixes: a bad secret, a key with no company, or a
+   * key whose per-endpoint permissions are too narrow. Collapsing them into one
+   * boolean is what made a permissions problem look like a login problem.
+   */
+  async connect(): Promise<{
+    authenticated: boolean;
+    company: { id: string; name: string } | null;
+    endpoints: { name: string; path: string; readable: boolean; total: number | null; error?: string }[];
+    /** True only when the endpoints the app actually depends on are all readable. */
+    ready: boolean;
+    problem?: string;
+  }> {
+    const empty = { authenticated: false, company: null, endpoints: [], ready: false };
+
+    let companies: { ID: number; Name: string }[];
+    try {
+      companies = await this.listCompanies();
+    } catch (e) {
+      return { ...empty, problem: e instanceof SimproError ? e.message : String(e) };
+    }
+
+    // A company ID already configured wins, so an office with more than one
+    // build does not get silently moved to whichever is listed first.
+    const configured = this.config.companyId.trim();
+    const chosen = configured
+      ? (companies.find((c) => String(c.ID) === configured) ?? null)
+      : (companies[0] ?? null);
+
+    if (!chosen) {
+      return {
+        ...empty,
+        authenticated: true,
+        problem: configured
+          ? `These credentials authenticated, but company ${configured} is not one they can see (${companies.map((c) => c.ID).join(', ') || 'none'}).`
+          : 'These credentials authenticated but no company was visible to them.',
+      };
+    }
+
+    // Rebuilt rather than mutated: `companyRoot` reads config on every request,
+    // and a half-configured client that works only after a second call is the
+    // bug this method exists to remove.
+    const scoped = new SimproClient({ ...this.config, companyId: String(chosen.ID) });
+    scoped.token = this.token;
+
+    const { endpoints } = await scoped.testConnection();
+    const missing = endpoints.filter((e) => REQUIRED_ENDPOINTS.includes(e.name) && !e.readable);
+
+    return {
+      authenticated: true,
+      company: { id: String(chosen.ID), name: chosen.Name },
+      endpoints,
+      ready: missing.length === 0,
+      problem: missing.length
+        ? `Connected, but this key cannot read ${missing.map((m) => m.name).join(', ')}. Simpro sets API permissions per endpoint.`
+        : undefined,
+    };
   }
 }

@@ -51,9 +51,22 @@ export const DEFAULT_PREFS: Prefs = {
   technicianLicence: '',
   vehicleRego: '',
   companyName: 'Safe QLD Pty Ltd',
+  // Everything about the Safe QLD build except the secret, so setting the app
+  // up is one paste and one tap rather than four fields typed off a phone.
+  //
+  // These three are identifiers, not credentials: the client ID authenticates
+  // nothing on its own, and the company ID is 0 on this build — which is why it
+  // is a string. Left as a number it would be falsy, and every "is this
+  // configured yet" check in the app would read a correctly configured install
+  // as blank.
+  //
+  // The client secret is deliberately absent. Anything committed here is bundled
+  // into the APK and ships to every phone, so a secret placed here would be
+  // readable by anyone holding the file. It is pasted once into the platform
+  // keystore instead, or removed from devices entirely by setting `simproProxyUrl`.
   simproDomain: 'safeqld.simprosuite.com',
-  simproCompanyId: '',
-  simproClientId: '',
+  simproCompanyId: '0',
+  simproClientId: '6564738df3bba3cd587e3dacb58a1d',
   simproProxyUrl: '',
   normalHoursSellCents: 0,
   afterHoursSellCents: 0,

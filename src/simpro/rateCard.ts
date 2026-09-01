@@ -46,11 +46,21 @@ export interface RawServiceFee {
   Charge?: number | string;
   SellPrice?: number | string;
   Price?: number | string;
-  /** Minutes of labour the fee covers, again under several names. */
+  /**
+   * Minutes of labour the fee covers, again under several names.
+   *
+   * `LaborTime` is the American spelling and is the one this build actually
+   * returns. Without it the fee imported with its charge but no included time,
+   * so an attendance fee looked like it covered nothing and every minute on
+   * site was billed again on top of it.
+   */
+  LaborTime?: number | string;
   IncludedLabourTime?: number | string;
   LabourTime?: number | string;
   IncludedMinutes?: number | string;
+  /** Simpro names this `SalesTaxCode` on the service fee endpoint. */
   TaxCode?: { Rate?: number | string };
+  SalesTaxCode?: { Rate?: number | string };
   Archived?: boolean;
 }
 
@@ -264,7 +274,7 @@ const feeCharge = (f: RawServiceFee): number | undefined =>
   num(f.Amount) ?? num(f.Charge) ?? num(f.SellPrice) ?? num(f.Price);
 
 const feeMinutes = (f: RawServiceFee): number | undefined =>
-  num(f.IncludedLabourTime) ?? num(f.LabourTime) ?? num(f.IncludedMinutes);
+  num(f.LaborTime) ?? num(f.IncludedLabourTime) ?? num(f.LabourTime) ?? num(f.IncludedMinutes);
 
 export function mapServiceFees(
   raw: readonly RawServiceFee[],
