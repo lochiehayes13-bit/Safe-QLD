@@ -512,6 +512,17 @@ export const SCATTER_R2 = 0.25;
  */
 export const GAP_RATIO_UNRESOLVABLE = 1.5;
 
+/**
+ * The narrowest the rate is ever treated as being known, as a fraction of it.
+ *
+ * Four service readings that happen to fall exactly on a line make the
+ * statistical uncertainty zero, and a projection would then name a week. That
+ * is luck, not precision: these are gauge readings taken by different people on
+ * different days, and a floor of fifteen per cent on the rate keeps the
+ * projection honest about what a field measurement is worth.
+ */
+export const PROJECTION_MINIMUM_RATE_UNCERTAINTY = 0.15;
+
 export const PROJECTION_ASSUMPTION =
   'This is what the numbers do if nothing changes, and nothing here knows whether it will. A '
   + 'partly shut valve stays shut until somebody opens it; a corroding main keeps corroding; a '
@@ -607,6 +618,8 @@ export interface MeasurementTrend {
   assetName?: string;
   key: string;
   kind?: MeasurementKind;
+  /** Which way is deterioration, from the catalogue or from the caller. */
+  deterioration?: Deterioration;
   status: TrendStatus;
   /** Why there is no trend. Present on every status except 'trend'. */
   refusal?: string;
@@ -731,6 +744,7 @@ export function trendMeasurements(
     assetName: series.assetName,
     key: series.key,
     kind,
+    deterioration: series.deterioration ?? kind?.deterioration,
     used: [] as MeasurementPoint[],
     excluded,
     conversions: [] as { from: string; to: string; count: number }[],
@@ -769,7 +783,9 @@ export function trendMeasurements(
         base,
         'key-redefined',
         `"${series.key}" changed meaning on ${formatAuDate(change.at)}: ${change.what} `
-        + 'Readings either side are not the same measurement, so nothing is trended through it.',
+        + 'Readings either side are not the same measurement, so nothing is trended through it. '
+        + `${after.length} reading${after.length === 1 ? '' : 's'} ${after.length === 1 ? 'sits' : 'sit'} `
+        + `after the change; ${minimum} are needed before those alone can be trended.`,
       );
       if (after.length >= minimum) {
         result.continuation = trendMeasurements(
@@ -1035,6 +1051,7 @@ export function trendMeasurements(
   } else if (used.length >= 4 && spanDays >= SEASONAL_SPAN_DAYS && fit.r2 >= 0.4 && shape !== 'unclear') {
     confidence = 'medium';
   }
+  if (confidence === 'high' && unstated > 0) confidence = 'medium';
   if (spanDays < SEASONAL_SPAN_DAYS || shape === 'unclear' || !target) confidence = 'low';
 
   return {
@@ -1211,8 +1228,20 @@ export function projectToThreshold(
   options: { today?: string } = {},
 ): ThresholdProjection {
   const todayMs = instantOf(options.today) ?? Date.now();
-  const kindOf = (value: number): 'minimum' | 'maximum' =>
-    threshold.kind ?? (value >= threshold.value ? 'minimum' : 'maximum');
+
+  /**
+   * A floor or a ceiling.
+   *
+   * Taken from what the measurement is — a residual pressure has a minimum, a
+   * loop impedance has a maximum — rather than from where the readings
+   * currently sit. Inferring it from the latest reading inverts exactly when
+   * the asset has already failed, which is the one case that has to be right.
+   */
+  const kindOf = (firstValue: number): 'minimum' | 'maximum' => {
+    if (threshold.kind) return threshold.kind;
+    if (trend.deterioration) return trend.deterioration === 'falling' ? 'minimum' : 'maximum';
+    return firstValue >= threshold.value ? 'minimum' : 'maximum';
+  };
 
   const shell = (
     status: ProjectionStatus,
@@ -1287,7 +1316,8 @@ export function projectToThreshold(
         reason: `There was a step change on ${formatAuDate(trend.step.to.at)} and only `
           + `${points.length} reading${points.length === 1 ? '' : 's'} since. Readings from before `
           + 'it describe a different state of this asset, and there are not enough after it to '
-          + 'project from. Two more services will answer this.',
+          + `project from. ${MINIMUM_POINTS - points.length} more service`
+          + `${MINIMUM_POINTS - points.length === 1 ? '' : 's'} will answer this.`,
       });
     }
     cautions.push({
@@ -1305,21 +1335,30 @@ export function projectToThreshold(
   const fit = fitLine(xs, ys);
 
   const latestValue = ys[ys.length - 1]!;
-  const kind = kindOf(latestValue);
+  const kind = kindOf(ys[0]!);
   const crossed = kind === 'minimum' ? latestValue <= threshold.value : latestValue >= threshold.value;
 
   const forUnit = trend.unit ? ` ${trend.unit}` : '';
   if (crossed) {
-    return shell('crossed', `Already at or past ${threshold.value}${forUnit}`, {
-      kind,
-      basedOn: points.length,
-      cautions: [...cautions, ...trend.cautions.filter((c) => c.code === 'seasonal')],
-      earliest: qldDateOf(times[times.length - 1]!),
-    });
+    return shell(
+      'crossed',
+      `Already at or past ${threshold.value}${forUnit} — measured `
+      + `${formatAuDate(points[points.length - 1]!.at)}`,
+      {
+        kind,
+        basedOn: points.length,
+        // The seasonal caution matters most here: a hydrant below its duty in
+        // February may be above it in July, and one reading is not a failure.
+        cautions: [...cautions, ...trend.cautions.filter((c) => c.code === 'seasonal')],
+      },
+    );
   }
 
   const towards = kind === 'minimum' ? -1 : 1;
-  const margin = fit.slopeStdError * tValue(fit.n - 2);
+  const margin = Math.max(
+    fit.slopeStdError * tValue(fit.n - 2),
+    Math.abs(fit.slopePerYear) * PROJECTION_MINIMUM_RATE_UNCERTAINTY,
+  );
   const slopes = [fit.slopePerYear - margin, fit.slopePerYear + margin]
     .filter((s) => Number.isFinite(s));
 
@@ -1485,7 +1524,7 @@ export function rankDeterioration(
       });
       continue;
     }
-    const bad = series.deterioration ?? trend.kind?.deterioration;
+    const bad = trend.deterioration;
     if (!bad) {
       notRanked.push({
         ...head,

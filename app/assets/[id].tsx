@@ -144,6 +144,17 @@ export default function AssetScreen() {
               })
             }
           />
+          {/*
+            The timeline above says what happened at each service. This says
+            what has been happening across them, which is the question a single
+            reading cannot answer.
+          */}
+          <Button
+            title="Trend"
+            variant="secondary"
+            style={{ flex: 1 }}
+            onPress={() => router.push({ pathname: '/assets/trend', params: { id: asset.id } })}
+          />
         </Rowed>
 
         <Rowed gap={2} align="flex-end">

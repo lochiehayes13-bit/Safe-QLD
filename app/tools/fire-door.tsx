@@ -16,6 +16,7 @@ import {
   assessDoor,
   checkGap,
   citeSources,
+  compareFrl,
   explainFrl,
   formatAuDate,
   latchingApplies,
@@ -270,13 +271,12 @@ function FrlView() {
   );
 }
 
+/**
+ * The comparison is the module's, never the screen's. A screen that decided for
+ * itself when two FRLs agree would be a second opinion nobody tested.
+ */
 function ScheduleComparison({ tag, schedule }: { tag: string; schedule: string }) {
-  const a = useMemo(() => {
-    // Imported lazily through the module's own comparator so the screen never
-    // implements its own idea of when two FRLs agree.
-    const { compareFrl } = require('@/domain/fireDoor') as typeof import('@/domain/fireDoor');
-    return compareFrl(tag, schedule);
-  }, [tag, schedule]);
+  const a = useMemo(() => compareFrl(tag, schedule), [tag, schedule]);
   const tone = a.result === 'match' ? 'pass' : a.result === 'differs' ? 'fail' : 'warn';
   const title = a.result === 'match' ? 'Tag and schedule agree'
     : a.result === 'differs' ? 'Tag and schedule disagree'

@@ -288,6 +288,16 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['asset', 'device', 'history', 'timeline'],
   },
   {
+    route: '/assets/trend', file: 'app/assets/trend.tsx', tab: 'sites', section: 'In front of you',
+    label: 'Measurement trend', needsContext: true, modes: BOTH, openedFrom: ['/assets/[id]'],
+    blurb: 'What one asset\u2019s readings have been doing across every service, not just at this one.',
+    terms: ['trend', 'measurements', 'readings', 'over time', 'declining', 'history'],
+    keptBecause:
+      'The hydrant that passes every year at a pressure fifteen per cent lower than it started at '
+      + 'is the conversation to have before it fails, and it is a technician standing at the asset '
+      + 'who is in a position to have it.',
+  },
+  {
     route: '/assets/new', file: 'app/assets/new.tsx', tab: 'sites', section: 'In front of you',
     // Needs the site even though the screen will let you pick one: an asset
     // filed against no site is a record nobody finds again.
@@ -474,6 +484,12 @@ export const DESTINATIONS: readonly Destination[] = [
     label: 'End of line', modes: BOTH, openedFrom: ['/tools'],
     blurb: 'End-of-line values per panel and per circuit, each with its source, because one universal table would be wrong on most sites.',
     terms: ['end of line', 'eol', 'resistor', 'monitoring', 'circuit'],
+  },
+  {
+    route: '/tools/fire-door', file: 'app/tools/fire-door.tsx', tab: 'tools', section: 'Calculators',
+    label: 'Fire and smoke doors', modes: BOTH, openedFrom: ['/tools'],
+    blurb: 'What the tag says, whether the gap passes, whether it closed and latched, and what to write down.',
+    terms: ['fire door', 'smoke door', 'door', 'gap', 'clearance', 'latch', 'self closing', 'tag'],
   },
   {
     route: '/tools/spl', file: 'app/tools/spl.tsx', tab: 'tools', section: 'Calculators',

@@ -45,6 +45,12 @@ const CALCULATORS: ToolDef[] = [
     body: 'Sprinkler and hydrant duty on one page, converted before they are added, with the 150% overload run answered.',
   },
   {
+    href: '/tools/fire-door',
+    icon: 'door-closed',
+    title: 'Fire and smoke doors',
+    body: 'What the tag says, whether the gap passes, whether it closed and latched — with the clause behind every figure.',
+  },
+  {
     href: '/tools/spl',
     icon: 'volume-high',
     title: 'Sound pressure level',
