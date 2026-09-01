@@ -9,6 +9,7 @@ import {
   MIGRATION_V3, MIGRATION_V4, MIGRATION_V5, MIGRATION_V6, MIGRATION_V7, MIGRATION_V8, MIGRATION_V9,
 } from './schemaV3';
 import { MIGRATION_V10 } from './schemaQuote';
+import { MIGRATION_V11 } from './schemaLibrary';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -274,6 +275,9 @@ export const MIGRATIONS: string[] = [
 
   // v10 — client quotes built from a site's coded defects
   MIGRATION_V10,
+
+  // v11 — documents the technician imported and had read on the device
+  MIGRATION_V11,
 ];
 
 /**

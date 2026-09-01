@@ -1,5 +1,7 @@
-import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, Pressable, ScrollView, View } from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
+import { File } from 'expo-file-system';
 import { Stack, router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
@@ -7,9 +9,13 @@ import {
 } from '@/domain/standardsCatalogue';
 import { ask, explainQuery, type Answer } from '@/domain/ask';
 import { SYSTEM_LABELS } from '@/seed/assetTypes';
+import {
+  deleteLibraryDoc, importPdf, listLibraryDocs, searchLibrary, type LibraryDoc,
+} from '@/db/libraryRepo';
+import type { PageHit } from '@/domain/docSearch';
 import { useTheme } from '@/theme';
 import {
-  Banner, Card, Chip, Field, H2, Rowed, Screen, Txt,
+  Banner, Button, Card, Chip, Field, H2, Rowed, Screen, Txt,
 } from '@/components/ui';
 
 /**
@@ -71,12 +77,65 @@ export default function LibraryScreen() {
   const t = useTheme();
   const [query, setQuery] = useState('');
   const [system, setSystem] = useState<string | null>(null);
+  const [mine, setMine] = useState<LibraryDoc[]>([]);
+  const [pageHits, setPageHits] = useState<PageHit[]>([]);
+  const [importing, setImporting] = useState(false);
 
   const q = query.trim();
   const searching = q.length >= 2;
 
   const results = useMemo(() => (searching ? ask(q, 25) : []), [q, searching]);
   const reading = useMemo(() => (searching ? explainQuery(q) : null), [q, searching]);
+
+  const load = useCallback(async () => { setMine(await listLibraryDocs()); }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  // The imported documents are searched from the database, so this cannot be a
+  // memo — it lands a moment after the clause results and that is fine.
+  useEffect(() => {
+    if (!searching) { setPageHits([]); return; }
+    let live = true;
+    void searchLibrary(q, 15).then((h) => { if (live) setPageHits(h); });
+    return () => { live = false; };
+  }, [q, searching]);
+
+  const addDocument = async () => {
+    const picked = await DocumentPicker.getDocumentAsync({
+      type: 'application/pdf', copyToCacheDirectory: true,
+    });
+    if (picked.canceled || !picked.assets?.[0]) return;
+    const asset = picked.assets[0];
+    setImporting(true);
+    try {
+      const bytes = await new File(asset.uri).bytes();
+      const result = await importPdf({ bytes, fileName: asset.name ?? 'document.pdf' });
+      if (result.refused) {
+        Alert.alert('Not imported', result.refused);
+        return;
+      }
+      await load();
+      Alert.alert(
+        'Imported',
+        `${result.doc!.title} — ${result.doc!.pageCount} pages, searchable offline. `
+        + 'The file itself stays where it is; the app kept only the text it read.',
+      );
+    } catch (e) {
+      Alert.alert('Could not read that file', e instanceof Error ? e.message : String(e));
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const forget = (doc: LibraryDoc) => {
+    Alert.alert(`Remove ${doc.title}?`, 'The original file is not touched — only the text this app read from it.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: () => { void deleteLibraryDoc(doc.id).then(load); },
+      },
+    ]);
+  };
 
   const systems = useMemo(() => {
     const seen = new Set<string>();
@@ -141,7 +200,18 @@ export default function LibraryScreen() {
         ) : null}
 
         {searching ? (
-          results.map((a, i) => <Result key={`${a.kind}-${a.title}-${i}`} answer={a} />)
+          <>
+            {pageHits.length ? (
+              <>
+                <H2>In your own documents</H2>
+                {pageHits.map((h) => (
+                  <PageResult key={`${h.docId}-${h.page}`} hit={h} />
+                ))}
+                <H2>In the clause index</H2>
+              </>
+            ) : null}
+            {results.map((a, i) => <Result key={`${a.kind}-${a.title}-${i}`} answer={a} />)}
+          </>
         ) : (
           <>
             <Card>
@@ -165,6 +235,47 @@ export default function LibraryScreen() {
                   <Txt size="sm" tone="muted" style={{ flex: 1 }}>{e}</Txt>
                 </Rowed>
               </Pressable>
+            ))}
+
+            <H2>Your documents</H2>
+            <Card>
+              <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
+                Import a PDF you already own and the app reads its text on this device, so you can
+                search the actual words offline. Nothing is uploaded and the file itself stays where
+                it is.
+              </Txt>
+              <Txt size="xs" tone="warn" style={{ marginTop: t.space(2), lineHeight: 17 }}>
+                Australian Standards are published encrypted to stop their text being copied, and
+                this app will not strip that. Those stay in your own licensed viewer — the clause
+                index below is what points you at the right clause. The Queensland codes, the
+                legislation and manufacturer manuals are not locked and read fine.
+              </Txt>
+              <View style={{ height: t.space(3) }} />
+              <Button
+                title="Import a PDF"
+                variant="secondary"
+                onPress={addDocument}
+                loading={importing}
+              />
+            </Card>
+
+            {mine.map((d) => (
+              <Card key={d.id} onPress={() => forget(d)}>
+                <Rowed gap={2} align="flex-start">
+                  <MaterialCommunityIcons name="file-document-outline" size={18} color={t.color.accentText} />
+                  <View style={{ flex: 1 }}>
+                    <Txt size="sm" weight="700">{d.title}</Txt>
+                    <Txt size="xs" tone="faint">
+                      {d.pageCount} pages · {d.wordCount.toLocaleString()} words
+                    </Txt>
+                    {d.warnings.length ? (
+                      <Txt size="xs" tone="warn" style={{ marginTop: t.space(1), lineHeight: 16 }}>
+                        {d.warnings.join(' ')}
+                      </Txt>
+                    ) : null}
+                  </View>
+                </Rowed>
+              </Card>
             ))}
 
             <H2>The catalogue</H2>
@@ -195,6 +306,45 @@ export default function LibraryScreen() {
         )}
       </Screen>
     </>
+  );
+}
+
+function PageResult({ hit }: { hit: PageHit }) {
+  const t = useTheme();
+  /*
+   * The matched words are marked in the snippet. A hit with no context is a
+   * page number, and nobody walks back to the ute to check a page number.
+   */
+  const parts: { text: string; mark: boolean }[] = [];
+  let at = 0;
+  for (const m of hit.marks) {
+    if (m.from > at) parts.push({ text: hit.snippet.slice(at, m.from), mark: false });
+    parts.push({ text: hit.snippet.slice(m.from, m.to), mark: true });
+    at = m.to;
+  }
+  if (at < hit.snippet.length) parts.push({ text: hit.snippet.slice(at), mark: false });
+
+  return (
+    <Card>
+      <Rowed gap={2} align="center">
+        <MaterialCommunityIcons name="text-search" size={16} color={t.color.accentText} />
+        <Txt size="xs" tone="accent" style={{ flex: 1 }}>
+          {hit.docTitle} · page {hit.page}
+        </Txt>
+      </Rowed>
+      <Txt size="sm" style={{ marginTop: t.space(1.5), lineHeight: 20 }}>
+        {parts.map((p, i) => (
+          <Txt
+            key={i}
+            size="sm"
+            weight={p.mark ? '700' : undefined}
+            tone={p.mark ? 'accent' : undefined}
+          >
+            {p.text}
+          </Txt>
+        ))}
+      </Txt>
+    </Card>
   );
 }
 

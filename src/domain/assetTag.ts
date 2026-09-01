@@ -23,9 +23,12 @@ import { ASSET_TYPES, type SystemKind } from '@/seed/assetTypes';
  * choice was MOD 37,36, which produces one character and is what most people
  * reach for. It was measured and rejected: over 4,000 sample tags it detected
  * 100% of single-character substitutions but let through 113 of 49,245 adjacent
- * transpositions (0.23%). Transposing two digits is the single most common way
- * a person mis-copies a number, so a scheme that misses one in four hundred of
- * them is not doing the job it was added for.
+ * transpositions (0.23%). One of those is SQEXT0000120T read as SQEXT0000210T —
+ * both check out under MOD 37,36, and extinguisher 120's service goes on
+ * extinguisher 210's record. Transposing two digits is the single most common
+ * way a person mis-copies a number, so a scheme that misses one in four hundred
+ * of them is not doing the job it was added for. The test file demonstrates
+ * that exact failure against the rejected scheme.
  *
  * MOD 1271-36 detects, provably rather than by luck:
  *   - every single-character substitution,
