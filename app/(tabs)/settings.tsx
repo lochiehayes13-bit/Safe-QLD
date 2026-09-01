@@ -9,6 +9,7 @@ import { loadPrefs, savePrefs, DEFAULT_PREFS, type Prefs } from '@/app-prefs';
 import { clearExports, exportsSize } from '@/export/files';
 import { listPhotoFiles } from '@/export/photoFiles';
 import { photoStorageReport } from '@/db/photoRepo';
+import { clearAllDrafts, listDrafts } from '@/hooks/useDraft';
 import type { StorageReport } from '@/domain/photoStore';
 import { pendingSyncCount } from '@/db/opsRepo';
 import { bundledCatalogueSize, startCatalogueSeed } from '@/seed/catalogueSeed';
@@ -36,6 +37,17 @@ export default function SettingsScreen() {
   const [result, setResult] = useState<{ name: string; readable: boolean; total: number | null; error?: string }[] | null>(null);
   const [storage, setStorage] = useState(0);
   const [photos, setPhotos] = useState<StorageReport | null>(null);
+  /*
+   * Half-finished forms held in storage.
+   *
+   * useDraft keeps every form's unsaved state as it is typed, so a half-written
+   * defect survives a lock screen, a call or a flat battery. It restores when
+   * you come back to the same form — and if you never do, it is invisible.
+   * listDrafts and clearAllDrafts were written for this and nothing called
+   * them, so a technician had no way to know they had work sitting unfinished,
+   * nor to clear it off a phone being handed on.
+   */
+  const [drafts, setDrafts] = useState<{ key: string; bytes: number }[]>([]);
   const [pending, setPending] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [syncState, setSyncState] = useState<SyncState[]>([]);
@@ -61,6 +73,7 @@ export default function SettingsScreen() {
     try {
       setStorage(exportsSize());
       void photoStorageReport(listPhotoFiles()).then(setPhotos);
+      void listDrafts().then(setDrafts);
     } catch {
       setStorage(0);
     }
@@ -593,6 +606,22 @@ export default function SettingsScreen() {
         ) : null}
         <Divider />
         <Rowed style={{ justifyContent: 'space-between' }}>
+          <Txt size="sm">Unfinished forms</Txt>
+          <Txt size="sm" tone={drafts.length ? 'warn' : 'muted'}>
+            {drafts.length
+              ? `${drafts.length} draft${drafts.length === 1 ? '' : 's'}, ${formatBytes(
+                drafts.reduce((n, d) => n + d.bytes, 0))}`
+              : 'none'}
+          </Txt>
+        </Rowed>
+        {drafts.length ? (
+          <Txt size="xs" tone="muted" style={{ lineHeight: 16 }}>
+            Forms typed into and not saved. They come back when you reopen the same form, so
+            clearing them throws that work away.
+          </Txt>
+        ) : null}
+        <Divider />
+        <Rowed style={{ justifyContent: 'space-between' }}>
           <Txt size="sm">Parts catalogue</Txt>
           <Txt size="sm" tone={catalogue === null ? 'muted' : catalogue < bundled ? 'warn' : 'muted'}>
             {catalogue === null ? 'loading…' : `${catalogue.toLocaleString()} of ${bundled.toLocaleString()}`}
@@ -617,6 +646,40 @@ export default function SettingsScreen() {
             ]);
           }}
         />
+        {drafts.length ? (
+          <Button
+            title={`Clear ${drafts.length} unfinished form${drafts.length === 1 ? '' : 's'}`}
+            variant="ghost"
+            onPress={() => {
+              /*
+               * Named as throwing work away, because that is what it is. The
+               * whole reason drafts exist is that losing half-written work is
+               * the loudest complaint about the systems technicians are made
+               * to use, and a button that quietly did it would be the same
+               * fault wearing this app's colours.
+               */
+              Alert.alert(
+                'Throw away unfinished forms?',
+                `${drafts.length} form${drafts.length === 1 ? ' has' : 's have'} been typed into and `
+                + 'not saved. They come back when you reopen the same form. Clearing them cannot be '
+                + 'undone.',
+                [
+                  { text: 'Keep them', style: 'cancel' },
+                  {
+                    text: 'Throw away',
+                    style: 'destructive',
+                    onPress: () => {
+                      void clearAllDrafts().then((n) => {
+                        setDrafts([]);
+                        Alert.alert('Cleared', `${n} draft${n === 1 ? '' : 's'} removed.`);
+                      });
+                    },
+                  },
+                ],
+              );
+            }}
+          />
+        ) : null}
       </Card>
 
       <H2>About</H2>
