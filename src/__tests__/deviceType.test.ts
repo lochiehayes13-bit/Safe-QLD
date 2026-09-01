@@ -200,3 +200,35 @@ describe('the cache', () => {
     expect(normaliseDeviceType('Strobe')).toBe('strobe');
   });
 });
+
+/**
+ * "MONITOR" on its own.
+ *
+ * It is Notifier's own name for a monitor module point and there are six of
+ * them on the real Ipswich Hospital panel, one labelled "MONITOR MODULE" in as
+ * many words. Unmapped, each imported with no type — and a device with no type
+ * has no test method, so the routine that should operate the input has nothing
+ * to ask about it.
+ *
+ * The rule has to be anchored to the whole string rather than to a word
+ * boundary, because a valve monitor and a duct monitor are different devices
+ * with different tests. Their rules run first and would win either way, but a
+ * rule that is only correct because of where it sits in a list is one edit away
+ * from being wrong.
+ */
+describe('the bare word MONITOR', () => {
+  it('is a monitor module', () => {
+    expect(normaliseDeviceType('MONITOR')).toBe('module-input');
+    expect(normaliseDeviceType('monitor')).toBe('module-input');
+    expect(normaliseDeviceType(' Monitor ')).toBe('module-input');
+  });
+
+  it('does not swallow the devices that carry the word', () => {
+    expect(normaliseDeviceType('VALVE MONITOR')).toBe('sprinkler-valve');
+    expect(normaliseDeviceType('DUCT MONITOR')).toBe('duct');
+    expect(normaliseDeviceType('MONITOR RELAY')).toBe('relay');
+    // And the compound the rule already knew about still reads the same way.
+    expect(normaliseDeviceType('MONITOR MODULE')).toBe('module-input');
+    expect(normaliseDeviceType('ZONE MONITOR')).toBe('module-input');
+  });
+});

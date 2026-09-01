@@ -186,6 +186,44 @@ export function parsePci(text: string, fileName = ''): ParsedConfig {
     warnings.push(`${fileName || 'The file'} parsed as a Notifier configuration but contained no addressable points.`);
   }
 
+  /*
+   * Device types this reader did not recognise, named and counted.
+   *
+   * The Vigilant reader already reports any record type it cannot name and the
+   * Kentec one reports its unresolved library keys; this one silently produced
+   * `deviceType: 'unknown'` and moved on. That matters more here than it looks,
+   * because an unknown type has no test method — so the device imports, appears
+   * on the site, and the routine that should test it has nothing to ask about
+   * it. Silently, on a panel with nineteen hundred points.
+   *
+   * Their file has six of these. Five are real Notifier point types this app
+   * has no class for — "FAN SWITCH", "FAN STATUS" — and the sixth is
+   * "25OTO" on one heat detector at the loading dock, which is "PHOTO" with
+   * its first two characters overtyped. Every other detector in that zone reads
+   * HEAT. Nothing but the panel's own programming can fix that, and nobody can
+   * fix it without being told.
+   */
+  const unrecognised = new Map<string, { count: number; example?: string }>();
+  for (const p of points) {
+    const raw = p.deviceTypeRaw;
+    if (!raw || p.deviceType !== 'unknown') continue;
+    const seen = unrecognised.get(raw) ?? { count: 0, example: p.pointRef || p.text };
+    seen.count++;
+    unrecognised.set(raw, seen);
+  }
+  if (unrecognised.size) {
+    const listed = [...unrecognised.entries()]
+      .sort((a, b) => b[1].count - a[1].count || a[0].localeCompare(b[0]))
+      .map(([raw, { count, example }]) => `"${raw}" (${count}${example ? `, e.g. ${example}` : ''})`)
+      .join(', ');
+    const total = [...unrecognised.values()].reduce((n, x) => n + x.count, 0);
+    warnings.push(
+      `${total} ${total === 1 ? 'point names a device type' : 'points name device types'} this app does not `
+      + `recognise: ${listed}. They import with the type kept as written, but an unrecognised type has no test `
+      + `method, so nothing will ask about them on a service sheet.`,
+    );
+  }
+
   // ---- Zones -------------------------------------------------------------
   const usedZones = new Set(points.map((p) => p.zoneNumber).filter((z): z is number => z !== undefined));
   for (const z of usedZones) {

@@ -49,6 +49,15 @@ const LOOP = [
   '<Loop Name = "L 2:LOOP 2">',
   '<Point ModuleKey = "dL2FLD1" ModuleType = "6" PointId = "D1" Label = "WARD 3" Script = "" Zone = "21"' +
     ' ZoneType = "PHOTO" Loop = "2" Device = "1" ActKey = "L2D1" />',
+  // "25OTO" is in their real file, on one heat detector at the loading dock —
+  // "PHOTO" with its first two characters overtyped. Every other detector in
+  // that zone reads HEAT.
+  '<Point ModuleKey = "dL2FLD2" ModuleType = "6" PointId = "D2" Label = "LOADING DOCK ROOF" Script = "" Zone = "25"' +
+    ' ZoneType = "25OTO" Loop = "2" Device = "2" ActKey = "L2D2" />',
+  '<Point ModuleKey = "oL2FLM40" ModuleType = "0" PointId = "I40" Label = "MONITOR MODULE" Script = "" Zone = "25"' +
+    ' ZoneType = "MONITOR" Loop = "2" Device = "40" ActKey = "L2M40" />',
+  '<Point ModuleKey = "oL2FLM41" ModuleType = "0" PointId = "I41" Label = "SSA/C 2-2 STATUS" Script = "" Zone = "25"' +
+    ' ZoneType = "FAN STATUS" Loop = "2" Device = "41" ActKey = "L2M41" />',
   '</Loop>',
   '</Flashscan>',
 ];
@@ -235,6 +244,64 @@ describe('cause and effect from the equations', () => {
 });
 
 /** Against the real Ipswich Hospital file when present; never committed. */
+/**
+ * A device type this reader could not name.
+ *
+ * An unknown type has no test method, so the device imports, appears on its
+ * site, and the routine that should test it has nothing to ask about it. That
+ * was happening silently on a panel with nineteen hundred points, while the
+ * Vigilant reader already reported every record type it could not name and the
+ * Kentec one reported its unresolved library keys.
+ *
+ * Their file has five of them across ninety-eight points. Four are real
+ * Notifier point types this app has no class for — "FAN SWITCH", "FAN STATUS"
+ * — and the fifth is "25OTO" on one heat detector, which is "PHOTO" with its
+ * first two characters overtyped. Nothing but the panel's own programming can
+ * fix that, and nobody can fix it without being told.
+ */
+describe('device types this reader cannot name', () => {
+  const warning = () => parsePci(FILE, 'notifier.pci').warnings
+    .find((w) => w.includes('does not recognise'));
+
+  it('names each one, counts it, and gives a point to go and look at', () => {
+    const w = warning()!;
+    expect(w).toContain('"25OTO" (1, e.g. L2D2)');
+    expect(w).toContain('"FAN STATUS" (1, e.g. L2M41)');
+  });
+
+  it('says what the consequence is rather than only counting', () => {
+    // A count reads as a parse complaint. What matters is that the device will
+    // not be asked about on a service sheet.
+    expect(warning()).toContain('no test method');
+  });
+
+  it('says nothing about the types it does recognise', () => {
+    const w = warning()!;
+    expect(w).not.toContain('PHOTO"');
+    expect(w).not.toContain('HEAT');
+    expect(w).not.toContain('MCP');
+    // MONITOR is Notifier's own name for a monitor module and is now mapped,
+    // so it is not in here either.
+    expect(w).not.toContain('MONITOR');
+  });
+
+  it('leaves the raw type on the point either way, since the parse is lossy', () => {
+    const points = parsePci(FILE, 'notifier.pci').panels[0]!.points;
+    const odd = points.find((x) => x.pointRef === 'L2D2')!;
+    expect(odd.deviceTypeRaw).toBe('25OTO');
+    expect(odd.deviceType).toBe('unknown');
+    const monitor = points.find((x) => x.pointRef === 'L2M40')!;
+    expect(monitor.deviceType).toBe('module-input');
+  });
+
+  it('says nothing at all where every type is recognised', () => {
+    const clean = FILE.replace(/ZoneType = "25OTO"/, 'ZoneType = "HEAT"')
+      .replace(/ZoneType = "FAN STATUS"/, 'ZoneType = "HEAT"');
+    expect(parsePci(clean, 'notifier.pci').warnings.some((w) => w.includes('does not recognise')))
+      .toBe(false);
+  });
+});
+
 const REAL = '/tmp/panels/notifier.pci';
 const describeReal = existsSync(REAL) ? describe : describe.skip;
 
@@ -250,5 +317,20 @@ describeReal('against the real Ipswich Hospital configuration', () => {
     for (const rule of panel.causeEffect) {
       if (rule.sourceLogic?.includes('!')) expect(rule.causeLabel).toMatch(/NOT /);
     }
+  });
+
+  it('reports the types it cannot name, and names the corrupt one', () => {
+    /*
+     * Measured on the file it was found in. The types themselves are facts
+     * about somebody's panel programming and will change when they fix it, so
+     * what is asserted is that the reader speaks up — and that the one which is
+     * plainly a typo is named, since that is the one only they can fix.
+     */
+    const c = parsePci(readFileSync(REAL, 'latin1'), 'notifier.pci');
+    const w = c.warnings.find((x) => x.includes('does not recognise'));
+    expect(w).toBeDefined();
+    expect(w).toContain('25OTO');
+    // And the six monitor modules are not among them.
+    expect(w).not.toContain('"MONITOR"');
   });
 });

@@ -43,7 +43,19 @@ const RULES: Rule[] = [
   // has to tolerate the gap it leaves.
   { type: 'module-io', patterns: [/\bI\s*O\s*(MODULE|UNIT)\b/, /\bINPUT\s*OUTPUT\b/, /\bIOM\b/] },
   { type: 'module-output', patterns: [/\bOUTPUT\s*(MODULE|UNIT)\b/, /\bCONTROL\s*MODULE\b/, /\bSUPERVISED\s*OUTPUT\b/, /\bSIGNAL\s*MODULE\b/] },
-  { type: 'module-input', patterns: [/\bINPUT\s*(MODULE|UNIT)\b/, /\bMONITOR\s*MODULE\b/, /\bMINI\s*MONITOR\b/, /\bCONTACT\s*MODULE\b/, /\bZONE\s*MONITOR\b/] },
+  /*
+   * "MONITOR" on its own is Notifier's own name for a monitor module point,
+   * and their site file has six of them — one labelled "MONITOR MODULE" in as
+   * many words, which the rule beside it already catches.
+   *
+   * Anchored to the whole string rather than a word boundary, and it has to be
+   * because "VALVE MONITOR" and "DUCT MONITOR" are different devices with a
+   * different test. The sprinkler-valve rule runs first and would win either
+   * way, but a rule that is only correct because of its position in a list is
+   * one edit away from being wrong. The string arrives wrapped in spaces so the
+   * \b anchors behave, which is what the padding here is matching.
+   */
+  { type: 'module-input', patterns: [/\bINPUT\s*(MODULE|UNIT)\b/, /\bMONITOR\s*MODULE\b/, /\bMINI\s*MONITOR\b/, /\bCONTACT\s*MODULE\b/, /\bZONE\s*MONITOR\b/, /^ MONITOR $/] },
 ];
 
 const CACHE = new Map<string, DeviceType>();
