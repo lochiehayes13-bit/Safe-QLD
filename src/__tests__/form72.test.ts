@@ -6,7 +6,7 @@ import {
 } from '@/export/form72';
 import { MIGRATION_V12 } from '@/db/schemaForm72';
 import {
-  deviceCalibration, emptyForm72, validateForm72, type Form72, type TestDevice,
+  deviceCalibration, emptyForm72, overloadCheck, validateForm72, type Form72, type TestDevice,
 } from '@/domain/form72';
 
 /**
@@ -710,9 +710,220 @@ describe('the page itself', () => {
  * no calibration date on it — the same unusable reading, with less evidence
  * behind it, shown to a technician as though it were fine.
  */
+describe('Part H — what a failure obliges', () => {
+  const msgs = (over: Partial<Form72>) =>
+    validateForm72(issuable(over)).map((i) => i.message).join('\n');
+
+  it('asks what happens next where the flow test failed', () => {
+    // A failed flow test with no note is a form that records a problem and
+    // nothing about it. The note is what the next person reads.
+    expect(msgs({ flowTest: { result: 'fail', hydrantLocations: [], rows: [] }, systemNotes: '' }))
+      .toContain('no system note saying what happens next');
+  });
+
+  it('is satisfied once the note is there', () => {
+    expect(msgs({
+      flowTest: { result: 'fail', hydrantLocations: [], rows: [] },
+      systemNotes: 'Booster inlet restricted. Quoted to replace, occupier notified 3 July.',
+    })).not.toContain('no system note saying what happens next');
+  });
+
+  it('does not ask for a note where the flow test passed', () => {
+    expect(msgs({ flowTest: { result: 'pass', hydrantLocations: [], rows: [] }, systemNotes: '' }))
+      .not.toContain('no system note saying what happens next');
+  });
+
+  it('will not let a failed system leave the critical defect question blank', () => {
+    /*
+     * The question that decides whether the occupier has to be given a notice
+     * within 24 hours. Unanswered on a failed system, nobody is told anything.
+     */
+    expect(msgs({ systemResult: 'fail', criticalDefectsIdentified: undefined, systemNotes: 'x' }))
+      .toContain('critical defect question is unanswered');
+  });
+
+  it('accepts a plain No to the critical defect question', () => {
+    // No is an answer. Only a blank is not.
+    expect(msgs({ systemResult: 'fail', criticalDefectsIdentified: false, systemNotes: 'x' }))
+      .not.toContain('critical defect question is unanswered');
+  });
+
+  it('does not raise it where the system passed', () => {
+    expect(msgs({ systemResult: 'pass', criticalDefectsIdentified: undefined }))
+      .not.toContain('critical defect question is unanswered');
+  });
+});
+
+describe('Part B — a hydrostatic test that says it passed', () => {
+  /*
+   * The pressure test on a main. It is signed off on the department's form,
+   * and three of the checks that guard it were untested — including the one
+   * that catches a test recorded as a pass while the gauge fell.
+   */
+  const msgs = (over: Partial<Form72>) =>
+    validateForm72(issuable(over)).map((i) => i.message).join('\n');
+
+  it('is content where the pressure and the duration are both recorded', () => {
+    const out = msgs({ hydrostatic: { result: 'pass', testPressureKpa: 1700, durationMinutes: 120 } });
+    expect(out).not.toContain('no pressure or no duration');
+  });
+
+  it('asks for the duration where only the pressure is recorded', () => {
+    const out = msgs({ hydrostatic: { result: 'pass', testPressureKpa: 1700 } });
+    expect(out).toContain('no pressure or no duration');
+  });
+
+  it('asks for the pressure where only the duration is recorded', () => {
+    const out = msgs({ hydrostatic: { result: 'pass', durationMinutes: 120 } });
+    expect(out).toContain('no pressure or no duration');
+  });
+
+  it('asks for neither where the test does not apply', () => {
+    // N/A is a real answer on this form. Demanding figures for a test nobody
+    // ran is how a blank gets filled in with something invented.
+    expect(msgs({ hydrostatic: { result: 'na' } })).not.toContain('no pressure or no duration');
+  });
+
+  it('challenges a pass where the pressure fell over the test', () => {
+    /*
+     * A drop is a loss, and a hydrostatic recorded as a pass while the gauge
+     * went down is either a leak nobody wrote up or a mistyped figure. It
+     * blocks while the loss field is blank, because the form has a column for
+     * exactly this.
+     */
+    const issues = validateForm72(issuable({
+      hydrostatic: { result: 'pass', testPressureKpa: 1700, durationMinutes: 120, endPressureKpa: 1650 },
+    }));
+    const drop = issues.find((i) => i.message.includes('A drop is a loss'))!;
+    expect(drop.part).toBe('B');
+    expect(drop.blocking).toBe(true);
+    expect(drop.message).toContain('1700');
+    expect(drop.message).toContain('1650');
+  });
+
+  it('stops blocking once the loss is written down', () => {
+    const issues = validateForm72(issuable({
+      hydrostatic: {
+        result: 'pass', testPressureKpa: 1700, durationMinutes: 120, endPressureKpa: 1650, lossLpm: 0.4,
+      },
+    }));
+    expect(issues.find((i) => i.message.includes('A drop is a loss'))?.blocking).toBe(false);
+  });
+
+  it('says nothing where the pressure held exactly', () => {
+    // Held is a pass, and it is the answer a good test gives.
+    const out = msgs({
+      hydrostatic: { result: 'pass', testPressureKpa: 1700, durationMinutes: 120, endPressureKpa: 1700 },
+    });
+    expect(out).not.toContain('A drop is a loss');
+  });
+
+  it('does not challenge a test already recorded as a fail', () => {
+    // The pressure falling is the reason it failed. Saying so twice is noise.
+    const out = msgs({
+      hydrostatic: { result: 'fail', testPressureKpa: 1700, durationMinutes: 120, endPressureKpa: 1200 },
+    });
+    expect(out).not.toContain('A drop is a loss');
+  });
+});
+
+describe('the pump at overload', () => {
+  /*
+   * The combined flow test certificate requires the pump to still make 65% of
+   * its duty pressure while delivering 150% of its duty flow. That single
+   * pass or fail is what says a fire pump is adequate for the building, and
+   * none of it was tested.
+   *
+   * Its worked example is 16 L/s at 700 kPa giving 24 L/s at 455 kPa, so that
+   * is the case held here — the same numbers a person can check against the
+   * certificate in front of them.
+   */
+  it('works the certificate\'s own example', () => {
+    const c = overloadCheck(16, 700)!;
+    expect(c.requiredFlowLps).toBe(24);
+    expect(c.requiredPressureKpa).toBe(455);
+    expect(c.note).toContain('24 L/s');
+    expect(c.note).toContain('455 kPa');
+    expect(c.note).toContain('65%');
+  });
+
+  it('passes a run that lands exactly on both figures', () => {
+    /*
+     * Exactly on the requirement is a pass. Both comparisons deciding it could
+     * have been a hair the wrong way, and either would condemn a pump that
+     * meets the standard — which means a building told to replace a pumpset
+     * that is fine.
+     */
+    const c = overloadCheck(16, 700, { flowLps: 24, pressureKpa: 455 })!;
+    expect(c.achieved).toBe(true);
+    expect(c.shortfallKpa).toBeUndefined();
+  });
+
+  it('fails a run a single kilopascal short, and says by how much', () => {
+    const c = overloadCheck(16, 700, { flowLps: 24, pressureKpa: 454 })!;
+    expect(c.achieved).toBe(false);
+    expect(c.shortfallKpa).toBe(1);
+  });
+
+  it('refuses to call a run below the required flow a pass, whatever pressure it held', () => {
+    /*
+     * The one that would flatter a bad pump. Held at 24 L/s a pump might make
+     * 455 kPa; at 20 L/s making 600 is not the same test and proves nothing
+     * about the pump at overload.
+     */
+    const c = overloadCheck(16, 700, { flowLps: 20, pressureKpa: 600 })!;
+    expect(c.achieved).toBe(false);
+    expect(c.note).toContain('has not proved the pump at overload');
+  });
+
+  it('accepts a run a whisker over, rather than losing it to floating point', () => {
+    // 150% of 16.1 is 24.150000000000002 in binary floating point. A gauge
+    // reading of exactly that must not read as short of itself.
+    const c = overloadCheck(16.1, 700, { flowLps: 16.1 * 1.5, pressureKpa: 455 })!;
+    expect(c.achieved).toBe(true);
+  });
+
+  it('says nothing at all where there is no duty to work from', () => {
+    /*
+     * The dangerous default. With a duty of nought the required figures are
+     * nought too, and every test ever run passes — a pump nobody has recorded
+     * a duty for would certify itself.
+     */
+    expect(overloadCheck(0, 700)).toBeUndefined();
+    expect(overloadCheck(16, 0)).toBeUndefined();
+    expect(overloadCheck(0, 0, { flowLps: 0, pressureKpa: 0 })).toBeUndefined();
+  });
+
+  it('gives the requirement before any test has been run', () => {
+    // What the technician needs on the way to the pump room.
+    const c = overloadCheck(16, 700)!;
+    expect(c.achieved).toBeUndefined();
+    expect(c.shortfallKpa).toBeUndefined();
+  });
+});
+
 describe('deviceCalibration', () => {
   const gauge = (over: Partial<TestDevice> = {}): TestDevice => ({
     slot: 'Gauge 1', serialNumber: 'G-1', dateCalibrated: '2026-01-15', ...over,
+  });
+
+  it('accepts a gauge calibrated on the morning of the test', () => {
+    /*
+     * The ordinary way a gauge gets used: calibrated and taken straight out.
+     * Read as calibrated after the test it produces "one of the two dates is
+     * wrong" against a form where neither is.
+     */
+    expect(deviceCalibration(gauge({ dateCalibrated: '2026-07-03' }), '2026-07-03').state)
+      .toBe('in-calibration');
+  });
+
+  it('holds the line at a year either side of it', () => {
+    // A day under the twelve months is still good; a day over is not. This is
+    // the question a technician asks of the sticker on the gauge.
+    expect(deviceCalibration(gauge({ dateCalibrated: '2025-07-03' }), '2026-07-03').state)
+      .toBe('in-calibration');
+    expect(deviceCalibration(gauge({ dateCalibrated: '2025-07-02' }), '2026-07-03').state)
+      .toBe('out-of-calibration');
   });
 
   it('passes a gauge calibrated inside twelve months', () => {
