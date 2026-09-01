@@ -60,6 +60,7 @@ export type PortfolioSourceId =
   | 'bfsr-2008'
   | 'qdc-mp61'
   | 'as1851-section-6'
+  | 'auspost-localities'
   | 'safe-qld-weighting';
 
 export interface PortfolioSource {
@@ -108,6 +109,17 @@ export const PORTFOLIO_SOURCES: Record<PortfolioSourceId, PortfolioSource> = {
       + 'the standard\'s text. A frequency with no table behind it is reported as unschedulable rather than '
       + 'given the nearest tolerance.',
   },
+  'auspost-localities': {
+    id: 'auspost-localities',
+    what: 'That one Queensland suburb name can carry more than one postcode, and the worked example the suburb '
+      + 'caveat gives: Springfield is 4300 in Ipswich and 4871 in the Shire of Mareeba',
+    ref: 'Australia Post postcode search, locality "Springfield"',
+    url: 'https://auspost.com.au/postcode/springfield',
+    confidence: 'high',
+    basis: 'The carrier\'s own locality list, which is where the postcode on a site record comes from. Checked '
+      + '1/9/2026. It is used only to justify keeping the postcodes behind a suburb row; no routing, distance or '
+      + 'scheduling decision is taken from it.',
+  },
   'safe-qld-weighting': {
     id: 'safe-qld-weighting',
     what: 'Every point in a risk score: what each factor is worth relative to the others',
@@ -117,6 +129,26 @@ export const PORTFOLIO_SOURCES: Record<PortfolioSourceId, PortfolioSource> = {
       + 'company\'s opinion about what to look at first, which is why every contribution is shown individually '
       + 'and the ranking is never presented as a compliance finding.',
   },
+};
+
+/**
+ * The example the suburb caveat gives for why a name is not a place.
+ *
+ * Held here with its source id rather than written into the sentence that
+ * prints it, because it is an external fact and the first version of that
+ * sentence had it wrong — it said 4870, which is Cairns. A wrong postcode in a
+ * caveat about wrong postcodes is the kind of thing a client notices.
+ */
+export const SUBURB_NAME_COLLISION: {
+  name: string;
+  postcodes: [string, string];
+  places: [string, string];
+  sourceId: PortfolioSourceId;
+} = {
+  name: 'Springfield',
+  postcodes: ['4300', '4871'],
+  places: ['Ipswich', 'the Shire of Mareeba, in the far north'],
+  sourceId: 'auspost-localities',
 };
 
 export function portfolioSources(ids: PortfolioSourceId[]): PortfolioSource[] {
@@ -146,11 +178,10 @@ export const QLD_UTC_OFFSET_HOURS = 10;
  */
 export function qldToday(instantIso: string): string | undefined {
   const text = instantIso?.trim() ?? '';
-  if (!/^\d{4}-\d{2}-\d{2}/.test(text)) return undefined;
-  const day = text.slice(0, 10);
-  // Rejects 2026-02-31 and friends: the round trip only survives a real date.
-  const parsed = parseIsoDate(day);
-  if (!parsed || parsed.toISOString().slice(0, 10) !== day) return undefined;
+  // Rejects "1/9/2026" before any parser sees it, and 2026-02-31 on the round
+  // trip inside isoDay.
+  const day = isoDay(text);
+  if (!day) return undefined;
   if (text.length === 10) return day;
 
   const t = Date.parse(text);
@@ -165,7 +196,41 @@ function parseIsoDate(iso: string | undefined): Date | null {
   const day = iso.slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
   const d = new Date(`${day}T00:00:00Z`);
-  return Number.isNaN(d.getTime()) ? null : d;
+  if (Number.isNaN(d.getTime())) return null;
+  // The round trip is the whole check. new Date("2026-02-31T00:00:00Z") does
+  // not fail; it rolls forward to 3 March, and a rectification month counted
+  // from it is three days out with nothing to show for it.
+  return d.toISOString().slice(0, 10) === day ? d : null;
+}
+
+/**
+ * The ISO day inside a string, or nothing where the string is not ISO at all.
+ *
+ * The reason this exists is `new Date(x)`. Everything downstream of this module
+ * — criticalNoticeDueAt in particular — hands its argument straight to it, and
+ * new Date("1/9/2026") returns 9 January 2026 without complaint. A defect
+ * raised on 1 September then reports its 24-hour notice as having run out eight
+ * months ago, in the statutory block, with a day count beside it. Nothing that
+ * has not been recognised as ISO here is passed to a date function.
+ */
+export function isoDay(text: string | undefined): string | undefined {
+  const s = text?.trim();
+  if (!s || !/^\d{4}-\d{2}-\d{2}/.test(s)) return undefined;
+  return parseIsoDate(s) ? s.slice(0, 10) : undefined;
+}
+
+/**
+ * The instant a readable ISO string names, or nothing.
+ *
+ * A date with no time is taken at midnight UTC, which is what every date-only
+ * value in this app already means when it is compared against another.
+ */
+export function isoInstantMs(text: string | undefined): number | undefined {
+  const s = text?.trim();
+  if (!s || !isoDay(s)) return undefined;
+  if (s.length === 10) return Date.parse(`${s}T00:00:00Z`);
+  const t = Date.parse(s);
+  return Number.isNaN(t) ? undefined : t;
 }
 
 /** Whole days from one date to another. Negative when `to` is the earlier one. */
@@ -267,6 +332,73 @@ export function qldCriticalVerdict(defect: PortfolioDefect): QldCriticalVerdict 
 
 export function isOutstanding(defect: PortfolioDefect): boolean {
   return (OUTSTANDING_STATUSES as readonly string[]).includes(defect.status) && !defect.rectifiedAt;
+}
+
+export interface DefectClocks {
+  /** The raised date as this app can read it. Absent where it cannot read it. */
+  raisedDay?: string;
+  /** When the written notice fell due. Absent where the raised date is unreadable. */
+  noticeDueAt?: string;
+  /** True only where the deadline has actually passed and no notice is recorded. */
+  noticeOverdue: boolean;
+  /** The date the repair had to be carried out by. */
+  rectifyBy?: string;
+  /** Why there is no rectification date, naming the field that is at fault. */
+  rectifyUnknownBecause?: string;
+}
+
+/**
+ * Both statutory clocks on one defect, worked out once.
+ *
+ * They are computed here rather than in each of the two places that need them
+ * because the two used to disagree: the score and the statutory block each did
+ * their own arithmetic, and a legal figure that depends on which function asked
+ * is not a legal figure.
+ *
+ * The important rule is that nothing unreadable is guessed at, in either
+ * direction. `criticalNoticeDueAt` calls `new Date()`, which reads the ordinary
+ * Australian date "1/9/2026" as 9 January and says nothing — so a defect raised
+ * on 1 September was reported as having missed its 24-hour notice by eight
+ * months, in the same block that said the date could not be read. Nothing
+ * reaches a date function that `isoDay` has not recognised first.
+ *
+ * A rectification date the office recorded but this app cannot read is refused
+ * outright rather than replaced with one counted from the raised date. The
+ * recorded date is somebody's decision; substituting a different one behind it
+ * asserts a deadline nobody set.
+ */
+export function defectClocks(defect: PortfolioDefect, nowMs: number): DefectClocks {
+  const raisedDay = isoDay(defect.raisedAt);
+  const noticeDueAt = raisedDay === undefined
+    ? undefined
+    : criticalNoticeDueAt(defect.raisedAt) ?? undefined;
+  const noticeDueMs = isoInstantMs(noticeDueAt);
+
+  const recorded = defect.rectificationDueAt?.trim();
+  const recordedDay = recorded ? isoDay(recorded) : undefined;
+
+  let rectifyBy: string | undefined;
+  let rectifyUnknownBecause: string | undefined;
+  if (recordedDay) {
+    rectifyBy = recordedDay;
+  } else if (recorded) {
+    rectifyUnknownBecause = `A rectification date of "${recorded}" is recorded against the defect but is not a `
+      + 'date this app can read. The month is not counted from the raised date instead, because that would '
+      + 'assert a deadline nobody set.';
+  } else if (raisedDay) {
+    rectifyBy = rectificationDueAt(raisedDay) ?? undefined;
+  } else {
+    rectifyUnknownBecause = `No rectification date is recorded and the raised date ("${defect.raisedAt}") is not `
+      + 'one this app can read, so the month cannot be counted from anything.';
+  }
+
+  return {
+    raisedDay,
+    noticeDueAt,
+    noticeOverdue: !defect.noticeIssuedAt && noticeDueMs !== undefined && noticeDueMs < nowMs,
+    rectifyBy,
+    rectifyUnknownBecause,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -508,8 +640,9 @@ export const STANDING_MEANING: Record<SiteStanding, string> = {
     + 'app cannot tell a site nobody has serviced from a site serviced for years before the app existed. It is '
     + 'counted on its own and left out of every percentage.',
   unschedulable:
-    'Services have been recorded, but no routine here has a schedule table behind it, so nothing can be called '
-    + 'due or overdue without inventing a tolerance.',
+    'Services have been recorded, but nothing here can be placed on a schedule: either no routine carries a '
+    + 'Section 6 schedule table, or no first service date is held to anchor one from. Nothing can be called due '
+    + 'or overdue without inventing a tolerance.',
 };
 
 // ---------------------------------------------------------------------------
@@ -553,14 +686,24 @@ export interface PortfolioCoverage {
   caveats: string[];
 }
 
-/** Below this, a health figure describes a minority of the book. */
+/**
+ * How much of the book has to be judgeable before a health figure is worth reading.
+ *
+ * Four fifths, and that is Safe QLD's own line rather than anybody's rule —
+ * held under the same source as the risk weights and marked the same way. It is
+ * not a claim that 79% is a minority; it is a claim that a fifth of the book
+ * missing from a percentage is enough that the percentage should carry a
+ * warning next to it.
+ */
 export const COVERAGE_THRESHOLD = 0.8;
+export const COVERAGE_THRESHOLD_SOURCE: PortfolioSourceId = 'safe-qld-weighting';
 
 export type StatutoryKind =
   | 'notice-running'
   | 'notice-overdue'
   | 'rectification-overdue'
   | 'rectification-date-unknown'
+  | 'notice-date-unknown'
   | 'classification-unanswered'
   | 'statement-overdue'
   | 'statement-due-soon'
@@ -571,6 +714,7 @@ export const STATUTORY_LABEL: Record<StatutoryKind, string> = {
   'notice-overdue': 'Written notice not recorded',
   'rectification-overdue': 'Past rectification date',
   'rectification-date-unknown': 'Rectification date unknown',
+  'notice-date-unknown': 'Notice deadline unknown',
   'classification-unanswered': 'Critical limbs unanswered',
   'statement-overdue': 'Occupier statement overdue',
   'statement-due-soon': 'Occupier statement due',
@@ -599,6 +743,8 @@ export interface StatutoryExposure {
   noticeRecorded: number;
   pastRectificationDate: number;
   rectificationDateUnknown: number;
+  /** Critical defects whose raised date cannot be read, so the 24 hours has no start. */
+  noticeDateUnknown: number;
   /** Flagged critical with the two limbs never answered. Not counted as critical. */
   classificationUnanswered: number;
   statementsOverdue: number;
@@ -617,6 +763,16 @@ export interface ConcentrationRow {
   sites: number;
   overdueRoutines: number;
   criticalDefectsOutstanding: number;
+  /**
+   * Risk points sitting in this row, in the same units everywhere.
+   *
+   * On a client or a suburb row that is the sum of the member sites' scores. On
+   * a system row it is the sum of the contributions the overdue routines of
+   * that system actually scored — a subset of the same totals, never a second
+   * arithmetic. It used to be the raw frequency weight on system rows, which
+   * meant the number in this field meant one thing in two tables and another in
+   * the third, and the two could not be compared.
+   */
   riskScore: number;
   /** Share of the portfolio's overdue routines, 0..1. Undefined when there are none. */
   shareOfOverdue?: number;
@@ -769,7 +925,11 @@ export function foldRuns(runs: PortfolioRun[]): FoldedRuns {
       continue;
     }
 
-    const key = `${run.siteId} ${run.routineId}`;
+    // A separator no id can contain, so "s1 " + "x" and "s1" + " x" cannot
+    // collide into one history. Written as an escape rather than as the byte
+    // itself: a literal NUL in the source makes git diff the whole file as
+    // binary and makes grep skip it.
+    const key = `${run.siteId}\u0000${run.routineId}`;
     const existing = byKey.get(key);
     const system = run.system && SYSTEMS.has(run.system) ? (run.system as SystemKind) : undefined;
     if (!existing) {
@@ -826,7 +986,7 @@ function systemOf(h: PortfolioRoutineHistory): SystemKind | undefined {
  * never-serviced and scores forty — the defect is a fact, the absent history is
  * not a failure, and neither statement contaminates the other.
  */
-function scoreSite(w: SiteWorkings, today: string, statementLeadDays: number): SiteRisk {
+function scoreSite(w: SiteWorkings, today: string, nowMs: number, statementLeadDays: number): SiteRisk {
   const contributions: RiskContribution[] = [];
   const unknowns: RiskUnknown[] = [];
 
@@ -945,51 +1105,54 @@ function scoreSite(w: SiteWorkings, today: string, statementLeadDays: number): S
 
   for (const { defect } of criticals) {
     statutoryExposure = true;
+    const clocks = defectClocks(defect, nowMs);
     contributions.push({
       factor: 'critical-defect',
       label: `Critical defect — ${defect.description?.trim() || defect.defectId}`,
+      // The raised date is printed only where it was readable. Echoing back an
+      // unreadable string as though it were a date is how "Raised 1/9/2026"
+      // ends up beside a line saying the date cannot be read.
+      detail: `${clocks.raisedDay ? `Raised ${clocks.raisedDay}. ` : 'Raised date unreadable. '}`
+        + `Both limbs of the Queensland test answered yes. ${RISK_WEIGHTS['critical-defect'].why}`,
       points: RISK_WEIGHTS['critical-defect'].points,
-      detail: `Raised ${defect.raisedAt.slice(0, 10)}. Both limbs of the Queensland test answered yes. `
-        + RISK_WEIGHTS['critical-defect'].why,
       sourceIds: RISK_WEIGHTS['critical-defect'].sourceIds,
       defectId: defect.defectId,
     });
 
-    const rectifyBy = defect.rectificationDueAt?.slice(0, 10) ?? rectificationDueAt(defect.raisedAt) ?? undefined;
-    if (rectifyBy && parseIsoDate(rectifyBy)) {
-      const remaining = daysBetween(today, rectifyBy);
-      if (remaining !== undefined && remaining < 0) {
-        contributions.push({
-          factor: 'rectification-overdue',
-          label: `Rectification date passed ${Math.abs(remaining)} days ago`,
-          points: RISK_WEIGHTS['rectification-overdue'].points,
-          detail: `Due ${rectifyBy}, still outstanding today. ${RISK_WEIGHTS['rectification-overdue'].why}`,
-          sourceIds: RISK_WEIGHTS['rectification-overdue'].sourceIds,
-          defectId: defect.defectId,
-        });
-      }
-    } else {
+    const remaining = clocks.rectifyBy ? daysBetween(today, clocks.rectifyBy) : undefined;
+    if (clocks.rectifyBy && remaining !== undefined && remaining < 0) {
+      contributions.push({
+        factor: 'rectification-overdue',
+        label: `Rectification date passed ${Math.abs(remaining)} days ago`,
+        points: RISK_WEIGHTS['rectification-overdue'].points,
+        detail: `Due ${clocks.rectifyBy}, still outstanding today. ${RISK_WEIGHTS['rectification-overdue'].why}`,
+        sourceIds: RISK_WEIGHTS['rectification-overdue'].sourceIds,
+        defectId: defect.defectId,
+      });
+    } else if (clocks.rectifyUnknownBecause) {
       unknowns.push({
         code: 'defect-date-unreadable',
-        detail: `Critical defect ${defect.defectId} has no rectification date and its raised date `
-          + `("${defect.raisedAt}") cannot be read, so the one-month clock cannot be counted. It is not assumed `
-          + 'to be in time.',
+        detail: `Critical defect ${defect.defectId}: ${clocks.rectifyUnknownBecause} It is not assumed to be in `
+          + 'time.',
       });
     }
 
-    if (!defect.noticeIssuedAt) {
-      const noticeBy = criticalNoticeDueAt(defect.raisedAt);
-      const overdueNotice = noticeBy ? Date.parse(noticeBy) < Date.parse(`${today}T00:00:00Z`) : false;
-      if (overdueNotice) {
-        contributions.push({
-          factor: 'notice-overdue',
-          label: 'Written critical defect notice not recorded',
-          points: RISK_WEIGHTS['notice-overdue'].points,
-          detail: `The 24 hours ran out ${noticeBy?.slice(0, 10)}. ${RISK_WEIGHTS['notice-overdue'].why}`,
-          sourceIds: RISK_WEIGHTS['notice-overdue'].sourceIds,
-          defectId: defect.defectId,
-        });
-      }
+    if (clocks.noticeOverdue) {
+      contributions.push({
+        factor: 'notice-overdue',
+        label: 'Written critical defect notice not recorded',
+        points: RISK_WEIGHTS['notice-overdue'].points,
+        detail: `The 24 hours ran out ${clocks.noticeDueAt?.slice(0, 10)}. ${RISK_WEIGHTS['notice-overdue'].why}`,
+        sourceIds: RISK_WEIGHTS['notice-overdue'].sourceIds,
+        defectId: defect.defectId,
+      });
+    } else if (clocks.noticeDueAt === undefined && !defect.noticeIssuedAt) {
+      unknowns.push({
+        code: 'defect-date-unreadable',
+        detail: `Critical defect ${defect.defectId} has no written notice recorded and its raised date `
+          + `("${defect.raisedAt}") is not one this app can read, so when the 24 hours ran out is unknown. It is `
+          + 'not scored as a breach, and it is not treated as in hand either.',
+      });
     }
   }
 
@@ -1117,7 +1280,7 @@ function emptyPortfolio(refusal: string): Portfolio {
     },
     statutory: {
       criticalDefectsOutstanding: 0, noticeClockRunning: 0, noticeOverdue: 0, noticeRecorded: 0,
-      pastRectificationDate: 0, rectificationDateUnknown: 0, classificationUnanswered: 0,
+      pastRectificationDate: 0, rectificationDateUnknown: 0, noticeDateUnknown: 0, classificationUnanswered: 0,
       statementsOverdue: 0, statementsDueSoon: 0, statementDateUnknown: 0, sitesAffected: 0,
       items: [], note: STATUTORY_NOTE, sources: portfolioSources(['bfsr-2008', 'qdc-mp61']),
     },
@@ -1151,6 +1314,23 @@ export function buildPortfolio(input: PortfolioInput): Portfolio {
       + 'No figure is offered rather than one counted from today by accident.',
     );
   }
+
+  /**
+   * The instant the statutory clocks are read at.
+   *
+   * A 24-hour deadline is an instant, not a day, so it has to be compared
+   * against one. Where the caller passed a full timestamp, that is it.
+   *
+   * Where the caller passed only a date there is no time of day to work with,
+   * and the clocks are read from the *start* of the Queensland day. That can
+   * leave a breach uncounted for part of one day. The alternative, which is
+   * what this compared against before, was midnight UTC — which is 10am in
+   * Brisbane, so a notice falling due at 8am today was reported as missed from
+   * the moment the screen opened. Telling an office it has missed a statutory
+   * notice it has not yet missed is the worse of the two errors.
+   */
+  const nowMs = (input.today.trim().length > 10 ? isoInstantMs(input.today) : undefined)
+    ?? Date.parse(`${today}T00:00:00+${String(QLD_UTC_OFFSET_HOURS).padStart(2, '0')}:00`);
 
   const rankLimit = input.rankLimit ?? DEFAULT_RANK_LIMIT;
   const statementLeadDays = input.statementLeadDays ?? DEFAULT_STATEMENT_LEAD_DAYS;
@@ -1226,6 +1406,7 @@ export function buildPortfolio(input: PortfolioInput): Portfolio {
         assetCount: site.assetCount ?? derived,
       },
       today,
+      nowMs,
       statementLeadDays,
     ));
   }
@@ -1284,8 +1465,9 @@ export function buildPortfolio(input: PortfolioInput): Portfolio {
   };
   if (risks.length > 0 && !coverage.enoughToJudge) {
     coverage.caveats.push(
-      `${risks.length - judged} of ${risks.length} sites cannot be placed on the schedule at all. A health `
-      + 'figure over the remainder describes a corner of the book and must not be read as the book.',
+      `${risks.length - judged} of ${risks.length} sites cannot be placed on the schedule at all — more than the `
+      + `${Math.round((1 - COVERAGE_THRESHOLD) * 100)}% Safe QLD treats as the point where a percentage needs a `
+      + 'warning beside it. Every health figure below is over the remainder and must not be read as the book.',
     );
   }
   if (neverServiced > 0) {
@@ -1304,7 +1486,7 @@ export function buildPortfolio(input: PortfolioInput): Portfolio {
   }
 
   // --- Statutory exposure, counted on its own -----------------------------
-  const statutory = statutoryExposure(sites, defectsBySite, today, statementLeadDays);
+  const statutory = statutoryExposure(sites, defectsBySite, today, nowMs, statementLeadDays);
 
   // --- Ranking ------------------------------------------------------------
   const scored = risks
@@ -1353,7 +1535,9 @@ export function buildPortfolio(input: PortfolioInput): Portfolio {
     unmatched,
     notes,
     refusals,
-    sources: portfolioSources(['as1851-section-6', 'bfsr-2008', 'qdc-mp61', 'safe-qld-weighting']),
+    sources: portfolioSources([
+      'as1851-section-6', 'bfsr-2008', 'qdc-mp61', 'auspost-localities', 'safe-qld-weighting',
+    ]),
   };
 }
 
@@ -1368,6 +1552,7 @@ function statutoryExposure(
   sites: Map<string, PortfolioSite>,
   defectsBySite: Map<string, PortfolioDefect[]>,
   today: string,
+  nowMs: number,
   statementLeadDays: number,
 ): StatutoryExposure {
   const items: StatutoryItem[] = [];
@@ -1378,12 +1563,11 @@ function statutoryExposure(
   let noticeRecorded = 0;
   let pastRectificationDate = 0;
   let rectificationDateUnknown = 0;
+  let noticeDateUnknown = 0;
   let classificationUnanswered = 0;
   let statementsOverdue = 0;
   let statementsDueSoon = 0;
   let statementDateUnknown = 0;
-
-  const todayMs = Date.parse(`${today}T00:00:00Z`);
 
   for (const [siteId, site] of sites) {
     for (const defect of defectsBySite.get(siteId) ?? []) {
@@ -1392,7 +1576,11 @@ function statutoryExposure(
 
       if (verdict === 'unanswered') {
         classificationUnanswered++;
-        affected.add(siteId);
+        // Deliberately not added to `affected`. That count is sites with a
+        // statutory clock established as running, and the whole point of this
+        // verdict is that nobody has established whether one is. It has its own
+        // counter and its own row; inflating a legal figure with maybes is the
+        // same fault as dropping it.
         items.push({
           kind: 'classification-unanswered',
           siteId,
@@ -1413,40 +1601,44 @@ function statutoryExposure(
 
       // The 24 hours runs from the maintenance; the app holds when the defect
       // was raised, which is the nearest thing it has, and every item says so.
-      const noticeBy = criticalNoticeDueAt(defect.raisedAt);
+      const clocks = defectClocks(defect, nowMs);
       if (defect.noticeIssuedAt) {
         noticeRecorded++;
-      } else if (noticeBy && Date.parse(noticeBy) < todayMs) {
+      } else if (clocks.noticeOverdue && clocks.noticeDueAt) {
         noticeOverdue++;
         items.push({
           kind: 'notice-overdue',
           siteId,
           siteName: site.siteName,
           defectId: defect.defectId,
-          dueAt: noticeBy,
-          daysRemaining: daysBetween(today, noticeBy.slice(0, 10)),
+          dueAt: clocks.noticeDueAt,
+          daysRemaining: daysBetween(today, clocks.noticeDueAt.slice(0, 10)),
           detail: 'No written critical defect notice is recorded and the 24 hours has run. Counted from when the '
             + 'defect was raised, which is the closest date this app holds to when the maintenance was carried out.',
           legalRef: 'Building Fire Safety Regulation 2008 (Qld) s 53(2)',
           sourceIds: ['bfsr-2008'],
         });
-      } else if (noticeBy) {
+      } else if (clocks.noticeDueAt) {
         noticeClockRunning++;
         items.push({
           kind: 'notice-running',
           siteId,
           siteName: site.siteName,
           defectId: defect.defectId,
-          dueAt: noticeBy,
-          daysRemaining: daysBetween(today, noticeBy.slice(0, 10)),
+          dueAt: clocks.noticeDueAt,
+          daysRemaining: daysBetween(today, clocks.noticeDueAt.slice(0, 10)),
           detail: 'The written critical defect notice is not recorded yet and the 24 hours is still running.',
           legalRef: 'Building Fire Safety Regulation 2008 (Qld) s 53(2)',
           sourceIds: ['bfsr-2008'],
         });
+      } else {
+        // The raised date is not readable, so there is no deadline to count to.
+        // Reported under the rectification-unknown row below rather than being
+        // guessed at in either direction.
+        noticeDateUnknown++;
       }
 
-      const rectifyBy = defect.rectificationDueAt?.slice(0, 10) ?? rectificationDueAt(defect.raisedAt) ?? undefined;
-      const remaining = rectifyBy ? daysBetween(today, rectifyBy) : undefined;
+      const remaining = clocks.rectifyBy ? daysBetween(today, clocks.rectifyBy) : undefined;
       if (remaining === undefined) {
         rectificationDateUnknown++;
         items.push({
@@ -1454,8 +1646,11 @@ function statutoryExposure(
           siteId,
           siteName: site.siteName,
           defectId: defect.defectId,
-          detail: `No rectification date is recorded and "${defect.raisedAt}" cannot be read as a date, so the `
-            + 'one month cannot be counted. It is reported as unknown rather than assumed to be in time.',
+          detail: `${clocks.rectifyUnknownBecause ?? 'The rectification date cannot be worked out.'} It is `
+            + 'reported as unknown rather than assumed to be in time.'
+            + (clocks.noticeDueAt === undefined && !defect.noticeIssuedAt
+              ? ' The 24-hour notice deadline cannot be counted from that date either.'
+              : ''),
           legalRef: 'Building Fire Safety Regulation 2008 (Qld) s 54(4)',
           sourceIds: ['bfsr-2008'],
         });
@@ -1466,7 +1661,7 @@ function statutoryExposure(
           siteId,
           siteName: site.siteName,
           defectId: defect.defectId,
-          dueAt: rectifyBy,
+          dueAt: clocks.rectifyBy,
           daysRemaining: remaining,
           detail: `${Math.abs(remaining)} days past the date the repair had to be carried out by, and still `
             + 'outstanding.',
@@ -1526,10 +1721,11 @@ function statutoryExposure(
     'rectification-overdue': 1,
     'notice-running': 2,
     'rectification-date-unknown': 3,
-    'classification-unanswered': 4,
-    'statement-overdue': 5,
-    'statement-due-soon': 6,
-    'statement-date-unknown': 7,
+    'notice-date-unknown': 4,
+    'classification-unanswered': 5,
+    'statement-overdue': 6,
+    'statement-due-soon': 7,
+    'statement-date-unknown': 8,
   };
   items.sort((a, b) =>
     ORDER[a.kind] - ORDER[b.kind]
@@ -1543,6 +1739,7 @@ function statutoryExposure(
     noticeRecorded,
     pastRectificationDate,
     rectificationDateUnknown,
+    noticeDateUnknown,
     classificationUnanswered,
     statementsOverdue,
     statementsDueSoon,
@@ -1670,7 +1867,14 @@ function concentrationOf(
       const b = bucketOf(bySystem, system, SYSTEM_LABELS[system]);
       b.siteIds.add(risk.siteId);
       b.overdueRoutines += 1;
-      b.riskScore += OVERDUE_POINTS_BY_FREQUENCY[history.frequency];
+      // The points this routine actually put into its site's score, taken from
+      // the contributions rather than recomputed from the weight table. A
+      // second piece of arithmetic here is a second answer, and the whole
+      // module rests on the score being the sum of what is printed under it.
+      b.riskScore += risk.contributions
+        .filter((c) => c.routineId === history.routineId
+          && (c.factor === 'routine-overdue' || c.factor === 'routine-overdue-age'))
+        .reduce((sum, c) => sum + c.points, 0);
     }
   }
 
@@ -1696,10 +1900,12 @@ function concentrationOf(
   const suburbRows = rowsOf(bySuburb, totalOverdue);
   const ambiguous = suburbRows.filter((r) => r.postcodes && r.postcodes.length > 1);
   if (ambiguous.length) {
+    const eg = SUBURB_NAME_COLLISION;
     caveats.push(
       `${ambiguous.length} suburb name${ambiguous.length === 1 ? '' : 's'} cover more than one postcode `
-      + `(${ambiguous.map((r) => r.label).join(', ')}). Queensland reuses names — Springfield is 4300 and 4870 — `
-      + 'so read those rows as a name, not a place.',
+      + `(${ambiguous.map((r) => r.label).join(', ')}). Queensland reuses names — ${eg.name} is `
+      + `${eg.postcodes[0]} in ${eg.places[0]} and ${eg.postcodes[1]} in ${eg.places[1]} — so read those rows as `
+      + 'a name, not a place.',
     );
   }
 

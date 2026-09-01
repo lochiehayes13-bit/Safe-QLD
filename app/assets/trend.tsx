@@ -9,6 +9,7 @@ import {
   formatAuDate,
   formatRate,
   instantOf,
+  parseMeasurement,
   projectToThreshold,
   seriesFromEvents,
   trendHeadline,
@@ -55,8 +56,17 @@ const ROUTINE_UNITS: Record<string, string> = (() => {
   return out;
 })();
 
-/** Timeline entries that change what the asset is, rather than record it. */
-const INTERVENTION_KINDS = new Set(['replaced', 'repaired', 'cleaned', 'moved', 'restored', 'installed']);
+/**
+ * Timeline entries that change what the asset is, rather than record it.
+ *
+ * "isolated" belongs here above all the others: a valve shut for tenancy works
+ * is the textbook explanation for a step in a hydrant's pressure, and leaving
+ * it out has the app report "no recorded cause" for a cause sitting on the
+ * timeline two rows up.
+ */
+const INTERVENTION_KINDS = new Set([
+  'replaced', 'repaired', 'cleaned', 'moved', 'isolated', 'restored', 'installed',
+]);
 
 export default function MeasurementTrendScreen() {
   const t = useTheme();
@@ -98,12 +108,28 @@ export default function MeasurementTrendScreen() {
     [series, interventions],
   );
 
-  const threshold = parseFloat(thresholdText.replace(',', ''));
+  /**
+   * The pass value, read with the same parser as the readings themselves.
+   *
+   * Stripping a comma and calling parseFloat turns "1,2" into 12 and "3.5.5"
+   * into 3.5 without a word. This screen's whole argument is that a number
+   * nobody can read is refused rather than guessed at, and the threshold — the
+   * one number a projected date is measured against — cannot be the exception.
+   */
+  const thresholdParse = useMemo(
+    () => (thresholdText.trim() ? parseMeasurement(thresholdText) : undefined),
+    [thresholdText],
+  );
+  const thresholdValue = thresholdParse?.ok ? thresholdParse.value : undefined;
+  // A unit typed with the value wins: "3.5 bar" against kPa readings is a
+  // conversion the module can do, and is not the technician's mistake.
+  const thresholdUnit = thresholdParse?.ok ? thresholdParse.unit ?? trend?.unit : undefined;
+
   const projection: ThresholdProjection | undefined = useMemo(
-    () => (trend && Number.isFinite(threshold)
-      ? projectToThreshold(trend, { value: threshold, unit: trend.unit })
+    () => (trend && thresholdValue !== undefined
+      ? projectToThreshold(trend, { value: thresholdValue, unit: thresholdUnit })
       : undefined),
-    [trend, threshold],
+    [trend, thresholdValue, thresholdUnit],
   );
 
   if (!asset) {
@@ -157,6 +183,7 @@ export default function MeasurementTrendScreen() {
                 series={series}
                 projection={projection}
                 thresholdText={thresholdText}
+                thresholdError={thresholdParse && !thresholdParse.ok ? thresholdParse.reason : undefined}
                 onThresholdChange={setThresholdText}
               />
             ) : null}
@@ -193,16 +220,37 @@ function TrendBody({
   series,
   projection,
   thresholdText,
+  thresholdError,
   onThresholdChange,
 }: {
   trend: MeasurementTrend;
   series: MeasurementSeries;
   projection?: ThresholdProjection;
   thresholdText: string;
+  thresholdError?: string;
   onThresholdChange: (v: string) => void;
 }) {
   const points = trend.status === 'trend' ? trend.used : series.points;
-  const thresholdValue = parseFloat(thresholdText.replace(',', ''));
+
+  /**
+   * What may be drawn as one line.
+   *
+   * On a refusal the readings have not been normalised, so a series refused
+   * for mixed units still holds the volts and the kilopascals that got it
+   * refused. Drawn together they make a shape, and a shape is read as a trend
+   * by anyone who does not stop to check the axis — which is exactly what the
+   * refusal was for. The reading list below prints each with its own unit
+   * instead.
+   */
+  const chartable = trend.status === 'trend'
+    ? trend.used
+    : new Set(series.points.map((p) => p.unit ?? '')).size <= 1 ? series.points : [];
+
+  // In the trend's own unit, whatever unit it was typed in: the module hands
+  // back the converted figure, so the rule sits where the readings are.
+  const chartThreshold = projection && trend.unit !== undefined && projection.unit === trend.unit
+    ? projection.threshold
+    : undefined;
 
   const tone = trend.interpretation === 'deteriorating'
     ? 'fail'
@@ -229,11 +277,18 @@ function TrendBody({
         />
       )}
 
-      <Sparkline
-        points={points}
-        threshold={Number.isFinite(thresholdValue) ? thresholdValue : undefined}
-        stepAt={trend.step?.to.at}
-      />
+      {chartable.length >= 2 ? (
+        <Sparkline points={chartable} threshold={chartThreshold} stepAt={trend.step?.to.at} />
+      ) : series.points.length >= 2 ? (
+        <Banner
+          tone="info"
+          title="These readings are not drawn as a line"
+          body={
+            'They are not all in one unit, so a single line through them would make a shape out '
+            + 'of two different measurements. They are listed below exactly as they were recorded.'
+          }
+        />
+      ) : null}
 
       {trend.status === 'trend' ? (
         <Rowed gap={2}>
@@ -293,7 +348,13 @@ function TrendBody({
         keyboardType="decimal-pad"
         placeholder="e.g. 350"
         suffix={trend.unit}
-        hint={trend.unit ? undefined : 'These readings carry no unit, so a threshold cannot be compared with them.'}
+        hint={
+          thresholdError
+            ? `That is not a value this app can read: ${thresholdError.replace(/\.$/, '')}.`
+            : trend.unit
+              ? undefined
+              : 'These readings carry no unit, so a threshold cannot be compared with them.'
+        }
       />
 
       {projection ? <ProjectionCard projection={projection} /> : null}

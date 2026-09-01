@@ -1,6 +1,6 @@
 import {
-  COVERAGE_THRESHOLD, OVERDUE_POINTS_BY_FREQUENCY, RISK_WEIGHTS, buildPortfolio, explainScore, foldRuns,
-  qldCriticalVerdict, qldToday, riskBand, scoreAddsUp, statementDue,
+  COVERAGE_THRESHOLD, OVERDUE_POINTS_BY_FREQUENCY, RISK_WEIGHTS, SUBURB_NAME_COLLISION, buildPortfolio,
+  explainScore, foldRuns, isoDay, qldCriticalVerdict, qldToday, riskBand, scoreAddsUp, statementDue,
   type PortfolioDefect, type PortfolioInput, type PortfolioRoutineHistory, type PortfolioSite,
 } from '@/domain/portfolio';
 
@@ -399,6 +399,78 @@ describe('statutory exposure', () => {
     expect(qldCriticalVerdict(defect({ defectId: 'd', siteId: 's' }))).toBe('no');
   });
 
+  it('will not count a breach against a raised date it has just said it cannot read', () => {
+    // "1/9/2026" is 1 September here and 9 January to Date.parse, which is what
+    // criticalNoticeDueAt hands its argument to. Before this was closed, the
+    // same defect produced "the 24 hours ran out 2026-01-10, 234 days ago" in
+    // the statutory block and "that date cannot be read" two rows below it.
+    const book = buildPortfolio({
+      ...base,
+      defects: [critical({ defectId: 'd1', siteId: 's1', raisedAt: '1/9/2026' })],
+    });
+    expect(book.statutory.noticeOverdue).toBe(0);
+    expect(book.statutory.noticeClockRunning).toBe(0);
+    expect(book.statutory.noticeDateUnknown).toBe(1);
+    expect(book.statutory.rectificationDateUnknown).toBe(1);
+    expect(book.statutory.items.some((i) => i.kind === 'notice-overdue')).toBe(false);
+    // And it must not be scored as one either — the score is what the ranking
+    // sorts on, so a phantom breach there moves a real one down the list.
+    const risk = book.ranked.find((r) => r.siteId === 's1')!;
+    expect(risk.contributions.some((c) => c.factor === 'notice-overdue')).toBe(false);
+  });
+
+  it('does not print an unreadable raised date back as though it were a date', () => {
+    // "Raised 1/9/2026" beside a line saying the date cannot be read is a
+    // breakdown that argues with itself, on a card a client can be shown.
+    const book = buildPortfolio({
+      ...base,
+      defects: [critical({ defectId: 'd1', siteId: 's1', raisedAt: '1/9/2026' })],
+    });
+    const line = book.ranked[0]!.contributions.find((c) => c.factor === 'critical-defect')!;
+    expect(line.detail).toContain('Raised date unreadable');
+    expect(line.detail).not.toContain('1/9/2026');
+  });
+
+  it('blames the rectification date, not the raised date, when it is the one that is unreadable', () => {
+    // The office is being told which record to go and fix. Naming the wrong
+    // field sends somebody to the wrong end of the defect.
+    const book = buildPortfolio({
+      ...base,
+      defects: [critical({
+        defectId: 'd1', siteId: 's1', raisedAt: '2026-07-01', rectificationDueAt: '1/8/2026',
+      })],
+    });
+    const item = book.statutory.items.find((i) => i.kind === 'rectification-date-unknown')!;
+    expect(item.detail).toContain('"1/8/2026"');
+    expect(item.detail).not.toContain('2026-07-01');
+    // The recorded date is refused outright rather than being replaced with one
+    // counted from the raised date, which would assert a deadline nobody set.
+    expect(book.statutory.pastRectificationDate).toBe(0);
+    expect(book.statutory.rectificationDateUnknown).toBe(1);
+  });
+
+  it("does not call a notice missed while the deadline is still hours away in Queensland", () => {
+    // The clock was compared against midnight UTC, which is 10am in Brisbane.
+    // A notice falling due at 8am today therefore read as missed from the
+    // moment the screen opened. Telling an office it has breached a statutory
+    // notice it has not yet breached is the worst thing this screen can do.
+    const stillRunning = buildPortfolio({
+      ...base,
+      // Notice falls due 2026-08-31T22:00Z, which is 8am on 1 September here.
+      defects: [critical({ defectId: 'd1', siteId: 's1', raisedAt: '2026-08-30T22:00:00.000Z' })],
+    });
+    expect(stillRunning.statutory.noticeOverdue).toBe(0);
+    expect(stillRunning.statutory.noticeClockRunning).toBe(1);
+
+    // Given an actual instant rather than a bare date, the clock is read at it.
+    const afterIt = buildPortfolio({
+      ...base,
+      today: '2026-09-01T09:00:00+10:00',
+      defects: [critical({ defectId: 'd1', siteId: 's1', raisedAt: '2026-08-30T22:00:00.000Z' })],
+    });
+    expect(afterIt.statutory.noticeOverdue).toBe(1);
+  });
+
   it('reports a rectification date it cannot work out rather than assuming the repair is in time', () => {
     const book = buildPortfolio({
       ...base,
@@ -556,6 +628,19 @@ describe('concentration', () => {
     expect(systems).toEqual({ detection: 2, extinguisher: 1 });
   });
 
+  it('counts a system row in the same points as a client row, not in a second currency', () => {
+    // riskScore used to mean the sum of the member sites' scores on a client
+    // row and the raw frequency weight on a system row, which made the two
+    // tables silently incomparable: the same overdue annual was 42 points in
+    // one and 30 in the other. A system row is a subset of the site scores,
+    // taken from the contributions those sites actually printed.
+    const systems = Object.fromEntries(book.concentration.bySystem.map((r) => [r.key, r.riskScore]));
+    expect(systems).toEqual({ detection: 84, extinguisher: 42 });
+    const systemTotal = book.concentration.bySystem.reduce((n, r) => n + r.riskScore, 0);
+    const clientTotal = book.concentration.byClient.reduce((n, r) => n + r.riskScore, 0);
+    expect(systemTotal).toBe(clientTotal);
+  });
+
   it('says when one suburb name covers two postcodes rather than reading as one place', () => {
     // Springfield is 4300 near Ipswich and 4870 outside Cairns. A row that
     // merges them reads as one run of work and is eight hundred kilometres long.
@@ -570,6 +655,28 @@ describe('concentration', () => {
     expect(row.label).toBe('Springfield');
     expect(row.postcodes).toEqual(['4300', '4870']);
     expect(split.concentration.caveats.join(' ')).toContain('Springfield');
+  });
+
+  it('gets the postcodes in its own worked example right, and says where they came from', () => {
+    // The caveat used to say "Springfield is 4300 and 4870". 4870 is Cairns;
+    // the second Queensland Springfield is 4871, in the Shire of Mareeba. A
+    // wrong postcode inside a caveat about wrong postcodes is exactly the sort
+    // of thing that ends up quoted back by a client, so the pair is held as
+    // data with the source that establishes it.
+    expect(SUBURB_NAME_COLLISION.postcodes).toEqual(['4300', '4871']);
+    const split = buildPortfolio(input({
+      sites: [
+        site({ siteId: 'a', suburb: 'Springfield', postcode: '4300' }),
+        site({ siteId: 'b', suburb: 'springfield', postcode: '4871' }),
+      ],
+      histories: [annual('a'), annual('b')],
+    }));
+    const caveat = split.concentration.caveats.join(' ');
+    expect(caveat).toContain('4871');
+    expect(caveat).not.toContain('4870');
+    const cited = split.sources.find((s) => s.id === SUBURB_NAME_COLLISION.sourceId)!;
+    expect(cited.url).toBe('https://auspost.com.au/postcode/springfield');
+    expect(cited.confidence).toBe('high');
   });
 
   it('ignores a postcode that is not one, rather than splitting a suburb on a typo', () => {
@@ -680,6 +787,19 @@ describe('refusing to answer', () => {
   it('refuses a date that looks ISO but is not a day of the year', () => {
     expect(qldToday('2026-02-31')).toBeUndefined();
     expect(qldToday('2026-13-01')).toBeUndefined();
+  });
+
+  it('refuses 31 February everywhere, not only at the top of the screen', () => {
+    // new Date("2026-02-31T00:00:00Z") does not fail — it rolls forward to
+    // 3 March. A rectification month counted from that is three days out and
+    // nothing on the page says so, so every reader of a date goes through the
+    // same round trip.
+    expect(isoDay('2026-02-31')).toBeUndefined();
+    expect(isoDay('1/9/2026')).toBeUndefined();
+    expect(isoDay('2026-09-01T23:00:00.000Z')).toBe('2026-09-01');
+    expect(foldRuns([
+      { siteId: 's1', routineId: 'det-annual', frequency: 'annual', completedAt: '2026-02-31' },
+    ]).rejected).toHaveLength(1);
   });
 
   it('reads an instant on the Queensland calendar, which never shifts for daylight saving', () => {

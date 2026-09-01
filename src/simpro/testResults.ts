@@ -112,6 +112,35 @@ interface RawJobNote {
 }
 
 /**
+ * Reads the job's notes, and either the markers in them or why not.
+ *
+ * The reason is carried rather than discarded because the caller has to tell a
+ * technician something: a key that cannot read notes is a permission somebody
+ * changes in Simpro in a minute, and a dropped connection is a wait.
+ */
+async function readMarkers(
+  client: SimproPoster,
+  jobId: string,
+  maxNotesRead = 200,
+): Promise<{ keys?: Set<string>; error?: string }> {
+  try {
+    const notes = await client.listAll<RawJobNote>(
+      `jobs/${jobId}/notes/`, { columns: 'ID,Subject,Note' }, maxNotesRead,
+    );
+    const keys = new Set<string>();
+    for (const note of notes) {
+      for (const key of keysInNoteText(`${note.Subject ?? ''}\n${note.Note ?? ''}`)) keys.add(key);
+    }
+    return { keys };
+  } catch (e) {
+    // Kept, not swallowed. "The key cannot read job notes" is fixed in Simpro in
+    // a minute and "the tunnel dropped" fixes itself, and a caller told only
+    // that something failed cannot tell a technician which of the two it was.
+    return { error: describe(e, 'read job notes') };
+  }
+}
+
+/**
  * Safe QLD reference markers already on a job in Simpro.
  *
  * Returns undefined — not an empty set — when the notes could not be read. The
@@ -124,31 +153,34 @@ export async function keysAlreadyOnJob(
   jobId: string,
   maxNotesRead = 200,
 ): Promise<Set<string> | undefined> {
-  try {
-    const notes = await client.listAll<RawJobNote>(
-      `jobs/${jobId}/notes/`, { columns: 'ID,Subject,Note' }, maxNotesRead,
-    );
-    const keys = new Set<string>();
-    for (const note of notes) {
-      for (const key of keysInNoteText(`${note.Subject ?? ''}\n${note.Note ?? ''}`)) keys.add(key);
-    }
-    return keys;
-  } catch {
-    return undefined;
-  }
+  return (await readMarkers(client, jobId, maxNotesRead)).keys;
 }
 
-/** Posts one note. Mirrors the call in resources.addJobNote, which this cannot import. */
+/**
+ * Posts one note.
+ *
+ * Mirrors the call in resources.addJobNote, which this cannot import — including
+ * its cut at 200 characters. The mapping composes subjects inside that already;
+ * this is here so the two calls cannot drift into disagreeing about the field,
+ * and so a payload assembled by hand cannot be refused by the server.
+ */
 export async function postJobNote(client: SimproPoster, payload: OutboundJobNote): Promise<void> {
   await client.request('POST', `jobs/${payload.jobId}/notes/`, {
-    body: { Subject: payload.subject, Note: payload.note },
+    body: { Subject: payload.subject.slice(0, 200), Note: payload.note },
   });
 }
 
-function describe(e: unknown): string {
+/**
+ * A failure in the words a technician can act on.
+ *
+ * The attempted action is named because the two calls this file makes need
+ * different permissions in Simpro, and "not permitted" without saying to do what
+ * sends somebody to the wrong setting.
+ */
+function describe(e: unknown, action: 'add job notes' | 'read job notes' = 'add job notes'): string {
   const status = statusOf(e);
   if (status === 403) {
-    return 'This Simpro key is not permitted to add job notes. Note permissions are set per endpoint in Simpro.';
+    return `This Simpro key is not permitted to ${action}. Note permissions are set per endpoint in Simpro.`;
   }
   if (status === 401) return 'Simpro rejected the credentials. Check them in Settings.';
   return e instanceof Error ? e.message : String(e);
@@ -185,19 +217,26 @@ export async function sendOutboundPlan(
     // Every item in a plan belongs to one job, but the jobs are read from the
     // items rather than assumed, so a future plan spanning two cannot half-check.
     const jobIds = [...new Set(plan.items.map((i) => i.payload.jobId))];
+    const reasons: string[] = [];
+    // Tracked separately from the reasons: a failure that arrives with nothing
+    // to say is still a failure, and reporting it as 'checked' would turn "not
+    // looked at" into "looked at and clear".
     let anyUnavailable = false;
     for (const jobId of jobIds) {
-      const remote = await keysAlreadyOnJob(client, jobId, options.maxNotesRead);
-      if (!remote) {
+      const remote = await readMarkers(client, jobId, options.maxNotesRead);
+      if (!remote.keys) {
         anyUnavailable = true;
+        const reason = remote.error?.trim();
+        if (reason && !reasons.includes(reason)) reasons.push(reason);
         continue;
       }
-      for (const key of remote) known.add(key);
+      for (const key of remote.keys) known.add(key);
     }
     report.remoteCheck = anyUnavailable ? 'unavailable' : 'checked';
     if (anyUnavailable) {
       report.remoteCheckError = 'The job\'s existing notes could not be read, so a duplicate could not be ruled '
-        + 'out from the server. The work was sent anyway rather than lost; check the job in Simpro.';
+        + 'out from the server. The work was sent anyway rather than lost; check the job in Simpro.'
+        + (reasons.length ? ` Reason: ${reasons.join(' ')}` : '');
     }
   }
 

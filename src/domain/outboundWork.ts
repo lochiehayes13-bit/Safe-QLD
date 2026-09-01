@@ -98,10 +98,12 @@ export const SOURCES: Record<SourceId, Source> = {
   },
   'bfsr-2008': {
     id: 'bfsr-2008',
-    what: 'That a critical defect obliges notice to the occupier within 24 hours and rectification within one '
-      + 'month of the maintenance, which is why a critical defect cannot wait behind a summary note',
-    ref: 'Building Fire Safety Regulation 2008 (Qld). The clocks themselves are computed in '
-      + 'src/domain/qldCompliance.ts and are not restated here',
+    what: 'That a critical defect obliges a written notice to the occupier within 24 hours after the '
+      + 'maintenance is carried out, and rectification within one month of it, which is why a critical defect '
+      + 'cannot wait behind a summary note and why both clocks are counted from the maintenance rather than '
+      + 'from the moment the defect was written up',
+    ref: 'Building Fire Safety Regulation 2008 (Qld) s 53 (notice) and s 54 (rectification). The clocks '
+      + 'themselves are computed in src/domain/qldCompliance.ts and are not restated here',
     url: 'https://www.legislation.qld.gov.au/view/html/inforce/current/sl-2008-0160',
     confidence: 'high',
     basis: 'Queensland subordinate legislation. This module only orders and labels; it derives no date of its own.',
@@ -360,6 +362,7 @@ export type OutboundWarningCode =
   | 'already-sent'
   | 'amended-record'
   | 'defect-already-with-office'
+  | 'indistinguishable-defects'
   | 'not-tested-reason-missing'
   | 'critical-not-verbally-notified'
   | 'critical-severity-disagrees'
@@ -686,7 +689,7 @@ function criticalBasis(defect: OutboundDefect): string[] {
  * Written without a lookbehind on purpose: Hermes has not always supported them
  * and a regex that throws at runtime would take the whole push down with it.
  */
-const MONEY_PATTERN = /(\$\s?\d|\b\d+\.\d{2}\s?(dollars|aud)\b)/i;
+const MONEY_PATTERN = /(\$\s?\d|\b\d+(\.\d{2})?\s?(dollars|aud)\b)/i;
 
 /**
  * The order assets are listed in, which must not depend on the order the rows
@@ -747,7 +750,21 @@ function reasonsLine(summary: ServiceSummary): string | undefined {
 
 function criticalBlock(defect: OutboundDefect, run: CompletedRoutineRun): string[] {
   const basis = criticalBasis(defect);
-  const noticeDue = qldMoment(criticalNoticeDueAt(defect.raisedAt) ?? undefined);
+  /*
+   * Both clocks run from the maintenance, not from the moment the defect was
+   * typed up. The written notice is due within 24 hours after the maintenance is
+   * carried out and the rectification within one month of it, so a defect
+   * written up at the start of a two-day attendance does not get a deadline of
+   * its own that nothing in the regulation supports.
+   *
+   * And the 24-hour one is only stated where the maintenance instant carries a
+   * time. Twenty-four hours after a date with no time in it is a moment nobody
+   * recorded, and "due by 04/07/2026 10:00" is read as a deadline somebody set.
+   */
+  const maintenanceHasTime = qldMoment(run.completedAt) !== undefined;
+  const noticeDue = maintenanceHasTime
+    ? qldMoment(criticalNoticeDueAt(run.completedAt) ?? undefined)
+    : undefined;
   const rectifyDue = qldDay(rectificationDueAt(qldIsoDay(run.completedAt) ?? run.completedAt) ?? undefined);
   const lines = [
     `*** CRITICAL DEFECT *** ${defect.location.trim() || 'location not recorded'}`,
@@ -762,7 +779,13 @@ function criticalBlock(defect: OutboundDefect, run: CompletedRoutineRun): string
       : 'Verbal notification: NOT RECORDED in the app. '
         + `${AS1851_CLASS_OBLIGATION.critical.notify}`,
   );
-  if (noticeDue) lines.push(`Written notice to the responsible entity due by ${noticeDue}.`);
+  // The written notice under the Queensland regulation goes to the occupier;
+  // AS 1851's verbal notification goes to the responsible entity. They are two
+  // obligations to two audiences and the note names each of them correctly.
+  lines.push(noticeDue
+    ? `Written critical defect notice to the occupier due by ${noticeDue} (24 hours from the maintenance).`
+    : 'Written critical defect notice to the occupier is due within 24 hours of the maintenance. No time was '
+      + 'recorded for the maintenance, so the hour it falls due is not stated here rather than invented.');
   if (rectifyDue) lines.push(`Rectification due by ${rectifyDue} (one month from the maintenance).`);
   if (defect.interimMeasures?.trim()) lines.push(`Interim measures: ${defect.interimMeasures.trim()}.`);
   if (defect.status !== 'open') lines.push(`Status recorded on site: ${defect.status}.`);
@@ -791,6 +814,8 @@ function composeSections(
   results: OutboundResult[],
   defects: OutboundDefect[],
   amended: boolean,
+  /** Defects raised on this visit that the office already holds, so are not repeated here. */
+  alreadyReported: number,
 ): NoteSection[] {
   const sections: NoteSection[] = [];
   const criticals = defects.filter(isCriticalDefect);
@@ -811,16 +836,32 @@ function composeSections(
   // The counts come before anything else a reader might stop at. This is the
   // number that decides whether the job can be invoiced.
   const counts = [countLine(summary)];
-  const reasons = reasonsLine(summary);
-  if (reasons) counts.push(reasons);
   if (summary.notTested > 0) {
     counts.push(`${summary.notTested} of ${summary.total} assets were NOT tested on this visit. `
       + 'The routine is not complete for those assets.');
   } else if (summary.total > 0) {
-    counts.push('Every asset on this visit was tested.');
+    // Not "every asset was tested". This module sees the assets that got a
+    // result, not the routine's register, so an asset nobody reached at all is
+    // invisible to it and the sentence says so rather than reading as a
+    // completed routine.
+    counts.push('Every asset with a result recorded on this visit was tested. '
+      + 'An asset nobody reached carries no result and is not counted above.');
   }
   counts.push(`Defects raised: ${summary.defectsRaised}`
     + (summary.criticalDefects ? `, of which ${summary.criticalDefects} CRITICAL.` : '.'));
+  if (alreadyReported > 0) {
+    // Left out of the count above because they are not this note's to report a
+    // second time, and said out loud because a service note that quietly counts
+    // three defects as one reads as a quieter visit than it was.
+    counts.push(`A further ${alreadyReported} defect${alreadyReported === 1 ? ' was' : 's were'} raised on this `
+      + 'visit and already reported to the office separately, so are not repeated here.');
+  }
+  // The reasons line goes last of the counts, however long it runs. Everything
+  // above it is a fixed-length statement the office acts on; this one is free
+  // text and can run to thousands of characters, and when the note has to be cut
+  // the cut has to land on the explanation rather than on the numbers.
+  const reasons = reasonsLine(summary);
+  if (reasons) counts.push(reasons);
   sections.push({ id: 'results', text: counts.join('\n'), essential: true });
 
   if (criticals.length) {
@@ -935,16 +976,34 @@ function assemble(sections: NoteSection[], key: string, fullRecordAt: string, li
     remaining -= cut.text.length + 2;
   };
 
-  // Essential sections first, each held to an equal share of what is left when
-  // they cannot all fit whole. Recomputed as it goes, so a short section hands
-  // its unused room to the next one rather than wasting it.
+  /*
+   * Essential sections first, sharing the budget between them.
+   *
+   * The room is handed out smallest need first, each section taking an equal
+   * share of what is still unspent and the ones that need less than their share
+   * releasing the rest. Two other ways of doing this were tried and both lose the
+   * case this exists for. Taking whole sections first lets the counts — which can
+   * run to a page once the not-tested reasons are in them — swallow the budget
+   * and push the critical defect block off the end. Handing out a flat equal
+   * share cuts a short section that would have fitted and then leaves the room
+   * it did not need unused. Smallest first does neither: the header and the
+   * critical defects are kept whole and the counts absorb the cut.
+   */
   const essential = sections.filter((s) => s.essential);
-  let unfitted = essential.length;
-  for (const section of essential) {
-    const share = unfitted > 1 ? Math.floor(remaining / unfitted) : remaining;
-    take(section, Math.min(remaining, share));
-    unfitted--;
+  // The two characters are the blank line that separates this section from the
+  // next, budgeted with the section so nothing overspends by the joins.
+  const need = (s: NoteSection): number => s.text.length + 2;
+  const allocation = new Map<string, number>();
+  let unspent = remaining;
+  let unallocated = essential.length;
+  for (const section of [...essential].sort((a, b) => need(a) - need(b))) {
+    const share = unallocated > 1 ? Math.floor(unspent / unallocated) : unspent;
+    const give = Math.min(need(section), share);
+    allocation.set(section.id, give);
+    unspent -= give;
+    unallocated--;
   }
+  for (const section of essential) take(section, (allocation.get(section.id) ?? 0) - 2);
 
   // Then the detail, in order, until the room runs out.
   let detailAllowed = true;
@@ -1081,6 +1140,7 @@ export function planOutboundWork(
   const bodyLimit = options.bodyLimit ?? NOTE_LIMITS.body.chars;
 
   // -------------------------------------------------------------- critical first
+  const keysUsed = new Set<string>();
   for (const defect of criticals) {
     const identity = ['critical', run.siteId, defect.location, defect.description, defect.raisedAt];
     const content = [
@@ -1095,6 +1155,22 @@ export function planOutboundWork(
         + `by the office (${key}). Sending it again would raise it twice.`);
       continue;
     }
+    if (keysUsed.has(key)) {
+      /*
+       * Two critical defects recorded with the same location, description and
+       * instant produce one key and one identical note. The send layer would
+       * post the first and skip the second as a duplicate — and report it as
+       * accepted, which is a critical defect lost with a tick beside it. It is
+       * said out loud instead, because only the technician can tell whether
+       * there really are two.
+       */
+      decline('indistinguishable-defects',
+        `Two critical defects at ${defect.location || 'an unrecorded location'} are recorded with the same `
+        + 'description and the same time raised, so nothing that goes out could tell them apart. One notice is '
+        + 'sent. Edit the second so it reads differently, or phone the office about it.');
+      continue;
+    }
+    keysUsed.add(key);
     const amended = sentIdentities.has(keyIdentity(key) ?? '');
     if (amended) {
       caution('amended-record',
@@ -1192,15 +1268,26 @@ export function planOutboundWork(
       'Some assets have no tag number, name or location, so the note can only say "asset not identified". '
       + 'The office cannot match those rows to their register.');
   }
-  const freeText = [run.notes, ...results.map((r) => r.notes), ...sendableDefects.map((d) => d.description)]
-    .filter((t): t is string => !!t);
+  // Every free-text field that ends up in the note is scanned, not only the
+  // obvious ones. A price is typed into a not-tested reason ("no access, quoted
+  // $450 to open the ceiling") at least as often as into a defect description,
+  // and a warning that misses those is a rule nobody is actually keeping.
+  const freeText = [
+    run.notes,
+    ...results.map((r) => r.notes),
+    ...results.map((r) => r.notTestedReason),
+    ...sendableDefects.map((d) => d.description),
+    ...sendableDefects.map((d) => d.interimMeasures),
+  ].filter((t): t is string => !!t);
   if (freeText.some((t) => MONEY_PATTERN.test(t))) {
     caution('money-in-free-text',
       'A price appears in typed notes. It is sent as written because dropping a technician\'s words silently is '
       + 'worse, but money belongs on a quote in Simpro: a figure in a note is never reconciled.');
   }
 
-  const sections = composeSections(run, summary, results, sendableDefects, serviceAmended);
+  const sections = composeSections(
+    run, summary, results, sendableDefects, serviceAmended, defects.length - sendableDefects.length,
+  );
   const note = assemble(sections, serviceKey, fullRecordAt, bodyLimit);
   if (note.truncated) {
     caution('truncated',

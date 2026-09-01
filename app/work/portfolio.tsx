@@ -8,7 +8,7 @@ import { listRoutineRuns } from '@/db/routineRunRepo';
 import { queryAssets } from '@/db/assetRepo';
 import { listOccupierStatements } from '@/db/occupierRepo';
 import {
-  STANDING_LABEL, STATUTORY_LABEL, buildPortfolio, foldRuns,
+  STANDING_LABEL, STATUTORY_LABEL, buildPortfolio, foldRuns, percentOf, scoreAddsUp,
   type ConcentrationRow, type Portfolio, type SiteRisk, type StatutoryItem,
 } from '@/domain/portfolio';
 import { assetTypeById } from '@/seed/assetTypes';
@@ -117,9 +117,17 @@ export default function PortfolioScreen() {
            * or the limbs were never worked through, and in both cases the
            * statutory position is unestablished — which is what the portfolio
            * then reports.
+           *
+           * "Flagged critical" has to include the AS 1851 classification as
+           * well as the severity. They are different tests and the app records
+           * them separately, but both are a person calling this defect
+           * critical, and only checking one of them let an AS 1851 critical
+           * defect with nothing answered arrive as two false limbs and be
+           * scored as an ordinary three-point defect.
            */
+          const flaggedCritical = d.severity === 'critical' || d.as1851Class === 'critical';
           const answered = d.qldLimbInoperable === true || d.qldLimbAdverseImpact === true;
-          const unestablished = d.severity === 'critical' && !answered;
+          const unestablished = flaggedCritical && !answered;
           return {
             defectId: d.id,
             siteId: d.siteId,
@@ -159,10 +167,10 @@ export default function PortfolioScreen() {
 
   const book = data?.portfolio;
 
-  const currentPercent = useMemo(() => {
-    const f = book?.health.currentFractionOfJudged;
-    return f === undefined ? undefined : Math.round(f * 100);
-  }, [book]);
+  const currentPercent = useMemo(
+    () => percentOf(book?.health.currentFractionOfJudged),
+    [book],
+  );
 
   if (loading && !book) {
     return (
@@ -267,6 +275,20 @@ export default function PortfolioScreen() {
           />
           <StatTile label="Limbs unanswered" value={s.classificationUnanswered} />
         </Rowed>
+        {s.rectificationDateUnknown ? (
+          <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+            The month allowed for the repair cannot be counted on {s.rectificationDateUnknown} critical defect
+            {s.rectificationDateUnknown === 1 ? '' : 's'}, because the date it would run from is not one this app
+            can read. Not counted as breached, and not counted as in hand.
+          </Txt>
+        ) : null}
+        {s.noticeDateUnknown ? (
+          <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+            The 24 hours cannot be counted on {s.noticeDateUnknown} critical defect
+            {s.noticeDateUnknown === 1 ? '' : 's'} either — the raised date is unreadable, so there is no moment
+            for it to run from. A breach is not asserted against a date nobody can read.
+          </Txt>
+        ) : null}
         {s.statementDateUnknown ? (
           <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
             {s.statementDateUnknown} site{s.statementDateUnknown === 1 ? ' holds' : 's hold'} no statement date at
@@ -409,8 +431,11 @@ export default function PortfolioScreen() {
           />
         </Rowed>
         <Txt size="xs" tone="faint">
-          Read at {formatAuDate(book.today)}. This screen reads the whole book, so it does not refresh itself every
-          time you open it — nothing here is live.
+          {book.today
+            ? `Read at ${formatAuDate(book.today)}. `
+            : 'Nothing was read, because the date to read it against could not be established. '}
+          This screen reads the whole book, so it does not refresh itself every time you open it — nothing here
+          is live.
         </Txt>
 
         <H2>Notes and sources</H2>
@@ -480,6 +505,15 @@ function RiskCard({
 }) {
   const t = useTheme();
   const tone = BAND_TONE[risk.band];
+  /**
+   * The one thing this card promises is that the total is the lines under it.
+   *
+   * scoreAddsUp is the module's own check on that, and it is asked here rather
+   * than assumed: if a contribution ever stops being counted into the total,
+   * this card withholds the number instead of printing one it cannot justify.
+   * The reasons are still shown — they are what a technician acts on.
+   */
+  const justified = scoreAddsUp(risk);
 
   return (
     <Card onPress={onToggle}>
@@ -500,7 +534,7 @@ function RiskCard({
           </Rowed>
         </View>
         <View style={{ alignItems: 'flex-end' }}>
-          <Txt size="xl" weight="700" tone={tone}>{risk.score}</Txt>
+          <Txt size="xl" weight="700" tone={justified ? tone : 'fail'}>{justified ? risk.score : '—'}</Txt>
           <Txt size="xs" tone="faint">{open ? 'hide' : 'why'}</Txt>
         </View>
       </Rowed>
@@ -508,6 +542,13 @@ function RiskCard({
       {open ? (
         <View style={{ marginTop: t.space(3), gap: t.space(2) }}>
           <Divider />
+          {justified ? null : (
+            <Banner
+              tone="fail"
+              title="This score is not shown"
+              body="The lines below do not add up to the total the ranking used, so the number is not one this screen can stand behind and it is withheld. The reasons are still listed. Report this — the ranking is built so that this cannot happen."
+            />
+          )}
           <Label>Every point in this score</Label>
           {risk.contributions.map((c, i) => (
             <View key={`${c.factor}-${i}`} style={{ gap: 2 }}>
@@ -518,12 +559,14 @@ function RiskCard({
               <Txt size="sm" tone="muted" style={{ lineHeight: 19, marginLeft: 34 }}>{c.detail}</Txt>
             </View>
           ))}
-          <Rowed gap={2}>
-            <Txt weight="700" style={{ minWidth: 34 }}>={risk.score}</Txt>
-            <Txt size="sm" tone="muted" style={{ flex: 1 }}>
-              The total is the sum of the lines above and nothing else.
-            </Txt>
-          </Rowed>
+          {justified ? (
+            <Rowed gap={2}>
+              <Txt weight="700" style={{ minWidth: 34 }}>={risk.score}</Txt>
+              <Txt size="sm" tone="muted" style={{ flex: 1 }}>
+                The total is the sum of the lines above and nothing else.
+              </Txt>
+            </Rowed>
+          ) : null}
 
           {risk.unknowns.length ? (
             <>

@@ -114,6 +114,25 @@ describe('outboundKey', () => {
     expect(keyIdentity('SRV-nope')).toBeUndefined();
     expect(keyIdentity('')).toBeUndefined();
   });
+
+  it('spends the whole digest on each half rather than throwing the second pass away', () => {
+    /*
+     * Eight hex digits a side is a 32-bit hash, which reaches an even chance of
+     * collision at around 77,000 records — a book of sites gets there inside a
+     * few years of monthly services. A collision on the content half is a
+     * service the office never receives and nobody goes looking for.
+     */
+    expect(outboundKey('SRV', ['site-1'], ['x'])).toMatch(/^SRV-[0-9a-f]{16}-[0-9a-f]{16}$/);
+  });
+
+  it('keeps a defect notice and a service record apart even where their identity digests agree', () => {
+    // Compared as bare hex, the two would eventually cross and a first service
+    // record would go out labelled as an amendment of a defect nobody amended.
+    const service = outboundKey('SRV', ['site-1', 'attendance'], ['a']);
+    const notice = outboundKey('DEF', ['site-1', 'attendance'], ['a']);
+    expect(keyIdentity(notice)).not.toBe(keyIdentity(service));
+    expect(keyIdentity(service)).toBe(`SRV-${service.split('-')[1]}`);
+  });
 });
 
 describe('keysInNoteText', () => {
@@ -181,7 +200,7 @@ describe('summariseRun', () => {
     expect(s.notTestedReasons[0]).toMatchObject({ count: 2, unrecorded: false });
   });
 
-  it('keeps the reason in the technician\'s own words', () => {
+  it("keeps the reason in the technician's own words", () => {
     const s = summariseRun([pass('1', { outcome: 'not-tested', notTestedReason: 'Ward in use' })], []);
     expect(s.notTestedReasons[0]!.reason).toBe('Ward in use');
   });
@@ -296,6 +315,22 @@ describe('planOutboundWork — what it refuses to send', () => {
     expect(plan.summary.defectsRaised).toBe(0);
   });
 
+  it('says so rather than quietly dropping one of two critical defects it cannot tell apart', () => {
+    /*
+     * Same location, same description, same instant: one key, one identical
+     * note. The send layer would post the first, skip the second as a duplicate
+     * and record it as accepted — a critical defect lost with a tick beside it.
+     */
+    const twin = { severity: 'critical' as const, location: 'Plant room', description: 'Pump will not start.' };
+    const plan = planOutboundWork(run(), [pass('1')], [
+      defect({ id: 'd-1', ...twin }), defect({ id: 'd-2', ...twin }),
+    ]);
+    expect(plan.items.filter((i) => i.urgency === 'critical')).toHaveLength(1);
+    const warn = plan.warnings.find((w) => w.code === 'indistinguishable-defects');
+    expect(warn?.severity).toBe('declined');
+    expect(warn?.message).toContain('Plant room');
+  });
+
   it('refuses to send a critical defect notice that will not fit, rather than an empty shell', () => {
     const plan = planOutboundWork(
       run(),
@@ -348,6 +383,47 @@ describe('planOutboundWork — a critical defect', () => {
     const warn = plan.warnings.find((w) => w.code === 'critical-severity-disagrees');
     expect(warn?.message).toContain('Confirm the severity');
     expect(plan.items[0]!.urgency).toBe('critical');
+  });
+
+  it('runs the 24-hour clock from the maintenance, not from when the defect was typed up', () => {
+    /*
+     * The written notice is due within 24 hours after the maintenance is carried
+     * out. A defect written up at nine in the morning of a two-day attendance
+     * does not get a deadline of its own a day early, and a technician who
+     * worked to the earlier one would think they were late when they were not.
+     */
+    const plan = planOutboundWork(
+      run({ completedAt: '2026-07-03T07:00:00.000Z' }),
+      [pass('1')],
+      [defect({ severity: 'critical', raisedAt: '2026-07-02T23:00:00.000Z' })],
+    );
+    const note = plan.items[0]!.payload.note;
+    expect(note).toContain('Raised: 03/07/2026');
+    expect(note).toContain('due by 04/07/2026 17:00 (Qld)');
+  });
+
+  it('will not put an hour on the notice deadline when nobody recorded one', () => {
+    /*
+     * "Due by 04/07/2026 10:00" out of a date with no time in it is a deadline
+     * invented by a formatter, and it is read as one somebody set. The obligation
+     * is stated; the hour is not.
+     */
+    const plan = planOutboundWork(
+      run({ completedAt: '2026-07-03' }), [pass('1')], [defect({ severity: 'critical' })],
+    );
+    const note = plan.items[0]!.payload.note;
+    expect(note).toContain('due within 24 hours of the maintenance');
+    expect(note).not.toMatch(/due by \d\d\/\d\d\/\d{4} \d\d:\d\d/);
+    // The one-month clock survives, because a calendar day is all it needs.
+    expect(note).toContain('Rectification due by 03/08/2026');
+  });
+
+  it('names the occupier for the written notice and the responsible entity for the verbal one', () => {
+    // Two obligations to two audiences. A notice addressed to the wrong one is
+    // not the notice the regulation asks for.
+    const note = criticalPlan().items[0]!.payload.note;
+    expect(note).toContain('Written critical defect notice to the occupier');
+    expect(note).toContain('Verbally to the responsible entity');
   });
 
   it('says the photos stay with the report rather than implying they were attached', () => {
@@ -444,6 +520,32 @@ describe('planOutboundWork — the service note', () => {
     expect(warn?.severity).toBe('caution');
     expect(plan.items).toHaveLength(1);
     expect(plan.items[0]!.payload.note).toContain('$450');
+  });
+
+  it('flags a price typed into a not-tested reason, which is where one usually lands', () => {
+    /*
+     * "No access, quoted $450 to open the ceiling" is how a price gets into a
+     * service note. A money warning that only reads the technician's summary and
+     * the defect descriptions is a rule the app is not actually keeping.
+     */
+    const plan = planOutboundWork(run(), [
+      pass('1', { outcome: 'not-tested', notTestedReason: 'No access, quoted $450 to open the ceiling' }),
+    ], []);
+    expect(plan.warnings.map((w) => w.code)).toContain('money-in-free-text');
+  });
+
+  it('flags a price typed into the interim measures on a defect', () => {
+    const plan = planOutboundWork(run(), [pass('1')], [
+      defect({ severity: 'critical', interimMeasures: 'Fire watch engaged at $95 an hour until rectified.' }),
+    ]);
+    expect(plan.warnings.map((w) => w.code)).toContain('money-in-free-text');
+  });
+
+  it('catches a price written in words as well as one with a dollar sign', () => {
+    // "450 dollars" is a price. A detector that only knows the "$" is one a
+    // technician can walk past without meaning to.
+    const plan = planOutboundWork(run({ notes: 'Head replacement is about 450 dollars.' }), [pass('1')], []);
+    expect(plan.warnings.map((w) => w.code)).toContain('money-in-free-text');
   });
 
   it('does not cry money over an ordinary sentence', () => {
@@ -570,8 +672,20 @@ describe('planOutboundWork — what the office actually reads', () => {
 
   it('says every asset was tested only when that is true', () => {
     const clean = planOutboundWork(run(), [pass('1'), pass('2')], []);
-    expect(clean.items[0]!.payload.note).toContain('Every asset on this visit was tested.');
-    expect(busy().items[1]!.payload.note).not.toContain('Every asset on this visit was tested.');
+    expect(clean.items[0]!.payload.note).toContain('Every asset with a result recorded on this visit was tested.');
+    expect(busy().items[1]!.payload.note).not.toContain('was tested. An asset nobody reached');
+  });
+
+  it("does not claim more than it can see, because it never gets the routine's register", () => {
+    /*
+     * The module is handed the assets that got a result, not the assets the
+     * routine covers. Ten detectors nobody reached produce no rows at all, so an
+     * unqualified "every asset was tested" would be the same lie in a quieter
+     * voice — read as a complete routine and invoiced as one.
+     */
+    const note = planOutboundWork(run(), [pass('1'), pass('2')], []).items[0]!.payload.note;
+    expect(note).toContain('An asset nobody reached carries no result and is not counted above.');
+    expect(note).not.toMatch(/every asset (on this visit )?was tested/i);
   });
 
   it('puts the critical defect above the other defects and the failures in the note', () => {
@@ -595,6 +709,72 @@ describe('planOutboundWork — what the office actually reads', () => {
     expect(note).toContain('due by 04/07/2026 14:30 (Qld)');
     expect(note).toContain('Rectification due by 03/08/2026');
     expect(note).not.toContain('2026-07-03');
+  });
+
+  /**
+   * Twelve assets across six differently worded reasons, each of them a
+   * paragraph. The reasons line alone runs past a thousand characters, which is
+   * what makes this the case that breaks a note filled top to bottom.
+   */
+  const wordyReasons = () => planOutboundWork(
+    run(),
+    Array.from({ length: 12 }, (_, i) => pass(String(i + 1), {
+      outcome: 'not-tested',
+      notTestedReason: `Tenancy ${i % 6} refused access on the day and the managing agent could not be reached `
+        + 'before the attendance finished, so the detectors in that tenancy were left for a return visit',
+    })),
+    [defect({ severity: 'critical' })],
+    { bodyLimit: 1800 },
+  );
+
+  it('does not let a long not-tested-reasons line crowd the critical defect out of the note', () => {
+    /*
+     * Filling the note top to bottom is the obvious way and it loses this case:
+     * the reasons run to thousands of characters, the counts sit above the
+     * critical defect block, and the block that carries a 24-hour statutory
+     * clock falls off the end of the note that was supposed to carry it.
+     */
+    const note = wordyReasons().items[1]!.payload.note;
+    expect(note).toContain('*** CRITICAL DEFECT ***');
+    expect(note).toContain('Rectification due by');
+    expect(note.length).toBeLessThanOrEqual(1800);
+  });
+
+  it('cuts the explanation before it cuts the numbers it explains', () => {
+    /*
+     * When the counts section itself has to be shortened, what goes is the free
+     * text at the bottom of it. The sentence that says the routine is not
+     * complete is the one line on this note the office acts on, and it sat below
+     * an unbounded list of reasons where a cut reached it first.
+     */
+    const note = wordyReasons().items[1]!.payload.note;
+    expect(note).toContain('12 of 12 assets were NOT tested');
+    expect(note).toContain('Defects raised: 1, of which 1 CRITICAL.');
+    expect(note).toContain('TRUNCATED');
+  });
+
+  it('says a defect the office already holds was still raised on this visit', () => {
+    /*
+     * It is left out of the count because it is not this note's to report twice.
+     * Saying nothing at all would make a three-defect visit read as a one-defect
+     * visit, which is the same failure as a short service reading as complete.
+     */
+    const plan = planOutboundWork(run(), [pass('1')], [
+      defect({ id: 'd-1' }),
+      defect({ id: 'd-2', sentToOfficeAt: '2026-07-03T05:00:00.000Z' }),
+    ]);
+    const note = plan.items[0]!.payload.note;
+    expect(note).toContain('Defects raised: 1');
+    expect(note).toContain('A further 1 defect was raised on this visit and already reported to the office');
+  });
+
+  it('writes the same note whichever order the result rows arrived in', () => {
+    // Two phones on the same visit produce the same words, so a duplicate in the
+    // office is recognisable by eye as well as by key.
+    const rows = [pass('10'), pass('2'), pass('1', { outcome: 'fail' })];
+    const a = planOutboundWork(run(), rows, []).items[0]!.payload.note;
+    const b = planOutboundWork(run(), [...rows].reverse(), []).items[0]!.payload.note;
+    expect(b).toBe(a);
   });
 
   it('keeps a critical notice and the service record inside the size limit together', () => {
@@ -695,7 +875,7 @@ describe('sendOutboundPlan', () => {
     expect(report.remoteCheck).toBe('checked');
   });
 
-  it('sends anyway when the job\'s notes cannot be read, and says the check was unavailable', async () => {
+  it("sends anyway when the job's notes cannot be read, and says the check was unavailable", async () => {
     /*
      * "Nothing found" and "could not look" are not the same answer. Refusing to
      * push a service record because a second-line check was unavailable would
@@ -705,6 +885,10 @@ describe('sendOutboundPlan', () => {
     const report = await sendOutboundPlan(client, criticalPlan());
     expect(report.remoteCheck).toBe('unavailable');
     expect(report.remoteCheckError).toContain('could not be read');
+    // And which of the two it was. "The key cannot read notes" is fixed in
+    // Simpro in a minute; "the tunnel dropped" fixes itself. A technician told
+    // only that something failed cannot tell those apart or act on either.
+    expect(report.remoteCheckError).toContain('not permitted to read job notes');
     expect(posted).toHaveLength(2);
   });
 
@@ -751,7 +935,7 @@ describe('sendOutboundPlan', () => {
     expect(acceptedKeys(report)).toEqual(plan.items.map((i) => i.key));
   });
 
-  it('carries the plan\'s refusals through, so one screen shows sent and not-sent together', async () => {
+  it("carries the plan's refusals through, so one screen shows sent and not-sent together", async () => {
     const { client } = poster();
     const plan = planOutboundWork(run({ jobId: undefined }), [pass('1')], []);
     const report = await sendOutboundPlan(client, plan);

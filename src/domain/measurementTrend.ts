@@ -30,6 +30,10 @@ import { QUANTITIES, convert, type Unit } from '@/calc/units';
  *    new connection upstream — and that is an investigation, not a decline
  *    curve. Where the step falls inside a long gap between services the two
  *    cannot be told apart, and the module says that instead of choosing.
+ *  - A month of readings is not a history. Three numbers four days apart are
+ *    one attendance being argued with, and dividing what they moved by four
+ *    days gives a rate per year in the thousands. Anything spanning less than
+ *    MINIMUM_SPAN_DAYS is refused for the same reason a single day is.
  *  - A short series is a season. South East Queensland mains demand rises
  *    sharply in a hot summer, so a residual measured in January is not
  *    comparable with one measured in July, and neither is a battery voltage
@@ -68,8 +72,9 @@ export interface Provenance {
 export const CONFOUNDER_SEQ_DEMAND: Provenance = {
   fact:
     'South East Queensland mains demand swings hard with the weather: regional use peaked at an '
-    + 'average 239 litres per person per day in a hot January against about 170 across the year. '
-    + 'Higher demand means lower pressure at the hydrant, with nothing wrong at the site.',
+    + 'average 239 litres per person per day across a hot January, against an average of about '
+    + '170 a day since the Millennium Drought broke. Higher demand means lower pressure at the '
+    + 'hydrant, with nothing wrong at the site.',
   source: 'Seqwater — SEQ water use at record high since the Millennium Drought',
   url: 'https://www.seqwater.com.au/news/seq-water-use-record-high-millennium-drought',
   confidence: 'high',
@@ -256,6 +261,25 @@ export const MEASUREMENT_KINDS: MeasurementKind[] = [
   },
 ];
 
+/**
+ * Whether a key contains a fragment as whole words rather than as a tail of one.
+ *
+ * "Airflow" is a real key in this app's routine table — the airflow of an
+ * aspirating detector, recorded as a percentage — and a plain substring match
+ * reads it as a hydrant flow. That is not a cosmetic mislabel: it hangs the
+ * water network's confounders, sourced and printed on the screen, off a smoke
+ * detector, and tells the technician the app knows a key it does not.
+ */
+function containsWords(key: string, fragment: string): boolean {
+  const boundary = (c: string) => c === '' || !/[a-z0-9]/.test(c);
+  for (let from = 0; ; from += 1) {
+    const at = key.indexOf(fragment, from);
+    if (at < 0) return false;
+    if (boundary(key[at - 1] ?? '') && boundary(key[at + fragment.length] ?? '')) return true;
+    from = at;
+  }
+}
+
 /** The kind a recorded key belongs to, or undefined where the app does not know it. */
 export function kindForKey(key: string): MeasurementKind | undefined {
   const k = key.trim().toLowerCase();
@@ -264,7 +288,7 @@ export function kindForKey(key: string): MeasurementKind | undefined {
   const candidates = MEASUREMENT_KINDS
     .flatMap((kind) => kind.match.map((m) => ({ kind, m })))
     .sort((a, b) => b.m.length - a.m.length);
-  return candidates.find(({ m }) => k === m || k.includes(m))?.kind;
+  return candidates.find(({ m }) => k === m || containsWords(k, m))?.kind;
 }
 
 // ---------------------------------------------------------------------------
@@ -423,6 +447,15 @@ export interface MeasurementPoint {
   value: number;
   /** The unit as recorded. Undefined means the record does not say. */
   unit?: string;
+  /**
+   * True where the unit was not written against the reading and has been
+   * filled in from the routine that records it.
+   *
+   * The distinction has to survive into the trend. A unit taken from the
+   * routine is a reasonable assumption, not a record, and a series that was
+   * silently completed reads exactly like one that was measured properly.
+   */
+  unitAssumed?: boolean;
   /** The event the reading came from, so a point on a chart is traceable. */
   eventId?: string;
   technician?: string;
@@ -493,6 +526,20 @@ export const MINIMUM_POINTS = 3;
 
 /** A year of readings, below which a trend and a season look identical. */
 export const SEASONAL_SPAN_DAYS = 365;
+
+/**
+ * The shortest history that can carry a rate per year.
+ *
+ * The shortest routine in this app's own table (src/seed/serviceRoutines.ts)
+ * is monthly, so three readings inside four weeks are one attendance's retests
+ * — a gauge that would not settle, a battery read before and after a charge —
+ * and not a history. Dividing what they moved by four days and multiplying by
+ * a year turns 40 kPa of settling into 7,000 kPa a year and a projection that
+ * crosses the threshold next month. Refusing here is the same refusal as
+ * refusing a set of readings all taken on one day; the calendar just makes the
+ * one-day case obvious.
+ */
+export const MINIMUM_SPAN_DAYS = 28;
 
 /** Movement smaller than this a year is called flat rather than a direction. */
 export const FLAT_PERCENT_PER_YEAR = 1;
@@ -601,7 +648,8 @@ export interface StepChange {
   from: MeasurementPoint;
   to: MeasurementPoint;
   delta: number;
-  percent: number;
+  /** Undefined where the earlier reading was zero and a proportion has no meaning. */
+  percent?: number;
   days: number;
   /**
    * False when the step sits inside a gap long enough that a steady decline
@@ -703,9 +751,14 @@ const T95: [number, number][] = [
 
 function tValue(df: number): number {
   if (df <= 0) return Number.POSITIVE_INFINITY;
-  let value = 1.96;
+  // Between two rows, take the wider multiplier — the one for the smaller
+  // degrees of freedom. Rounding the other way (11 readings read off the row
+  // for 12) narrows an interval that is supposed to be a 95% one, and the
+  // whole point of this table is that the range is not flattered.
+  let value = T95[0]![1];
   for (const [k, v] of T95) {
-    if (df <= k) { value = v; break; }
+    if (df < k) break;
+    value = v;
   }
   return value;
 }
@@ -799,11 +852,22 @@ export function trendMeasurements(
 
   // --- Units ---------------------------------------------------------------
   const stated = new Map<string, number>();
+  /** Readings nothing anywhere gives a unit for. */
   let unstated = 0;
+  /** Readings whose unit was filled in from the routine rather than recorded. */
+  let assumed = 0;
   for (const { point } of dated) {
-    const u = normaliseUnit(point.unit) ?? normaliseUnit(options.assumeUnit);
-    if (u) stated.set(u, (stated.get(u) ?? 0) + 1);
-    else unstated += 1;
+    const written = normaliseUnit(point.unit);
+    const u = written ?? normaliseUnit(options.assumeUnit);
+    if (!u) {
+      unstated += 1;
+      continue;
+    }
+    // A unit the caller supplied — or one seriesFromEvents took off the
+    // routine — is an assumption and is counted as one. Losing that here is
+    // how a bare "630" becomes 630 kPa with nothing on the screen to say so.
+    if (!written || point.unitAssumed) assumed += 1;
+    stated.set(u, (stated.get(u) ?? 0) + 1);
   }
 
   let target: string | undefined;
@@ -870,7 +934,10 @@ export function trendMeasurements(
   }
 
   // --- A key holding two quantities ----------------------------------------
-  if (kind?.ambiguous && (!target || unstated > 0)) {
+  // An assumed unit is not a separator. Filling "kPa" in from the routine on a
+  // key that records kPa on one extinguisher and kg on the next would decide
+  // by default the very thing this refusal exists to protect.
+  if (kind?.ambiguous && (!target || unstated > 0 || assumed > 0)) {
     return refuse(base, 'ambiguous-key', kind.ambiguous, cautions);
   }
 
@@ -882,12 +949,14 @@ export function trendMeasurements(
         + 'still hold, because they are relative; the rate has no unit and cannot be compared '
         + 'against a threshold.',
     });
-  } else if (unstated > 0) {
+  } else if (unstated + assumed > 0) {
+    const n = unstated + assumed;
     cautions.push({
       code: 'unit-unstated',
-      message: `${unstated} reading${unstated === 1 ? ' has' : 's have'} no unit recorded and `
-        + `${unstated === 1 ? 'was' : 'were'} read as ${target}. If a gauge was in bar that day, `
-        + 'this trend is wrong.',
+      message: `${n} reading${n === 1 ? ' has' : 's have'} no unit written against `
+        + `${n === 1 ? 'it' : 'them'} and ${n === 1 ? 'was' : 'were'} read as ${target}`
+        + `${assumed > 0 ? ', which is the unit the routine records for this measurement' : ''}. `
+        + 'If a gauge was in bar that day, this trend is wrong.',
     });
   }
 
@@ -918,6 +987,19 @@ export function trendMeasurements(
       'no-time-span',
       'Every reading is from the same day, so these are repeats of one measurement rather than a '
       + 'history. Their spread is worth looking at; their trend does not exist.',
+      cautions,
+    );
+  }
+  if (spanDays < MINIMUM_SPAN_DAYS) {
+    return refuse(
+      base,
+      'no-time-span',
+      `All ${used.length} readings were taken within ${spanDays} days of each other, and the `
+      + 'shortest routine this app records runs monthly. Readings this close together are one '
+      + `attendance retested rather than a history: scaled to a year, ${spanDays} days of drift `
+      + `is multiplied by ${Math.round(SEASONAL_SPAN_DAYS / spanDays)}, and whatever the gauge `
+      + 'was doing that morning becomes a rate of decline. Their spread is worth looking at; '
+      + 'their trend is not.',
       cautions,
     );
   }
@@ -1051,7 +1133,7 @@ export function trendMeasurements(
   } else if (used.length >= 4 && spanDays >= SEASONAL_SPAN_DAYS && fit.r2 >= 0.4 && shape !== 'unclear') {
     confidence = 'medium';
   }
-  if (confidence === 'high' && unstated > 0) confidence = 'medium';
+  if (confidence === 'high' && unstated + assumed > 0) confidence = 'medium';
   if (spanDays < SEASONAL_SPAN_DAYS || shape === 'unclear' || !target) confidence = 'low';
 
   return {
@@ -1107,7 +1189,13 @@ function detectStep(
     return {
       from, to, delta, days,
       rate: years > 0 ? delta / years : 0,
-      fraction: from.point.value === 0 ? 0 : Math.abs(delta / from.point.value),
+      // Movement away from a zero reading has no percentage — every change is
+      // an infinite proportion of nothing — and calling it zero per cent hides
+      // the largest step there is. A hydrant that read 0 kPa and then 500 was
+      // dead and is not any more, which is the event this looks for.
+      fraction: from.point.value === 0
+        ? (delta === 0 ? 0 : Number.POSITIVE_INFINITY)
+        : Math.abs(delta / from.point.value),
     };
   });
 
@@ -1123,7 +1211,12 @@ function detectStep(
   const dominant = median === 0 ? Math.abs(worst.rate) > 0 : Math.abs(worst.rate) >= dominance * median;
   if (!dominant || worst.fraction < relative) return undefined;
 
-  const dayList = intervals.map((i) => i.days).sort((a, b) => a - b);
+  // The usual interval has to be measured from the OTHER services, exactly as
+  // the usual rate is. A long gap that is included in its own median drags the
+  // median up towards itself — with three readings it is half of it outright —
+  // and a four-year silence then measures as an ordinary one and gets reported
+  // as a step somebody can investigate. Nobody was there; that is the point.
+  const dayList = intervals.filter((i) => i !== worst).map((i) => i.days).sort((a, b) => a - b);
   const medianDays = dayList.length % 2
     ? dayList[(dayList.length - 1) / 2]!
     : (dayList[dayList.length / 2 - 1]! + dayList[dayList.length / 2]!) / 2;
@@ -1134,8 +1227,15 @@ function detectStep(
     return at !== undefined && at > worst.from.ms && at <= worst.to.ms;
   });
 
-  const percent = worst.delta / (worst.from.point.value || 1) * 100;
-  const movement = `${percent > 0 ? 'rose' : 'fell'} ${Math.abs(percent).toFixed(0)}%`;
+  // Undefined rather than a percentage of one: dividing by a zero reading has
+  // no answer, and quoting the delta as though the baseline were 1 kPa is a
+  // number somebody would repeat to a client.
+  const percent = worst.from.point.value === 0
+    ? undefined
+    : worst.delta / worst.from.point.value * 100;
+  const movement = percent === undefined
+    ? `went from 0 to ${worst.to.point.value}`
+    : `${percent > 0 ? 'rose' : 'fell'} ${Math.abs(percent).toFixed(0)}%`;
   const between = `between ${formatAuDate(worst.from.point.at)} and ${formatAuDate(worst.to.point.at)}`;
 
   const message = explanation
@@ -1243,6 +1343,15 @@ export function projectToThreshold(
     return firstValue >= threshold.value ? 'minimum' : 'maximum';
   };
 
+  // Even a refusal is printed under a heading — "Falls below 350 kPa" — so the
+  // floor-or-ceiling question has to be answered before the refusal, not only
+  // on the paths that reach an answer. A ceiling refused under "falls below"
+  // is the wrong word on a screen somebody reads in a plant room.
+  const defaultKind: 'minimum' | 'maximum' = threshold.kind
+    ?? (trend.deterioration
+      ? (trend.deterioration === 'falling' ? 'minimum' : 'maximum')
+      : trend.first && trend.first.value < threshold.value ? 'maximum' : 'minimum');
+
   const shell = (
     status: ProjectionStatus,
     label: string,
@@ -1251,7 +1360,7 @@ export function projectToThreshold(
     status,
     threshold: threshold.value,
     unit: threshold.unit ?? trend.unit,
-    kind: threshold.kind ?? 'minimum',
+    kind: defaultKind,
     label,
     assumption: PROJECTION_ASSUMPTION,
     cautions: [],
@@ -1268,6 +1377,20 @@ export function projectToThreshold(
   // A threshold in kPa against readings with no unit, or in a different unit,
   // is a comparison of two different numbers that happen to be side by side.
   const thresholdUnit = normaliseUnit(threshold.unit);
+
+  // Both sides bare is the trap: 350 against a series of unitless numbers
+  // compares without complaint and produces a date. Nothing in the record says
+  // those readings are pressures at all, so the comparison is refused whether
+  // or not the threshold names a unit — a caller that leaves both blank must
+  // not get an answer a caller that filled one in is refused.
+  if (!trend.unit) {
+    return shell('unknown', 'No projection', {
+      reason: 'These readings carry no unit at all, so nothing establishes that they and this '
+        + `threshold measure the same thing.${thresholdUnit ? ` The threshold is in ${thresholdUnit}.` : ''} `
+        + 'Record the unit against the readings and the comparison can be made.',
+    });
+  }
+
   if (thresholdUnit && trend.unit && thresholdUnit !== trend.unit) {
     const from = lookupUnit(thresholdUnit);
     const to = lookupUnit(trend.unit);
@@ -1284,12 +1407,6 @@ export function projectToThreshold(
       { ...threshold, value: convert(threshold.value, pair.unit, target.unit), unit: trend.unit },
       options,
     );
-  }
-  if (thresholdUnit && !trend.unit) {
-    return shell('unknown', 'No projection', {
-      reason: `The threshold is in ${thresholdUnit} and the readings carry no unit at all, so `
-        + 'there is nothing to say the two are the same quantity.',
-    });
   }
 
   if (trend.shape === 'unclear') {
@@ -1524,6 +1641,22 @@ export function rankDeterioration(
       });
       continue;
     }
+    // A step is an event, not a rate. Fitting a line through it and printing
+    // the answer as "losing 13% a year" is the mistake this module spends most
+    // of its length avoiding, and a ranked list is where a number gets read
+    // fastest and questioned least. It is listed with the date instead, which
+    // is a better prompt for the work it actually needs.
+    if (trend.shape === 'step' && trend.step) {
+      notRanked.push({
+        ...head,
+        reason: `The reading changed sharply ${formatAuDate(trend.step.from.at)} to `
+          + `${formatAuDate(trend.step.to.at)}`
+          + `${trend.step.explanation ? ` ("${trend.step.explanation.what}")` : ''}. `
+          + 'Either side of that is two different states of this asset, so there is no one rate '
+          + 'to rank it on. It needs looking at rather than ordering.',
+      });
+      continue;
+    }
     const bad = trend.deterioration;
     if (!bad) {
       notRanked.push({
@@ -1604,10 +1737,16 @@ export function seriesFromEvents(
         continue;
       }
       const list = byKey.get(key) ?? [];
+      // A unit taken off the routine is marked as taken off the routine. The
+      // trend needs to be able to tell "630 kPa" from "630, and the routine
+      // says this one is in kPa" — the second is an assumption a technician is
+      // entitled to see before a threshold is compared against it.
+      const fromRoutine = parsed.unit === undefined ? options.units?.[key] : undefined;
       list.push({
         at: event.occurredAt,
         value: parsed.value,
-        unit: parsed.unit ?? options.units?.[key],
+        unit: parsed.unit ?? fromRoutine,
+        unitAssumed: fromRoutine ? true : undefined,
         eventId: event.id,
         technician: event.technician,
       });
@@ -1652,7 +1791,10 @@ export function trendHeadline(trend: MeasurementTrend): string {
   const percentPart = pct !== undefined ? ` (${Math.abs(pct).toFixed(1)}% a year)` : '';
 
   if (trend.shape === 'step' && trend.step) {
-    return `Step change of ${trend.step.percent > 0 ? '+' : ''}${trend.step.percent.toFixed(0)}% `
+    const size = trend.step.percent === undefined
+      ? `from ${trend.step.from.value} to ${trend.step.to.value}`
+      : `of ${trend.step.percent > 0 ? '+' : ''}${trend.step.percent.toFixed(0)}%`;
+    return `Step change ${size} `
       + `${trend.step.explanation ? 'explained by recorded work' : 'with no recorded cause'}, `
       + `${formatAuDate(trend.step.to.at)}.`;
   }

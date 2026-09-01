@@ -227,6 +227,57 @@ describe('trendMeasurements — refusing what cannot be trended', () => {
     expect(trend.cautions.map((c) => c.code)).toContain('excluded-readings');
   });
 
+  it('refuses three readings taken inside one attendance, however far apart the numbers are', () => {
+    // A gauge that would not settle, read three times across four days. Scaled
+    // to a year that is a fall of thousands of kPa and a threshold crossed
+    // next month; it is one measurement being argued with.
+    const trend = trendMeasurements(series({
+      points: [
+        { at: '2026-03-01', value: 700, unit: 'kPa' },
+        { at: '2026-03-03', value: 660, unit: 'kPa' },
+        { at: '2026-03-05', value: 620, unit: 'kPa' },
+      ],
+    }));
+    expect(trend.status).toBe('no-time-span');
+    expect(trend.ratePerYear).toBeUndefined();
+    expect(trend.refusal).toMatch(/within 4 days/);
+    expect(trend.refusal).toMatch(/monthly/);
+  });
+
+  it('says so when a unit came from the routine rather than from the reading', () => {
+    // The screen fills a bare "630" in from the routine's own unit, which is a
+    // reasonable assumption and not a record. A series completed silently
+    // reads exactly like one that was measured properly, and it is then
+    // compared against a threshold in kPa.
+    const built = seriesFromEvents('hyd-1', [
+      { occurredAt: '2020-03-01', measurements: { 'Residual pressure': '700' } },
+      { occurredAt: '2021-03-01', measurements: { 'Residual pressure': '665' } },
+      { occurredAt: '2022-03-01', measurements: { 'Residual pressure': 630 } },
+    ], { units: { 'Residual pressure': 'kPa' } });
+    expect(built.series[0]!.points.every((p) => p.unitAssumed)).toBe(true);
+
+    const trend = trendMeasurements(built.series[0]!);
+    expect(trend.unit).toBe('kPa');
+    const caution = trend.cautions.find((c) => c.code === 'unit-unstated');
+    expect(caution).toBeDefined();
+    expect(caution!.message).toMatch(/3 readings have no unit written against them/);
+    expect(caution!.message).toMatch(/the unit the routine records/);
+  });
+
+  it('will not let a routine unit decide which quantity an ambiguous key holds', () => {
+    // "Gauge reading or mass" records kPa on one extinguisher and kg on the
+    // next. Filling kPa in from the routine would settle by default the one
+    // thing the ambiguity refusal exists to protect.
+    const built = seriesFromEvents('ext-1', [
+      { occurredAt: '2020-03-01', measurements: { 'Gauge reading or mass': '1400' } },
+      { occurredAt: '2021-03-01', measurements: { 'Gauge reading or mass': '1380' } },
+      { occurredAt: '2022-03-01', measurements: { 'Gauge reading or mass': '6.2' } },
+    ], { units: { 'Gauge reading or mass': 'kPa' } });
+    const trend = trendMeasurements(built.series[0]!);
+    expect(trend.status).toBe('ambiguous-key');
+    expect(trend.ratePerYear).toBeUndefined();
+  });
+
   it('trends without a unit but refuses to compare the result with a threshold', () => {
     // Bare numbers can still rise or fall. They cannot be measured against
     // 350 kPa, because nothing says they are pressures at all.
@@ -358,7 +409,7 @@ describe('trendMeasurements — a step is not a drift', () => {
     expect(trend.step).toBeDefined();
     expect(trend.step!.from.value).toBe(690);
     expect(trend.step!.to.value).toBe(420);
-    expect(Math.round(trend.step!.percent)).toBe(-39);
+    expect(Math.round(trend.step!.percent!)).toBe(-39);
     expect(trend.step!.distinguishable).toBe(true);
     expect(trend.step!.message).toMatch(/event, not wear/);
     expect(trend.cautions.map((c) => c.code)).toContain('step');
@@ -396,6 +447,47 @@ describe('trendMeasurements — a step is not a drift', () => {
     expect(trend.shape).toBe('unclear');
     expect(trend.step!.message).toMatch(/look identical/);
     expect(trend.cautions.map((c) => c.code)).toContain('step-in-gap');
+  });
+
+  it('will not call a long gap distinguishable just because it is half the record', () => {
+    // Three readings, the last of them nearly three years after the one
+    // before. Measured against a median the gap is itself part of, a gap can
+    // be most of the history and still measure as ordinary — and a silence
+    // that long then gets reported as an event somebody can investigate.
+    const trend = trendMeasurements(series({
+      points: [
+        { at: '2020-03-01', value: 700, unit: 'kPa' },
+        { at: '2021-03-01', value: 695, unit: 'kPa' },
+        { at: '2023-12-01', value: 420, unit: 'kPa' },
+      ],
+    }));
+    expect(trend.step!.days).toBeGreaterThan(900);
+    expect(trend.step!.distinguishable).toBe(false);
+    expect(trend.shape).toBe('unclear');
+    expect(trend.cautions.map((c) => c.code)).toContain('step-in-gap');
+
+    const projection = projectToThreshold(trend, { value: 350, unit: 'kPa' }, { today: '2023-12-01' });
+    expect(projection.status).toBe('unknown');
+  });
+
+  it('sees the step out of a zero reading, which has no percentage at all', () => {
+    // A hydrant that read 0 kPa was dead — an upstream valve shut, a main down
+    // — and 500 the next year is the repair, not a year of improvement.
+    // Measured as a proportion of zero the change is either nothing or
+    // everything, and calling it nothing loses the largest step in the record.
+    const trend = trendMeasurements(series({
+      points: [
+        { at: '2020-03-01', value: 0, unit: 'kPa' },
+        { at: '2021-03-01', value: 500, unit: 'kPa' },
+        { at: '2022-03-01', value: 495, unit: 'kPa' },
+        { at: '2023-03-01', value: 490, unit: 'kPa' },
+      ],
+    }));
+    expect(trend.shape).toBe('step');
+    expect(trend.step!.from.value).toBe(0);
+    // No percentage at all, rather than a percentage of one kPa.
+    expect(trend.step!.percent).toBeUndefined();
+    expect(trendHeadline(trend)).toMatch(/Step change from 0 to 500/);
   });
 
   it('reports scattered readings as unclear rather than quoting a rate from them', () => {
@@ -476,6 +568,38 @@ describe('projectToThreshold', () => {
     expect(projection.cautions.some((c) => /since the step change/.test(c.message))).toBe(true);
   });
 
+  it('refuses a bare threshold against bare readings, not only one that names a unit', () => {
+    // The trap is both sides blank: 350 against a column of unitless numbers
+    // compares without complaint and prints a date. Nothing in the record says
+    // those readings are pressures, and the screen offers the threshold in
+    // whatever unit the trend is in — which here is none.
+    const trend = trendMeasurements(series({
+      points: [
+        { at: '2020-03-01', value: 700 },
+        { at: '2021-03-01', value: 665 },
+        { at: '2022-03-01', value: 630 },
+      ],
+    }));
+    const projection = projectToThreshold(trend, { value: 350 }, { today: '2022-03-01' });
+    expect(projection.status).toBe('unknown');
+    expect(projection.earliest).toBeUndefined();
+    expect(projection.reason).toMatch(/no unit at all/);
+  });
+
+  it('names a ceiling as a ceiling even when it is refusing to project', () => {
+    // The refusal is printed under a heading — "Falls below 40 Ω" is the wrong
+    // sentence about a loop impedance, which fails by rising, and it is read
+    // by somebody standing at a panel.
+    const trend = trendMeasurements(series({
+      key: 'Circuit impedance',
+      points: yearly([40, 44], 'Ω'),
+    }));
+    expect(trend.status).toBe('insufficient');
+    const projection = projectToThreshold(trend, { value: 60, unit: 'Ω' }, { today: TODAY });
+    expect(projection.status).toBe('unknown');
+    expect(projection.kind).toBe('maximum');
+  });
+
   it('refuses a threshold in a quantity the readings are not in', () => {
     const trend = trendMeasurements(series({ points: yearly([700, 665, 630, 595]) }));
     const projection = projectToThreshold(trend, { value: 24, unit: 'V' }, { today: TODAY });
@@ -541,6 +665,20 @@ describe('rankDeterioration', () => {
     expect(reasons['hyd-4']).toMatch(/straight line perfectly/);
     // An unknown key is not ranked at all: nothing establishes which way is bad.
     expect(reasons['wid-1']).toMatch(/which direction is deterioration/);
+  });
+
+  it('will not rank an asset that stepped, because a step is an event and not a rate', () => {
+    // Fitting a line through a valve being shut and printing "losing 13% a
+    // year" is the exact mistake the rest of this module exists to avoid, and
+    // a ranked list is where a number is read fastest and questioned least.
+    const ranking = rankDeterioration([
+      { assetId: 'hyd-9', assetName: 'Hydrant 9', key: HYDRANT, points: yearly([700, 695, 690, 420, 415]) },
+    ]);
+    expect(ranking.ranked).toHaveLength(0);
+    const reason = ranking.notRanked.find((n) => n.assetId === 'hyd-9')!.reason;
+    expect(reason).toMatch(/changed sharply/);
+    // The dates are there so the row is a prompt to investigate, not a dead end.
+    expect(reason).toContain('1/3/2023');
   });
 
   it('carries a projection on each row where the office holds a threshold', () => {
@@ -612,6 +750,21 @@ describe('the measurement catalogue', () => {
     expect(kindForKey('')).toBeUndefined();
   });
 
+  it("does not read an aspirating detector's Airflow as a hydrant's flow", () => {
+    // "Airflow" is a real key in this app's routine table, recorded as a
+    // percentage on a smoke aspirating system. Matched as a hydrant flow it
+    // inherits the water network's confounders — sourced, printed on the
+    // screen, and about somebody else's asset entirely.
+    expect(kindForKey('Airflow')).toBeUndefined();
+    expect(kindForKey('Flow')?.id).toBe('flow');
+    expect(kindForKey('Flow rate')?.id).toBe('flow');
+
+    const trend = trendMeasurements(series({ key: 'Airflow', points: yearly([95, 92, 88], '%') }));
+    expect(trend.interpretation).toBe('unknown');
+    expect(trend.cautions.map((c) => c.code)).toContain('unknown-key');
+    expect(trend.cautions.filter((c) => c.code === 'confounded')).toHaveLength(0);
+  });
+
   it('gives every second-hand fact a source and a confidence', () => {
     for (const kind of MEASUREMENT_KINDS) {
       for (const c of kind.confounders) {
@@ -626,63 +779,3 @@ describe('the measurement catalogue', () => {
   });
 });
 
-// ---- TEMPORARY PROBES ----
-describe('PROBE', () => {
-  it('probe', () => {
-    const p1 = kindForKey('Airflow');
-    console.log('PROBE airflow kind:', p1?.id, p1?.unit, p1?.confounders.map((c) => c.source));
-
-    const built = seriesFromEvents('a', [
-      { occurredAt: '2020-03-01', measurements: { 'Residual pressure': '700' } },
-      { occurredAt: '2021-03-01', measurements: { 'Residual pressure': '665' } },
-      { occurredAt: '2022-03-01', measurements: { 'Residual pressure': '630' } },
-    ], { units: { 'Residual pressure': 'kPa' } });
-    const t2 = trendMeasurements(built.series[0]!);
-    console.log('PROBE assumed-unit cautions:', t2.cautions.map((c) => c.code), t2.unit);
-
-    const t3 = trendMeasurements(series({
-      points: [
-        { at: '2020-03-01', value: 700 }, { at: '2021-03-01', value: 665 }, { at: '2022-03-01', value: 630 },
-      ],
-    }));
-    const p3 = projectToThreshold(t3, { value: 350 }, { today: '2022-03-01' });
-    console.log('PROBE unitless projection:', p3.status, p3.label, p3.reason);
-
-    const t4 = trendMeasurements(series({
-      points: [
-        { at: '2020-03-01', value: 700, unit: 'kPa' },
-        { at: '2021-03-01', value: 695, unit: 'kPa' },
-        { at: '2023-12-01', value: 420, unit: 'kPa' },
-      ],
-    }));
-    console.log('PROBE 3pt long gap:', t4.shape, t4.step?.days, t4.step?.distinguishable);
-
-    const t5 = trendMeasurements(series({
-      points: [
-        { at: '2020-03-01', value: 0, unit: 'kPa' },
-        { at: '2021-03-01', value: 500, unit: 'kPa' },
-        { at: '2022-03-01', value: 495, unit: 'kPa' },
-        { at: '2023-03-01', value: 490, unit: 'kPa' },
-      ],
-    }));
-    console.log('PROBE zero baseline:', t5.shape, t5.step?.percent, t5.ratePerYear, t5.interpretation, trendHeadline(t5));
-
-    const t6 = trendMeasurements(series({
-      points: [
-        { at: '2026-03-01', value: 700, unit: 'kPa' },
-        { at: '2026-03-03', value: 660, unit: 'kPa' },
-        { at: '2026-03-05', value: 620, unit: 'kPa' },
-      ],
-    }));
-    console.log('PROBE 4-day span:', t6.status, t6.spanDays, t6.ratePerYear, t6.ratePercentPerYear, trendHeadline(t6));
-    console.log('PROBE 4-day projection:', projectToThreshold(t6, { value: 350, unit: 'kPa' }, { today: '2026-03-05' }).label);
-
-    const t7 = trendMeasurements(series({
-      key: 'Gauge reading or mass',
-      points: [
-        { at: '2020-03-01', value: 1400 }, { at: '2021-03-01', value: 1380 }, { at: '2022-03-01', value: 6.2 },
-      ],
-    }), { assumeUnit: 'kPa' });
-    console.log('PROBE ambiguous with assumeUnit:', t7.status, t7.unit, t7.ratePerYear);
-  });
-});
