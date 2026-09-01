@@ -24,8 +24,10 @@ jobs:
           node-version: 22
           cache: npm
 
-      # The Expo dependency tree carries a pre-existing react/react-dom peer
-      # conflict, so a plain `npm ci` cannot resolve it.
+      # The repository's .npmrc sets legacy-peer-deps, because Expo 57 pulls
+      # react-native-reanimated 4.5.1 which peers on react-native-worklets
+      # 0.10.x, and npm's strict resolution refuses the tree. The flag is kept
+      # here as well so this step still works if the file is ever dropped.
       - name: Install
         run: npm ci --legacy-peer-deps
 

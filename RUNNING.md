@@ -15,6 +15,10 @@ npm install
 npm start
 ```
 
+(The repository carries an `.npmrc` setting `legacy-peer-deps=true`. Expo 57's
+own dependency tree has a peer conflict npm will not resolve on its own, and
+without that setting `npm install` fails on a clean checkout.)
+
 Metro prints a QR code. On the phone:
 
 1. Install **Expo Go** from the Play Store.
@@ -64,6 +68,26 @@ Upload the `.aab` to the Play Console under **Internal testing** and add
 testers by email. Requires a Google Play developer account.
 
 ---
+
+## First run — the app starts empty
+
+A fresh install has no sites and no assets, which is correct and briefly
+confusing. Two things get it to look like your round:
+
+1. **Settings → You.** Your name, licence number and company prefill every
+   report, Form 72 and timesheet. Two minutes here saves retyping on every job.
+2. **Import your register.** Sites tab → a site → **Import**, or the Import
+   screen for a whole register export. The column-mapping step shows what it
+   read before anything is written, and it reports rows it could not read
+   rather than dropping them.
+
+The app opens in **technician mode**, which keeps the office half — planning,
+quoting, ordering, portfolio — out of the lists. Nothing is deleted: Settings →
+**What this device shows** switches to office mode, and every hidden screen
+says why it is hidden and how it is still reached.
+
+Nothing else needs setting up. Every calculator, the standards library and the
+whole reference work offline with no account and no key.
 
 ## Checking it before you build
 
