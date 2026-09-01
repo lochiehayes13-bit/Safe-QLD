@@ -155,7 +155,14 @@ export const NOTE_LIMITS: { subject: FieldLimit; body: FieldLimit } = {
   },
 };
 
-/** The smallest a section can be cut to and still be worth reading. */
+/**
+ * The smallest amount of a section worth keeping at all.
+ *
+ * Used twice: a section with less room than this is left out whole rather than
+ * reduced to a fragment, and a sentence end this early in a block is passed over
+ * in favour of a later line ending, so a list is cut between its lines instead
+ * of after its first heading.
+ */
 const MIN_USEFUL_SECTION = 120;
 
 // ---------------------------------------------------------------------------
@@ -704,10 +711,25 @@ function countLine(summary: ServiceSummary): string {
     + `${summary.failed} failed. Not tested: ${summary.notTested}.`;
 }
 
+/**
+ * How many distinct reasons are named before the rest are counted instead.
+ *
+ * A note that lists ninety-one differently worded reasons is unreadable, and it
+ * crowds out the count it exists to explain. The common ones are named; the tail
+ * is counted so nothing goes missing without being mentioned.
+ */
+const MAX_NAMED_REASONS = 6;
+
 function reasonsLine(summary: ServiceSummary): string | undefined {
   if (!summary.notTestedReasons.length) return undefined;
-  const parts = summary.notTestedReasons.map((r) => `${r.reason} (${r.count})`);
-  return `Not tested because: ${parts.join('; ')}.`;
+  const named = summary.notTestedReasons.slice(0, MAX_NAMED_REASONS);
+  const rest = summary.notTestedReasons.slice(MAX_NAMED_REASONS);
+  const parts = named.map((r) => `${r.reason} (${r.count})`);
+  const tail = rest.length
+    ? ` and ${rest.reduce((n, r) => n + r.count, 0)} more across ${rest.length} other reasons, `
+      + 'each named in the full record'
+    : '';
+  return `Not tested because: ${parts.join('; ')}${tail}.`;
 }
 
 function criticalBlock(defect: OutboundDefect, run: CompletedRoutineRun): string[] {
@@ -742,6 +764,12 @@ interface NoteSection {
   /** Named so a truncation can say what went. */
   id: string;
   text: string;
+  /**
+   * An essential section is never dropped to make room for one below it. The
+   * counts and the critical defects are the note; the per-asset detail is
+   * supporting material that the full record holds anyway.
+   */
+  essential: boolean;
 }
 
 function composeSections(
@@ -765,7 +793,7 @@ function composeSections(
     head.push('AMENDED RECORD: this attendance was reported earlier and the record has since changed. '
       + 'This note replaces the earlier one.');
   }
-  sections.push({ id: 'header', text: head.join('\n') });
+  sections.push({ id: 'header', text: head.join('\n'), essential: true });
 
   // The counts come before anything else a reader might stop at. This is the
   // number that decides whether the job can be invoiced.
@@ -780,12 +808,12 @@ function composeSections(
   }
   counts.push(`Defects raised: ${summary.defectsRaised}`
     + (summary.criticalDefects ? `, of which ${summary.criticalDefects} CRITICAL.` : '.'));
-  sections.push({ id: 'results', text: counts.join('\n') });
+  sections.push({ id: 'results', text: counts.join('\n'), essential: true });
 
   if (criticals.length) {
     const block = [`CRITICAL DEFECTS (${criticals.length}) - statutory clocks have started`];
     for (const defect of criticals) block.push(criticalBlock(defect, run).join('\n'));
-    sections.push({ id: 'critical defects', text: block.join('\n\n') });
+    sections.push({ id: 'critical defects', text: block.join('\n\n'), essential: true });
   }
 
   if (others.length) {
@@ -795,7 +823,7 @@ function composeSections(
       block.push(`- ${defect.location.trim() || 'location not recorded'}: ${defect.description.trim()} `
         + `[${label}, raised ${qldDay(defect.raisedAt) ?? 'date not readable'}, ${defect.status}]`);
     }
-    sections.push({ id: 'other defects', text: block.join('\n') });
+    sections.push({ id: 'other defects', text: block.join('\n'), essential: false });
   }
 
   const failed = results.filter((r) => r.outcome === 'fail').sort(byAssetOrder);
@@ -804,7 +832,7 @@ function composeSections(
     for (const row of failed) {
       block.push(`- ${assetLabel(row)}${row.notes?.trim() ? `: ${row.notes.trim()}` : ''}`);
     }
-    sections.push({ id: 'failed assets', text: block.join('\n') });
+    sections.push({ id: 'failed assets', text: block.join('\n'), essential: false });
   }
 
   const notTested = results.filter((r) => r.outcome === 'not-tested').sort(byAssetOrder);
@@ -813,11 +841,11 @@ function composeSections(
     for (const row of notTested) {
       block.push(`- ${assetLabel(row)}: ${row.notTestedReason?.trim() || 'reason not recorded'}`);
     }
-    sections.push({ id: 'not tested assets', text: block.join('\n') });
+    sections.push({ id: 'not tested assets', text: block.join('\n'), essential: false });
   }
 
   if (run.notes?.trim()) {
-    sections.push({ id: 'technician notes', text: `TECHNICIAN NOTES\n${run.notes.trim()}` });
+    sections.push({ id: 'technician notes', text: `TECHNICIAN NOTES\n${run.notes.trim()}`, essential: false });
   }
 
   // Passed assets are counted, never listed. Forty lines of "passed" push the
@@ -836,16 +864,18 @@ interface AssembledNote {
 /**
  * Fits the sections into the budget, keeping the ones that matter.
  *
- * The sections arrive in the order a reader needs them, which is also the order
- * they must survive in: header, counts, critical defects, then detail. Detail is
- * shortened from the end and whatever went is named — "12 not-tested lines
- * omitted, full record in report SQ-1042" is useful, a note that simply stops is
- * not.
+ * Filling top to bottom until the room runs out is the obvious approach and it
+ * is wrong here: the counts are near the top and the not-tested reasons can run
+ * to thousands of characters, so a long list of reasons would push the critical
+ * defect block out of the note that carries it. Instead the essential sections —
+ * the header, the counts, the critical defects — are fitted first and share the
+ * budget between them, and the per-asset detail gets whatever is left. Detail
+ * lives in the full record either way; the counts and a critical defect do not
+ * exist anywhere the office is looking.
  *
  * Room for the footer is reserved before anything is fitted, using the longest
- * form it can take. Composing first and trimming afterwards is the obvious
- * approach and it is wrong: the trim would eat the marker, and a note without
- * its marker cannot be recognised on a retry.
+ * form it can take. Composing first and trimming afterwards would eat the
+ * marker, and a note without its marker cannot be recognised on a retry.
  */
 function assemble(sections: NoteSection[], key: string, fullRecordAt: string, limit: number): AssembledNote {
   const markerLine = marker(key);
@@ -853,56 +883,77 @@ function assemble(sections: NoteSection[], key: string, fullRecordAt: string, li
   const plainFooter = `Full record: ${fullRecordAt}.\n${markerLine}`;
 
   if (`${body}\n\n${plainFooter}`.length <= limit) {
-    return {
-      text: `${body}\n\n${plainFooter}`,
-      truncated: false,
-      omittedChars: 0,
-      omittedSections: [],
-    };
+    return { text: `${body}\n\n${plainFooter}`, truncated: false, omittedChars: 0, omittedSections: [] };
   }
 
   const truncatedFooter = (omittedChars: number, omitted: string[]): string =>
     `[TRUNCATED to fit the note field: ${omittedChars} characters not shown`
     + `${omitted.length ? ` (${omitted.join(', ')})` : ''}. Full record: ${fullRecordAt}.]\n${markerLine}`;
 
-  // The worst case: every section named, and a character count as long as the
-  // whole composed record.
+  // The worst case footer: every section named, and a character count as long as
+  // the whole composed record.
   const reserve = truncatedFooter(body.length, sections.map((x) => `${x.id} shortened`)).length + 2;
-  const budget = limit - reserve;
+  let remaining = limit - reserve;
 
-  const kept: string[] = [];
+  const kept = new Map<string, string>();
   const omitted: string[] = [];
   let omittedChars = 0;
-  let full = true;
 
-  for (const section of sections) {
-    const used = kept.length ? kept.join('\n\n').length + 2 : 0;
-    const room = budget - used;
-    if (!full || room <= 0) {
+  const take = (section: NoteSection, room: number): void => {
+    if (room < MIN_USEFUL_SECTION && section.text.length > room) {
       omitted.push(section.id);
       omittedChars += section.text.length;
-      continue;
+      return;
     }
     if (section.text.length <= room) {
-      kept.push(section.text);
-      continue;
+      kept.set(section.id, section.text);
+      remaining -= section.text.length + 2;
+      return;
     }
     const cut = truncateOnSentence(section.text, room);
-    if (cut.text.length >= MIN_USEFUL_SECTION) {
-      kept.push(cut.text);
-      omitted.push(`${section.id} shortened`);
-      omittedChars += cut.omittedChars;
-    } else {
-      // Too little would survive to mean anything, so the section goes whole
-      // and is named. Half a defect line is worse than a stated absence.
+    if (!cut.text.length) {
       omitted.push(section.id);
       omittedChars += section.text.length;
+      return;
     }
-    full = false;
+    kept.set(section.id, cut.text);
+    omitted.push(`${section.id} shortened`);
+    omittedChars += cut.omittedChars;
+    remaining -= cut.text.length + 2;
+  };
+
+  // Essential sections first, each held to an equal share of what is left when
+  // they cannot all fit whole. Recomputed as it goes, so a short section hands
+  // its unused room to the next one rather than wasting it.
+  const essential = sections.filter((s) => s.essential);
+  let unfitted = essential.length;
+  for (const section of essential) {
+    const share = unfitted > 1 ? Math.floor(remaining / unfitted) : remaining;
+    take(section, Math.min(remaining, share));
+    unfitted--;
   }
 
+  // Then the detail, in order, until the room runs out.
+  let detailAllowed = true;
+  for (const section of sections) {
+    if (section.essential) continue;
+    if (!detailAllowed) {
+      omitted.push(section.id);
+      omittedChars += section.text.length;
+      continue;
+    }
+    const before = kept.size;
+    take(section, remaining);
+    if (kept.size === before || kept.get(section.id) !== section.text) detailAllowed = false;
+  }
+
+  const text = sections
+    .map((s) => kept.get(s.id))
+    .filter((t): t is string => t !== undefined)
+    .join('\n\n');
+
   return {
-    text: `${kept.join('\n\n')}\n\n${truncatedFooter(omittedChars, omitted)}`,
+    text: `${text}\n\n${truncatedFooter(omittedChars, omitted)}`,
     truncated: true,
     omittedChars,
     omittedSections: omitted,
@@ -1046,7 +1097,7 @@ export function planOutboundWork(
       amended ? 'AMENDED: this replaces the critical defect notice sent earlier for this defect.' : undefined,
     ].filter((l): l is string => l !== undefined).join('\n');
 
-    const note = assemble([{ id: 'critical defect', text: body }], key, fullRecordAt, bodyLimit);
+    const note = assemble([{ id: 'critical defect', text: body, essential: true }], key, fullRecordAt, bodyLimit);
     if (note.omittedSections.includes('critical defect')) {
       // The one thing that must never be dropped. Reported loudly rather than
       // sent as an empty shell.

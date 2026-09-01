@@ -10,6 +10,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const PREFS_KEY = 'safeqld.prefs';
 
 export interface Prefs {
+  /**
+   * Which half of the app this device shows.
+   *
+   * Held as a plain string rather than the AppMode union so an older build
+   * reading a value a newer one wrote does not fail to parse its whole
+   * settings blob over one field. `readMode` in @/domain/appMode turns it into
+   * a mode and says when it did not recognise what it found.
+   */
+  appMode: string;
   technicianName: string;
   technicianLicence: string;
   vehicleRego: string;
@@ -34,6 +43,10 @@ export interface Prefs {
 }
 
 export const DEFAULT_PREFS: Prefs = {
+  // Technician, because most installs are a phone in a van and a mode switch
+  // that starts by showing everything would only ever be found by the people
+  // who did not need it.
+  appMode: 'technician',
   technicianName: '',
   technicianLicence: '',
   vehicleRego: '',

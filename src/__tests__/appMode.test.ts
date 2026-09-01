@@ -118,7 +118,7 @@ describe('nothing is ever unreachable', () => {
     for (const d of DESTINATIONS) {
       const r = reach(d.route, 'office')!;
       expect(r.proven).toBe(true);
-      expect(r.chain[0]).toBe(navFor('office').find((g) => g.tab === d.tab)!.sections[0].destinations[0].route);
+      expect(r.chain[0]).toBe(navFor('office').find((g) => g.tab === d.tab)!.sections[0]!.destinations[0]!.route);
     }
   });
 });
@@ -186,9 +186,9 @@ describe('the grouping', () => {
   });
 
   it('opens each tab with the screen that tab is, then the rows under it', () => {
-    const today = navFor('technician')[0];
-    expect(today.sections[0].title).toBe('The day');
-    expect(today.sections[0].destinations.slice(0, 3).map((d) => d.label))
+    const today = navFor('technician')[0]!;
+    expect(today.sections[0]!.title).toBe('The day');
+    expect(today.sections[0]!.destinations.slice(0, 3).map((d) => d.label))
       .toEqual(['Today', 'Jobs', "Today's run"]);
   });
 
@@ -229,22 +229,22 @@ describe('the grouping', () => {
 describe('finding a screen that is not in front of you', () => {
   it('finds a hidden screen by name and says it is hidden, rather than pretending it is gone', () => {
     const hits = searchDestinations('work planner', 'technician');
-    expect(hits[0].destination.route).toBe('/work/plan');
-    expect(hits[0].hidden).toBe(true);
-    expect(hits[0].matched).toBe('name');
+    expect(hits[0]!.destination.route).toBe('/work/plan');
+    expect(hits[0]!.hidden).toBe(true);
+    expect(hits[0]!.matched).toBe('name');
   });
 
   it('searches the whole app whatever the mode, because a trimmed menu is not a locked one', () => {
     for (const mode of APP_MODES) {
       expect(searchDestinations('quote', mode).map((h) => h.destination.route)).toContain('/site/quote');
-      expect(searchDestinations('asset labels', mode)[0].destination.route).toBe('/work/labels');
+      expect(searchDestinations('asset labels', mode)[0]!.destination.route).toBe('/work/labels');
     }
   });
 
   it('finds a screen by the word a technician would actually use for it', () => {
-    expect(searchDestinations('date code', 'technician')[0].destination.route).toBe('/tools/detector-age');
-    expect(searchDestinations('isolate', 'technician')[0].destination.route).toBe('/impairment/new');
-    expect(searchDestinations('lux', 'technician')[0].destination.route).toBe('/tools/emergency-lighting');
+    expect(searchDestinations('date code', 'technician')[0]!.destination.route).toBe('/tools/detector-age');
+    expect(searchDestinations('isolate', 'technician')[0]!.destination.route).toBe('/impairment/new');
+    expect(searchDestinations('lux', 'technician')[0]!.destination.route).toBe('/tools/emergency-lighting');
   });
 
   it('returns nothing rather than the nearest thing lying around', () => {

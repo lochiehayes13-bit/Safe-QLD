@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Linking, View } from 'react-native';
+import { router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SimproClient, type SimproConfig } from '@/simpro/client';
 import { clearKey as clearAiKey, hasKey as hasAiKey, storeKey as storeAiKey } from '@/ai/client';
@@ -19,6 +20,7 @@ import { clearRateCard, loadRateCard, saveRateCard } from '@/db/rateCardRepo';
 import { effectiveRateCard, formatCents, parseCents, type LabourRate, type ServiceFee } from '@/domain/rates';
 import type { RateCardImport } from '@/simpro/rateCard';
 import { formatBytes } from '@/share/pack';
+import { MODE_BLURB, MODE_LABEL, readMode } from '@/domain/appMode';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
 
@@ -222,8 +224,25 @@ export default function SettingsScreen() {
     }
   };
 
+  const mode = readMode(prefs.appMode);
+
   return (
     <Screen>
+      <H2>What this device shows</H2>
+      <Card onPress={() => router.push('/settings/mode')}>
+        <Rowed gap={3}>
+          <MaterialCommunityIcons name="account-switch-outline" size={22} color={t.color.accentText} />
+          <View style={{ flex: 1 }}>
+            <Txt weight="600">{MODE_LABEL[mode.mode]}</Txt>
+            <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{MODE_BLURB[mode.mode]}</Txt>
+          </View>
+          <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
+        </Rowed>
+        {mode.assumed ? (
+          <Banner tone="warn" title="Mode not recognised" body={mode.assumed} />
+        ) : null}
+      </Card>
+
       <H2>You</H2>
       <Card>
         <Field label="Name" value={prefs.technicianName} onChangeText={(v) => update({ technicianName: v })} autoCapitalize="words" />

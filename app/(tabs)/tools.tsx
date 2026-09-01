@@ -45,6 +45,12 @@ const CALCULATORS: ToolDef[] = [
     body: 'Sprinkler and hydrant duty on one page, converted before they are added, with the 150% overload run answered.',
   },
   {
+    href: '/tools/spl',
+    icon: 'volume-high',
+    title: 'Sound pressure level',
+    body: 'Whether the occupant warning is loud enough in the room you are standing in, and what a second sounder would add.',
+  },
+  {
     href: '/tools/battery',
     icon: 'car-battery',
     title: 'FIP battery calculator',

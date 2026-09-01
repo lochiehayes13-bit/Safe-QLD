@@ -1,9 +1,12 @@
 import {
-  NOTE_LIMITS, WITHHELD_FROM_SIMPRO,
+  NOTE_LIMITS, SOURCES, WITHHELD_FROM_SIMPRO,
   isCriticalDefect, keyIdentity, keysInNoteText, outboundKey, planOutboundWork, qldDay, qldIsoDay,
   qldMoment, summariseRun, truncateOnSentence,
   type CompletedRoutineRun, type OutboundDefect, type OutboundResult,
 } from '@/domain/outboundWork';
+import {
+  acceptedKeys, keysAlreadyOnJob, sendOutboundPlan, type SimproPoster,
+} from '@/simpro/testResults';
 
 /**
  * Pushing a completed service back to the office.
@@ -529,5 +532,242 @@ describe('what is deliberately never pushed', () => {
     expect(NOTE_LIMITS.subject.confidence).toBe('high');
     expect(NOTE_LIMITS.body.confidence).toBe('low');
     expect(NOTE_LIMITS.body.why).toContain('No published maximum');
+  });
+});
+
+describe('planOutboundWork — what the office actually reads', () => {
+  const busy = () => planOutboundWork(
+    run(),
+    [
+      ...Array.from({ length: 30 }, (_, i) => pass(String(i + 1))),
+      pass('31', { outcome: 'fail', notes: 'No response on test.' }),
+      ...Array.from({ length: 9 }, (_, i) => pass(String(40 + i), {
+        outcome: 'not-tested', notTestedReason: 'No access to tenancy',
+      })),
+    ],
+    [defect({ id: 'd-crit', severity: 'critical' }), defect({ id: 'd-2' })],
+  );
+
+  it('puts the counts in the note itself, not only in the returned object', () => {
+    // Nobody in the office opens a payload. The number that decides whether the
+    // job can be invoiced has to be in the words.
+    const note = busy().items[1]!.payload.note;
+    expect(note).toContain('Tested 31: 30 passed, 1 failed');
+    expect(note).toContain('Not tested: 9');
+    expect(note).toContain('No access to tenancy (9)');
+  });
+
+  it('never lets a visit with untested assets read as complete', () => {
+    /*
+     * The failure this whole module exists for: "service complete" on a job
+     * that was nine assets short, invoiced in full because the note said so.
+     */
+    const note = busy().items[1]!.payload.note;
+    expect(note).not.toMatch(/service complete/i);
+    expect(note).toContain('9 of 40 assets were NOT tested');
+    expect(note).toContain('The routine is not complete for those assets.');
+  });
+
+  it('says every asset was tested only when that is true', () => {
+    const clean = planOutboundWork(run(), [pass('1'), pass('2')], []);
+    expect(clean.items[0]!.payload.note).toContain('Every asset on this visit was tested.');
+    expect(busy().items[1]!.payload.note).not.toContain('Every asset on this visit was tested.');
+  });
+
+  it('puts the critical defect above the other defects and the failures in the note', () => {
+    // A critical defect four screens down gets read on Monday, by which time the
+    // 24-hour written notice is already late.
+    const note = busy().items[1]!.payload.note;
+    const critical = note.indexOf('*** CRITICAL DEFECT ***');
+    expect(critical).toBeGreaterThan(-1);
+    expect(critical).toBeLessThan(note.indexOf('OTHER DEFECTS RAISED'));
+    expect(critical).toBeLessThan(note.indexOf('FAILED (1)'));
+  });
+
+  it('states the statutory clocks in Australian dates at Queensland time', () => {
+    /*
+     * Completed 14:30 on 3 July in Brisbane. The written notice runs 24 hours
+     * from the defect, and rectification one month from the maintenance — counted
+     * from the Queensland day, not the UTC one it was stamped with.
+     */
+    const note = busy().items[0]!.payload.note;
+    expect(note).toContain('Raised: 03/07/2026');
+    expect(note).toContain('due by 04/07/2026 14:30 (Qld)');
+    expect(note).toContain('Rectification due by 03/08/2026');
+    expect(note).not.toContain('2026-07-03');
+  });
+
+  it('keeps a critical notice and the service record inside the size limit together', () => {
+    const plan = planOutboundWork(
+      run(),
+      Array.from({ length: 120 }, (_, i) => pass(String(i + 1), {
+        outcome: 'not-tested', notTestedReason: `Ward ${i} in use for the whole attendance`,
+      })),
+      [defect({ severity: 'critical' })],
+      { bodyLimit: 1500 },
+    );
+    for (const item of plan.items) {
+      expect(item.payload.note.length).toBeLessThanOrEqual(1500);
+      expect(keysInNoteText(item.payload.note)).toContain(item.key);
+    }
+    // The two things that must survive a cut, whatever else goes.
+    expect(plan.items[1]!.payload.note).toContain('Not tested: 120');
+    expect(plan.items[1]!.payload.note).toContain('*** CRITICAL DEFECT ***');
+  });
+});
+
+describe('the facts this module stands on', () => {
+  it('carries a source, a URL and a reason for its confidence on each one', () => {
+    // The rule is that a value from outside the app\'s own reasoning says where
+    // it came from in the data, not in a comment nobody ships.
+    for (const source of Object.values(SOURCES)) {
+      expect(source.url).toMatch(/^https:\/\//);
+      expect(source.basis.trim().length).toBeGreaterThan(40);
+      expect(['high', 'medium', 'low']).toContain(source.confidence);
+    }
+  });
+
+  it("marks the note size low confidence, because Simpro does not publish one", () => {
+    // A guessed limit that is too high loses the end of a record on the server,
+    // silently, and the end is where the not-tested assets are.
+    expect(SOURCES[NOTE_LIMITS.body.sourceId].confidence).toBe('low');
+    expect(SOURCES[NOTE_LIMITS.body.sourceId].ref).toMatch(/not published/i);
+  });
+});
+
+
+/**
+ * The send layer.
+ *
+ * Testable at all only because it takes the two client calls it makes rather
+ * than the client class — importing that would pull the platform keystore into a
+ * node test. What is worth proving here is not the HTTP: it is that the order
+ * the plan chose survives, that a note already on the job is not posted twice,
+ * and that a permission failure stops the run instead of burning the retries of
+ * everything behind it.
+ */
+describe('sendOutboundPlan', () => {
+  interface Posted { path: string; body: unknown }
+
+  const poster = (over: Partial<SimproPoster> = {}) => {
+    const posted: Posted[] = [];
+    const client: SimproPoster = {
+      listAll: async <T,>(): Promise<T[]> => [],
+      request: async <T,>(_method: string, path: string, options: { body?: unknown } = {}) => {
+        posted.push({ path, body: options.body });
+        return { data: {} as T, total: null };
+      },
+      ...over,
+    };
+    return { client, posted };
+  };
+
+  const criticalPlan = () => planOutboundWork(
+    run(), [pass('1')], [defect({ severity: 'critical' })],
+  );
+
+  const fail = (status: number) => async (): Promise<never> => {
+    throw Object.assign(new Error(`HTTP ${status}`), { status });
+  };
+
+  it('posts the critical defect notice before the service record', async () => {
+    const { client, posted } = poster();
+    const plan = criticalPlan();
+    const report = await sendOutboundPlan(client, plan);
+    expect(report.sent).toBe(2);
+    expect(posted).toHaveLength(2);
+    expect(posted[0]!.body).toMatchObject({ Subject: expect.stringContaining('CRITICAL DEFECT') });
+    expect(report.outcomes.map((o) => o.urgency)).toEqual(['critical', 'routine']);
+  });
+
+  it('does not post a note the job already carries', async () => {
+    // The queue knows what this handset sent. It does not know what the handset
+    // it replaced sent, and the duplicate would land in the office either way.
+    const plan = criticalPlan();
+    const existing = plan.items[0]!;
+    const { client, posted } = poster({
+      listAll: async <T,>(): Promise<T[]> => ([{ Note: existing.payload.note }] as unknown as T[]),
+    });
+    const report = await sendOutboundPlan(client, plan);
+    expect(report.skipped).toBe(1);
+    expect(report.sent).toBe(1);
+    expect(posted).toHaveLength(1);
+    expect(report.remoteCheck).toBe('checked');
+  });
+
+  it('sends anyway when the job\'s notes cannot be read, and says the check was unavailable', async () => {
+    /*
+     * "Nothing found" and "could not look" are not the same answer. Refusing to
+     * push a service record because a second-line check was unavailable would
+     * lose real work, so it goes, and the caller is told what was not verified.
+     */
+    const { client, posted } = poster({ listAll: fail(403) });
+    const report = await sendOutboundPlan(client, criticalPlan());
+    expect(report.remoteCheck).toBe('unavailable');
+    expect(report.remoteCheckError).toContain('could not be read');
+    expect(posted).toHaveLength(2);
+  });
+
+  it('stops on a permission failure instead of burning the rest of the run against it', async () => {
+    const { client } = poster({ request: fail(403) });
+    const report = await sendOutboundPlan(client, criticalPlan(), { checkRemote: false });
+    expect(report.failed).toBe(1);
+    expect(report.notAttempted).toBe(1);
+    expect(report.outcomes[0]!.error).toContain('not permitted to add job notes');
+    expect(report.outcomes[1]!.status).toBe('not-attempted');
+  });
+
+  it('keeps trying after an ordinary network failure, because the next one may work', async () => {
+    let calls = 0;
+    const { client } = poster({
+      request: async <T,>() => {
+        calls++;
+        if (calls === 1) throw new Error('Network request failed');
+        return { data: {} as T, total: null };
+      },
+    });
+    const report = await sendOutboundPlan(client, criticalPlan(), { checkRemote: false });
+    expect(report.failed).toBe(1);
+    expect(report.sent).toBe(1);
+    expect(report.notAttempted).toBe(0);
+  });
+
+  it('only reports as accepted what the office actually holds', async () => {
+    // A timed-out post may or may not have landed. Recording it as accepted is
+    // how a service record goes missing for good.
+    const { client } = poster({ request: fail(500) });
+    const report = await sendOutboundPlan(client, criticalPlan(), { checkRemote: false });
+    expect(acceptedKeys(report)).toEqual([]);
+  });
+
+  it('skips a key the caller already knows was accepted, without asking the server', async () => {
+    const plan = criticalPlan();
+    const { client, posted } = poster();
+    const report = await sendOutboundPlan(client, plan, {
+      checkRemote: false,
+      alreadySent: [plan.items[0]!.key],
+    });
+    expect(posted).toHaveLength(1);
+    expect(acceptedKeys(report)).toEqual(plan.items.map((i) => i.key));
+  });
+
+  it('carries the plan\'s refusals through, so one screen shows sent and not-sent together', async () => {
+    const { client } = poster();
+    const plan = planOutboundWork(run({ jobId: undefined }), [pass('1')], []);
+    const report = await sendOutboundPlan(client, plan);
+    expect(report.outcomes).toEqual([]);
+    expect(report.declined.join(' ')).toContain('no Simpro job linked');
+  });
+
+  it('tells a marker apart from an office note when reading a job back', async () => {
+    const plan = criticalPlan();
+    const { client } = poster({
+      listAll: async <T,>(): Promise<T[]> => ([
+        { Note: 'Attended, all good.' },
+        { Subject: 'Service', Note: plan.items[1]!.payload.note },
+      ] as unknown as T[]),
+    });
+    const keys = await keysAlreadyOnJob(client, 'JOB-1');
+    expect([...(keys ?? [])]).toEqual([plan.items[1]!.key]);
   });
 });

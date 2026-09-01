@@ -470,6 +470,18 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['detector age', 'date code', 'head', 'service life', 'replace'],
   },
   {
+    route: '/tools/eol', file: 'app/tools/eol.tsx', tab: 'tools', section: 'Calculators',
+    label: 'End of line', modes: BOTH, openedFrom: ['/tools'],
+    blurb: 'End-of-line values per panel and per circuit, each with its source, because one universal table would be wrong on most sites.',
+    terms: ['end of line', 'eol', 'resistor', 'monitoring', 'circuit'],
+  },
+  {
+    route: '/tools/spl', file: 'app/tools/spl.tsx', tab: 'tools', section: 'Calculators',
+    label: 'Sound pressure level', modes: BOTH, openedFrom: ['/tools'],
+    blurb: 'What the reading on the meter has to beat, with the assumption behind the answer printed above it.',
+    terms: ['spl', 'sound', 'db', 'decibel', 'loud', 'sounder', 'ewis'],
+  },
+  {
     route: '/tools/hydrant', file: 'app/tools/hydrant.tsx', tab: 'tools', section: 'Calculators',
     label: 'Hydrant flow test', modes: BOTH, openedFrom: ['/tools'],
     blurb: 'Flow measured, supply worked back to the pressure the brigade needs, then the losses that explain a marginal result.',
@@ -808,8 +820,9 @@ export function reach(route: string, mode: AppMode): Reach | undefined {
   return {
     route, mode, reachable: true, proven: false, channel: 'search', chain: [],
     sentence:
-      `Not shown in ${MODE_LABEL[mode]}. Search "${d.label.toLowerCase()}" from the question bar `
-      + `on Today and it opens from the result, or go straight to ${d.route}. Nothing was deleted.`,
+      `Not shown in ${MODE_LABEL[mode]}. Search "${d.label.toLowerCase()}" under Settings → `
+      + `Technician or office and it opens from the result, or go straight to ${d.route}. `
+      + 'Nothing was deleted.',
   };
 }
 

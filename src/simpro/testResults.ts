@@ -1,4 +1,4 @@
-import { SimproError, type SimproClient } from './client';
+import type { SimproClient } from './client';
 import {
   keysInNoteText, type OutboundItem, type OutboundJobNote, type OutboundPlan,
 } from '@/domain/outboundWork';
@@ -34,7 +34,31 @@ import {
  * Nothing here writes to a job's own fields. Every call is an appended note, so
  * a phone that has been offline for a week cannot overwrite an edit made in the
  * office yesterday.
+ *
+ * The client is taken as the two calls this layer actually makes rather than as
+ * the class. A real `SimproClient` satisfies it, and so does a stand-in — which
+ * is what lets the send order, the duplicate skip and the stop-on-403 be tested
+ * at all. Importing the class as a value would pull the platform keystore into
+ * every test that touched this file, and under the node preset that is a suite
+ * that cannot load.
  */
+
+export interface SimproPoster {
+  request: SimproClient['request'];
+  listAll: SimproClient['listAll'];
+}
+
+/**
+ * The HTTP status behind a failure, where there is one.
+ *
+ * Read off the error rather than tested with `instanceof SimproError`, for the
+ * same reason the client is structural: the class cannot be imported as a value
+ * here. SimproError carries `status`, so nothing is lost but the name.
+ */
+function statusOf(e: unknown): number | undefined {
+  const status = (e as { status?: unknown } | null | undefined)?.status;
+  return typeof status === 'number' ? status : undefined;
+}
 
 export type SendStatus = 'sent' | 'skipped-duplicate' | 'failed' | 'not-attempted';
 
@@ -96,7 +120,7 @@ interface RawJobNote {
  * eventually post a duplicate and call it certainty.
  */
 export async function keysAlreadyOnJob(
-  client: SimproClient,
+  client: SimproPoster,
   jobId: string,
   maxNotesRead = 200,
 ): Promise<Set<string> | undefined> {
@@ -115,20 +139,18 @@ export async function keysAlreadyOnJob(
 }
 
 /** Posts one note. Mirrors the call in resources.addJobNote, which this cannot import. */
-export async function postJobNote(client: SimproClient, payload: OutboundJobNote): Promise<void> {
+export async function postJobNote(client: SimproPoster, payload: OutboundJobNote): Promise<void> {
   await client.request('POST', `jobs/${payload.jobId}/notes/`, {
     body: { Subject: payload.subject, Note: payload.note },
   });
 }
 
 function describe(e: unknown): string {
-  if (e instanceof SimproError) {
-    if (e.status === 403) {
-      return 'This Simpro key is not permitted to add job notes. Note permissions are set per endpoint in Simpro.';
-    }
-    if (e.status === 401) return 'Simpro rejected the credentials. Check them in Settings.';
-    return e.message;
+  const status = statusOf(e);
+  if (status === 403) {
+    return 'This Simpro key is not permitted to add job notes. Note permissions are set per endpoint in Simpro.';
   }
+  if (status === 401) return 'Simpro rejected the credentials. Check them in Settings.';
   return e instanceof Error ? e.message : String(e);
 }
 
@@ -140,7 +162,7 @@ function describe(e: unknown): string {
  * by anything else — size, job, retry count — would quietly undo it.
  */
 export async function sendOutboundPlan(
-  client: SimproClient,
+  client: SimproPoster,
   plan: OutboundPlan,
   options: SendOptions = {},
 ): Promise<SendReport> {
@@ -205,7 +227,11 @@ export async function sendOutboundPlan(
         status: 'failed', error: describe(e),
       });
       report.failed++;
-      if (e instanceof SimproError && (e.status === 401 || e.status === 403)) stopped = true;
+      // A permission or credential failure will not fix itself before somebody
+      // changes it in Simpro, so the rest of the queue is left alone rather than
+      // burning its retry counts against it.
+      const status = statusOf(e);
+      if (status === 401 || status === 403) stopped = true;
     }
   }
 
