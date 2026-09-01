@@ -5,6 +5,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { listSiteSummaries, type SiteSummary } from '@/db/repo';
 import { useTheme } from '@/theme';
 import { Button, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
+import { ambiguousNames, disambiguator } from '@/domain/siteNames';
 
 /** Site list. A technician's mental model is "which job am I on", so sites lead. */
 export default function SitesScreen() {
@@ -19,6 +20,14 @@ export default function SitesScreen() {
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+
+  /*
+   * Worked out across the whole list rather than the filtered one: a name is
+   * ambiguous because two sites share it, and that stays true when a search
+   * happens to show only one of them. Deciding it from the filtered list would
+   * make the warning appear and disappear as somebody types.
+   */
+  const ambiguous = useMemo(() => ambiguousNames(sites), [sites]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -61,7 +70,7 @@ export default function SitesScreen() {
             </Rowed>
           </View>
         }
-        renderItem={({ item }) => <SiteCard site={item} />}
+        renderItem={({ item }) => <SiteCard site={item} apart={disambiguator(item, ambiguous)} />}
         ListEmptyComponent={
           loading ? null : (
             <EmptyState
@@ -76,7 +85,17 @@ export default function SitesScreen() {
   );
 }
 
-function SiteCard({ site }: { site: SiteSummary }) {
+/**
+ * One site in the list.
+ *
+ * `apart` is what tells this site from its namesakes, and it is absent on all
+ * but a handful of rows. Three of the sites on the book are called "Storage
+ * Choice - Sumner Park", three are "Luggage Direct" and two are "Brisbane
+ * Rheumatology", the register carries no address for any of them, and without
+ * this the rows are identical — so a technician picks one of three and records
+ * a service against whichever building it turns out to be.
+ */
+function SiteCard({ site, apart }: { site: SiteSummary; apart?: string }) {
   const t = useTheme();
   const location = [site.suburb, site.state].filter(Boolean).join(' ');
   return (
@@ -88,6 +107,14 @@ function SiteCard({ site }: { site: SiteSummary }) {
             <Txt size="sm" tone="muted" numberOfLines={1}>{[site.address, location].filter(Boolean).join(', ')}</Txt>
           ) : null}
           {site.clientName ? <Txt size="sm" tone="faint" numberOfLines={1}>{site.clientName}</Txt> : null}
+          {apart ? (
+            <Rowed gap={1.5} align="center">
+              <MaterialCommunityIcons name="alert-circle-outline" size={13} color={t.color.warn} />
+              <Txt size="xs" tone="warn" numberOfLines={1}>
+                Another site shares this name — {apart}
+              </Txt>
+            </Rowed>
+          ) : null}
           <Rowed gap={1.5} wrap style={{ marginTop: t.space(1.5) }}>
             <Chip label={`${site.panelCount} panel${site.panelCount === 1 ? '' : 's'}`} />
             <Chip label={`${site.pointCount.toLocaleString()} points`} />
