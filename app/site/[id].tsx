@@ -13,6 +13,8 @@ import { configTotals, siteToConfig } from '@/share/siteToConfig';
 import { encodePack, formatBytes } from '@/share/pack';
 import { shareFile, writePack, writePdf } from '@/export/files';
 import { buildRoutineReport } from '@/db/routineReportRepo';
+import { listJobs } from '@/db/opsRepo';
+import { jobNumberForReport } from '@/domain/reportJobMatch';
 import { routineServiceReportHtml, tallyReport } from '@/export/routineServiceReport';
 import { nowIso } from '@/db';
 import type { Defect, Panel, ServiceReport, Site } from '@/domain/types';
@@ -127,10 +129,27 @@ export default function SiteScreen() {
     try {
       const to = new Date();
       const from = new Date(to.getTime() - 30 * 24 * 3600 * 1000);
+
+      /*
+       * The customer's job number, worked out rather than typed.
+       *
+       * Their report leads with it and the office files by it. Where the site
+       * has more than one job in the period this deliberately prints none —
+       * putting the wrong number on a service report files it against somebody
+       * else's work — and says so below, where the technician sees it before
+       * the document leaves the phone.
+       */
+      const job = jobNumberForReport(await listJobs({ limit: 500 }), {
+        siteId: site.id,
+        from: from.toISOString(),
+        to: to.toISOString(),
+      });
+
       const input = await buildRoutineReport({
         siteId: site.id,
         from: from.toISOString(),
         to: to.toISOString(),
+        jobNumber: job.jobNumber,
         workRequested: 'Routine service of fire protection systems and assets',
       });
 
@@ -153,7 +172,8 @@ export default function SiteScreen() {
         // technician sees them before the document leaves the phone.
         `${site.name} — ${tally.total} assets: ${tally.pass} pass, ${tally.fail} fail`
         + `${tally.notTested ? `, ${tally.notTested} not tested` : ''}`
-        + `${tally.missingReason ? ` (${tally.missingReason} with no reason given)` : ''}`,
+        + `${tally.missingReason ? ` (${tally.missingReason} with no reason given)` : ''}`
+        + `${job.reason ? `. ${job.reason}` : ''}`,
       );
     } catch (e) {
       Alert.alert('Could not build the report', e instanceof Error ? e.message : String(e));
