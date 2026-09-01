@@ -105,6 +105,43 @@ export const MAX_DIMENSION = 2048;
 /** Bytes above which a photograph is worth flagging as unusually large. */
 export const LARGE_PHOTO_BYTES = 6_000_000;
 
+/**
+ * The size to resize a captured photograph to, or nothing where it already fits.
+ *
+ * MAX_DIMENSION was written above and never applied, so the trade the comment
+ * describes was only half made: quality came down to 0.6 and the pixels stayed
+ * where the camera left them. A picker's `quality` is JPEG compression only. A
+ * modern handset shoots around 4000 x 3000, and compressing that still leaves
+ * a couple of megabytes — on a device already holding 12,553 assets and 897
+ * sites offline, and in a PDF that has to be shared over a site's mobile
+ * signal.
+ *
+ * The long edge is what is capped, so a photograph taken sideways is treated
+ * the same as one taken upright. Aspect ratio is kept: a defect photograph is
+ * evidence and stretching it is worse than leaving it large.
+ *
+ * Returns nothing where the photograph is already inside the cap, so a small
+ * image is never re-encoded — every re-encode of a JPEG loses a little, and a
+ * photograph of a cracked weld does not have much to spare.
+ */
+export function shrinkTarget(
+  width: number,
+  height: number,
+  max: number = MAX_DIMENSION,
+): { width: number; height: number } | undefined {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return undefined;
+  }
+  const longest = Math.max(width, height);
+  if (longest <= max) return undefined;
+
+  const scale = max / longest;
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
 export interface StorageReport {
   count: number;
   totalBytes: number;

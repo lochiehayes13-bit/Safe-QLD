@@ -6,6 +6,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { createDefect, listSites } from '@/db/repo';
 import { newId } from '@/db';
 import { CAPTURE_QUALITY } from '@/domain/photoStore';
+import { shrinkForStorage } from '@/export/photoResize';
 import { keepPhoto } from '@/export/photoFiles';
 import { addAssetEvent } from '@/db/assetRepo';
 import { SYSTEM_LABELS, type SystemKind } from '@/seed/assetTypes';
@@ -107,6 +108,11 @@ export default function NewDefectScreen() {
       ? await ImagePicker.launchCameraAsync({ quality: CAPTURE_QUALITY })
       : await ImagePicker.launchImageLibraryAsync({ quality: CAPTURE_QUALITY });
     if (result.canceled || !result.assets[0]) return;
+    // Down to MAX_DIMENSION before it is kept. The picker's quality setting is
+    // compression only, so without this a photograph is stored at whatever the
+    // camera shot — a couple of megabytes each, on a handset already holding
+    // every site offline.
+    const sourceUri = await shrinkForStorage(result.assets[0]!);
 
     // Copy it out of the cache now rather than at save. The picker hands back a
     // URI the operating system may clear at any point, and a defect photograph
@@ -115,7 +121,7 @@ export default function NewDefectScreen() {
     try {
       const kept = keepPhoto({
         id: newId(),
-        sourceUri: result.assets[0]!.uri,
+        sourceUri,
         subject: 'defect',
         // The defect does not exist yet; its photographs are filed against it
         // on save, when it has an id.

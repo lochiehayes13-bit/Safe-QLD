@@ -1,6 +1,7 @@
 import {
   CAPTURE_QUALITY, LARGE_PHOTO_BYTES, extensionFor, groupForRegister, isEphemeral,
   numberRegister, photoFileName, photoPath, reconcilePhotos, type PhotoRef,
+  MAX_DIMENSION, shrinkTarget,
 } from '@/domain/photoStore';
 
 /**
@@ -172,5 +173,61 @@ describe('capture settings', () => {
     // defect notice with an unreadable photograph attached is not evidence.
     expect(CAPTURE_QUALITY).toBeGreaterThanOrEqual(0.5);
     expect(CAPTURE_QUALITY).toBeLessThan(1);
+  });
+});
+
+
+describe('sizing a photograph down before it is kept', () => {
+  /*
+   * MAX_DIMENSION sat in the module unused. The comment beside it describes
+   * the trade — a full-resolution photograph is about four megabytes and a job
+   * with twenty of them fills eighty — and only half of it was made: quality
+   * came down and the pixels did not. A picker's quality setting is JPEG
+   * compression, not size.
+   *
+   * That matters on a handset already carrying 12,553 assets and 897 sites
+   * offline, and again in a report that has to be shared over a site's signal.
+   */
+  it('caps the long edge of a photograph taken upright', () => {
+    expect(shrinkTarget(3000, 4000)).toEqual({ width: 1536, height: 2048 });
+  });
+
+  it('caps the long edge of the same photograph taken sideways', () => {
+    // A phone held the other way is not a different case.
+    expect(shrinkTarget(4000, 3000)).toEqual({ width: 2048, height: 1536 });
+  });
+
+  it('keeps the shape, because a defect photograph is evidence', () => {
+    const out = shrinkTarget(4000, 3000)!;
+    expect(out.width / out.height).toBeCloseTo(4000 / 3000, 3);
+  });
+
+  it('leaves a photograph already inside the cap alone', () => {
+    /*
+     * Not merely an optimisation. Every re-encode of a JPEG loses a little,
+     * and a photograph of a hairline crack does not have much to spare.
+     */
+    expect(shrinkTarget(1600, 1200)).toBeUndefined();
+    expect(shrinkTarget(MAX_DIMENSION, MAX_DIMENSION)).toBeUndefined();
+  });
+
+  it('resizes the one pixel past the cap', () => {
+    expect(shrinkTarget(MAX_DIMENSION + 1, 100)).toBeDefined();
+  });
+
+  it('never rounds a narrow photograph away to nothing', () => {
+    // A very long, very thin image scaled by the long edge can round its short
+    // edge to zero, and a zero-height resize is an error rather than a photo.
+    const out = shrinkTarget(20_000, 3)!;
+    expect(out.width).toBe(MAX_DIMENSION);
+    expect(out.height).toBeGreaterThanOrEqual(1);
+  });
+
+  it('says nothing for a size it was not given', () => {
+    // An asset with no dimensions is kept as it is rather than resized to a
+    // guess.
+    expect(shrinkTarget(0, 0)).toBeUndefined();
+    expect(shrinkTarget(Number.NaN, 100)).toBeUndefined();
+    expect(shrinkTarget(-4000, 3000)).toBeUndefined();
   });
 });

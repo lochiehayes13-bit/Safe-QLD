@@ -17,6 +17,7 @@ import { keepPhoto, photoUri } from '@/export/photoFiles';
 import {
   CAPTURE_QUALITY, groupForRegister, numberRegister, type PhotoRef,
 } from '@/domain/photoStore';
+import { shrinkForStorage } from '@/export/photoResize';
 import { shareFile, writePdf } from '@/export/files';
 import { loadPrefs } from '@/app-prefs';
 import { newId } from '@/db';
@@ -410,10 +411,15 @@ function FindingCard({
       ? await ImagePicker.launchCameraAsync({ quality: CAPTURE_QUALITY })
       : await ImagePicker.launchImageLibraryAsync({ quality: CAPTURE_QUALITY });
     if (result.canceled || !result.assets[0]) return;
+    // Down to MAX_DIMENSION before it is kept. The picker's quality setting is
+    // compression only, so without this a photograph is stored at whatever the
+    // camera shot — a couple of megabytes each, on a handset already holding
+    // every site offline.
+    const sourceUri = await shrinkForStorage(result.assets[0]!);
     try {
       const kept = keepPhoto({
         id: newId(),
-        sourceUri: result.assets[0]!.uri,
+        sourceUri,
         subject: 'report',
         subjectId: finding.id,
         takenAt: new Date().toISOString(),
