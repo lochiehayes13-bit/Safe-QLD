@@ -435,6 +435,14 @@ function DetailsTab({ input, set }: TabProps) {
           </View>
         </Rowed>
         <Field label="Applicable standards" value={input.applicableStandards ?? ''} onChangeText={(v) => set({ applicableStandards: v })} placeholder="AS 2419.1, AS 2118.1" />
+        {/*
+          * The certificate prints a "Year of standard" row and there was no
+          * field for it, so it came out blank on every one. It is not the same
+          * question as year of design: a system designed in 2015 was designed
+          * to the edition current then, and which edition applied is what a
+          * certifier reads that row to find out.
+          */}
+        <Field label="Year of standard" value={input.standardYear ?? ''} onChangeText={(v) => set({ standardYear: v })} keyboardType="numeric" placeholder="2005" hint="The edition the system was designed to, which is not always the year it was designed." />
         <Rowed gap={2}>
           <View style={{ flex: 1 }}>
             <Field label="Year of design" value={input.yearOfDesign ?? ''} onChangeText={(v) => set({ yearOfDesign: v })} keyboardType="numeric" />
