@@ -132,6 +132,17 @@ export default function AssetScreen() {
           {asset.openDefects ? <Chip label={`${asset.openDefects} open defect`} tone="fail" /> : null}
         </Rowed>
 
+        {asset.notes?.trim() ? (
+          /*
+            * The asset's own note, off the register — 453 of the real ones
+            * carry it and nothing was showing it. "Switchboard in office, use
+            * test switch" and "logbook inside switchboard" are read before the
+            * work starts, not after, so this sits above the record buttons
+            * rather than under the details at the bottom.
+            */
+          <Banner tone="info" title="Note on this asset" body={asset.notes.trim()} />
+        ) : null}
+
         {failures >= 3 ? (
           <Banner
             tone="warn"

@@ -28,7 +28,7 @@ const INPUT: RoutineReportInput = {
       system: 'hydrant',
       assets: [
         { assetNumber: '1', location: 'VIP Finger', descriptor: 'Fire Hydrant - 65mm',
-          date: '2026-05-20', result: 'pass' },
+          date: '2026-05-20', result: 'pass', notes: 'Switchboard in office, use test switch' },
         { assetNumber: '63', location: 'Booster Cabinet - Salt water suction',
           descriptor: '100mm FBBV', date: '2026-05-22', result: 'fail',
           testNotes: 'Valve seized' },
@@ -101,6 +101,23 @@ describe('matching the issued document', () => {
     const out = html();
     expect(out.match(/Test Notes/g)?.length).toBe(4);
     expect(out.match(/Notes:/g)?.length).toBe(4);
+  });
+
+  it('prints what is written in them, not just the rows they go in', () => {
+    /*
+     * Counting the rows was the whole of this check, and it passed for months
+     * against a report whose Notes line was blank under every asset on every
+     * page: the field was declared, the row was rendered, and the repository
+     * that builds the report never set it.
+     *
+     * 453 assets in the real register carry a note and they are read before the
+     * work starts — "Switchboard in office, use test switch", "Logbook inside
+     * switchboard". A row that is present and empty looks exactly like an asset
+     * nobody wrote anything about.
+     */
+    const out = html();
+    expect(out).toContain('Switchboard in office, use test switch');
+    expect(out).toContain('Valve seized');
   });
 
   it('closes with the declaration and a signature block', () => {

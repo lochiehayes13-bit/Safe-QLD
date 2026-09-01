@@ -28,6 +28,7 @@ interface Row {
   assetTypeId: string;
   name: string;
   locationNote: string | null;
+  notes: string | null;
   attributes: string;
   kind: string;
   occurredAt: string;
@@ -64,7 +65,7 @@ export async function buildRoutineReport(q: RoutineReportQuery): Promise<Routine
   // same visit — a retest after a repair — should show the outcome that stands,
   // not the first attempt.
   const rows = await db.getAllAsync<Row>(
-    `SELECT a.id AS assetId, a.assetTypeId, a.name, a.locationNote, a.attributes,
+    `SELECT a.id AS assetId, a.assetTypeId, a.name, a.locationNote, a.notes, a.attributes,
             e.kind, e.occurredAt, e.summary, e.detail, e.technician
        FROM asset a
        JOIN asset_event e ON e.assetId = a.id
@@ -101,6 +102,20 @@ export async function buildRoutineReport(q: RoutineReportQuery): Promise<Routine
       // point of recording it separately from a pass.
       notTestedReason: result === 'not-tested' ? row.summary ?? undefined : undefined,
       testNotes: result === 'not-tested' ? row.detail ?? undefined : row.detail ?? row.summary ?? undefined,
+      /*
+       * The asset's own note, off the register.
+       *
+       * The report prints a "Notes:" line under every asset because their own
+       * one does, and this was the field behind it — declared, rendered, and
+       * never filled, so the line came out blank on every row of every report.
+       *
+       * 453 assets in the real register carry one, and they are the kind of
+       * thing the line exists for: "Switchboard in Office — use test switch",
+       * "Logbook inside switchboard", "NIL OPERATION". A technician reads that
+       * before starting, and a client reading the report sees what was known
+       * about the asset at the time.
+       */
+      notes: row.notes?.trim() || undefined,
     };
 
     const list = bySystem.get(system);
