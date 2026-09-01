@@ -10,7 +10,9 @@ import {
 } from '@/domain/partsNeeded';
 import type { Defect, Site } from '@/domain/types';
 import { loadPrefs, DEFAULT_PREFS, type Prefs } from '@/app-prefs';
-import { chargeForAttendance, formatCents, rateCardFrom } from '@/domain/rates';
+import type { StoredRateCard } from '@/db/rateCardRepo';
+import { chargeForAttendance, effectiveRateCard, formatCents } from '@/domain/rates';
+import { loadRateCard } from '@/db/rateCardRepo';
 import { useTheme } from '@/theme';
 import { DevicePicker } from '@/components/DevicePicker';
 import {
@@ -44,13 +46,17 @@ export default function SitePartsScreen() {
   const [picking, setPicking] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
+  const [card, setCard] = useState<StoredRateCard>({ rates: [], fees: [] });
 
   const load = useCallback(async () => {
     if (!siteId) return;
-    const [s, d, p] = await Promise.all([getSite(siteId), listDefects(siteId), loadPrefs()]);
+    const [s, d, p, c] = await Promise.all([
+      getSite(siteId), listDefects(siteId), loadPrefs(), loadRateCard(),
+    ]);
     setSite(s);
     setDefects(d.filter((x) => x.status === 'open'));
     setPrefs(p);
+    setCard(c);
   }, [siteId]);
 
   useEffect(() => { void load(); }, [load]);
@@ -125,16 +131,19 @@ export default function SitePartsScreen() {
    */
   const quote = useMemo(() => {
     const hours = totalLabourHours(defects);
-    const { rates } = rateCardFrom(prefs);
-    if (!hours || !rates.some((r) => r.hours === 'normal')) return null;
-    return chargeForAttendance({
-      minutesOnSite: Math.round(hours * 60),
-      hours: 'normal',
-      rates,
-      fees: [],
-      chargeAttendance: false,
-    });
-  }, [defects, prefs]);
+    const eff = effectiveRateCard(card, prefs);
+    if (!hours || !eff.rates.some((r) => r.hours === 'normal' && r.kind === 'labour')) return null;
+    return {
+      charge: chargeForAttendance({
+        minutesOnSite: Math.round(hours * 60),
+        hours: 'normal',
+        rates: eff.rates,
+        fees: [],
+        chargeAttendance: false,
+      }),
+      note: eff.note,
+    };
+  }, [defects, prefs, card]);
 
   return (
     <>
@@ -271,7 +280,7 @@ export default function SitePartsScreen() {
               <Divider />
               {quote ? (
                 <>
-                  {quote.lines.map((line, i) => (
+                  {quote.charge.lines.map((line, i) => (
                     <Rowed key={i} style={{ justifyContent: 'space-between' }}>
                       <Txt size="sm" style={{ flex: 1 }}>{line.label}</Txt>
                       <Txt size="sm">{formatCents(line.amountCents)}</Txt>
@@ -279,13 +288,16 @@ export default function SitePartsScreen() {
                   ))}
                   <Rowed style={{ justifyContent: 'space-between', marginTop: t.space(1) }}>
                     <Txt size="sm" weight="700">Labour, inc GST</Txt>
-                    <Txt size="sm" weight="700">{formatCents(quote.totalCents)}</Txt>
+                    <Txt size="sm" weight="700">{formatCents(quote.charge.totalCents)}</Txt>
                   </Rowed>
-                  {quote.warnings.length ? (
+                  {quote.charge.warnings.length ? (
                     <Txt size="xs" tone="warn" style={{ marginTop: t.space(1.5), lineHeight: 16 }}>
-                      {quote.warnings.join(' ')}
+                      {quote.charge.warnings.join(' ')}
                     </Txt>
                   ) : null}
+                  <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5), lineHeight: 16 }}>
+                    {quote.note}
+                  </Txt>
                 </>
               ) : (
                 // Quoting at nothing is worse than not quoting: a zero total

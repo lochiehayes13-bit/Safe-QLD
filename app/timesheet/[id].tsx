@@ -9,7 +9,8 @@ import {
   type HourKind, type Timesheet, type TimesheetEntry,
 } from '@/domain/timesheet';
 import { valueTimesheet } from '@/domain/timesheetValue';
-import { formatCents, rateCardFrom } from '@/domain/rates';
+import { effectiveRateCard, formatCents } from '@/domain/rates';
+import { loadRateCard, type StoredRateCard } from '@/db/rateCardRepo';
 import { loadPrefs, DEFAULT_PREFS, type Prefs } from '@/app-prefs';
 import type { Site } from '@/domain/types';
 import { timesheetSheet, timesheetSummarySheet } from '@/export/safeqldForms';
@@ -36,6 +37,7 @@ export default function TimesheetScreen() {
   const [busy, setBusy] = useState(false);
   const [showIssues, setShowIssues] = useState(true);
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
+  const [card, setCard] = useState<StoredRateCard>({ rates: [], fees: [] });
   const [chargeAttendance, setChargeAttendance] = useState(false);
   const [showValue, setShowValue] = useState(false);
 
@@ -44,6 +46,7 @@ export default function TimesheetScreen() {
     void getTimesheet(id).then(setSheet);
     void listSites().then(setSites);
     void loadPrefs().then(setPrefs);
+    void loadRateCard().then(setCard);
   }, [id]);
 
   const update = useCallback((patch: Partial<Timesheet>) => {
@@ -78,10 +81,10 @@ export default function TimesheetScreen() {
    */
   const value = useMemo(() => {
     if (!sheet) return null;
-    const card = rateCardFrom(prefs);
-    if (!card.rates.length && !card.fees.length) return null;
-    return valueTimesheet(sheet, { ...card, chargeAttendance });
-  }, [sheet, prefs, chargeAttendance]);
+    const eff = effectiveRateCard(card, prefs);
+    if (!eff.rates.length && !eff.fees.length) return null;
+    return { ...valueTimesheet(sheet, { ...eff, chargeAttendance }), note: eff.note };
+  }, [sheet, prefs, card, chargeAttendance]);
 
   const addEntry = (date: string) => {
     if (!sheet) return;
@@ -248,7 +251,10 @@ export default function TimesheetScreen() {
                     </Txt>
                   ) : null}
                   <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 16 }}>
-                    An estimate from the rates in Settings, not an invoice. Variations, agreed caps
+                    {value.note}
+                  </Txt>
+                  <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5), lineHeight: 16 }}>
+                    An estimate, not an invoice. Variations, agreed caps
                     and what the contract already covers are not visible from a timesheet — the
                     office system raises the bill.
                   </Txt>

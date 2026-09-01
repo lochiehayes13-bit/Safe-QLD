@@ -1,4 +1,4 @@
-import { GST, rateCardFrom, type RateCardPrefs } from '@/domain/rates';
+import { GST, effectiveRateCard, rateCardFrom, type RateCardPrefs } from '@/domain/rates';
 import { bandFor, valueTimesheet } from '@/domain/timesheetValue';
 import type { Timesheet, TimesheetEntry } from '@/domain/timesheet';
 
@@ -202,5 +202,49 @@ describe('valueTimesheet', () => {
     expect(v.hours).toBe(2);
     // Two hours is exactly what the attendance fee covers, so nothing extra.
     expect(v.subtotalCents).toBe(30_000);
+  });
+});
+
+describe('effectiveRateCard', () => {
+  const empty = { rates: [], fees: [] };
+  const office = rateCardFrom({
+    ...PREFS, normalHoursSellCents: 15_000, attendanceNormalCents: 40_000,
+  });
+
+  it('quotes from the office system when it has answered', () => {
+    const card = effectiveRateCard({ ...office, pulledAt: '2026-09-01T04:00:00.000Z' }, PREFS);
+    expect(card.rateSource).toBe('office');
+    expect(card.feeSource).toBe('office');
+    expect(card.rates.find((r) => r.hours === 'normal')!.sellCentsPerHour).toBe(15_000);
+    expect(card.note).toContain('Pulled 2026-09-01');
+  });
+
+  it('falls back to the typed figures when nothing has been pulled', () => {
+    const card = effectiveRateCard(empty, PREFS);
+    expect(card.rateSource).toBe('settings');
+    expect(card.rates.find((r) => r.hours === 'normal')!.sellCentsPerHour).toBe(13_000);
+    expect(card.note).toContain('typed into Settings');
+  });
+
+  it('keeps a typed attendance fee when only the rates were readable', () => {
+    // A key without setup scope on fees is the common case, and dropping the
+    // typed fee because the rates arrived would quietly stop charging
+    // attendances.
+    const card = effectiveRateCard({ rates: office.rates, fees: [] }, PREFS);
+    expect(card.rateSource).toBe('office');
+    expect(card.feeSource).toBe('settings');
+    expect(card.fees[0]!.chargeCents).toBe(30_000);
+    expect(card.note).toContain('office system');
+    expect(card.note).toContain('Settings');
+  });
+
+  it('says plainly when nothing is set anywhere', () => {
+    const card = effectiveRateCard(empty, {
+      normalHoursSellCents: 0, afterHoursSellCents: 0, attendanceNormalCents: 0,
+      attendanceNormalMinutes: 120, attendanceAfterHoursCents: 0, attendanceAfterHoursMinutes: 180,
+    });
+    expect(card.rateSource).toBe('none');
+    expect(card.rates).toEqual([]);
+    expect(card.note).toBe('No rates are set, so labour is shown as hours only.');
   });
 });

@@ -321,3 +321,59 @@ export function rateCardFrom(p: RateCardPrefs): { rates: LabourRate[]; fees: Ser
 
   return { rates, fees };
 }
+
+export interface EffectiveCard {
+  rates: LabourRate[];
+  fees: ServiceFee[];
+  /** Where each half came from, because a mixed card is worth knowing about. */
+  rateSource: 'office' | 'settings' | 'none';
+  feeSource: 'office' | 'settings' | 'none';
+  /** In a technician's words, for the screen that shows the money. */
+  note: string;
+}
+
+/**
+ * Which card to actually quote from.
+ *
+ * The office system wins where it has answered, because it is the record and it
+ * changes day to day. It wins per half rather than outright: a key without
+ * setup scope commonly reads labour rates and not service fees, and throwing
+ * away a typed attendance fee because the labour rates arrived would quietly
+ * stop charging attendances.
+ *
+ * Nothing here falls back silently. Whatever the mix, the note says it, so a
+ * figure on a screen can always be traced to where it came from.
+ */
+export function effectiveRateCard(
+  pulled: { rates: LabourRate[]; fees: ServiceFee[]; pulledAt?: string },
+  prefs: RateCardPrefs,
+): EffectiveCard {
+  const typed = rateCardFrom(prefs);
+
+  const rates = pulled.rates.length ? pulled.rates : typed.rates;
+  const fees = pulled.fees.length ? pulled.fees : typed.fees;
+  const rateSource = pulled.rates.length ? 'office' : typed.rates.length ? 'settings' : 'none';
+  const feeSource = pulled.fees.length ? 'office' : typed.fees.length ? 'settings' : 'none';
+
+  const parts: string[] = [];
+  if (rateSource === 'office' && feeSource === 'office') {
+    parts.push('Rates and attendance fees came from the office system');
+  } else {
+    if (rateSource === 'office') parts.push('Labour rates came from the office system');
+    if (rateSource === 'settings') parts.push('Labour rates are the ones typed into Settings');
+    if (rateSource === 'none') parts.push('No labour rate is set anywhere');
+    if (feeSource === 'office') parts.push('attendance fees came from the office system');
+    if (feeSource === 'settings') parts.push('attendance fees are the ones typed into Settings');
+    if (feeSource === 'none') parts.push('no attendance fee is set');
+  }
+
+  let note = `${parts.join(', ')}.`;
+  if ((rateSource === 'office' || feeSource === 'office') && pulled.pulledAt) {
+    note += ` Pulled ${pulled.pulledAt.slice(0, 10)}.`;
+  }
+  if (rateSource === 'none' && feeSource === 'none') {
+    note = 'No rates are set, so labour is shown as hours only.';
+  }
+
+  return { rates, fees, rateSource, feeSource, note };
+}

@@ -501,3 +501,44 @@ CREATE TABLE IF NOT EXISTS sync_state (
   updatedAt        TEXT NOT NULL
 );
 `;
+
+/**
+ * v8 — the rate card as the office system holds it.
+ *
+ * Kept in its own table rather than in preferences because a real card is many
+ * named rates, several of them per-customer, and a handful of scalars cannot
+ * hold that. Replaced wholesale on each pull: a rate deleted in Simpro must
+ * disappear here too, and merging would keep it alive.
+ *
+ * There is no cost column, deliberately. The device is never told what an hour
+ * costs Safe QLD, so nothing on a lost phone reveals a margin.
+ */
+export const MIGRATION_V8 = `
+CREATE TABLE IF NOT EXISTS labour_rate (
+  id                TEXT PRIMARY KEY NOT NULL,
+  name              TEXT NOT NULL,
+  sellCentsPerHour  INTEGER NOT NULL,
+  taxRate           REAL NOT NULL DEFAULT 0.1,
+  /* labour | callout */
+  kind              TEXT NOT NULL DEFAULT 'labour',
+  /* normal | after-hours */
+  hours             TEXT NOT NULL DEFAULT 'normal',
+  /* Null on a general rate. Held with the office system's spelling, right or wrong. */
+  customerName      TEXT,
+  source            TEXT NOT NULL DEFAULT 'simpro',
+  updatedAt         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_labour_rate_pick ON labour_rate(hours, kind, customerName);
+
+CREATE TABLE IF NOT EXISTS service_fee (
+  id                     TEXT PRIMARY KEY NOT NULL,
+  name                   TEXT NOT NULL,
+  chargeCents            INTEGER NOT NULL,
+  includedLabourMinutes  INTEGER NOT NULL DEFAULT 0,
+  taxRate                REAL NOT NULL DEFAULT 0.1,
+  hours                  TEXT NOT NULL DEFAULT 'normal',
+  source                 TEXT NOT NULL DEFAULT 'simpro',
+  updatedAt              TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_service_fee_hours ON service_fee(hours);
+`;

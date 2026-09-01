@@ -12,7 +12,10 @@ import { bundledCatalogueSize, startCatalogueSeed } from '@/seed/catalogueSeed';
 import { flushQueue, pullFromSimpro, type SyncProgress } from '@/simpro/sync';
 import { describeStaleness, type SyncState } from '@/simpro/incremental';
 import { readAllSyncState } from '@/simpro/watermark';
-import { formatCents, parseCents, rateCardFrom } from '@/domain/rates';
+import { SimproResources } from '@/simpro/resources';
+import { clearRateCard, loadRateCard, saveRateCard } from '@/db/rateCardRepo';
+import { effectiveRateCard, formatCents, parseCents, type LabourRate, type ServiceFee } from '@/domain/rates';
+import type { RateCardImport } from '@/simpro/rateCard';
 import { formatBytes } from '@/share/pack';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
@@ -34,10 +37,14 @@ export default function SettingsScreen() {
   // Null until seeding settles, so a first launch shows "loading" rather than
   // an alarming zero against the bundled figure.
   const [catalogue, setCatalogue] = useState<number | null>(null);
+  const [card, setCard] = useState<{ rates: LabourRate[]; fees: ServiceFee[]; pulledAt?: string }>({ rates: [], fees: [] });
+  const [pulling, setPulling] = useState(false);
+  const [pullReport, setPullReport] = useState<RateCardImport & { unreadable: { what: string; error: string }[] } | null>(null);
   const bundled = bundledCatalogueSize();
 
   useEffect(() => {
     void loadPrefs().then(setPrefs);
+    void loadRateCard().then(setCard);
     void SimproClient.hasSecret().then(setHasSecret);
     void readAllSyncState().then(setSyncState);
     void pendingSyncCount().then(setPending);
@@ -67,14 +74,7 @@ export default function SettingsScreen() {
    * preference fields directly: if a rate is dropped for being zero, this says
    * so instead of showing a figure nothing will use.
    */
-  const rateSummary = useMemo(() => {
-    const { rates, fees } = rateCardFrom(prefs);
-    const parts = [
-      ...rates.map((r) => `${r.hours === 'normal' ? 'Normal' : 'After'} hours at ${formatCents(r.sellCentsPerHour)} an hour`),
-      ...fees.map((f) => `${f.hours === 'normal' ? 'normal' : 'after'} hours attendance ${formatCents(f.chargeCents)} covering ${f.includedLabourMinutes} minutes`),
-    ];
-    return parts.length ? `${parts.join('; ')}.` : '';
-  }, [prefs]);
+  const effective = useMemo(() => effectiveRateCard(card, prefs), [card, prefs]);
 
   const saveSecret = async () => {
     if (!secret.trim()) return;
@@ -82,6 +82,50 @@ export default function SettingsScreen() {
     setSecret('');
     setHasSecret(true);
     Alert.alert('Saved', 'The client secret is held in this device’s secure keystore. It is never written to ordinary app storage and never leaves the device except to Simpro.');
+  };
+
+  /**
+   * Reads the rate card straight out of the office system.
+   *
+   * Wholesale rather than merged: a rate deleted in Simpro has to disappear
+   * here too, because a stale rate still selects and a missing one is reported.
+   * Everything the pull inferred rather than read comes back with it and is
+   * shown, so no figure on a quote is traceable to a guess nobody saw.
+   */
+  const pullRates = async () => {
+    setPulling(true);
+    setPullReport(null);
+    try {
+      const client = new SimproClient({
+        buildDomain: prefs.simproDomain,
+        companyId: prefs.simproCompanyId,
+        clientId: prefs.simproClientId,
+        proxyUrl: prefs.simproProxyUrl || undefined,
+      });
+      const report = await new SimproResources(client).rateCard();
+      setPullReport(report);
+      if (!report.rates.length && !report.fees.length) {
+        Alert.alert(
+          'Nothing came back',
+          report.unreadable.length
+            ? report.unreadable.map((u) => `${u.what}: ${u.error}`).join('\n\n')
+            : 'Simpro answered but had no rates or fees to give. The figures in Settings are still used.',
+        );
+        return;
+      }
+      await saveRateCard(report.rates, report.fees);
+      setCard(await loadRateCard());
+    } catch (e) {
+      Alert.alert('Could not read the rate card', e instanceof Error ? e.message : String(e));
+    } finally {
+      setPulling(false);
+    }
+  };
+
+  const forgetRates = async () => {
+    await clearRateCard();
+    setCard(await loadRateCard());
+    setPullReport(null);
   };
 
   const test = async () => {
@@ -222,17 +266,100 @@ export default function SettingsScreen() {
             <Minutes label="Covers" minutes={prefs.attendanceAfterHoursMinutes} onMinutes={(m) => update({ attendanceAfterHoursMinutes: m })} />
           </View>
         </Rowed>
-        {rateSummary ? (
-          <Txt size="xs" tone="muted" style={{ marginTop: t.space(3), lineHeight: 17 }}>{rateSummary}</Txt>
-        ) : (
-          <Txt size="xs" tone="warn" style={{ marginTop: t.space(3), lineHeight: 17 }}>
-            Nothing is set, so labour and attendances are shown as hours only.
-          </Txt>
-        )}
+        <Txt
+          size="xs"
+          tone={effective.rateSource === 'none' && effective.feeSource === 'none' ? 'warn' : 'muted'}
+          style={{ marginTop: t.space(3), lineHeight: 17 }}
+        >
+          {effective.note}
+        </Txt>
         <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 16 }}>
           Cost rates are not asked for and not held here. Only what a client is charged, so nothing
           on this device reveals a margin.
         </Txt>
+      </Card>
+
+      <Card>
+        <Txt size="sm" weight="700">Follow the office system instead</Txt>
+        <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5), lineHeight: 17 }}>
+          Rates change in Simpro day to day, so they can be read from there rather than retyped
+          here. A pull replaces the whole card — a rate deleted in Simpro disappears here too,
+          because a stale rate still gets used where a missing one is reported.
+        </Txt>
+        <View style={{ height: t.space(3) }} />
+        <Button title="Pull the rate card from Simpro" variant="secondary" onPress={pullRates} loading={pulling} />
+
+        {card.rates.length || card.fees.length ? (
+          <>
+            <Divider />
+            <Rowed style={{ justifyContent: 'space-between' }}>
+              <Txt size="sm">Held from Simpro</Txt>
+              <Txt size="sm" tone="muted">
+                {card.rates.length} rate{card.rates.length === 1 ? '' : 's'}, {card.fees.length} fee{card.fees.length === 1 ? '' : 's'}
+              </Txt>
+            </Rowed>
+            {card.rates.map((r) => (
+              <Rowed key={r.id} style={{ justifyContent: 'space-between' }} align="flex-start">
+                <View style={{ flex: 1 }}>
+                  <Txt size="sm">{r.name}</Txt>
+                  <Txt size="xs" tone="faint">
+                    {r.hours === 'normal' ? 'Normal hours' : 'After hours'} · {r.kind === 'callout' ? 'call-out' : 'hourly'}
+                    {r.customerName ? ` · ${r.customerName}` : ''}
+                  </Txt>
+                </View>
+                <Txt size="sm">{formatCents(r.sellCentsPerHour)}</Txt>
+              </Rowed>
+            ))}
+            {card.fees.map((f) => (
+              <Rowed key={f.id} style={{ justifyContent: 'space-between' }} align="flex-start">
+                <View style={{ flex: 1 }}>
+                  <Txt size="sm">{f.name}</Txt>
+                  <Txt size="xs" tone="faint">covers {f.includedLabourMinutes} minutes</Txt>
+                </View>
+                <Txt size="sm">{formatCents(f.chargeCents)}</Txt>
+              </Rowed>
+            ))}
+            <View style={{ height: t.space(3) }} />
+            <Button title="Forget the pulled card" variant="ghost" compact onPress={forgetRates} />
+          </>
+        ) : null}
+
+        {pullReport ? (
+          <>
+            <Divider />
+            {pullReport.suspect.length ? (
+              <Banner
+                tone="warn"
+                title={`${pullReport.suspect.length} rate name${pullReport.suspect.length === 1 ? '' : 's'} will not match a customer`}
+                body={pullReport.suspect.join('\n\n')}
+              />
+            ) : null}
+            {pullReport.unreadable.length ? (
+              <Banner
+                tone="warn"
+                title="Part of the card could not be read"
+                body={pullReport.unreadable.map((u) => `${u.what}: ${u.error}`).join('\n')}
+              />
+            ) : null}
+            {pullReport.skipped.length ? (
+              <Txt size="xs" tone="warn" style={{ lineHeight: 17 }}>
+                Left out: {pullReport.skipped.map((sk) => `${sk.name} (${sk.reason})`).join('; ')}.
+              </Txt>
+            ) : null}
+            {pullReport.notes.length ? (
+              <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
+                {pullReport.notes.join(' ')}
+              </Txt>
+            ) : null}
+            {pullReport.margins.length ? (
+              <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
+                Margin at the moment of the pull, for a sanity check only —{' '}
+                {pullReport.margins.map((m) => `${m.name} ${m.percent}%`).join(', ')}. Not saved:
+                the cost rates it was worked out from are dropped on the way in.
+              </Txt>
+            ) : null}
+          </>
+        ) : null}
       </Card>
 
       <H2>Simpro</H2>

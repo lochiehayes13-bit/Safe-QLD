@@ -1,4 +1,5 @@
 import type { SimproClient } from './client';
+import { buildRateCard, type RateCardImport, type RawLabourRate, type RawServiceFee } from './rateCard';
 
 /**
  * Typed views over the Simpro endpoints the app uses.
@@ -242,5 +243,54 @@ export class SimproResources {
       },
     });
     return { id: data.ID !== undefined ? String(data.ID) : undefined };
+  }
+
+  /**
+   * Customer names, used only to tell a customer rate from a general one.
+   *
+   * Nothing else is read: a rate card needs to know that "Vaxxas" is a real
+   * customer, not who they are.
+   */
+  async customerNames(maxRecords = 5000): Promise<string[]> {
+    const raw = await this.client.listAll<{ CompanyName?: string; Name?: string }>(
+      'customers/companies/', { columns: 'ID,CompanyName' }, maxRecords,
+    );
+    return raw.map((c) => str(c.CompanyName) ?? str(c.Name)).filter((n): n is string => !!n);
+  }
+
+  /**
+   * The rate card as Simpro holds it right now.
+   *
+   * Rates change in the office system day to day, which is the whole reason to
+   * read them rather than keep a typed copy. The two setup endpoints are asked
+   * for separately so one being unreadable — a key without setup scope is
+   * common — still yields the other, with the gap reported rather than showing
+   * a half card as though it were whole.
+   */
+  async rateCard(): Promise<RateCardImport & { unreadable: { what: string; error: string }[] }> {
+    const unreadable: { what: string; error: string }[] = [];
+
+    const tryList = async <T>(what: string, path: string): Promise<T[]> => {
+      try {
+        return await this.client.listAll<T>(path, {}, 1000);
+      } catch (e) {
+        unreadable.push({ what, error: e instanceof Error ? e.message : String(e) });
+        return [];
+      }
+    };
+
+    const [rates, fees] = await Promise.all([
+      tryList<RawLabourRate>('Labour rates', 'setup/labor/laborRates/'),
+      tryList<RawServiceFee>('Service fees', 'setup/labor/serviceFees/'),
+    ]);
+
+    let customers: string[] = [];
+    try {
+      customers = await this.customerNames();
+    } catch (e) {
+      unreadable.push({ what: 'Customer names', error: e instanceof Error ? e.message : String(e) });
+    }
+
+    return { ...buildRateCard(rates, fees, customers), unreadable };
   }
 }
