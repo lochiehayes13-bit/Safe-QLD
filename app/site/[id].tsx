@@ -9,7 +9,9 @@ import { createBaseline, listBaselines } from '@/db/baselineRepo';
 import { createOccupierStatement, listOccupierStatements } from '@/db/occupierRepo';
 import { configTotals, siteToConfig } from '@/share/siteToConfig';
 import { encodePack, formatBytes } from '@/share/pack';
-import { shareFile, writePack } from '@/export/files';
+import { shareFile, writePack, writePdf } from '@/export/files';
+import { buildRoutineReport } from '@/db/routineReportRepo';
+import { routineServiceReportHtml, tallyReport } from '@/export/routineServiceReport';
 import { nowIso } from '@/db';
 import type { Defect, Panel, ServiceReport, Site } from '@/domain/types';
 import { PANEL_CATALOGUE } from '@/parsers';
@@ -29,6 +31,7 @@ export default function SiteScreen() {
   const [pointCount, setPointCount] = useState(0);
   const [creating, setCreating] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [reporting, setReporting] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -108,6 +111,55 @@ export default function SiteScreen() {
    * does not redistribute a customer's proprietary configuration. Until now the
    * app could open a pack but never make one, which meant no pack could exist.
    */
+  /**
+   * The routine service report for the most recent visit.
+   *
+   * The window is the day of the newest recorded result rather than a range
+   * the technician picks: a service report is a record of a visit, and asking
+   * someone to choose dates invites the wrong ones. A different visit can be
+   * reported by picking it from the timeline.
+   */
+  const shareRoutineReport = async () => {
+    if (!site) return;
+    setReporting(true);
+    try {
+      const to = new Date();
+      const from = new Date(to.getTime() - 30 * 24 * 3600 * 1000);
+      const input = await buildRoutineReport({
+        siteId: site.id,
+        from: from.toISOString(),
+        to: to.toISOString(),
+        workRequested: 'Routine service of fire protection systems and assets',
+      });
+
+      if (!input) {
+        Alert.alert(
+          'Nothing to report yet',
+          'No assets at this site have been passed, failed or recorded as not tested in the last '
+          + 'month. Run a routine first — the report is built from what was actually recorded, not '
+          + 'from the asset list.',
+        );
+        return;
+      }
+
+      const tally = tallyReport(input);
+      const html = routineServiceReportHtml(input);
+      const file = await writePdf(`${site.name} service report`, html);
+      await shareFile(
+        file,
+        // The issued format carries no summary, so the counts go here where a
+        // technician sees them before the document leaves the phone.
+        `${site.name} — ${tally.total} assets: ${tally.pass} pass, ${tally.fail} fail`
+        + `${tally.notTested ? `, ${tally.notTested} not tested` : ''}`
+        + `${tally.missingReason ? ` (${tally.missingReason} with no reason given)` : ''}`,
+      );
+    } catch (e) {
+      Alert.alert('Could not build the report', e instanceof Error ? e.message : String(e));
+    } finally {
+      setReporting(false);
+    }
+  };
+
   const sharePack = async () => {
     if (!site) return;
     setSharing(true);
@@ -163,11 +215,20 @@ export default function SiteScreen() {
         </Rowed>
         <Rowed gap={2}>
           <Button
+            title="Service report"
+            variant="secondary"
+            onPress={shareRoutineReport}
+            loading={reporting}
+            style={{ flex: 1 }}
+          />
+          <Button
             title="Import a configuration"
             variant="secondary"
             onPress={() => router.push({ pathname: '/import', params: { siteId: site.id } })}
             style={{ flex: 1 }}
           />
+        </Rowed>
+        <Rowed gap={2}>
           <Button
             title="Share this site"
             variant="secondary"
@@ -175,6 +236,7 @@ export default function SiteScreen() {
             loading={sharing}
             style={{ flex: 1 }}
           />
+          <View style={{ flex: 1 }} />
         </Rowed>
 
         <H2>Browse</H2>
