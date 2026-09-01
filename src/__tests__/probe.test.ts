@@ -188,6 +188,24 @@ describe('delimiters', () => {
     expect(probeFile(bytes(text)).delimiter).toBeUndefined();
   });
 
+  it('sniffs the smallest real file a technician would import', () => {
+    /*
+     * A header and two rows. That is a perfectly ordinary export — a site with
+     * two extinguishers on it — and the sniffer needs three non-empty lines
+     * before it will call a delimiter. Three is the smallest number from which
+     * "most lines agree on a shape" means anything, so the rule is right; what
+     * was not written down is that three is enough rather than too few, and a
+     * file this small failing to import is a technician told their file is not
+     * a spreadsheet.
+     */
+    const three = 'Site Name,Asset #,Location\nHall,1,Foyer\nHall,2,Kitchen\n';
+    expect(probeFile(bytes(three)).delimiter).toMatchObject({ name: 'comma', consistency: 1 });
+
+    // Two lines is a header and one row, and there is nothing to agree with.
+    const two = 'Site Name,Asset #,Location\nHall,1,Foyer\n';
+    expect(probeFile(bytes(two)).delimiter).toBeUndefined();
+  });
+
   it('reports no delimiter for fixed-width records rather than guessing one', () => {
     const text = Array.from({ length: 10 }, (_, i) => `001${String(i).padStart(4, '0')}SMOKE     ZONE1`).join('\n');
     expect(probeFile(bytes(text)).delimiter).toBeUndefined();
