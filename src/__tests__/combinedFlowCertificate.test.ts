@@ -98,6 +98,32 @@ describe('assessCombinedFlow', () => {
     expect(a.warnings.join(' ')).toContain('One of the two is wrong');
   });
 
+  it('says as much about a gauge with no calibration date at all', () => {
+    /*
+     * The narrower question this check used to answer. It flagged a gauge past
+     * twelve months and said nothing about one with no date recorded — which is
+     * the same unusable reading with less evidence behind it, and the easier of
+     * the two to end up with, because leaving a field blank takes no effort.
+     *
+     * It is not counted as stale: nobody has established that it is. It is
+     * counted as a reason the pressures on the page cannot be relied on, which
+     * is the thing the certificate turns on.
+     */
+    const a = assessCombinedFlow(base({
+      equipment: [{ item: 'Pressure Gauge', idNumber: 'G3', model: 'Ashcroft 1082' }],
+    }));
+    expect(a.warnings.join(' ')).toContain('has no calibration date');
+    expect(a.warnings.join(' ')).toContain('Every pressure on this page was read with it');
+    expect(a.staleEquipment).toEqual([]);
+  });
+
+  it('says nothing about an equipment row nobody filled in', () => {
+    // The table is printed with empty rows to write into. A warning against
+    // each of them buries the ones that mean something.
+    const a = assessCombinedFlow(base({ equipment: [{ item: 'Pressure Gauge' }, { item: 'Flow meter' }] }));
+    expect(a.warnings.join(' ')).not.toContain('calibration');
+  });
+
   it('leaves the verdict undetermined rather than passing on missing figures', () => {
     // A certificate that says "pass" because a field was blank is worse than
     // one that says nothing.
