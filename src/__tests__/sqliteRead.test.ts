@@ -49,9 +49,24 @@ function reference(bytes: Uint8Array, table: string): Record<string, unknown>[] 
   return new DatabaseSync(path, { readOnly: true }).prepare(`SELECT * FROM "${table}"`).all() as Record<string, unknown>[];
 }
 
+/**
+ * A value in a form the two engines can be compared in, without losing any of
+ * it on the way.
+ *
+ * This turned every bigint into a Number, which is the one conversion that
+ * cannot be undone: past 2^53 two different 64-bit integers round to the same
+ * double, so the comparison could not fail there however wrong the reader was.
+ * A test whose whole purpose is agreement with SQLite had a range in which it
+ * agreed by construction.
+ *
+ * Integers are compared as text so a bigint and a number of the same value
+ * still match — which is what the two engines legitimately differ on — while
+ * two integers that differ stay different.
+ */
 const normalise = (v: unknown): unknown => {
   if (v === null || v === undefined) return null;
-  if (typeof v === 'bigint') return Number(v);
+  if (typeof v === 'bigint') return `int:${v}`;
+  if (typeof v === 'number' && Number.isInteger(v)) return `int:${v}`;
   if (v instanceof Uint8Array) return Array.from(v).join(',');
   return v;
 };
@@ -102,6 +117,38 @@ describe('agreeing with SQLite itself', () => {
       `INSERT INTO t (v) VALUES ${values.map((v) => `(${v})`).join(',')}`,
     ]);
     expect(expectAgreement(bytes, 't')).toBe(values.length);
+  });
+
+  it('reads the integers SQLite can store but a JavaScript number cannot', () => {
+    /*
+     * The agreement harness cannot reach these: Node's own reader throws a
+     * RangeError on them in its default mode, which is why they are pinned
+     * directly here rather than compared. They are ordinary SQLite values —
+     * the format's own minimum and maximum — and a rowid or an identifier from
+     * another system can sit anywhere in this range.
+     *
+     * Two boundaries live in these six rows. The sign boundary at 2^63, where
+     * the most negative integer the format holds is the one value that
+     * distinguishes `>=` from `>` and reads as a large positive number if it is
+     * wrong. And the safe-integer boundary, where this reader's contract is to
+     * hand back a plain number while it is exact and a bigint once it is not,
+     * so callers are not made to deal with bigint for ordinary values.
+     */
+    const bytes = build([
+      'CREATE TABLE big (id INTEGER PRIMARY KEY, v INTEGER)',
+      'INSERT INTO big (v) VALUES (-9223372036854775808),(9223372036854775807),'
+        + '(9007199254740992),(-9007199254740992),(9007199254740991),(-9007199254740991)',
+    ]);
+    const mine = readSqlite(bytes);
+    const rows = mine.rows(mine.table('big')!);
+    expect(rows.map((r) => `${typeof r.v}:${r.v}`)).toEqual([
+      'bigint:-9223372036854775808',
+      'bigint:9223372036854775807',
+      'bigint:9007199254740992',
+      'bigint:-9007199254740992',
+      'number:9007199254740991',
+      'number:-9007199254740991',
+    ]);
   });
 
   it('substitutes the rowid for an INTEGER PRIMARY KEY column', () => {
