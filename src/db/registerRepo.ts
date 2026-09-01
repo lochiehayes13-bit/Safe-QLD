@@ -6,6 +6,7 @@ import {
 } from '@/parsers/assetRegister';
 import type { Frequency } from '@/seed/serviceRoutines';
 import { matchSiteByRefOrName } from '@/domain/siteNames';
+import type { RegisterScheduleRow } from '@/domain/registerSchedule';
 import type { Site } from '@/domain/types';
 
 /**
@@ -189,6 +190,26 @@ export async function importAssetRegister(parsed: ParsedRegister): Promise<Regis
   }
 
   return result;
+}
+
+/**
+ * What the register says is next due on one asset, routine by routine.
+ *
+ * The import has always written a row per routine, for the reason the schema
+ * comment gives: an extinguisher is due six-monthly, yearly and five-yearly on
+ * three different dates, and the asset's own `nextDueAt` can only hold the
+ * soonest. Thirty-one thousand of those rows went in on the real register and
+ * nothing read one — so a technician looking at an extinguisher due on the
+ * first of October could not find out whether that was the six-monthly or the
+ * pressure test, which are not the same visit.
+ */
+export async function assetSchedule(assetId: string): Promise<RegisterScheduleRow[]> {
+  const db = await getDb();
+  return db.getAllAsync<RegisterScheduleRow>(
+    `SELECT frequency, nextDueAt, lastDoneAt, lastDonePrecision, lastDoneRaw
+       FROM asset_schedule WHERE assetId = ?`,
+    assetId,
+  );
 }
 
 /** The walk for a site, in the order the register puts it. */

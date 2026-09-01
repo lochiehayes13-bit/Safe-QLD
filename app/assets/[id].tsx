@@ -8,6 +8,11 @@ import {
 } from '@/db/assetRepo';
 import { assetTypeById, SYSTEM_LABELS, type AttributeDef } from '@/seed/assetTypes';
 import { getSite } from '@/db/repo';
+import { assetSchedule } from '@/db/registerRepo';
+import {
+  REGISTER_DUE_LABEL, registerScheduleLines,
+  type RegisterScheduleLine, type RegisterScheduleRow,
+} from '@/domain/registerSchedule';
 import type { Site } from '@/domain/types';
 import { formatAuDate } from '@/export/sheets';
 import { loadPrefs } from '@/app-prefs';
@@ -58,6 +63,7 @@ export default function AssetScreen() {
   const [missing, setMissing] = useState(false);
   const [site, setSite] = useState<Site | null>(null);
   const [events, setEvents] = useState<AssetEvent[]>([]);
+  const [schedule, setSchedule] = useState<RegisterScheduleRow[]>([]);
   const [note, setNote] = useState('');
 
   const load = useCallback(async () => {
@@ -66,9 +72,12 @@ export default function AssetScreen() {
     setAsset(a);
     setMissing(!a);
     if (a) {
-      const [s, e] = await Promise.all([getSite(a.siteId), assetTimeline(a.id)]);
+      const [s, e, sched] = await Promise.all([
+        getSite(a.siteId), assetTimeline(a.id), assetSchedule(a.id),
+      ]);
       setSite(s);
       setEvents(e);
+      setSchedule(sched);
     }
   }, [id]);
 
@@ -96,6 +105,7 @@ export default function AssetScreen() {
   const type = assetTypeById(asset.assetTypeId);
   const failures = events.filter((e) => e.kind === 'failed').length;
   const attributes: AttributeDef[] = type?.attributes ?? [];
+  const routines = registerScheduleLines(schedule, nowIso());
 
   return (
     <>
@@ -127,6 +137,45 @@ export default function AssetScreen() {
             title={`This has failed ${failures} times`}
             body="Repeated failure on one asset is usually the environment, the location or the device type — worth a root cause rather than another replacement."
           />
+        ) : null}
+
+        {routines.length ? (
+          <>
+            <H2>What the register says is due</H2>
+            {/*
+              * One line per routine, because they are different visits. An
+              * extinguisher's six-monthly is a look and a tag; its five-yearly
+              * takes the extinguisher off site. The asset's own due date is the
+              * soonest of these and cannot say which.
+              */}
+            <Card>
+              {routines.map((r, i) => (
+                <View key={r.frequency}>
+                  {i > 0 ? <Divider /> : null}
+                  <Rowed>
+                    <View style={{ flex: 1 }}>
+                      <Txt weight="700">{r.label}</Txt>
+                      {r.lastDone ? (
+                        <Txt size="sm" tone="muted">
+                          Last done {r.lastDone}
+                          {r.lastDoneImprecise ? ' — the register records no day for it' : ''}
+                        </Txt>
+                      ) : null}
+                    </View>
+                    <View style={{ alignItems: 'flex-end', gap: 3 }}>
+                      <Chip label={REGISTER_DUE_LABEL[r.state]} tone={toneForDue(r)} />
+                      {r.nextDueAt ? <Txt size="sm">{formatAuDate(r.nextDueAt)}</Txt> : null}
+                    </View>
+                  </Rowed>
+                </View>
+              ))}
+            </Card>
+            <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
+              These dates come from the office system's own register, as exported. They are not
+              worked out from the service history on this device, and where the two disagree the
+              service history is the record of what was actually done.
+            </Txt>
+          </>
         ) : null}
 
         <H2>Record</H2>
@@ -259,4 +308,13 @@ export default function AssetScreen() {
       </Screen>
     </>
   );
+}
+
+function toneForDue(line: RegisterScheduleLine): 'default' | 'pass' | 'warn' | 'fail' {
+  if (line.state === 'overdue') return 'fail';
+  if (line.state === 'due') return 'warn';
+  // Inside a fortnight is the one worth noticing on a screen somebody opens
+  // while standing in front of the asset.
+  if (line.state === 'upcoming' && (line.daysUntil ?? Infinity) <= 14) return 'warn';
+  return 'default';
 }

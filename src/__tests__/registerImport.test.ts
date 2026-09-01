@@ -5,6 +5,7 @@ import { existsSync } from 'fs';
 import { join } from 'path';
 import { MIGRATIONS } from '@/db/schema';
 import { assetName, parseAssetRegister, soonestDue, type RegisterAsset } from '@/parsers/assetRegister';
+import { registerScheduleLines, type RegisterScheduleRow } from '@/domain/registerSchedule';
 
 /**
  * Loading a register into the database.
@@ -58,6 +59,33 @@ describe('the schema the import writes to', () => {
     const rows = db.prepare("SELECT nextDueAt FROM asset_schedule WHERE assetId='a1' AND frequency='annual'").all();
     expect(rows).toHaveLength(1);
     expect((rows[0] as { nextDueAt: string }).nextDueAt).toBe('2028-03-01');
+  });
+
+  it('reads the schedule back in the shape the screen expects', () => {
+    /*
+     * The gap this closes is between the SQL and the type. `getAllAsync<T>` is
+     * an unchecked cast: rename a column in the migration and every row comes
+     * back with the field undefined, typed correctly, with nothing failing —
+     * the routine list simply goes blank on a screen nobody has open.
+     *
+     * So the repository's own query text is run here and its rows are handed to
+     * the domain function that renders them. If the two ever stop agreeing
+     * about a column name, this is where it shows.
+     */
+    db.exec(`UPDATE asset_schedule SET lastDoneAt = NULL, lastDonePrecision = 'month',
+             lastDoneRaw = 'Jun-25' WHERE assetId = 'a1' AND frequency = 'five-yearly'`);
+
+    const rows = db.prepare(
+      `SELECT frequency, nextDueAt, lastDoneAt, lastDonePrecision, lastDoneRaw
+         FROM asset_schedule WHERE assetId = ?`,
+    ).all('a1') as unknown as RegisterScheduleRow[];
+
+    const lines = registerScheduleLines(rows, '2026-09-01T21:30:00.000Z');
+    expect(lines.map((l) => l.frequency)).toEqual(['six-monthly', 'annual', 'five-yearly']);
+    expect(lines.every((l) => l.nextDueAt)).toBe(true);
+    const overhaul = lines.find((l) => l.frequency === 'five-yearly')!;
+    expect(overhaul.lastDone).toBe('Jun-25');
+    expect(overhaul.lastDoneImprecise).toBe(true);
   });
 
   it('finds an asset again by the id its source system gave it', () => {

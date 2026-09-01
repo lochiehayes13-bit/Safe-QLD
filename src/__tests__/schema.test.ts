@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { readFileSync, readdirSync } from 'fs';
+import { readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { MIGRATIONS, SCHEMA_VERSION } from '@/db/schema';
 
@@ -189,4 +189,82 @@ describe('repositories against the schema', () => {
   });
 
   afterAll(() => db.close());
+});
+
+/**
+ * A table the app fills and never reads.
+ *
+ * `asset_schedule` was one. The importer wrote a row per routine into it on
+ * every register import — thirty-one thousand of them on the real one — the
+ * schema gave it a unique index on (assetId, frequency) and another on
+ * nextDueAt for a query nobody had written, and no repository ever selected
+ * from it. The reason the table exists is written in its own schema comment:
+ * an extinguisher is due six-monthly, yearly and five-yearly on three different
+ * dates and the asset's single nextDueAt can only hold the soonest. The app
+ * showed the soonest.
+ *
+ * That is this repository's recurring failure, in the schema rather than in the
+ * router: something finished, correct, and reachable from nothing. It cost
+ * nothing to run and it silently threw away the only answer to "which routine
+ * is this asset actually due for", which is the question a technician standing
+ * in front of it is asking.
+ *
+ * A write with no read is the shape that catches it, and it is cheap to check.
+ */
+describe('tables the app writes to', () => {
+  const schema = MIGRATIONS.join('\n');
+  const declared = [...schema.matchAll(/CREATE TABLE IF NOT EXISTS\s+(\w+)/g)].map((m) => m[1]!);
+
+  /**
+   * Read somewhere else, and deliberately.
+   *
+   * `defect_code` mirrors the DEFECT_LIBRARY constant, which is what the app
+   * actually reads — `defectByCode` resolves against the TypeScript, never
+   * against a row. Its sibling `asset_type` is seeded the same way and *is*
+   * joined against, so this is a real asymmetry rather than a convention.
+   * Left as it is because deciding whether the database should describe its own
+   * defect vocabulary is a call about the schema, not a bug to fix quietly.
+   */
+  const KNOWN_WRITE_ONLY = new Set(['defect_code']);
+
+  function walk(dir: string, out: string[] = []): string[] {
+    for (const entry of readdirSync(dir)) {
+      if (['node_modules', '.git', 'dist', '.expo', 'coverage', '__tests__', '__mocks__'].includes(entry)) continue;
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) walk(full, out);
+      else if (/\.tsx?$/.test(entry) && !entry.endsWith('.d.ts') && !entry.includes('schema')) out.push(full);
+    }
+    return out;
+  }
+
+  const code = ['src', 'app'].flatMap((r) => walk(r)).map((f) => readFileSync(f, 'utf8')).join('\n');
+
+  it('has tables to check and code to check them against', () => {
+    // Both halves can silently become empty, and either would pass forever.
+    expect(declared.length).toBeGreaterThan(20);
+    expect(declared).toContain('asset_schedule');
+    expect(code.length).toBeGreaterThan(100_000);
+  });
+
+  it('reads every table it writes to', () => {
+    const writeOnly: string[] = [];
+    for (const table of declared) {
+      if (KNOWN_WRITE_ONLY.has(table)) continue;
+      const written = new RegExp(`(?:INSERT\\s+(?:OR\\s+\\w+\\s+)?INTO|UPDATE|DELETE\\s+FROM)\\s+${table}\\b`, 'i').test(code);
+      const read = new RegExp(`(?:FROM|JOIN)\\s+${table}\\b`, 'i').test(code);
+      if (written && !read) writeOnly.push(table);
+    }
+    // Named rather than counted: the fix is a repository function and a screen,
+    // and neither is findable from a number.
+    expect(writeOnly).toEqual([]);
+  });
+
+  it('names the one exception rather than hiding it in a count', () => {
+    // An allowlist that nobody has to justify is a way of never fixing
+    // anything, so the entry has to still be true.
+    for (const table of KNOWN_WRITE_ONLY) {
+      expect(declared).toContain(table);
+      expect(new RegExp(`(?:FROM|JOIN)\\s+${table}\\b`, 'i').test(code)).toBe(false);
+    }
+  });
 });
