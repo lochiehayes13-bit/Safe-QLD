@@ -1,11 +1,33 @@
-import { writeFileSync, mkdirSync } from 'fs';
+import { writeFileSync, mkdirSync, statSync } from 'fs';
 import { buildXlsx, colName, safeSheetName, type Sheet } from '@/export/xlsx';
 import { crc32, createZip, fromBase64, toBase64, utf8Bytes } from '@/export/zip';
+import { readZip } from '@/parsers/zipRead';
 import { baselineSheet, timesheetSheet, timesheetSummarySheet } from '@/export/safeqldForms';
 import { emptyBaseline } from '@/domain/baseline';
 import type { Timesheet } from '@/domain/timesheet';
 
 const OUT = '/tmp/safeqld-xlsx-test';
+
+/**
+ * The workbook, read back through this app's own zip reader.
+ *
+ * A .xlsx is a zip of XML, and the only way to know what one says is to open
+ * it. Three checks in here used to build a workbook and assert that it had a
+ * non-zero length — under names that promised the escaping and the control
+ * characters were handled. They passed on a writer with the escaping removed,
+ * which is how a mutation sweep found two hundred and seventy-four surviving
+ * mutants in a file that reads as thoroughly tested.
+ *
+ * That matters on this file in particular. Device labels come off customer
+ * panels and contain whatever somebody typed into a panel twenty years ago; an
+ * unescaped ampersand or a stray control character is a workbook Excel refuses
+ * to open, handed to a client as the record of a service they paid for.
+ */
+function sheetXml(sheets: Sheet[], index = 1): string {
+  const entry = readZip(buildXlsx(sheets)).find((e) => e.name === `xl/worksheets/sheet${index}.xml`);
+  expect({ found: Boolean(entry) }).toEqual({ found: true });
+  return Buffer.from(entry!.bytes).toString('utf8');
+}
 
 describe('zip primitives', () => {
   it('computes the standard CRC-32', () => {
@@ -98,8 +120,41 @@ describe('workbook generation', () => {
     expect(bytes.length).toBeGreaterThan(500);
   });
 
-  it('writes files that a real spreadsheet reader can open', () => {
-    // Verified by the openpyxl round-trip in the accompanying shell check.
+  it('is a zip carrying every part a spreadsheet reader needs', () => {
+    /*
+     * The parts, not the byte count. A workbook missing its content types or
+     * its styles opens as a repair prompt or not at all, and the previous
+     * check for this asserted `true`.
+     */
+    expect(readZip(buildXlsx(sheets)).map((e) => e.name)).toEqual([
+      '[Content_Types].xml',
+      '_rels/.rels',
+      'xl/workbook.xml',
+      'xl/_rels/workbook.xml.rels',
+      'xl/styles.xml',
+      'xl/worksheets/sheet1.xml',
+    ]);
+  });
+
+  it('writes a number as a number and text as text', () => {
+    // A figure stored as text cannot be summed, charted or compared, and every
+    // measurement this app exports is a figure somebody works with.
+    const xml = sheetXml([{ name: 'S', rows: [['Pressure', 812.5]] }]);
+    expect(xml).toContain('<v>812.5</v>');
+    expect(xml).toContain('<c r="A1" t="inlineStr"><is><t xml:space="preserve">Pressure</t></is></c>');
+  });
+
+  it('leaves an empty cell out rather than writing an empty one', () => {
+    // An empty cell and a cell holding an empty string read differently to
+    // anything that filters or counts.
+    const xml = sheetXml([{ name: 'S', rows: [['a', '', null, 'd']] }]);
+    expect(xml).toContain('r="A1"');
+    expect(xml).toContain('r="D1"');
+    expect(xml).not.toContain('r="B1"');
+    expect(xml).not.toContain('r="C1"');
+  });
+
+  it('writes sample files a person can open by hand', () => {
     mkdirSync(OUT, { recursive: true });
     writeFileSync(`${OUT}/basic.xlsx`, buildXlsx(sheets));
 
@@ -141,16 +196,42 @@ describe('workbook generation', () => {
     };
     writeFileSync(`${OUT}/timesheet.xlsx`, buildXlsx([timesheetSheet(ts), timesheetSummarySheet(ts)]));
 
-    expect(true).toBe(true);
+    /*
+     * Written for somebody to open, and checked here for the one thing a file
+     * on disk cannot check itself: that each is a workbook rather than a
+     * zero-length file left behind by a throw.
+     */
+    for (const name of ['basic', 'baseline', 'timesheet']) {
+      expect({ name, ok: statSync(`${OUT}/${name}.xlsx`).size > 500 }).toEqual({ name, ok: true });
+    }
   });
 
   it('escapes XML-hostile characters rather than corrupting the file', () => {
-    const bytes = buildXlsx([{ name: 'S', rows: [['a & b < c > d "e"']] }]);
-    expect(bytes.length).toBeGreaterThan(0);
+    /*
+     * This asserted a non-zero byte length, under this name. Remove the
+     * escaping and it still passed — and an unescaped ampersand in a device
+     * label is a workbook Excel will not open.
+     */
+    const xml = sheetXml([{ name: 'S', rows: [[`a & b < c > d "e" f'g`]] }]);
+    expect(xml).toContain('a &amp; b &lt; c &gt; d &quot;e&quot; f&apos;g');
+    // And none of them survived raw into the document.
+    const body = xml.slice(xml.indexOf('<sheetData>'));
+    expect(body).not.toContain('a & b');
+    expect(body).not.toContain('< c');
   });
 
   it('strips control characters Excel rejects', () => {
-    const bytes = buildXlsx([{ name: 'S', rows: [[`bad\x07char\x1Fhere`]] }]);
-    expect(bytes.length).toBeGreaterThan(0);
+    // Excel does not open a file containing these, whatever they are escaped
+    // to, so they are removed rather than encoded. Panels are full of them.
+    const xml = sheetXml([{ name: 'S', rows: [[`bad\x07char\x1Fhere`]] }]);
+    expect(xml).toContain('>badcharhere<');
+    expect(xml).not.toMatch(/[\x00-\x08\x0B\x0C\x0E-\x1F]/);
+  });
+
+  it('keeps a tab and a newline, which are legal and meaningful', () => {
+    // The strip has to be narrower than "control characters": a comment field
+    // holding two lines is not corrupt, and flattening it loses what it said.
+    const xml = sheetXml([{ name: 'S', rows: [['line one\nline two\tend']] }]);
+    expect(xml).toContain('line one\nline two\tend');
   });
 });
