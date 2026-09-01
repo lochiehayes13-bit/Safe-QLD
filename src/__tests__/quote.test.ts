@@ -3,6 +3,7 @@ import {
   canEdit, canTransition, editRefusal, expiryFor, formatQuoteReference, lapseStatus,
   lineAmountCents, pricingSources, qldDate, quoteTotals, scopeLinesFor, unpriceableDefects,
   unpriceableReason, weakestConfidence, type PriceSource, type Quote, type QuoteLine,
+  orderQuotes, QUOTE_URGENCY, QUOTE_STATUS_LABEL, type QuoteStatus,
 } from '@/domain/quote';
 import { uncoveredDefects } from '@/domain/partsNeeded';
 import { quoteDocumentHtml } from '@/export/quoteDocument';
@@ -789,5 +790,83 @@ describe('the document a client receives', () => {
     });
     expect(out).toContain('Smith &amp; Sons &lt;Holdings&gt;');
     expect(out).not.toContain('<script>');
+  });
+});
+
+
+describe('the order a list of quotes is read in', () => {
+  /*
+   * There was no list at all: the builder saved a quote and nothing could show
+   * it again. Which one a person sees first is the whole value of having one,
+   * and across 897 sites an alphabetical list buries the quote about to lapse
+   * at whatever letter its site starts with.
+   */
+  const q = (over: Partial<Parameters<typeof orderQuotes>[0][number]> = {}) => ({
+    status: 'issued' as QuoteStatus,
+    siteName: 'A Site',
+    expiresAt: undefined as string | undefined,
+    ...over,
+  });
+  const TODAY = '2026-09-01T00:00:00.000Z';
+
+  it('puts what a client still has to answer above what is settled', () => {
+    const out = orderQuotes([
+      q({ status: 'accepted', siteName: 'Accepted' }),
+      q({ status: 'declined', siteName: 'Declined' }),
+      q({ status: 'expired', siteName: 'Expired' }),
+      q({ status: 'draft', siteName: 'Draft' }),
+      q({ status: 'issued', siteName: 'Issued', expiresAt: '2026-09-30' }),
+    ], TODAY);
+    expect(out.map((x) => x.siteName))
+      .toEqual(['Issued', 'Draft', 'Expired', 'Declined', 'Accepted']);
+  });
+
+  it('puts the issued quote with least time left first', () => {
+    // The one that needs a phone call today.
+    const out = orderQuotes([
+      q({ siteName: 'Next month', expiresAt: '2026-10-01' }),
+      q({ siteName: 'Tomorrow', expiresAt: '2026-09-02' }),
+      q({ siteName: 'Next week', expiresAt: '2026-09-08' }),
+    ], TODAY);
+    expect(out.map((x) => x.siteName)).toEqual(['Tomorrow', 'Next week', 'Next month']);
+  });
+
+  it('puts one expiring today above one expiring tomorrow', () => {
+    // Nought days left is the last day it holds good, not "no answer".
+    const out = orderQuotes([
+      q({ siteName: 'Tomorrow', expiresAt: '2026-09-02' }),
+      q({ siteName: 'Today', expiresAt: '2026-09-01' }),
+    ], TODAY);
+    expect(out.map((x) => x.siteName)).toEqual(['Today', 'Tomorrow']);
+  });
+
+  it('sorts a quote with no expiry after ones that have one', () => {
+    // Nothing is running down on it, so it is not the row that needs an answer.
+    const out = orderQuotes([
+      q({ siteName: 'No expiry' }),
+      q({ siteName: 'Expiring', expiresAt: '2026-12-01' }),
+    ], TODAY);
+    expect(out.map((x) => x.siteName)).toEqual(['Expiring', 'No expiry']);
+  });
+
+  it('falls back to the site name so the order does not wander', () => {
+    // Two quotes equally urgent must not swap places between openings.
+    const out = orderQuotes([
+      q({ status: 'draft', siteName: 'Sandgate Hall' }),
+      q({ status: 'draft', siteName: 'Carina Bus Depot' }),
+    ], TODAY);
+    expect(out.map((x) => x.siteName)).toEqual(['Carina Bus Depot', 'Sandgate Hall']);
+  });
+
+  it('leaves the list it was given alone', () => {
+    const given = [q({ siteName: 'B' }), q({ siteName: 'A' })];
+    orderQuotes(given, TODAY);
+    expect(given.map((x) => x.siteName)).toEqual(['B', 'A']);
+  });
+
+  it('ranks every status, so a new one cannot sort by accident', () => {
+    for (const status of Object.keys(QUOTE_STATUS_LABEL) as QuoteStatus[]) {
+      expect(typeof QUOTE_URGENCY[status]).toBe('number');
+    }
   });
 });

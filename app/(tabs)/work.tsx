@@ -57,6 +57,7 @@ export default function WorkScreen() {
       rows: [
         { label: 'Send to the office', sub: 'Push a finished service and its defects to the Simpro job', icon: 'cloud-upload-outline', href: '/work/outbound' },
         { label: 'Occupier statements', sub: 'Every statement across every site, closest to late first', icon: 'file-certificate-outline', href: '/occupier' },
+        { label: 'Quotes', sub: 'What is out with clients and what is about to lapse', icon: 'file-sign', href: '/quotes' },
         { label: 'Test sheets', sub: 'Service reports and device testing', icon: 'file-document-outline', href: '/work/reports', badge: counts.reports },
         { label: 'Baseline data', sub: 'Commissioning records', icon: 'clipboard-text-outline', href: '/work/baselines', badge: counts.baselines },
         { label: 'Timesheets', sub: 'Weekly hours and sign off', icon: 'calendar-clock-outline', href: '/work/timesheets', badge: counts.timesheets },

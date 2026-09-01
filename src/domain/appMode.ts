@@ -643,6 +643,16 @@ export const DESTINATIONS: readonly Destination[] = [
       + 'technician who did the work is often the one who can chase it.',
   },
   {
+    route: '/quotes', file: 'app/quotes/index.tsx', tab: 'work', section: 'Records',
+    label: 'Quotes', modes: OFFICE, openedFrom: ['/work'],
+    blurb: 'Every quote across every site, ordered by what needs an answer soonest.',
+    terms: ['quotes', 'quotations', 'price', 'accepted', 'expired', 'lapsed', 'out with clients'],
+    hiddenBecause:
+      'A quote carries cost and margin, and the answer to "what did we quote for this?" given on '
+      + 'the spot commits the company to a number nobody has checked. The quote itself is raised '
+      + 'from the site and priced by the office, and this is the same half of the work.',
+  },
+  {
     route: '/work/reports', file: 'app/work/reports.tsx', tab: 'work', section: 'Records',
     label: 'Test sheets', modes: BOTH, openedFrom: ['/', '/work'],
     blurb: 'Every service report on this device, newest first.',

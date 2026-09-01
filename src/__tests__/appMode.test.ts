@@ -201,6 +201,10 @@ describe('technician mode', () => {
     // Pinned by route so that hiding anything further is a decision somebody
     // makes on purpose, in this test, rather than a line in a diff.
     expect(hiddenFrom('technician').map((h) => h.destination.route).sort()).toEqual([
+      // What is out with clients and what it is worth. Same argument as
+      // /site/quote: the number commits the company, and a technician asked
+      // in a corridor should not be the one who answers it.
+      '/quotes',
       '/site/quote',
       '/work/baselines',
       '/work/labels',
@@ -236,7 +240,7 @@ describe('technician mode', () => {
     const tech = summarise('technician');
     const office = summarise('office');
     expect(tech.total).toBe(DESTINATIONS.length);
-    expect(tech.hidden).toBe(6);
+    expect(tech.hidden).toBe(7);
     expect(office.hidden).toBe(0);
     expect(tech.listed).toBeLessThan(office.listed);
   });

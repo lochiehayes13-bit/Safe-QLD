@@ -528,6 +528,48 @@ export function lapseStatus(
   };
 }
 
+/**
+ * The order a list of quotes should be read in.
+ *
+ * By what needs an answer soonest, not by site and not by date. An issued quote
+ * about to lapse is the row that matters; one accepted last month is history,
+ * and one declined is closed. A list ordered alphabetically buries the first at
+ * whatever letter its site begins with, which across 897 sites means nobody
+ * sees it.
+ *
+ * Issued first and, among those, the one with least time left. Drafts next,
+ * because a draft is work this company has not finished rather than work a
+ * client has not answered. Then the settled ones, and expired ahead of the rest
+ * of them: an expired quote is the one still worth raising again.
+ */
+export const QUOTE_URGENCY: Record<QuoteStatus, number> = {
+  issued: 0, draft: 1, expired: 2, declined: 3, accepted: 4,
+};
+
+export interface QuoteForOrder {
+  status: QuoteStatus;
+  siteName: string;
+  expiresAt?: string;
+}
+
+/**
+ * Sorts quotes for a list, soonest to need an answer first.
+ *
+ * Days remaining is worked from the expiry against the day given, in Queensland
+ * dates — the whole reason `lapseStatus` exists rather than a slice of a UTC
+ * timestamp. A quote with no expiry sorts after ones that have one, since there
+ * is no clock running on it.
+ */
+export function orderQuotes<T extends QuoteForOrder>(quotes: readonly T[], asAt: string): T[] {
+  const remaining = (q: QuoteForOrder): number =>
+    lapseStatus(q, asAt).daysRemaining ?? Number.POSITIVE_INFINITY;
+
+  return [...quotes].sort((a, b) =>
+    QUOTE_URGENCY[a.status] - QUOTE_URGENCY[b.status]
+    || remaining(a) - remaining(b)
+    || a.siteName.localeCompare(b.siteName));
+}
+
 // ---------------------------------------------------------------------------
 // The state machine
 // ---------------------------------------------------------------------------
