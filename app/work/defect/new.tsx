@@ -4,6 +4,9 @@ import { Stack, router, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { createDefect, listSites } from '@/db/repo';
+import { newId } from '@/db';
+import { CAPTURE_QUALITY } from '@/domain/photoStore';
+import { keepPhoto } from '@/export/photoFiles';
 import { addAssetEvent } from '@/db/assetRepo';
 import { SYSTEM_LABELS, type SystemKind } from '@/seed/assetTypes';
 import {
@@ -101,9 +104,33 @@ export default function NewDefectScreen() {
       return;
     }
     const result = fromCamera
-      ? await ImagePicker.launchCameraAsync({ quality: 0.6 })
-      : await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
-    if (!result.canceled && result.assets[0]) setPhotos((prev) => [...prev, result.assets[0]!.uri]);
+      ? await ImagePicker.launchCameraAsync({ quality: CAPTURE_QUALITY })
+      : await ImagePicker.launchImageLibraryAsync({ quality: CAPTURE_QUALITY });
+    if (result.canceled || !result.assets[0]) return;
+
+    // Copy it out of the cache now rather than at save. The picker hands back a
+    // URI the operating system may clear at any point, and a defect photograph
+    // is evidence on a statutory notice — losing it produces no error, just a
+    // record that quietly stops pointing at anything.
+    try {
+      const kept = keepPhoto({
+        id: newId(),
+        sourceUri: result.assets[0]!.uri,
+        subject: 'defect',
+        // The defect does not exist yet; its photographs are filed against it
+        // on save, when it has an id.
+        subjectId: 'pending',
+        takenAt: new Date().toISOString(),
+      });
+      setPhotos((prev) => [...prev, kept.path]);
+    } catch (e) {
+      Alert.alert(
+        'Could not keep that photo',
+        `The photo was taken but could not be saved to this device, so it has not been attached. ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
+    }
   };
 
   const save = async () => {

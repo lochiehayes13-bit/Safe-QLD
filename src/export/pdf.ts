@@ -98,7 +98,24 @@ export interface StatutoryRecord {
   supervisorLicenceNumber?: string;
 }
 
-export function serviceReportHtml(b: ReportBundle, generatedAt: string, statutory?: StatutoryRecord): string {
+/**
+ * Turns a stored photo path into something the renderer can load.
+ *
+ * Photographs are recorded as a path relative to the app's document directory
+ * rather than as an absolute URI, because on iOS the container path contains a
+ * identifier that changes when the app is updated — absolute URIs saved today
+ * stop resolving after the next release, silently. So the report is handed a
+ * resolver, and defaults to leaving the string alone so the templates stay
+ * testable without the file system.
+ */
+export type PhotoResolver = (storedPath: string) => string;
+
+export function serviceReportHtml(
+  b: ReportBundle,
+  generatedAt: string,
+  statutory?: StatutoryRecord,
+  resolvePhoto: PhotoResolver = (p) => p,
+): string {
   const { site, report, panel, testRows, checkRows, defects } = b;
 
   const pass = testRows.filter((r) => r.result === 'pass').length;
@@ -178,7 +195,7 @@ ${defects.length ? `<h2>Defects</h2>
     <td><span class="pill ${d.severity === 'critical' ? 'crit' : 'non'}">${d.severity === 'critical' ? 'CRITICAL' : 'NON-CRITICAL'}</span></td>
     <td>${esc(d.status)}</td>
     <td>${esc(d.location)}</td>
-    <td>${esc(d.description)}${d.photos.length ? `<div class="photos">${d.photos.map((p) => `<img src="${esc(p)}"/>`).join('')}</div>` : ''}</td>
+    <td>${esc(d.description)}${d.photos.length ? `<div class="photos">${d.photos.map((p) => `<img src="${esc(resolvePhoto(p))}"/>`).join('')}</div>` : ''}</td>
     <td>${esc(formatAuDate(d.raisedAt))}</td>
   </tr>`).join('')}</tbody>
 </table>` : ''}
