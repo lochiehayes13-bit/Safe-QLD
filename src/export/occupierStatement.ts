@@ -1,5 +1,8 @@
 import type { OccupierStatement } from '@/db/occupierRepo';
-import { occupierStatementIssues, commissionerCopyDueAt } from '@/domain/qldCompliance';
+import { occupierStatementIssues } from '@/domain/qldCompliance';
+import {
+  COMMISSIONER_COPY_BUSINESS_DAYS, commissionerCopyDeadline,
+} from '@/domain/occupierForm';
 import { formatAuDate } from './sheets';
 
 /**
@@ -37,7 +40,21 @@ export function occupierStatementHtml(input: OccupierStatementInput): string {
   const { statement: s, generatedAt } = input;
   const present = s.rows.filter((r) => r.present);
   const issues = occupierStatementIssues(s.rows);
-  const dueAt = s.signedAt ? commissionerCopyDueAt(s.signedAt.slice(0, 10)) : null;
+  /*
+   * Section 55A(3) counts from the day the occupier is *required to prepare*
+   * the statement, not from the day they sign. Those are the same date only for
+   * an occupier who signs exactly on their anniversary — sign a month late and
+   * the ten business days have long since run, and a document telling them
+   * otherwise is worse than one that says nothing.
+   *
+   * So the period end is the anchor, and the signature goes in only as the
+   * fallback the domain labels as one. The count uses Queensland's real public
+   * holidays rather than skipping weekends alone.
+   */
+  const deadline = commissionerCopyDeadline({
+    requiredPreparationDate: s.periodEnd || undefined,
+    signedDate: s.signedAt ? s.signedAt.slice(0, 10) : undefined,
+  });
 
   const period = [s.periodStart, s.periodEnd].filter(Boolean).map(formatAuDate).join(' to ');
 
@@ -138,9 +155,12 @@ ${issues.length ? `<div class="warn">
   </div>
 </div>
 
-${s.signedAt && dueAt ? `<p class="clock" style="margin-top:14px">
-  A copy of this statement is to reach the Commissioner by ${esc(formatAuDate(dueAt))},
-  being ten working days after signing.${s.sentToCommissionerAt
+${deadline.due ? `<p class="clock" style="margin-top:14px">
+  A copy of this statement is to reach the Commissioner by ${esc(formatAuDate(deadline.due))},
+  being ${COMMISSIONER_COPY_BUSINESS_DAYS} business days from ${deadline.basis === 'signature-fallback'
+    ? 'the date it was signed. That is not the date the Regulation counts from — it counts from the day '
+      + 'the statement was required to be prepared, so this date may be later than the real one'
+    : 'the day the statement was required to be prepared'}.${s.sentToCommissionerAt
     ? ` Recorded as sent ${esc(formatAuDate(s.sentToCommissionerAt.slice(0, 10)))}.`
     : ''}
 </p>` : ''}
@@ -148,9 +168,9 @@ ${s.signedAt && dueAt ? `<p class="clock" style="margin-top:14px">
 <div class="note">
   This document was prepared from the maintenance records held for these premises so that it can be checked and signed
   on site. It is not the regulator's approved form and does not replace it. Where an approved form is required, use the
-  form published by the regulator; the content above is intended to transfer to it directly. The working-day count
-  excludes weekends only — public holidays are not accounted for, so treat the date as the earliest deadline rather
-  than a guaranteed one.
+  form published by the regulator; the content above is intended to transfer to it directly. The business-day count
+  applies Queensland's appointed public holidays as well as weekends; district show holidays are not known to this
+  app, so the real deadline can only be later than the date shown, never earlier.
 </div>
 
 <div class="footer">

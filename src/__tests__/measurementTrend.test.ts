@@ -625,3 +625,64 @@ describe('the measurement catalogue', () => {
     }
   });
 });
+
+// ---- TEMPORARY PROBES ----
+describe('PROBE', () => {
+  it('probe', () => {
+    const p1 = kindForKey('Airflow');
+    console.log('PROBE airflow kind:', p1?.id, p1?.unit, p1?.confounders.map((c) => c.source));
+
+    const built = seriesFromEvents('a', [
+      { occurredAt: '2020-03-01', measurements: { 'Residual pressure': '700' } },
+      { occurredAt: '2021-03-01', measurements: { 'Residual pressure': '665' } },
+      { occurredAt: '2022-03-01', measurements: { 'Residual pressure': '630' } },
+    ], { units: { 'Residual pressure': 'kPa' } });
+    const t2 = trendMeasurements(built.series[0]!);
+    console.log('PROBE assumed-unit cautions:', t2.cautions.map((c) => c.code), t2.unit);
+
+    const t3 = trendMeasurements(series({
+      points: [
+        { at: '2020-03-01', value: 700 }, { at: '2021-03-01', value: 665 }, { at: '2022-03-01', value: 630 },
+      ],
+    }));
+    const p3 = projectToThreshold(t3, { value: 350 }, { today: '2022-03-01' });
+    console.log('PROBE unitless projection:', p3.status, p3.label, p3.reason);
+
+    const t4 = trendMeasurements(series({
+      points: [
+        { at: '2020-03-01', value: 700, unit: 'kPa' },
+        { at: '2021-03-01', value: 695, unit: 'kPa' },
+        { at: '2023-12-01', value: 420, unit: 'kPa' },
+      ],
+    }));
+    console.log('PROBE 3pt long gap:', t4.shape, t4.step?.days, t4.step?.distinguishable);
+
+    const t5 = trendMeasurements(series({
+      points: [
+        { at: '2020-03-01', value: 0, unit: 'kPa' },
+        { at: '2021-03-01', value: 500, unit: 'kPa' },
+        { at: '2022-03-01', value: 495, unit: 'kPa' },
+        { at: '2023-03-01', value: 490, unit: 'kPa' },
+      ],
+    }));
+    console.log('PROBE zero baseline:', t5.shape, t5.step?.percent, t5.ratePerYear, t5.interpretation, trendHeadline(t5));
+
+    const t6 = trendMeasurements(series({
+      points: [
+        { at: '2026-03-01', value: 700, unit: 'kPa' },
+        { at: '2026-03-03', value: 660, unit: 'kPa' },
+        { at: '2026-03-05', value: 620, unit: 'kPa' },
+      ],
+    }));
+    console.log('PROBE 4-day span:', t6.status, t6.spanDays, t6.ratePerYear, t6.ratePercentPerYear, trendHeadline(t6));
+    console.log('PROBE 4-day projection:', projectToThreshold(t6, { value: 350, unit: 'kPa' }, { today: '2026-03-05' }).label);
+
+    const t7 = trendMeasurements(series({
+      key: 'Gauge reading or mass',
+      points: [
+        { at: '2020-03-01', value: 1400 }, { at: '2021-03-01', value: 1380 }, { at: '2022-03-01', value: 6.2 },
+      ],
+    }), { assumeUnit: 'kPa' });
+    console.log('PROBE ambiguous with assumeUnit:', t7.status, t7.unit, t7.ratePerYear);
+  });
+});

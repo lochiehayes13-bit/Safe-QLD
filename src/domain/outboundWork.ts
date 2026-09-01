@@ -454,8 +454,8 @@ export const WITHHELD_FROM_SIMPRO: { what: string; why: string }[] = [
  * service has already been reported.
  */
 const MARKER_PREFIX = 'SQ-REF:';
-const KEY_PATTERN = /^(SRV|DEF)-[0-9a-f]{8}-[0-9a-f]{8}$/;
-const MARKER_PATTERN = /\[SQ-REF:((?:SRV|DEF)-[0-9a-f]{8}-[0-9a-f]{8})\]/g;
+const KEY_PATTERN = /^(SRV|DEF)-[0-9a-f]{16}-[0-9a-f]{16}$/;
+const MARKER_PATTERN = /\[SQ-REF:((?:SRV|DEF)-[0-9a-f]{16}-[0-9a-f]{16})\]/g;
 
 /** FNV-1a, 32-bit. Small, dependency-free, and stable across platforms and app versions. */
 function fnv1a(input: string, basis: number): number {
@@ -511,12 +511,25 @@ export function outboundKey(
   identity: (string | number | undefined)[],
   content: (string | number | boolean | undefined)[],
 ): string {
-  return `${prefix}-${digest(identity).slice(0, 8)}-${digest(content).slice(0, 8)}`;
+  // Both halves carry the whole digest. Keeping only the first eight hex digits
+  // would throw the second pass away and leave 32 bits a side, which is the
+  // width the note above says is not enough.
+  return `${prefix}-${digest(identity)}-${digest(content)}`;
 }
 
-/** The identity half — two keys sharing it describe the same attendance or defect. */
+/**
+ * The identity half, with the kind that half belongs to.
+ *
+ * Two keys sharing it describe the same attendance or the same defect. The
+ * SRV/DEF prefix is part of it on purpose: a defect notice and a service record
+ * are different things even when their identity digests happen to agree, and a
+ * bare hex half compared across the two would eventually label a first service
+ * record as an amendment of a defect notice nobody had amended.
+ */
 export function keyIdentity(key: string): string | undefined {
-  return KEY_PATTERN.test(key) ? key.split('-')[1] : undefined;
+  if (!KEY_PATTERN.test(key)) return undefined;
+  const [prefix, identity] = key.split('-');
+  return `${prefix}-${identity}`;
 }
 
 /** Every Safe QLD key mentioned in a block of note text. Empty when there are none. */
