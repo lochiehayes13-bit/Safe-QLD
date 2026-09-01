@@ -4,6 +4,7 @@ import {
 import {
   criticalNoticeDueAt, isQldCriticalDefect, rectificationDueAt, type As1851Class,
 } from '@/domain/qldCompliance';
+import { QLD_UTC_OFFSET_HOURS, qldIsoDay } from '@/domain/qldTime';
 import { routineDue, type DueState, type RoutineHistory } from '@/domain/schedule';
 import { SYSTEM_LABELS, type SystemKind } from '@/seed/assetTypes';
 import { FREQUENCY_LABEL, routineById, type Frequency } from '@/seed/serviceRoutines';
@@ -166,7 +167,7 @@ export function portfolioSources(ids: PortfolioSourceId[]): PortfolioSource[] {
 // Dates — Queensland is UTC+10 all year and never shifts
 // ---------------------------------------------------------------------------
 
-export const QLD_UTC_OFFSET_HOURS = 10;
+export { QLD_UTC_OFFSET_HOURS };
 
 /**
  * The Queensland calendar date at an instant, or nothing when it is not one.
@@ -175,20 +176,13 @@ export const QLD_UTC_OFFSET_HOURS = 10;
  * Given "1/9/2026" — an ordinary Australian date meaning 1 September — Date.parse
  * returns 9 January, silently, and every tolerance window in the book moves
  * eight months. Anything that is not ISO is refused rather than read.
+ *
+ * That reasoning was right and this was the only one of the six copies of the
+ * Queensland day that acted on it. It now lives in qldTime.ts, which is where
+ * the other five got it from, and this delegates.
  */
 export function qldToday(instantIso: string): string | undefined {
-  const text = instantIso?.trim() ?? '';
-  // Rejects "1/9/2026" before any parser sees it, and 2026-02-31 on the round
-  // trip inside isoDay.
-  const day = isoDay(text);
-  if (!day) return undefined;
-  if (text.length === 10) return day;
-
-  const t = Date.parse(text);
-  if (Number.isNaN(t)) return undefined;
-  // Queensland does not observe daylight saving, so a fixed ten hours is right
-  // in every month: a job closed at 23:00 UTC belongs to the following day here.
-  return new Date(t + QLD_UTC_OFFSET_HOURS * 3_600_000).toISOString().slice(0, 10);
+  return qldIsoDay(instantIso);
 }
 
 function parseIsoDate(iso: string | undefined): Date | null {

@@ -1,6 +1,7 @@
 import { SYSTEM_LABELS, type SystemKind } from '@/seed/assetTypes';
 import { FREQUENCY_LABEL, type Frequency } from '@/seed/serviceRoutines';
 import { distanceKm, hasPosition } from '@/domain/routing';
+import { QLD_UTC_OFFSET_HOURS, qldIsoDay } from '@/domain/qldTime';
 import type { DueState } from '@/domain/schedule';
 
 /**
@@ -51,13 +52,17 @@ import type { DueState } from '@/domain/schedule';
  * strings parsed as UTC midnight, which keeps a plan from sliding a day when
  * the phone is in another timezone.
  */
-export const QLD_UTC_OFFSET_HOURS = 10;
+export { QLD_UTC_OFFSET_HOURS };
 
-/** The Queensland calendar date at an instant. */
+/**
+ * The Queensland calendar date at an instant.
+ *
+ * One implementation, in qldTime.ts. This was the sixth copy of the same ten
+ * hours and the loosest of them: it had no guard at all, so a month asked for
+ * as "1/9/2026" planned January.
+ */
 export function qldDate(instantIso: string): string | undefined {
-  const t = Date.parse(instantIso);
-  if (Number.isNaN(t)) return undefined;
-  return new Date(t + QLD_UTC_OFFSET_HOURS * 3_600_000).toISOString().slice(0, 10);
+  return qldIsoDay(instantIso);
 }
 
 function parseIsoDate(iso: string | undefined): Date | null {

@@ -27,6 +27,47 @@ const HOUR_MS = 3_600_000;
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
+ * An ISO instant, which is the only shape `Date.parse` is specified to read.
+ *
+ * Everything else it reads by its own rules, and the shape it gets wrong is the
+ * one this app prints on every page: `Date.parse('1/9/2026')` is 9 January, not
+ * the first of September. It does not throw and it does not return NaN — it
+ * returns a real date, eight months out, that looks entirely reasonable
+ * wherever it lands. "Jun-25" off the register's overhaul column comes back as
+ * the 25th of June 2001.
+ *
+ * So a value that is not an instant is refused here rather than guessed at.
+ * Refusing is safe by design: every caller in this app already has an answer
+ * for a date it cannot read. `formatAuDate` prints it back as it arrived, so a
+ * bad value stays visible on the page and traceable to the record holding it;
+ * the planner says it cannot read the day it was asked for. What none of them
+ * can do is notice a date that is wrong but well-formed.
+ *
+ * The register reader, the panel parsers and the standards library all read
+ * their own date formats, and each returns an ISO date. This is the boundary
+ * they hand across, not a general date reader.
+ */
+const INSTANT = /^\d{4}-\d{2}-\d{2}T/;
+
+/**
+ * A calendar date, or nothing where it is a day the month does not have.
+ *
+ * The round trip is the whole check. `new Date('2026-02-31T00:00:00Z')` does
+ * not fail — it rolls forward to 3 March, and 2026-02-29 to 1 March, because
+ * 2026 is not a leap year. A rectification month counted from a rolled date is
+ * days out with nothing on the page to show for it.
+ *
+ * Only date-only strings are checked this way. A full instant carries an offset
+ * that its UTC day legitimately differs from, so the same comparison would
+ * refuse a perfectly good timestamp written in Brisbane time.
+ */
+function realDay(day: string): string | undefined {
+  const d = new Date(`${day}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return undefined;
+  return d.toISOString().slice(0, 10) === day ? day : undefined;
+}
+
+/**
  * The Queensland calendar date of an instant, as yyyy-mm-dd.
  *
  * A date-only string is already a calendar date and is returned untouched.
@@ -38,7 +79,12 @@ export function qldIsoDay(iso: string | undefined): string | undefined {
   if (!iso) return undefined;
   const trimmed = iso.trim();
   if (!trimmed) return undefined;
-  if (DATE_ONLY.test(trimmed)) return trimmed;
+  if (DATE_ONLY.test(trimmed)) return realDay(trimmed);
+  if (!INSTANT.test(trimmed)) return undefined;
+  // The date it was written with has to be a real one. Checked on the literal
+  // rather than on the parsed result, because an instant carrying an offset has
+  // a UTC day that legitimately differs from the day it was written with.
+  if (!realDay(trimmed.slice(0, 10))) return undefined;
   const ms = Date.parse(trimmed);
   if (!Number.isFinite(ms)) return undefined;
   return new Date(ms + QLD_UTC_OFFSET_HOURS * HOUR_MS).toISOString().slice(0, 10);
@@ -69,7 +115,7 @@ export function qldDay(iso: string | undefined): string | undefined {
 export function qldMoment(iso: string | undefined): string | undefined {
   if (!iso) return undefined;
   const trimmed = iso.trim();
-  if (!trimmed || DATE_ONLY.test(trimmed)) return undefined;
+  if (!trimmed || DATE_ONLY.test(trimmed) || !INSTANT.test(trimmed)) return undefined;
   const ms = Date.parse(trimmed);
   if (!Number.isFinite(ms)) return undefined;
   const shifted = new Date(ms + QLD_UTC_OFFSET_HOURS * HOUR_MS);

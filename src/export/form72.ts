@@ -4,6 +4,7 @@ import {
   type SprinklerTestPoint, type TestDevice,
 } from '@/domain/form72';
 import { addQldBusinessDays } from '@/domain/occupierForm';
+import { qldIsoDay } from '@/domain/qldTime';
 import { formatAuDate } from './sheets';
 
 /**
@@ -258,13 +259,13 @@ export function testerCopyKeepUntil(testDate: string | undefined): string | unde
  * it dates the document a day early: a form produced at eight on a Brisbane
  * morning was stamped at 22:00 the previous day in UTC. Queensland is UTC+10
  * all year, with no daylight saving to allow for.
+ *
+ * One implementation, in qldTime.ts. This was a fifth copy of the same ten
+ * hours; it read "1/9/2026" as the ninth of January, on a form whose dates are
+ * the ones a certifier reads.
  */
 export function qldCalendarDate(instant: string | undefined): string | undefined {
-  if (!instant) return undefined;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(instant.trim())) return instant.trim();
-  const t = Date.parse(instant);
-  if (Number.isNaN(t)) return undefined;
-  return new Date(t + 10 * 3_600_000).toISOString().slice(0, 10);
+  return qldIsoDay(instant);
 }
 
 /** The flow rates printed down Part D of the department's form. */

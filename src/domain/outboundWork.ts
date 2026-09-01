@@ -2,6 +2,7 @@ import {
   AS1851_CLASS_LABEL, AS1851_CLASS_OBLIGATION, criticalNoticeDueAt, isQldCriticalDefect,
   rectificationDueAt, type As1851Class,
 } from '@/domain/qldCompliance';
+import { qldDay, qldIsoDay, qldMoment } from '@/domain/qldTime';
 
 /**
  * Pushing a completed routine service back to the office system.
@@ -171,54 +172,20 @@ const MIN_USEFUL_SECTION = 120;
 // Dates — Queensland is UTC+10 all year and never shifts
 // ---------------------------------------------------------------------------
 
-const QLD_UTC_OFFSET_HOURS = 10;
-
-/**
- * The Queensland calendar date of an instant, as yyyy-mm-dd.
+/*
+ * One copy of the Queensland day, in qldTime.ts.
  *
- * Kept separate from the display form because dates that get arithmetic done to
- * them — a rectification due one month on — must go into that arithmetic as the
- * Queensland day, not the UTC one. A service finished at 8:30am in Brisbane is
- * stamped 22:30 the previous day in UTC, and a month added to the wrong day
- * produces a due date that is a day short of the one the regulation gives.
- */
-export function qldIsoDay(iso: string | undefined): string | undefined {
-  if (!iso) return undefined;
-  const trimmed = iso.trim();
-  // A date-only string is already a calendar date; shifting it would move it.
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-  const ms = Date.parse(trimmed);
-  if (Number.isNaN(ms)) return undefined;
-  return new Date(ms + QLD_UTC_OFFSET_HOURS * 3_600_000).toISOString().slice(0, 10);
-}
-
-/** The Queensland calendar date of an instant, as d/m/yyyy. Refuses what it cannot read. */
-export function qldDay(iso: string | undefined): string | undefined {
-  const day = qldIsoDay(iso);
-  if (!day) return undefined;
-  const [y, m, d] = day.split('-');
-  return `${d}/${m}/${y}`;
-}
-
-/**
- * Date and time in Queensland, for the clocks a critical defect starts.
+ * These three were written here first and this module is where they are used
+ * hardest — every statutory clock in the office push runs through them — so a
+ * second copy grew in qldTime.ts and the suite held the two against each other
+ * rather than move the tested one. Holding two copies to each other only proves
+ * they agree on what somebody thought to compare, and what nobody compared was
+ * an Australian date: both read "1/9/2026" as the ninth of January.
  *
- * A date with no time in it comes back undefined rather than as midnight or ten
- * in the morning. "Notified 12/03/2026 10:00" that nobody recorded a time for is
- * a fact invented by a formatter, and it would be read as evidence.
+ * Re-exported rather than deleted, because these are part of this module's
+ * surface and its tests read them from here.
  */
-export function qldMoment(iso: string | undefined): string | undefined {
-  if (!iso) return undefined;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(iso.trim())) return undefined;
-  const ms = Date.parse(iso.trim());
-  if (Number.isNaN(ms)) return undefined;
-  const day = qldDay(iso);
-  if (!day) return undefined;
-  const shifted = new Date(ms + QLD_UTC_OFFSET_HOURS * 3_600_000);
-  const hh = String(shifted.getUTCHours()).padStart(2, '0');
-  const mm = String(shifted.getUTCMinutes()).padStart(2, '0');
-  return `${day} ${hh}:${mm} (Qld)`;
-}
+export { qldDay, qldIsoDay, qldMoment } from '@/domain/qldTime';
 
 // ---------------------------------------------------------------------------
 // Inputs

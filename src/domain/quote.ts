@@ -1,6 +1,7 @@
 import { defectByCode } from '@/seed/defectLibrary';
 import { labourNeededFor, partsNeededFor } from '@/domain/partsNeeded';
 import { GST, roundCents, type LabourRate } from '@/domain/rates';
+import { qldIsoDay } from '@/domain/qldTime';
 import type { Defect } from '@/domain/types';
 
 /**
@@ -430,9 +431,6 @@ export const DEFAULT_EXCLUSIONS: string[] = [
 // Dates — Queensland time, and Australian conventions
 // ---------------------------------------------------------------------------
 
-/** Queensland is UTC+10 all year. There is no daylight saving to allow for. */
-const QLD_OFFSET_MINUTES = 600;
-
 /**
  * The Queensland calendar date of an instant.
  *
@@ -441,16 +439,12 @@ const QLD_OFFSET_MINUTES = 600;
  * stamped at 22:00 the previous day in UTC, so the slice dates it a day early
  * and expires it a day early with it.
  *
- * A date-only string is already a calendar date and is returned untouched —
- * shifting it would move it.
+ * One implementation, in qldTime.ts. This was a fourth copy of the same ten
+ * hours, and the copies had stopped agreeing: this one read "1/9/2026" as the
+ * ninth of January, which would expire a quote eight months early.
  */
 export function qldDate(iso: string | undefined): string | undefined {
-  if (!iso) return undefined;
-  const trimmed = iso.trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-  const ms = Date.parse(trimmed);
-  if (Number.isNaN(ms)) return undefined;
-  return new Date(ms + QLD_OFFSET_MINUTES * 60_000).toISOString().slice(0, 10);
+  return qldIsoDay(iso);
 }
 
 /** Adds whole days to a Queensland calendar date, refusing what it cannot read. */
