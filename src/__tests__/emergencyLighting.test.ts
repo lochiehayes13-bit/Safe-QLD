@@ -118,6 +118,37 @@ describe('assessDischarge — the three ways a test can end well', () => {
   });
 });
 
+describe('assessDischarge — the duration a fitting was rated for', () => {
+  it('passes a fitting still lit at exactly its rated duration', () => {
+    /*
+     * Not an edge case — the ordinary result. A discharge test is stopped at
+     * the required duration, so "still lit at 90 minutes against 90 required"
+     * is what a healthy fitting produces and what most of the register looks
+     * like on a good day.
+     *
+     * A hair the other way and every one of them fails, which is a replacement
+     * quote for a building's worth of working emergency lights.
+     */
+    const v = assessDischarge({ achievedMinutes: 90, ending: 'still-lit' });
+    expect(v.outcome).toBe('pass');
+    expect(v.passed).toBe(true);
+    expect(v.marginMinutes).toBe(0);
+    expect(v.percentOfRequired).toBe(100);
+  });
+
+  it('calls one stopped a minute short inconclusive, not a failure', () => {
+    /*
+     * The fitting was still lit when the test was ended, so nothing was proven
+     * either way: it did not reach the duration, and it did not go out. Calling
+     * that a failure condemns a battery on evidence that does not exist, and
+     * calling it a pass claims a duration nobody watched.
+     */
+    const v = assessDischarge({ achievedMinutes: 89, ending: 'still-lit' });
+    expect(v.outcome).toBe('inconclusive');
+    expect(v.passed).toBeUndefined();
+  });
+});
+
 describe('assessDischarge — the two failures are not the same failure', () => {
   it('reports a fitting that lit and went out early as a battery at end of life', () => {
     const v = assessDischarge(ranFull(62));

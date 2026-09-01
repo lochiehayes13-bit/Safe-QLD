@@ -299,6 +299,48 @@ describe('checking a measured flow against a supplied duty', () => {
     expect(r.measuredFlowLitresPerSecond).toBe(0.4);
   });
 
+  it('passes a reel delivering exactly its duty, in flow and in pressure', () => {
+    /*
+     * Exactly on the duty is a pass. A reel is designed to that figure, so
+     * meeting it is the intended outcome rather than a near miss, and reading
+     * it as a failure condemns a reel that does what it was installed to do —
+     * across 804 of them on this company's books.
+     *
+     * 0.33 L/s is 19.8 L/min.
+     */
+    const exact = checkFlow({
+      measuredFlowLitresPerMinute: 19.8,
+      dutyFlowLitresPerSecond: 0.33,
+      measuredRunningPressureKpa: 220,
+      dutyPressureKpa: 220,
+    });
+    if (isRefused(exact)) throw new Error(exact.reason);
+    expect(exact.flow.verdict).toBe('pass');
+    expect(exact.flow.margin).toBe(0);
+    expect(exact.pressure.verdict).toBe('pass');
+    expect(exact.pressure.margin).toBe(0);
+  });
+
+  it('fails a reel a hair under its duty on either measurement', () => {
+    const lowFlow = checkFlow({
+      measuredFlowLitresPerMinute: 19.7,
+      dutyFlowLitresPerSecond: 0.33,
+      measuredRunningPressureKpa: 220,
+      dutyPressureKpa: 220,
+    });
+    if (isRefused(lowFlow)) throw new Error(lowFlow.reason);
+    expect(lowFlow.flow.verdict).toBe('fail');
+
+    const lowPressure = checkFlow({
+      measuredFlowLitresPerMinute: 19.8,
+      dutyFlowLitresPerSecond: 0.33,
+      measuredRunningPressureKpa: 219,
+      dutyPressureKpa: 220,
+    });
+    if (isRefused(lowPressure)) throw new Error(lowPressure.reason);
+    expect(lowPressure.pressure.verdict).toBe('fail');
+  });
+
   it('fails a reel reading 0.4 on a gauge marked L/min against a duty of 0.33 L/s, instead of passing it', () => {
     // The sixty-times mix-up, written as the field failure it is: 0.4 L/min is
     // a dripping tap and the number looks like a comfortable pass next to 0.33.
