@@ -50,6 +50,15 @@ export function utf8Bytes(s: string): Uint8Array {
   for (let i = 0; i < s.length; i++) {
     let cp = s.codePointAt(i)!;
     if (cp > 0xffff) i++;
+    /*
+     * A surrogate on its own is not a character and has no UTF-8 encoding.
+     * Encoded literally it produces ED A0 80 — the CESU-8 form, which strict
+     * readers reject, so a single stray half of a pair from a truncated panel
+     * label would make a whole workbook or pack unreadable. TextEncoder
+     * substitutes U+FFFD here, and the point of a fallback is that the two
+     * paths are interchangeable.
+     */
+    if (cp >= 0xd800 && cp <= 0xdfff) cp = 0xfffd;
     if (cp < 0x80) out.push(cp);
     else if (cp < 0x800) out.push(0xc0 | (cp >> 6), 0x80 | (cp & 0x3f));
     else if (cp < 0x10000) out.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));

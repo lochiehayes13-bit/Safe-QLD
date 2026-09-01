@@ -108,6 +108,45 @@ describe('refusing a bad pack', () => {
     expect(() => decodePack(bytes)).toThrow();
   });
 
+  it('names which of the two ways it was damaged', () => {
+    /*
+     * The check above passes without the checksum ever being reached: the body
+     * is deflated, so a flipped byte at the end fails decompression first. The
+     * CRC is the guard for the other case — a pack that inflates perfectly and
+     * is not what was sent — and it had never run.
+     *
+     * They are different things to tell somebody. One is a file that arrived
+     * broken; the other is a file that arrived complete and wrong.
+     */
+    const damagedBody = good();
+    damagedBody[damagedBody.length - 1] = damagedBody[damagedBody.length - 1]! ^ 0xff;
+    expect(() => decodePack(damagedBody)).toThrow(/could not be decompressed/);
+
+    const damagedHeader = good();
+    damagedHeader[6] = damagedHeader[6]! ^ 0xff;
+    expect(() => decodePack(damagedHeader)).toThrow(/failed its checksum/);
+  });
+
+  it('tells a technician on an old app to update rather than showing half a site', () => {
+    /*
+     * Two phones on one crew, one updated and one not. The pack format carries
+     * its version so the older app can say what is wrong instead of parsing
+     * fields it does not know and importing a site with pieces missing.
+     */
+    const future = good();
+    future[4] = PACK_VERSION + 1;
+    expect(() => decodePack(future)).toThrow(/newer version of Safe QLD/);
+    expect(() => decodePack(future)).toThrow(/Update the app/);
+  });
+
+  it('opens a pack from an older format, since those fields have not moved', () => {
+    // Only a newer version is refused. Refusing an older one would strand
+    // every pack made before an update for no reason.
+    const bytes = good();
+    expect(bytes[4]).toBe(PACK_VERSION);
+    expect(() => decodePack(bytes)).not.toThrow();
+  });
+
   it('writes the magic and version it claims to', () => {
     const bytes = good();
     expect(String.fromCharCode(...bytes.slice(0, 4))).toBe(PACK_MAGIC);

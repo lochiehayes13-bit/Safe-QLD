@@ -235,3 +235,81 @@ describe('workbook generation', () => {
     expect(xml).toContain('line one\nline two\tend');
   });
 });
+
+/**
+ * The UTF-8 encoder that has never run.
+ *
+ * `utf8Bytes` uses TextEncoder where there is one and falls back to encoding by
+ * hand. Hermes and Node both have TextEncoder, so the fallback has never
+ * executed — not on a handset and not in this suite, which is exactly where a
+ * surrogate-pair bug waits. It writes every filename in every zip and every
+ * string in every workbook, so if it ever does run and gets a byte wrong, the
+ * file is unreadable rather than slightly wrong.
+ *
+ * Checked against TextEncoder itself, because "agrees with the thing it stands
+ * in for" is the whole specification.
+ */
+describe('encoding text without TextEncoder', () => {
+  const withoutTextEncoder = <T>(fn: () => T): T => {
+    const real = globalThis.TextEncoder;
+    // @ts-expect-error deliberately removing it for the length of the call
+    delete globalThis.TextEncoder;
+    try {
+      return fn();
+    } finally {
+      globalThis.TextEncoder = real;
+    }
+  };
+
+  const both = (s: string): [number[], number[]] => {
+    const reference = Array.from(new TextEncoder().encode(s));
+    const fallback = Array.from(withoutTextEncoder(() => utf8Bytes(s)));
+    return [fallback, reference];
+  };
+
+  it('is actually taking the fallback path', () => {
+    // Otherwise every case below compares TextEncoder with itself and passes
+    // for the rest of this repository's life.
+    expect(withoutTextEncoder(() => typeof TextEncoder)).toBe('undefined');
+    expect(typeof TextEncoder).toBe('function');
+  });
+
+  it('agrees on everything this app actually writes', () => {
+    for (const s of [
+      'Logan DC',
+      'Level 3 / Plant Room',
+      'café',                       // two-byte
+      '— … ° ±',                    // the punctuation the documents emit
+      '日本',                        // three-byte
+      '🔥 a🔥b',                     // four-byte, and a pair between two letters
+      'Ω≈ç√∫',
+      '',
+    ]) {
+      const [fallback, reference] = both(s);
+      expect([s, fallback]).toEqual([s, reference]);
+    }
+  });
+
+  it('agrees on a surrogate that lost its other half', () => {
+    /*
+     * Not a character, and it has no UTF-8 encoding. Encoded literally it comes
+     * out as ED A0 80 — the CESU-8 form, which strict readers reject — so one
+     * stray half from a truncated panel label would make a whole workbook
+     * unreadable rather than one cell wrong. TextEncoder substitutes U+FFFD.
+     */
+    for (const s of ['\uD800', 'x\uDC00y', 'a\uD83Db']) {
+      const [fallback, reference] = both(s);
+      expect([s, fallback]).toEqual([s, reference]);
+    }
+    expect(Array.from(withoutTextEncoder(() => utf8Bytes('\uD800')))).toEqual([0xef, 0xbf, 0xbd]);
+  });
+
+  it('agrees at each width boundary', () => {
+    // One code point either side of every change in encoded length.
+    for (const cp of [0x7f, 0x80, 0x7ff, 0x800, 0xffff, 0x10000, 0x10ffff]) {
+      const s = String.fromCodePoint(cp);
+      const [fallback, reference] = both(s);
+      expect([cp.toString(16), fallback]).toEqual([cp.toString(16), reference]);
+    }
+  });
+});
