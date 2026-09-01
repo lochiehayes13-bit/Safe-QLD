@@ -11,7 +11,7 @@ import { EXPLAINED_CLAUSES, LIBRARY, TOTAL_CLAUSES } from '@/domain/standardsLib
 import { ask, explainQuery, type Answer } from '@/domain/ask';
 import { SYSTEM_LABELS } from '@/seed/assetTypes';
 import {
-  deleteLibraryDoc, importPdf, listLibraryDocs, searchLibrary, type LibraryDoc,
+  deleteLibraryDoc, importPdf, libraryPage, listLibraryDocs, searchLibrary, type LibraryDoc,
 } from '@/db/libraryRepo';
 import type { PageHit } from '@/domain/docSearch';
 import { askGrounded, hasKey } from '@/ai/client';
@@ -402,7 +402,36 @@ function PageResult({ hit }: { hit: PageHit }) {
   /*
    * The matched words are marked in the snippet. A hit with no context is a
    * page number, and nobody walks back to the ute to check a page number.
+   *
+   * The snippet is not always enough, though, and a standard is the worst case
+   * for it: the sentence that decides the answer is often the one after the
+   * match — "except where the system is", "unless otherwise approved" — and a
+   * snippet ending mid-qualifier reads as a clear answer while being the
+   * opposite of one. libraryPage was written to fetch the whole page for
+   * exactly this and nothing called it, so the page could be found and not
+   * read.
+   *
+   * Tapping opens it. The document is the technician's own copy, imported on
+   * their own device, and nothing about showing it leaves the handset.
    */
+  const [page, setPage] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const toggle = async () => {
+    if (open) { setOpen(false); return; }
+    setOpen(true);
+    if (page !== null) return;
+    setLoading(true);
+    try {
+      setPage((await libraryPage(hit.docId, hit.page)) ?? '');
+    } catch {
+      setPage('');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const parts: { text: string; mark: boolean }[] = [];
   let at = 0;
   for (const m of hit.marks) {
@@ -413,12 +442,17 @@ function PageResult({ hit }: { hit: PageHit }) {
   if (at < hit.snippet.length) parts.push({ text: hit.snippet.slice(at), mark: false });
 
   return (
-    <Card>
+    <Card onPress={() => void toggle()}>
       <Rowed gap={2} align="center">
         <MaterialCommunityIcons name="text-search" size={16} color={t.color.accentText} />
         <Txt size="xs" tone="accent" style={{ flex: 1 }}>
           {hit.docTitle} · page {hit.page}
         </Txt>
+        <MaterialCommunityIcons
+          name={open ? 'chevron-up' : 'chevron-down'}
+          size={18}
+          color={t.color.textFaint}
+        />
       </Rowed>
       <Txt size="sm" style={{ marginTop: t.space(1.5), lineHeight: 20 }}>
         {parts.map((p, i) => (
@@ -432,6 +466,32 @@ function PageResult({ hit }: { hit: PageHit }) {
           </Txt>
         ))}
       </Txt>
+
+      {open ? (
+        <>
+          <View style={{ height: 1, backgroundColor: t.color.border, marginVertical: t.space(2) }} />
+          {loading ? (
+            <Txt size="sm" tone="muted">Reading page {hit.page}…</Txt>
+          ) : page ? (
+            <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>{page}</Txt>
+          ) : (
+            /*
+             * The page was found by the search, so its text existed when the
+             * document was imported. Saying nothing here would read as a blank
+             * page in the standard rather than as the app failing to read it
+             * back.
+             */
+            <Txt size="sm" tone="warn">
+              The text of this page could not be read back. The document may have been re-imported
+              since this result was found — search again.
+            </Txt>
+          )}
+          <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5), lineHeight: 16 }}>
+            Page {hit.page} of your own imported copy, as the text was read off it. Layout, tables
+            and figures are not preserved — check the document itself where the layout matters.
+          </Txt>
+        </>
+      ) : null}
     </Card>
   );
 }
