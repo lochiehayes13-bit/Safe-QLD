@@ -106,6 +106,30 @@ describe.each([
   });
 });
 
+describe('scale', () => {
+  it('has a type ramp that only ever goes up', () => {
+    // A ramp that dips in the middle produces a "large" style smaller than the
+    // body it sits above, and it is invisible until someone sees the screen.
+    const sizes = Object.values(darkTheme.font.size);
+    expect(sizes).toEqual([...sizes].sort((a, b) => a - b));
+  });
+
+  it('sets body text large enough to read at arm\'s length', () => {
+    // Read at arm's length, in a riser cupboard, often through a face shield.
+    expect(darkTheme.font.size.md).toBeGreaterThanOrEqual(16);
+  });
+
+  it('keeps hit targets clear of the Android floor', () => {
+    // 48dp is the accessibility minimum. Gloves want more than the minimum.
+    expect(darkTheme.touch).toBeGreaterThanOrEqual(56);
+  });
+
+  it('uses the same scale in both themes', () => {
+    expect(lightTheme.font.size).toEqual(darkTheme.font.size);
+    expect(lightTheme.touch).toBe(darkTheme.touch);
+  });
+});
+
 describe('brand constants', () => {
   it('holds the colours sampled from the letterhead', () => {
     // Sampled from word/media/image1.jpeg in the supplied template. If someone
@@ -136,10 +160,37 @@ describe('brand constants', () => {
     expect({ abn: company.abn, remainder: sum % 89 }).toEqual({ abn: company.abn, remainder: 0 });
   });
 
-  it('derives the accent from the brand rather than drifting from it', () => {
-    // The deepened fill must still be recognisably the brand orange: same hue
-    // family, darker. Compare against the sampled orange, not a literal.
-    expect(darkTheme.color.accentText).toBe(brand.orange);
-    expect(relativeLuminance(darkTheme.color.accent)).toBeLessThan(relativeLuminance(brand.orange));
+  it.each([
+    ['dark', darkTheme],
+    ['light', lightTheme],
+  ])('keeps the %s accent in the brand\'s own hue family', (_name, theme: Theme) => {
+    // Not pinned to the sampled orange itself: the accent is deliberately a
+    // brighter flame than the letterhead's. What must hold is that it is the
+    // same colour turned up, not a different colour — so compare hue angle,
+    // which is what "is this still their orange" actually means. Measured at
+    // 44.6° for the brand and 44-53° across the flame ramp.
+    const hue = (hex: string): number => {
+      const [, a, b] = lab(hex);
+      return ((Math.atan2(b, a) * 180) / Math.PI + 360) % 360;
+    };
+    for (const colour of [theme.color.accent, theme.color.accentText]) {
+      const drift = Math.abs(hue(colour) - hue(brand.orange));
+      expect({ colour, drift: Math.round(drift), sameFamily: drift <= 15 })
+        .toEqual({ colour, drift: Math.round(drift), sameFamily: true });
+    }
+  });
+
+  it.each([
+    ['dark', darkTheme],
+    ['light', lightTheme],
+  ])('%s: puts a dark label on the flame, not a white one', (_name, theme: Theme) => {
+    // This is the whole reason the accent can be as bright as it is. White on
+    // flame orange is 2.85:1 and fails, which is what forced the previous,
+    // muted accent. Turning the label over reaches 6.92:1 — so if someone
+    // "fixes" onAccent back to white, the fill has to be darkened again and
+    // the app loses its brightness. Fail here instead.
+    expect(relativeLuminance(theme.color.onAccent))
+      .toBeLessThan(relativeLuminance(theme.color.accent));
+    expect(theme.color.onAccent.toUpperCase()).not.toBe('#FFFFFF');
   });
 });

@@ -129,12 +129,35 @@ export function Txt({
 }
 
 export function H1({ children }: { children: React.ReactNode }) {
-  return <Txt size="xxl" weight="700" style={{ letterSpacing: -0.4 }}>{children}</Txt>;
+  // Tighter tracking as the size goes up: at display sizes the default spacing
+  // reads as gappy rather than confident.
+  return <Txt size="xxl" weight="800" style={{ letterSpacing: -0.8 }}>{children}</Txt>;
 }
 
+/**
+ * A section heading, marked with a short flame rule.
+ *
+ * These screens are long — a settings page runs to a dozen sections — and a
+ * heading that differs from body text only by weight disappears when someone is
+ * scrolling with one hand on a ladder. The bar gives every section a fixed
+ * left edge to scan down, and it is the one place the brand colour appears
+ * purely as identity rather than as something to press.
+ */
 export function H2({ children }: { children: React.ReactNode }) {
   const t = useTheme();
-  return <Txt size="lg" weight="700" style={{ marginTop: t.space(2) }}>{children}</Txt>;
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.space(2.5), marginTop: t.space(4) }}>
+      <View
+        style={{
+          width: 4,
+          height: t.font.size.lg,
+          borderRadius: 2,
+          backgroundColor: t.color.accent,
+        }}
+      />
+      <Txt size="lg" weight="800" style={{ letterSpacing: -0.2 }}>{children}</Txt>
+    </View>
+  );
 }
 
 export function Label({ children }: { children: React.ReactNode }) {
@@ -194,8 +217,10 @@ export function Button({
       accessibilityState={{ disabled: !!isDisabled }}
       style={({ pressed }) => [
         {
-          minHeight: compact ? 40 : t.touch,
-          paddingHorizontal: t.space(compact ? 3 : 5),
+          // 44 rather than 40 even when compact: 40 was under the 44dp floor,
+          // and these are pressed with gloves on.
+          minHeight: compact ? 44 : t.touch,
+          paddingHorizontal: t.space(compact ? 3.5 : 5),
           borderRadius: t.radius.md,
           backgroundColor: bg[variant],
           alignItems: 'center',
@@ -204,13 +229,36 @@ export function Button({
           gap: t.space(2),
           borderWidth: variant === 'ghost' ? StyleSheet.hairlineWidth : 0,
           borderColor: t.color.border,
-          opacity: isDisabled ? 0.45 : pressed ? 0.85 : 1,
+          opacity: isDisabled ? 0.45 : pressed ? 0.9 : 1,
+          // The primary action throws a little of its own colour onto the
+          // surface under it, so the one button that matters is findable in
+          // peripheral vision without reading anything. Dropped while pressed
+          // and while disabled, so the glow always means "this is live".
+          ...(variant === 'primary' && !isDisabled
+            ? {
+                shadowColor: t.color.accent,
+                shadowOpacity: pressed ? 0.25 : 0.55,
+                shadowRadius: pressed ? 6 : 14,
+                shadowOffset: { width: 0, height: pressed ? 2 : 5 },
+                // Android draws the tinted shadow from elevation, API 28+.
+                elevation: pressed ? 3 : 8,
+              }
+            : null),
         },
         style,
       ]}
     >
       {loading ? <ActivityIndicator color={fg[variant]} size="small" /> : icon}
-      <Text style={{ color: fg[variant], fontWeight: '700', fontSize: compact ? t.font.size.sm : t.font.size.md }}>
+      <Text
+        style={{
+          color: fg[variant],
+          fontWeight: '800',
+          // Tracking opens the label up at these weights; without it a bold
+          // short word on a saturated fill reads as a solid block.
+          letterSpacing: 0.3,
+          fontSize: compact ? t.font.size.sm : t.font.size.md,
+        }}
+      >
         {title}
       </Text>
     </Pressable>

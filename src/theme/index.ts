@@ -20,17 +20,31 @@ export { brand, company } from './brand';
 
 const palette = {
   /**
-   * Brand orange, and a darkened version of it.
+   * Flame orange, and the near-black that rides on it.
    *
-   * Contrast measured against the real surfaces rather than eyeballed:
-   * `brandOrange` reads 5.71:1 on the dark background and 5.10:1 on a card, so
-   * it is the accent *text* colour — but white on it is only 3.39:1, which is
-   * under the 4.5:1 floor for a button label. `brandOrangeDeep` carries white
-   * at 5.01:1 and still reads 4.75:1 as text on the light background, so it is
-   * the fill in both themes. That split is why there are two of them.
+   * The first pass at this had to *mute* the brand orange, because a button
+   * label is white and white on flame orange is only 2.85:1 — well under the
+   * floor. Darkening the fill until white worked meant the app could never be
+   * as bright as the brand actually is.
+   *
+   * Turning the label over solves it the other way round. `onFlame` on `flame`
+   * measures 6.92:1, better than the muted fill managed with white, so the
+   * accent can be *brighter* than before and more legible at the same time.
+   * `flameBright` reads 7.43:1 on the dark background as text and icons.
+   *
+   * `flameDeep` survives only for the light theme's text, where a flame this
+   * bright cannot reach 4.5:1 against near-white paper.
+   *
+   * All three sit between 44° and 53° in Lab hue — the same warm family as the
+   * sampled brand orange at 44.6°, so this reads as the company's colour turned
+   * up rather than a different colour.
    */
-  brandOrange: brand.orange,
-  brandOrangeDeep: '#C4441C',
+  flame: '#FF6B1A',
+  flameBright: '#FF7A2F',
+  flameDeep: '#C4441C',
+  onFlame: '#12080A',
+  /** Ends the primary gradient. Kept close in hue so the ramp does not band. */
+  flameHot: '#FF8C1A',
 
   // Kept for status colours: a failure must not be mistaken for a brand accent.
   red600: '#E03131',
@@ -104,12 +118,12 @@ export interface Theme {
 
 const shared = {
   space: (n: number) => n * 4,
-  radius: { sm: 6, md: 10, lg: 14, xl: 20, pill: 999 },
+  radius: { sm: 8, md: 14, lg: 20, xl: 28, pill: 999 },
   font: {
-    size: { xs: 11, sm: 13, md: 15, lg: 17, xl: 20, xxl: 26, display: 34 },
+    size: { xs: 12, sm: 14, md: 17, lg: 20, xl: 24, xxl: 31, display: 42 },
     mono: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }) as string,
   },
-  touch: 52,
+  touch: 60,
 };
 
 export const darkTheme: Theme = {
@@ -125,9 +139,9 @@ export const darkTheme: Theme = {
     text: '#EEF2F7',
     textMuted: '#9AA6B6',
     textFaint: '#66748A',
-    accent: palette.brandOrangeDeep,
-    accentText: palette.brandOrange,
-    onAccent: '#FFFFFF',
+    accent: palette.flame,
+    accentText: palette.flameBright,
+    onAccent: palette.onFlame,
     pass: palette.green400,
     fail: palette.red400,
     warn: palette.amber400,
@@ -152,9 +166,9 @@ export const lightTheme: Theme = {
     text: palette.grey900,
     textMuted: palette.grey700,
     textFaint: palette.grey600,
-    accent: palette.brandOrangeDeep,
-    accentText: palette.brandOrangeDeep,
-    onAccent: '#FFFFFF',
+    accent: palette.flame,
+    accentText: palette.flameDeep,
+    onAccent: palette.onFlame,
     pass: palette.green500,
     fail: palette.red600,
     warn: '#B37500',
