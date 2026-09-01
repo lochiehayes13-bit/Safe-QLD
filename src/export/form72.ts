@@ -17,7 +17,7 @@ import { formatAuDate } from './sheets';
  * Standard: a technician handing over a "summary of the Form 72" has not
  * discharged QDC MP 6.1.
  *
- * Two failures on paper are what shaped the rest of it.
+ * Three failures on paper are what shaped the rest of it.
  *
  * The first is the blank. On a printed form a blank box is ambiguous — it may
  * mean N/A, or nobody looked, or the pen ran out — and by the time it is
@@ -33,10 +33,20 @@ import { formatAuDate } from './sheets';
  * stamped NOT FOR ISSUE with the reasons on its face, rather than printing
  * clean and being challenged in a year.
  *
+ * The third is the clean draft. A form with nothing outstanding prints without
+ * a mark on it, and at that point the only difference between it and the
+ * statutory record is that a draft can still be edited. So where the caller
+ * says which one it is holding, the page says so too: an occupier given a
+ * draft, and a figure changed the day after, ends up holding a document that
+ * disagrees with ours, which is the one thing the issued-form rule exists to
+ * stop.
+ *
  * Nothing here computes hydraulics of its own. The frictional loss and the
  * overload check come from domain/form72.ts, and where the readings do not
  * support them the page says so in words instead of printing a figure that
- * looks measured.
+ * looks measured. The business days are counted by the app's Queensland
+ * calendar, holidays and all, because the occupier statement counts the same
+ * ten days and two answers from one job is how an office stops believing both.
  */
 
 // ---------------------------------------------------------------------------
@@ -518,10 +528,41 @@ function partC(form: Form72, issues: FormIssue[]): string {
     : ''}`;
 }
 
+/**
+ * How many hydrant locations the readings actually depend on.
+ *
+ * The department prints four location fields and the flow table proves one, two
+ * or three hydrants at a time. A test run on two hydrants has no third location
+ * to give, and calling that a missing reading is the same mistake as flagging
+ * the three flow rates nobody ran: it puts red on the page where nothing is
+ * wrong, and a reader who learns to skip red will skip the row that matters.
+ *
+ * A location the readings *do* depend on is a different thing. Pressures in the
+ * "Hydrants 1, 2 & 3" column with no third hydrant named is a gap somebody has
+ * to answer for, and it stays red.
+ */
+export function hydrantLocationsNeeded(test: FlowTest): number {
+  let needed = 0;
+  for (const row of test.rows) {
+    if (row.hydrants123Kpa !== undefined) needed = Math.max(needed, 3);
+    else if (row.hydrants12Kpa !== undefined) needed = Math.max(needed, 2);
+    else if (row.hydrant1Kpa !== undefined) needed = Math.max(needed, 1);
+  }
+  return needed;
+}
+
 function partD(form: Form72): string {
   const d = form.flowTest;
   const r = d.result;
-  const loc = (n: number): string => cell(d.hydrantLocations[n - 1], r === 'na' ? 'na' : 'pass');
+  const needed = hydrantLocationsNeeded(d);
+  const loc = (n: number): string => {
+    const value = d.hydrantLocations[n - 1];
+    if (value?.trim()) return esc(value);
+    if (r === 'na') return '<span class="na">N/A</span>';
+    return n <= needed
+      ? '<span class="missing">Not recorded</span>'
+      : '<span class="na">Not used</span>';
+  };
   const rows = flowTableRows(d);
 
   const table = `<table class="grid flow">
@@ -877,6 +918,13 @@ export function form72Html(input: Form72DocumentInput): string {
   ${cautions.length ? `<div class="caution"><b>Check before issue</b><ul>${
   cautions.map((i) => `<li>Part ${esc(i.part)} — ${esc(i.message)}</li>`).join('')}</ul></div>` : ''}
 
+  ${issuable && input.status === 'draft' ? `<div class="caution">
+    <b>Draft copy — this form has not been issued</b>
+    Nothing on it is outstanding, but the app still holds it as a draft, which means it can still be
+    edited. Issue it before it is given to anybody: a copy handed over now and the record kept
+    afterwards can end up saying different things, and the occupier's copy is the one that counts.
+  </div>` : ''}
+
   ${partA(form)}
   ${partB(form)}
   ${partC(form, issues)}
@@ -889,13 +937,6 @@ export function form72Html(input: Form72DocumentInput): string {
 
   <div class="deptnote">${esc(DEPARTMENT_NOTE)}</div>
 
-  ${issuable && input.status === 'draft' ? `<div class="caution">
-    <b>Draft copy — this form has not been issued</b>
-    Nothing on it is outstanding, but the app still holds it as a draft, which means it can still be
-    edited. Issue it before it is given to anybody: a copy handed over now and the record kept
-    afterwards can end up saying different things, and the occupier's copy is the one that counts.
-  </div>` : ''}
-
   <div class="ours">
     <b>Not part of the department's form.</b>
     Produced by ${esc(company)} from the readings recorded on site${
@@ -906,8 +947,8 @@ export function form72Html(input: Form72DocumentInput): string {
     : ''}
     ${due.date
     ? `A copy is due to the building occupier by ${esc(formatAuDate(due.date))} — ${OCCUPIER_COPY_BUSINESS_DAYS}
-       business days after the work, under QDC MP 6.1 acceptable solution A4(b), counted as
-       ${esc(due.legalRef)} defines a business day.${
+       business days after the work, under QDC MP 6.1 acceptable solution A4(b), counted under
+       ${esc(due.legalRef)}.${
   due.holidaysApplied.length
     ? ` Public holidays passed over: ${esc(due.holidaysApplied.join('; '))}.`
     : ' No public holiday falls inside that count.'} ${esc(due.caveats.join(' '))}`

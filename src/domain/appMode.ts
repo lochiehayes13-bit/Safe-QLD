@@ -822,8 +822,8 @@ export type ReachChannel =
   /** Opened from the record it belongs to, which is itself reachable. */
   | 'record'
   /**
-   * Not listed in this mode, but a screen that is still opens it as part of
-   * doing something — see `stillOpenedFrom`.
+   * Not listed in this mode, but a screen that is shown still opens it as
+   * part of doing something — see `stillOpenedFrom`.
    */
   | 'opened'
   /** Not listed in this mode: found by name and opened from the result. */

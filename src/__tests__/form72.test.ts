@@ -1,7 +1,8 @@
 import {
   DECLARATION, DEPARTMENT_NOTE, FORM_72_SOURCES, STANDARD_FLOW_RATES_LPS,
-  flowTableRows, form72Html, frictionalLossGaps, occupierCopyDue, occupierCopyDueBy,
-  qldCalendarDate, testPointOutcome, testerCopyKeepUntil, type Form72DocumentInput,
+  flowTableRows, form72Html, frictionalLossGaps, hydrantLocationsNeeded, occupierCopyDue,
+  occupierCopyDueBy, qldCalendarDate, testPointOutcome, testerCopyKeepUntil,
+  type Form72DocumentInput,
 } from '@/export/form72';
 import { MIGRATION_V12 } from '@/db/schemaForm72';
 import {
@@ -366,6 +367,36 @@ describe('Part D — the flow table', () => {
     expect(rows).toHaveLength(STANDARD_FLOW_RATES_LPS.length + 1);
     expect(rows.filter((r) => r.row.rateLps === 20)).toHaveLength(2);
     expect(rows[rows.length - 1]!.standard).toBe(false);
+  });
+
+  it('flags a hydrant location the readings depend on, and lets go of the ones they do not', () => {
+    // Two hydrants proved, two locations given: nothing is missing, and red on
+    // those rows is red the reader learns to skip. Pressures in the three
+    // hydrant column with no third location is a different thing entirely.
+    const twoProved = form72Html(doc({
+      form: issuable({
+        flowTest: {
+          result: 'pass', hydrantLocations: ['Main entry', 'Loading dock'],
+          rows: [{ rateLps: 20, devices: 'DG1', hydrant1Kpa: 320, hydrants12Kpa: 240 }],
+        },
+      }),
+    }));
+    const locations = between(twoProved, 'Hydrant 1 Location', 'Static Pressure');
+    expect(locations).toContain('Main entry');
+    expect(locations).not.toContain('Not recorded');
+    expect(locations).toContain('Not used');
+
+    const threeProved = form72Html(doc({
+      form: issuable({
+        flowTest: {
+          result: 'pass', hydrantLocations: ['Main entry', 'Loading dock'],
+          rows: [{ rateLps: 20, devices: 'DG1', hydrant1Kpa: 320, hydrants12Kpa: 240, hydrants123Kpa: 200 }],
+        },
+      }),
+    }));
+    const three = between(threeProved, 'Hydrant 3 Location', 'Hydrant 4 Location');
+    expect(three).toContain('Not recorded');
+    expect(hydrantLocationsNeeded({ result: 'pass', hydrantLocations: [], rows: [] })).toBe(0);
   });
 
   it('records that the on-site pump set question was not answered', () => {

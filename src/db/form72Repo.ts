@@ -311,7 +311,9 @@ export async function updateForm72(id: string, patch: Form72Patch): Promise<void
     // Half a run is not a run. A screen that fills the other half with zero to
     // keep its own types happy would store a pump making 0 kPa at overload,
     // which reads as catastrophic failure rather than as a test not done, so
-    // anything but two positive figures is stored as no run at all.
+    // anything but two positive figures is stored as no run at all. A pump that
+    // genuinely made nothing is a Part E comment and a fail — not a zero in a
+    // box that nobody can tell apart from a box nobody filled in.
     const made = run !== undefined
       && Number.isFinite(run.flowLps) && run.flowLps > 0
       && Number.isFinite(run.pressureKpa) && run.pressureKpa > 0;

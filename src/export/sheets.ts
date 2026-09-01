@@ -12,6 +12,7 @@ import type {
 } from '@/domain/types';
 import { DEVICE_TYPE_LABEL } from '@/parsers/deviceType';
 import type { Cell, Row, Sheet } from './xlsx';
+import { qldDay } from '@/domain/qldTime';
 
 /**
  * Builds the workbook layouts the app exports.
@@ -24,10 +25,21 @@ const H = (s: string): Cell => ({ v: s, style: 'header' });
 
 export function formatAuDate(iso: string | undefined): string {
   if (!iso) return '';
-  // Accept both plain dates and full timestamps.
-  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) return iso;
-  return `${m[3]}/${m[2]}/${m[1]}`;
+  /*
+   * The Queensland calendar day, not the UTC one.
+   *
+   * Everything here is stamped as a UTC instant and read by somebody in
+   * Brisbane, and between midnight and 10am those two disagree about the date.
+   * A fire service that starts at seven spends the first three hours of every
+   * day on the wrong side of that line, so a notice for work done on Friday
+   * morning printed Thursday — on a document whose statutory clocks run from
+   * that date.
+   *
+   * What it cannot read comes back as it arrived. A date already unreadable
+   * should stay visible on the page rather than becoming an empty box that
+   * nobody can trace back to a bad value.
+   */
+  return qldDay(iso) ?? iso;
 }
 
 function pointAddressLabel(p: { loopNumber?: number; address?: number; subAddress?: number; pointRef?: string }): string {
