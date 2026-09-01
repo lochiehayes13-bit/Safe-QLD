@@ -43,7 +43,17 @@ const BASE_CSS = `
   .pass { background: #D4EDDA; font-weight: 700; text-align: center; }
   .fail { background: #F8D7DA; font-weight: 700; text-align: center; }
   .na   { background: #FFF3CD; text-align: center; }
-  .untested { background: #EEE; text-align: center; color: #888; }
+  /*
+   * Not tested is the cell that most needs looking at, and it was the least
+   * visible thing on the page: grey text on a grey ground, holding an em dash.
+   * N/A beside it was amber. So a device that was not applicable stood out and
+   * a device nobody could get to did not.
+   *
+   * Amber and bold now. It is not a failure and it is not a pass; it is the
+   * row somebody has to go back to, and it is louder than N/A because N/A is a
+   * finished answer and this one is not.
+   */
+  .untested { background: #FFF3CD; text-align: center; font-weight: 700; color: #664D03; }
   .pill { display: inline-block; padding: 1px 7px; border-radius: 9px; font-size: 9px;
           font-weight: 700; letter-spacing: 0.3px; }
   .pill.crit { background: #F8D7DA; color: #842029; }
@@ -69,7 +79,15 @@ function resultClass(r: TestRow['result']): string {
 }
 
 function resultText(r: TestRow['result']): string {
-  return r === 'pass' ? 'PASS' : r === 'fail' ? 'FAIL' : r === 'na' ? 'N/A' : '—';
+  /*
+   * "NOT TESTED", not a dash.
+   *
+   * A dash reads as nothing to report. This is a stated outcome with a required
+   * reason — an inaccessible device is the commonest real result on an annual,
+   * and the whole point of recording it apart from a pass is that the coverage
+   * gap stays visible on the document the client is given.
+   */
+  return r === 'pass' ? 'PASS' : r === 'fail' ? 'FAIL' : r === 'na' ? 'N/A' : 'NOT TESTED';
 }
 
 function addressLabel(p: { loopNumber?: number; address?: number; subAddress?: number; pointRef?: string }): string {
@@ -149,6 +167,12 @@ export function serviceReportHtml(
 
 <div class="stats">
   <div class="stat"><div class="k">Devices</div><div class="v">${testRows.length}</div></div>
+  <!--
+    What was actually tested, beside how many were on the sheet. The two are
+    the same number only on a job where nothing was locked, and a reader who
+    has only the first will take it for the second.
+  -->
+  <div class="stat"><div class="k">Tested</div><div class="v">${pass + fail}</div></div>
   <div class="stat"><div class="k">Pass</div><div class="v">${pass}</div></div>
   <div class="stat"><div class="k">Fail</div><div class="v">${fail}</div></div>
   <div class="stat"><div class="k">N/A</div><div class="v">${na}</div></div>
@@ -210,7 +234,20 @@ ${statutory ? `<h2>Record of maintenance</h2>
   ${statutory.appliedStandard ? `<tr><td>Maintained to</td><td>${esc(statutory.appliedStandard)}</td></tr>` : ''}
   <tr><td>Carried out by</td><td>${esc(report.technicianName)}${report.technicianLicence ? ` &middot; Licence ${esc(report.technicianLicence)}` : ''}</td></tr>
   ${statutory.supervisorName ? `<tr><td>Under supervision of</td><td>${esc(statutory.supervisorName)}${statutory.supervisorLicenceNumber ? ` &middot; Licence ${esc(statutory.supervisorLicenceNumber)}` : ''}</td></tr>` : ''}
-  <tr><td>Complied with QDC MP 6.1</td><td>${statutory.qdcCompliance ? 'Yes' : 'No'}</td></tr>
+  <!--
+    "Not stated", never "No".
+
+    Both of these come off an unticked checkbox on the report screen — the
+    technician's action is to tick and affirm, and there is no control anywhere
+    that records an explicit "No". So printing one turns an untouched box into
+    a positive assertion of non-compliance with QDC MP 6.1, on a record of
+    maintenance an inspector reads, that nobody made.
+
+    The row immediately below already got this right and says so in its own
+    comment: not yet answered is different from no. It is the same distinction
+    the department's Form 72 keeps in Part H, for the same reason.
+  -->
+  <tr><td>Complied with QDC MP 6.1</td><td>${statutory.qdcCompliance ? 'Yes' : 'Not stated'}</td></tr>
   <tr><td>In proper working order</td>
       <td>${statutory.inProperWorkingOrder === null ? 'Not stated' : statutory.inProperWorkingOrder ? 'Yes' : 'No'}</td></tr>
   ${defects.filter((d) => d.status === 'open').length
@@ -219,7 +256,7 @@ ${statutory ? `<h2>Record of maintenance</h2>
   ${defects.filter((d) => d.status === 'rectified').length
     ? `<tr><td>Repairs made</td><td>${defects.filter((d) => d.status === 'rectified').map((d) => `${esc(formatAuDate(d.rectifiedAt))} — ${esc(d.location)}: ${esc(d.description)}`).join('<br/>')}</td></tr>`
     : ''}
-  <tr><td>Hardcopy left on site</td><td>${statutory.hardcopyLeftOnSite ? 'Yes' : 'No'}</td></tr>
+  <tr><td>Hardcopy left on site</td><td>${statutory.hardcopyLeftOnSite ? 'Yes' : 'Not stated'}</td></tr>
 </table>
 
 <div style="margin-top:10px;padding:9px 11px;background:#F4F6F8;border-left:3px solid #C92A2A;font-size:10px;line-height:1.5">
