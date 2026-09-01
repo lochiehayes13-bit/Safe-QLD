@@ -39,6 +39,18 @@ describe('sniffDelimiter', () => {
     expect(sniffDelimiter(text)).toBe('\t');
   });
 
+  it('reads a genuinely two-column export as two columns', () => {
+    /*
+     * Two columns is a real export — a code and a description, a key and a
+     * value — and a delimiter that yields two fields is doing its job.
+     * Requiring three leaves a tab-separated pair falling through to the
+     * comma, which finds no delimiter at all and returns the whole line as one
+     * column. Every row then imports as a single unnamed field.
+     */
+    expect(sniffDelimiter('code\tdescription\nEXT-01\tExtinguisher')).toBe('\t');
+    expect(sniffDelimiter('code;description\nEXT-01;Extinguisher')).toBe(';');
+  });
+
   it('falls back to a comma rather than guessing from nothing', () => {
     expect(sniffDelimiter('')).toBe(',');
     expect(sniffDelimiter('   \n  ')).toBe(',');
@@ -48,6 +60,44 @@ describe('sniffDelimiter', () => {
     // One column is not evidence for any delimiter, and picking one on a tie
     // would be arbitrary.
     expect(sniffDelimiter('justonecolumn\nanotherline')).toBe(',');
+  });
+});
+
+describe('parseDelimited — a quote inside a field', () => {
+  /*
+   * Twenty-nine rows of Safe QLD's own register carry one, and every single
+   * one is an inch mark: "Approx 20"" Scissor required" is a note that
+   * reaching that emergency light needs a twenty-foot scissor lift, and
+   * "10"" -Switchboard in rear storage" is where the test switch is.
+   *
+   * A doubled quote inside a quoted field is one literal quote. Read any other
+   * way the field runs on into the next one and the row shifts by a column —
+   * silently, because what comes out is still a row of plausible strings. The
+   * whole rule sits in one comparison and nothing exercised it.
+   */
+  it('reads a doubled quote as one, and keeps the field whole', () => {
+    expect(parseDelimited(
+      'Location,Note\n"10"" -Switchboard in rear storage","Approx 20"" Scissor required"',
+    )).toEqual([
+      ['Location', 'Note'],
+      ['10" -Switchboard in rear storage', 'Approx 20" Scissor required'],
+    ]);
+  });
+
+  it('reads a field that is nothing but an inch mark', () => {
+    // The whole field is an opening quote, a doubled quote, and a close.
+    expect(parseDelimited('Height,Kind\n"12""",Batten')).toEqual([
+      ['Height', 'Kind'],
+      ['12"', 'Batten'],
+    ]);
+  });
+
+  it('does not let a quoted field swallow the delimiter that follows it', () => {
+    // The failure this guards: the row shifts by a column and every value
+    // after it lands under the wrong heading.
+    const rows = parseDelimited('A,B,C\n"one"",",two,three');
+    expect(rows[1]).toHaveLength(3);
+    expect(rows[1]).toEqual(['one",', 'two', 'three']);
   });
 });
 
