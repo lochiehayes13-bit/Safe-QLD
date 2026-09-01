@@ -388,6 +388,41 @@ describe('the discount', () => {
     expect(totals.totalCents).toBe(27_500);
   });
 
+  it('lets a job be written off entirely without calling it an error', () => {
+    /*
+     * A discount equal to the work is a real thing — goodwill, a warranty
+     * rectification, work done to keep a client. It comes to nothing owing,
+     * which is the correct answer, and warning about it puts a query on a
+     * decision somebody made deliberately.
+     *
+     * A cent more than the work is the one worth flagging: the total goes
+     * negative, and nothing here clamps it.
+     */
+    const wholeJob = quoteTotals(quote({
+      lines: [line({ id: 'l1', section: 'labour', unit: 'hr', quantity: 2, unitCents: HOURLY_CENTS })],
+      discountCents: 27_376,
+    }));
+    expect(wholeJob.subtotalCents).toBe(0);
+    expect(wholeJob.totalCents).toBe(0);
+    expect(wholeJob.warnings.filter((w) => w.includes('larger than the work'))).toEqual([]);
+
+    const overshoot = quoteTotals(quote({
+      lines: [line({ id: 'l1', section: 'labour', unit: 'hr', quantity: 2, unitCents: HOURLY_CENTS })],
+      discountCents: 27_377,
+    }));
+    expect(overshoot.warnings.some((w) => w.includes('larger than the work'))).toBe(true);
+  });
+
+  it('says nothing about a quote with no discount on it', () => {
+    // Nought is the ordinary case, not a negative one. A warning here would
+    // appear on every quote this company writes.
+    const totals = quoteTotals(quote({
+      lines: [line({ id: 'l1', section: 'labour', unit: 'hr', quantity: 2, unitCents: HOURLY_CENTS })],
+      discountCents: 0,
+    }));
+    expect(totals.warnings.filter((w) => w.includes('discount'))).toEqual([]);
+  });
+
   it('refuses a discount that is not whole cents rather than rounding it quietly', () => {
     // A fraction of a cent means a percentage was multiplied out somewhere. If
     // this rounded it, the quote and the office system would differ by a cent
