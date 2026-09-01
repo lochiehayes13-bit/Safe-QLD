@@ -56,6 +56,48 @@ unknown source, and it installs like any other app.
 This is the one to hand to a technician. It keeps its own data, has its own
 icon, and does not need Expo Go.
 
+### Building the same APK on your own machine, without an Expo account
+
+EAS is easier, but it needs an account and it needs signal. This route needs
+neither, and it is the same app.
+
+You need a JDK (17 or newer) and the Android SDK. If you have Android Studio
+they are already there; otherwise the command line tools alone are enough:
+
+```bash
+# once: SDK in ~/android-sdk, about 3 GB
+export ANDROID_HOME="$HOME/android-sdk"
+mkdir -p "$ANDROID_HOME/cmdline-tools"
+curl -L -o /tmp/cmdline-tools.zip \
+  https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+unzip -q /tmp/cmdline-tools.zip -d "$ANDROID_HOME/cmdline-tools"
+mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
+"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+  "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006"
+```
+
+Then, from the repository:
+
+```bash
+npx expo prebuild --platform android   # writes ./android, safe to delete after
+cd android && ./gradlew assembleRelease
+```
+
+The APK lands at `android/app/build/outputs/apk/release/app-release.apk`.
+Copy it to the phone and open it; Android asks once for permission to install
+from that source.
+
+The first build takes a while — Gradle fetches its own distribution and every
+dependency — and later ones are minutes.
+
+Two things worth knowing. The `android/` directory is generated, is not in
+version control, and can be deleted and regenerated at any time; edit
+`app.json` rather than anything inside it. And this APK is signed with the
+standard Android debug key, which is fine for sideloading onto your own
+handsets and is **not** accepted by the Play Store — route 3 below is the one
+for that.
+
 ## 3. Play Store internal testing
 
 When you want several technicians on it with automatic updates:
