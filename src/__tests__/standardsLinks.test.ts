@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { STANDARDS } from '@/domain/standardsCatalogue';
+import { LIBRARY } from '@/domain/standardsLibrary';
 
 /**
  * Where a clause says "this screen answers it", the screen has to exist.
@@ -30,7 +31,12 @@ function resolves(route: string): boolean {
   return existsSync(join(APP, `${clean}.tsx`)) || existsSync(join(APP, clean, 'index.tsx'));
 }
 
-const links = STANDARDS.flatMap((doc) =>
+/*
+ * Checked against the merged library rather than the register alone. Most of
+ * the links live in the curated notes, and those had never been checked at all
+ * — the register's own were the only ones any test had ever looked at.
+ */
+const links = LIBRARY.flatMap((doc) =>
   doc.clauses
     .filter((c) => c.appFeature)
     .map((c) => ({ doc: doc.designation, ref: c.ref, feature: c.appFeature! })));

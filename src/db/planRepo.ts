@@ -124,7 +124,7 @@ export async function buildWorkPlan(options: BuildPlanOptions = {}): Promise<Wor
        WHERE a.status NOT IN ('removed', 'decommissioned')
          ${NOT_COUNTED_CLAUSE}
        GROUP BY a.siteId, t.system`,
-      NOT_COUNTED_TYPE_IDS,
+      ...NOT_COUNTED_TYPE_IDS,
     ),
     // Newest job per site that carries a position. A site visited last week is
     // a better guide to where it is than one visited in 2019, and either is
@@ -247,13 +247,21 @@ export interface PlanCoverage {
 
 export async function planCoverage(): Promise<PlanCoverage> {
   const db = await getDb();
-  const row = await db.getFirstAsync<PlanCoverage>(`
-    SELECT (SELECT COUNT(*) FROM site) AS sites,
-           (SELECT COUNT(DISTINCT siteId) FROM asset) AS sitesWithAssets,
-           (SELECT COUNT(*) FROM site
-             WHERE (suburb IS NOT NULL AND TRIM(suburb) <> '')
-                OR (postcode IS NOT NULL AND TRIM(postcode) <> '')) AS sitesWithLocality,
-           (SELECT COUNT(*) FROM (SELECT 1 FROM routine_run GROUP BY siteId, routineId)) AS routinesWithHistory
-  `);
+  // Both counts have to be the same counts the plan itself makes, or the
+  // banner above the month contradicts the list below it. A site whose only
+  // asset rows are decommissioned detectors has no register as far as the
+  // planner is concerned, and a postcode of "QLD 4127" is not a locality —
+  // GLOB is SQLite's four-digit test, matching normalisePostcode.
+  const row = await db.getFirstAsync<PlanCoverage>(
+    `SELECT (SELECT COUNT(*) FROM site) AS sites,
+            (SELECT COUNT(DISTINCT a.siteId) FROM asset a JOIN asset_type t ON a.assetTypeId = t.id
+              WHERE a.status NOT IN ('removed', 'decommissioned')
+                ${NOT_COUNTED_CLAUSE}) AS sitesWithAssets,
+            (SELECT COUNT(*) FROM site
+              WHERE (suburb IS NOT NULL AND TRIM(suburb) <> '')
+                 OR (postcode IS NOT NULL AND TRIM(postcode) GLOB '[0-9][0-9][0-9][0-9]')) AS sitesWithLocality,
+            (SELECT COUNT(*) FROM (SELECT 1 FROM routine_run GROUP BY siteId, routineId)) AS routinesWithHistory`,
+    ...NOT_COUNTED_TYPE_IDS,
+  );
   return row ?? { sites: 0, sitesWithAssets: 0, sitesWithLocality: 0, routinesWithHistory: 0 };
 }

@@ -1,7 +1,7 @@
-import { readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import {
-  APP_MODES, DEFAULT_MODE, DESTINATIONS, TAB_ORDER, auditManifest, destinationAt,
+  APP_MODES, DEFAULT_MODE, DESTINATIONS, TAB_ORDER, auditLinks, auditManifest, destinationAt,
   destinationsFor, hiddenFrom, keptForTechnician, navFor, reach, readMode, searchDestinations,
   shows, summarise, unreachableRoutes, validateManifest, type AppMode,
 } from '@/domain/appMode';
@@ -40,6 +40,15 @@ function routeFiles(): string[] {
   };
   walk(join(root, 'app'));
   return out.sort();
+}
+
+/** The real file behind a route, or undefined where there is none to read. */
+function readSource(file: string): string | undefined {
+  try {
+    return readFileSync(join(join(__dirname, '..', '..'), file), 'utf8');
+  } catch {
+    return undefined;
+  }
 }
 
 describe('the manifest', () => {
@@ -114,12 +123,62 @@ describe('nothing is ever unreachable', () => {
     expect(shows('technician', '/work/nothing-like-this')).toBe(false);
   });
 
-  it('reaches everything from a tab root in Office, which is the mode that shows the lot', () => {
+  it('reaches everything from a tab root in Office, one declared link at a time', () => {
+    // Every step of every path has to be a link somebody wrote down, not a
+    // shortcut this module invented. The tab a screen is filed under is not
+    // the tab it is opened from — Scan a tag is filed under Sites and opened
+    // from Tools — so a chain built from tabs would read plausibly and be
+    // wrong, which is the worst thing a wayfinding module can be.
+    const roots = DESTINATIONS.filter((d) => d.root).map((d) => d.route);
     for (const d of DESTINATIONS) {
       const r = reach(d.route, 'office')!;
       expect(r.proven).toBe(true);
-      expect(r.chain[0]).toBe(navFor('office').find((g) => g.tab === d.tab)!.sections[0]!.destinations[0]!.route);
+      expect(roots).toContain(r.chain[0]);
+      expect(r.chain[r.chain.length - 1]).toBe(d.route);
+      for (let i = 1; i < r.chain.length; i += 1) {
+        expect(destinationAt(r.chain[i]!)!.openedFrom).toContain(r.chain[i - 1]!);
+      }
     }
+  });
+
+  it('gives the path a screen is actually opened by, not the tab it happens to be filed under', () => {
+    // Scan a tag sits in the Sites group and is opened from the Tools hub. A
+    // technician told "Sites → Scan a tag" taps Sites, finds nothing, and
+    // stops trusting every other sentence on the screen.
+    expect(reach('/scan', 'technician')).toMatchObject({
+      chain: ['/tools', '/scan'],
+      sentence: 'Tools → Scan a tag.',
+    });
+    expect(reach('/work/route', 'technician')!.chain).toEqual(['/work', '/work/route']);
+  });
+
+  it('says a hidden screen is still opened by the action that opens it, rather than sending you to search', () => {
+    // Van stock ends a restock request on the purchase request it just made,
+    // and it does that in Technician mode too. Telling somebody to search for
+    // a screen they were standing on is how a true setting reads as a broken one.
+    const po = reach('/work/purchases', 'technician')!;
+    expect(po.channel).toBe('opened');
+    expect(po.proven).toBe(true);
+    expect(po.chain).toEqual(['/', '/work/stock', '/work/purchases']);
+    expect(po.sentence).toContain('Van stock still opens it');
+  });
+});
+
+describe('the links between the screens', () => {
+  it('finds every claimed opener in the file that is supposed to contain it', () => {
+    // openedFrom is what reach() prints. An entry written from memory is a tap
+    // path on the settings screen that does not exist in the app, and two of
+    // them were wrong the first time this manifest was written.
+    expect(auditLinks(readSource)).toEqual([]);
+  });
+
+  it('names a link it cannot find rather than assuming the file must open it', () => {
+    expect(auditLinks(() => 'export default function Screen() { return null; }'))
+      .toContain('app/(tabs)/work.tsx does not open /work/plan, but the manifest says it does.');
+  });
+
+  it('treats a file it cannot read as unverified, not as verified', () => {
+    expect(auditLinks(() => undefined)[0]).toContain('could not be read');
   });
 });
 

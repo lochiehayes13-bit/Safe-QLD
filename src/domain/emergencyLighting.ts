@@ -52,7 +52,8 @@ export type SourceId =
   | 'abb-stanilite-class'
   | 'iec-60598-2-22'
   | 'atts-intervals'
-  | 'exiting-viewing'
+  | 'legrand-exit-viewing'
+  | 'hochiki-as2293'
   | 'elecas-design';
 
 export interface Source {
@@ -144,15 +145,27 @@ export const SOURCES: Record<SourceId, Source> = {
     confidence: 'low',
     basis: 'Second-hand trade guidance. Corroborates the interval; confirm the method against the purchased standard.',
   },
-  'exiting-viewing': {
-    id: 'exiting-viewing',
-    what: 'Exit sign viewing distance as a multiple of pictogram height, and the minimum sign dimensions',
-    ref: 'Exiting (Australian supplier), exit and emergency lighting guidance referencing AS 2293.1:2018',
-    url: 'https://www.exiting.com.au/viewing-distance-to-size-of-an-emergency-light.html',
-    confidence: 'low',
+  'legrand-exit-viewing': {
+    id: 'legrand-exit-viewing',
+    what: 'Maximum exit sign viewing distance for a 100 mm, 150 mm and 200 mm pictorial element',
+    ref: 'Legrand Australia, Emergency Lighting Catalogue, "Exit sign viewing distances"',
+    url: 'https://assets.legrand.com/webf/au/au_en_%20Emergency%20Lighting%20Catalogue.pdf',
+    confidence: 'medium',
     basis:
-      'Second-hand trade guidance, and it does not agree with other trade guidance on the multiplier. Carried as one '
-      + 'reading of AS/NZS 2293.1 Table 5.1, not as the answer.',
+      "A manufacturer's own published catalogue for the Australian market, stating the bands it builds its signs to. "
+      + 'It is not the standard, and it says explicitly that distances beyond its table come from a formula it does '
+      + 'not print — which is why this app stops where the table stops.',
+  },
+  'hochiki-as2293': {
+    id: 'hochiki-as2293',
+    what: 'The same viewing distance bands, and the band above them, from a second manufacturer',
+    ref: 'Hochiki Australia, A General Guide to AS 2293, "Maximum Exit Sign Viewing Distance Categories"',
+    url: 'http://www.hochikiaustralia.com/media/uploads/documentdownloads/Hochiki_AS_Firescape_Guide_to_AS2293.pdf',
+    confidence: 'medium',
+    basis:
+      "A second manufacturer's own published guide, agreeing band for band with Legrand, which is the only "
+      + 'corroboration available without the standard itself. Its own warning says it describes the 2005 edition and '
+      + 'is not a substitute for AS/NZS 2293.1. Hochiki serve it over plain HTTP; the link is given as published.',
   },
   'elecas-design': {
     id: 'elecas-design',
@@ -359,6 +372,22 @@ export interface RequiredDuration {
  */
 export function requiredDuration(ratedMinutes?: number): RequiredDuration {
   if (ratedMinutes !== undefined && Number.isFinite(ratedMinutes) && ratedMinutes > 0) {
+    // A rating only ever raises the bar. A fitting labelled for less than the
+    // code minimum is either mis-keyed or not fit for the position it is in,
+    // and holding it to its own label would pass a 40-minute run as compliant
+    // emergency lighting.
+    if (ratedMinutes < MINIMUM_DURATION_MINUTES) {
+      return {
+        minutes: MINIMUM_DURATION_MINUTES,
+        fromRating: false,
+        note:
+          `A rated duration of ${ratedMinutes} minutes was entered, which is below the `
+          + `${MINIMUM_DURATION_MINUTES}-minute code minimum, so the minimum has been used instead. A rating cannot `
+          + 'lower what a fitting has to achieve. Check the figure came off the fitting, and if it really is rated '
+          + 'below the minimum that is a finding about the fitting rather than about this test.',
+        sourceIds: ['ncc-e4', 'atts-intervals'],
+      };
+    }
     return {
       minutes: ratedMinutes,
       fromRating: true,
@@ -387,7 +416,11 @@ export function requiredDuration(ratedMinutes?: number): RequiredDuration {
 export type TestEnding = 'extinguished' | 'still-lit' | 'never-lit';
 
 export interface DischargeInput {
-  /** Minutes the fitting was observed illuminated. Zero where it never lit. */
+  /**
+   * Minutes the fitting was observed illuminated. Zero belongs only with a
+   * `never-lit` ending: zero minutes against any other ending is a record of a
+   * fitting that did not illuminate, entered under the wrong one.
+   */
   achievedMinutes: number;
   ending: TestEnding;
   /** The fitting's own rated duration, where the register or the label has it. */
@@ -481,6 +514,24 @@ export function assessDischarge(input: DischargeInput): DischargeVerdict {
       achievedMinutes: achieved,
       statement: 'Discharge test not assessed — the duration recorded is longer than a day.',
       reason: `${achieved} minutes is over 24 hours. Check whether seconds or a clock time was entered instead of a duration.`,
+    };
+  }
+
+  // "It lit and went out after no time at all" and "it was still lit after no
+  // time at all" are both records of a fitting that did not illuminate, written
+  // under the wrong ending. Reading the first as a flat battery would raise the
+  // battery defect against a fitting whose lamp is dead — the one confusion this
+  // module exists to stop.
+  if (achieved === 0 && input.ending !== 'never-lit') {
+    return {
+      ...base,
+      outcome: 'unreadable',
+      achievedMinutes: 0,
+      statement: 'Discharge test not assessed — the record contradicts itself.',
+      reason:
+        `A fitting recorded as "${input.ending === 'still-lit' ? 'still illuminated' : 'extinguished'}" cannot also `
+        + 'have run for zero minutes. If it never came on when the supply was removed, record it as never illuminated '
+        + '— that is a different defect with a different fix.',
     };
   }
 
@@ -625,17 +676,37 @@ export const OUTCOME_LABEL: Record<DischargeOutcome, string> = {
 export type SignIllumination = 'internally-illuminated' | 'externally-illuminated' | 'photoluminescent';
 
 /**
- * The smallest pictorial element height any source tabulates.
+ * The smallest pictorial element the sourced tables band.
  *
  * Below this the app has nothing to read from. It will not extrapolate a
  * straight line off the bottom of a table it has never seen.
  */
 export const MIN_TABULATED_PICTOGRAM_MM = 100;
 
+/**
+ * The largest. Both publications hand off to a formula above their top band and
+ * neither prints it, so this is where the app stops rather than where signs do.
+ */
+export const MAX_TABULATED_PICTOGRAM_MM = 300;
+
+/**
+ * How much bigger a photoluminescent sign's elements have to be.
+ *
+ * NCC Specification 25 Clause 4(b) (Specification E4.8 in the 2019 edition)
+ * requires them to be 1.3 times the AS/NZS 2293.1 Table 5.1 dimensions. Read
+ * the other way round — which is how a technician meets it, with a sign already
+ * on the wall and a tape measure — a photoluminescent element only counts as
+ * the Table 5.1 element it is 1.3 times of, so a measured element buys 1/1.3 of
+ * its size in viewing distance.
+ */
+export const PHOTOLUMINESCENT_ELEMENT_FACTOR = 1.3;
+
+/** Clause 5 of the same specification, and it is a ceiling rather than a grant. */
+export const PHOTOLUMINESCENT_CAP_M = 24;
+
 export interface ViewingCandidate {
-  /** Maximum viewing distance in metres per metre of pictogram height. */
-  factor: number;
   maxViewingDistanceM: number;
+  /** What that publication gives, in this app's words rather than theirs. */
   reading: string;
   sourceId: SourceId;
   confidence: Confidence;
@@ -671,48 +742,120 @@ export interface Refused {
   sourceIds: SourceId[];
 }
 
+export interface ViewingBand {
+  /** Element height from this, inclusive. */
+  fromMm: number;
+  /** Up to but not including this. */
+  toMm: number;
+  maxViewingDistanceM: number;
+  /** Every publication that prints this band. */
+  sourceIds: SourceId[];
+}
+
 /**
- * Two readings of AS/NZS 2293.1 Table 5.1 for an internally illuminated sign.
+ * Viewing distance by pictorial element height, as two Australian manufacturers
+ * publish it.
  *
- * They do not agree, and pretending otherwise would be the whole problem. One
- * Australian supplier's worked example gives 30 m for a 150 mm pictogram, a
- * ratio of 200. Another set of trade guidance tabulates 100 mm at 16 m, 150 mm
- * at 24 m and 200 mm at 32 m, a ratio of 160 throughout, with the same ratio
- * given as a formula above 32 m. Both are second-hand; Table 5.1 itself is the
- * only thing that settles it, and it is not reproducible here.
+ * Banded rather than a ratio, because banded is how both of them print it, and
+ * the difference is not academic: a 120 mm element is a 16 m sign, where a ratio
+ * of 160 applied to it would hand back 19.2 m and put the sign three metres
+ * further from the exit than either publication allows. The bands do sit on a
+ * ratio of 160 at each lower bound — which is what makes two independent
+ * catalogues recognisably the same table — but the ratio is never applied
+ * between the bounds.
+ *
+ * Both print the bands with a strict inequality at each end, which would leave
+ * 100, 150, 200 and 250 mm — the four sizes signs are actually made in — in no
+ * band at all. They are read here as inclusive at the lower bound, which is
+ * plainly what is meant and is the reading every catalogue sells signs on.
+ *
+ * Neither publishes anything above its top band; Legrand says outright that
+ * larger distances come from a formula it does not give. So the table stops
+ * where they stop, and so does this app.
  */
-const INTERNAL_READINGS: { factor: number; reading: string; sourceId: SourceId }[] = [
-  {
-    factor: 160,
-    reading:
-      'Trade guidance tabulating 100 mm at 16 m, 150 mm at 24 m and 200 mm at 32 m, and viewing distance ÷ 160 above '
-      + 'that — a ratio of 160 throughout.',
-    sourceId: 'exiting-viewing',
-  },
-  {
-    factor: 200,
-    reading:
-      "An Australian supplier's worked example putting a 150 mm pictogram at 30 m — a ratio of 200, which also matches "
-      + 'the 24 m, 32 m and 40 m ratings signs are sold under for 120 mm, 160 mm and 200 mm pictograms.',
-    sourceId: 'exiting-viewing',
-  },
+const VIEWING_BANDS: ViewingBand[] = [
+  { fromMm: 100, toMm: 150, maxViewingDistanceM: 16, sourceIds: ['legrand-exit-viewing', 'hochiki-as2293'] },
+  { fromMm: 150, toMm: 200, maxViewingDistanceM: 24, sourceIds: ['legrand-exit-viewing', 'hochiki-as2293'] },
+  { fromMm: 200, toMm: 250, maxViewingDistanceM: 32, sourceIds: ['legrand-exit-viewing', 'hochiki-as2293'] },
+  { fromMm: 250, toMm: 300, maxViewingDistanceM: 40, sourceIds: ['hochiki-as2293'] },
 ];
+
+const TOP_BAND = VIEWING_BANDS[VIEWING_BANDS.length - 1]!;
+
+function bandFor(elementMm: number): ViewingBand | undefined {
+  return VIEWING_BANDS.find((b) => elementMm >= b.fromMm && elementMm < b.toMm);
+}
+
+/**
+ * One reading per publication that prints the band, capped where a cap applies.
+ *
+ * Two sources that agree is worth showing rather than collapsing: it is the
+ * only corroboration available for a figure that ultimately comes out of a
+ * table this app may not reproduce.
+ */
+function candidatesFor(band: ViewingBand, capM?: number): ViewingCandidate[] {
+  return band.sourceIds.map((id) => {
+    const uncapped = band.maxViewingDistanceM;
+    const capped = capM !== undefined ? Math.min(uncapped, capM) : uncapped;
+    return {
+      maxViewingDistanceM: capped,
+      reading:
+        `A pictorial element from ${band.fromMm} mm to under ${band.toMm} mm is published as a ${uncapped} m sign.`
+        + (capped < uncapped ? ` Held to ${capped} m here by the photoluminescent cap.` : ''),
+      sourceId: id,
+      confidence: SOURCES[id].confidence,
+    };
+  });
+}
+
+/**
+ * The answer where the readings differ: the smallest of them.
+ *
+ * A sign inside the strictest reading is inside every reading, so this cannot
+ * pass a sign that one publication would fail. Broken out and exported because
+ * it is the single rule the whole exit sign section turns on, and while every
+ * source consulted agrees it would otherwise be a rule nothing could test.
+ */
+export function strictestReading(candidates: ViewingCandidate[]): number | undefined {
+  const limits = candidates.map((c) => c.maxViewingDistanceM).filter((n) => Number.isFinite(n));
+  return limits.length ? Math.min(...limits) : undefined;
+}
 
 /**
  * The furthest a sign of this size may be relied on to be read from.
  *
- * Refuses rather than guesses in three cases: a pictogram smaller than anything
- * tabulated, a sign whose illumination is not one of the three kinds handled,
- * and — the one that will surprise people — any externally illuminated sign.
- * The only multiplier this app could find for externally illuminated signs came
- * from United Kingdom guidance describing BS 5266 and ISO 3864, which is not
- * AS/NZS 2293.1 and must not be presented as if it were.
+ * Refuses rather than guesses in four cases: a sign whose illumination is not
+ * one of the three kinds handled, a pictorial element outside the banded range,
+ * a photoluminescent element too small to count once the 1.3 derating is
+ * applied, and — the one that will surprise people — any externally illuminated
+ * sign. The only multiplier this app could find for externally illuminated
+ * signs came from United Kingdom guidance describing BS 5266 and ISO 3864,
+ * which is not AS/NZS 2293.1 and must not be presented as if it were.
  */
 export function exitSignViewingDistance(args: {
   pictogramHeightMm: number;
   illumination: SignIllumination;
 }): ViewingDistance | Refused {
   const h = args.pictogramHeightMm;
+  const illumination = args.illumination;
+
+  // Not reachable through the type system, and reachable from anything that
+  // reads a sign type out of the register. Falling through to the internally
+  // illuminated answer would be the worst of the three, so it is refused.
+  if (
+    illumination !== 'internally-illuminated'
+    && illumination !== 'externally-illuminated'
+    && illumination !== 'photoluminescent'
+  ) {
+    return {
+      known: false,
+      reason: `"${String(illumination)}" is not a kind of exit sign this app has a viewing distance for.`,
+      whatToDo:
+        'Record the sign as internally illuminated, externally illuminated or photoluminescent. The three are held '
+        + 'to different distances and the difference is roughly double, so it cannot be assumed.',
+      sourceIds: ['as2293-1'],
+    };
+  }
 
   if (!Number.isFinite(h) || h <= 0) {
     return {
@@ -722,47 +865,8 @@ export function exitSignViewingDistance(args: {
       sourceIds: ['as2293-1'],
     };
   }
-  if (h > 1000) {
-    return {
-      known: false,
-      reason: `${h} mm is larger than any exit sign pictogram this app has a source for.`,
-      whatToDo: 'Check the measurement is the pictorial element in millimetres. If it really is that size, read Table 5.1 directly.',
-      sourceIds: ['as2293-1'],
-    };
-  }
 
-  if (args.illumination === 'photoluminescent') {
-    // The cap is the regulator's, not a ratio, and it applies whatever the sign
-    // measures — so the answer here does not depend on the height at all.
-    return {
-      known: true,
-      pictogramHeightMm: h,
-      illumination: args.illumination,
-      maxViewingDistanceM: 24,
-      candidates: [
-        {
-          factor: 0,
-          maxViewingDistanceM: 24,
-          reading: 'A flat cap of 24 m set by the NCC for photoluminescent signs, regardless of the size of the sign.',
-          sourceId: 'ncc-spec-e48',
-          confidence: 'high',
-        },
-      ],
-      sourcesAgree: true,
-      cappedBy: 'NCC Specification E4.8 Clause 5 (NCC 2022 Specification 25) — 24 m for photoluminescent exit signs',
-      governing: 'NCC Specification E4.8, Clauses 4(b), 4(c) and 5, with AS/NZS 2293.1 Table 5.1 behind Clause 4(b)',
-      notes: [
-        'This is a ceiling, not a permission. The sign must separately satisfy the requirement that its pictorial '
-        + 'elements are 1.3 times the AS/NZS 2293.1 Table 5.1 dimensions, with a photoluminescent border of at least '
-        + '15 mm around them. This app cannot check that — Table 5.1 is not reproduced here.',
-        'A photoluminescent sign also depends on being charged: the NCC requires at least 100 lux at the face from a '
-        + 'dedicated source of at least 4000 K. A sign in a dark corridor fails on that before viewing distance matters.',
-      ],
-      sourceIds: ['ncc-spec-e48', 'as2293-1'],
-    };
-  }
-
-  if (args.illumination === 'externally-illuminated') {
+  if (illumination === 'externally-illuminated') {
     return {
       known: false,
       reason:
@@ -777,54 +881,114 @@ export function exitSignViewingDistance(args: {
     };
   }
 
-  if (h < MIN_TABULATED_PICTOGRAM_MM) {
+  const isPhotoluminescent = illumination === 'photoluminescent';
+  const effectiveMm = isPhotoluminescent ? round1(h / PHOTOLUMINESCENT_ELEMENT_FACTOR) : h;
+
+  if (effectiveMm < MIN_TABULATED_PICTOGRAM_MM) {
     return {
       known: false,
-      reason:
-        `A ${h} mm pictogram is below the ${MIN_TABULATED_PICTOGRAM_MM} mm smallest element any source consulted `
-        + 'tabulates.',
-      whatToDo:
-        'Read Table 5.1 of AS/NZS 2293.1 directly. A sign this small is very likely not a compliant exit sign at all, '
-        + 'which is a finding in its own right.',
-      sourceIds: ['as2293-1', 'exiting-viewing'],
+      reason: isPhotoluminescent
+        ? `A photoluminescent sign's elements have to be ${PHOTOLUMINESCENT_ELEMENT_FACTOR} times the tabulated `
+          + `dimensions, so a ${h} mm element counts as ${effectiveMm} mm — below the `
+          + `${MIN_TABULATED_PICTOGRAM_MM} mm smallest element any source consulted bands.`
+        : `A ${h} mm pictogram is below the ${MIN_TABULATED_PICTOGRAM_MM} mm smallest element any source consulted `
+          + 'bands.',
+      whatToDo: isPhotoluminescent
+        ? `The smallest photoluminescent element this app can answer for is ${Math.ceil(MIN_TABULATED_PICTOGRAM_MM * PHOTOLUMINESCENT_ELEMENT_FACTOR)} mm. `
+          + 'Below that, read Table 5.1 of AS/NZS 2293.1 with NCC Specification 25 Clause 4(b) beside it — a sign this '
+          + 'small is very likely not compliant at all, which is a finding in its own right.'
+        : 'Read Table 5.1 of AS/NZS 2293.1 directly. A sign this small is very likely not a compliant exit sign at all, '
+          + 'which is a finding in its own right.',
+      sourceIds: ['as2293-1', 'ncc-spec-e48', 'legrand-exit-viewing'],
     };
   }
 
-  const candidates: ViewingCandidate[] = INTERNAL_READINGS.map((r) => ({
-    factor: r.factor,
-    maxViewingDistanceM: round1((h / 1000) * r.factor),
-    reading: r.reading,
-    sourceId: r.sourceId,
-    confidence: SOURCES[r.sourceId].confidence,
-  })).sort((a, b) => a.maxViewingDistanceM - b.maxViewingDistanceM);
+  // A photoluminescent sign bigger than the top band is still held to the 24 m
+  // ceiling, and every band from 250 mm up is already past it — so running off
+  // the top of the table cannot change its answer and need not refuse.
+  const band = bandFor(effectiveMm)
+    ?? (isPhotoluminescent && effectiveMm >= TOP_BAND.fromMm ? TOP_BAND : undefined);
 
-  const smallest = candidates[0]!;
+  if (!band) {
+    return {
+      known: false,
+      reason:
+        `A ${h} mm pictogram is above the ${MAX_TABULATED_PICTOGRAM_MM} mm top of the bands both sources publish.`,
+      whatToDo:
+        'Beyond their tables both publications hand off to a formula neither of them prints. Read Table 5.1 of '
+        + 'AS/NZS 2293.1 directly, or take the viewing distance printed on the sign face — every exit sign is required '
+        + 'to carry it.',
+      sourceIds: ['as2293-1', 'legrand-exit-viewing', 'hochiki-as2293'],
+    };
+  }
+
+  const cap = isPhotoluminescent ? PHOTOLUMINESCENT_CAP_M : undefined;
+  const candidates = candidatesFor(band, cap).sort((a, b) => a.maxViewingDistanceM - b.maxViewingDistanceM);
+  const answer = strictestReading(candidates)!;
   const largest = candidates[candidates.length - 1]!;
-  const agree = smallest.maxViewingDistanceM === largest.maxViewingDistanceM;
+  const agree = answer === largest.maxViewingDistanceM;
+  const cappedByRegulator = isPhotoluminescent && band.maxViewingDistanceM > PHOTOLUMINESCENT_CAP_M;
 
   const notes: string[] = [];
+  if (isPhotoluminescent) {
+    notes.push(
+      cappedByRegulator
+        ? `The size of this sign would give ${band.maxViewingDistanceM} m; the ${PHOTOLUMINESCENT_CAP_M} m `
+          + 'photoluminescent ceiling decides it instead. A ceiling is not a permission — the sign still has to earn '
+          + 'the distance it is placed at.'
+        : `The size of this sign decides it, not the ${PHOTOLUMINESCENT_CAP_M} m photoluminescent ceiling, which is `
+          + 'not reached here.',
+    );
+    notes.push(
+      `Clause 4(b) requires the pictorial elements of a photoluminescent sign to be ${PHOTOLUMINESCENT_ELEMENT_FACTOR} `
+      + `times the AS/NZS 2293.1 Table 5.1 dimensions. That has been applied: the ${h} mm element measured counts as `
+      + `${effectiveMm} mm. It is why a photoluminescent sign reads from closer than an internally illuminated one of `
+      + 'the same size.',
+    );
+    notes.push(
+      'Still unchecked: the photoluminescent border of at least 15 mm around the elements, and the charging '
+      + 'requirement — at least 100 lux at the face from a dedicated source of at least 4000 K. A sign in a dark '
+      + 'corridor fails on that before viewing distance matters.',
+    );
+  }
   if (!agree) {
     notes.push(
-      `The sources disagree: ${smallest.maxViewingDistanceM} m on one reading and ${largest.maxViewingDistanceM} m on `
-      + `the other. The smaller is answered with, so a sign inside ${smallest.maxViewingDistanceM} m is inside both. `
-      + `Between ${smallest.maxViewingDistanceM} m and ${largest.maxViewingDistanceM} m this app cannot say.`,
+      `The sources disagree: ${answer} m on one reading and ${largest.maxViewingDistanceM} m on the other. The `
+      + `smaller is answered with, so a sign inside ${answer} m is inside both. Between ${answer} m and `
+      + `${largest.maxViewingDistanceM} m this app cannot say.`,
     );
   }
   notes.push(
-    'Both readings are second-hand trade guidance. AS/NZS 2293.1 Table 5.1 governs and is the only thing that settles '
-    + 'it — check the office copy before this goes in a report.',
+    `Read as a band, not a ratio: anything from ${band.fromMm} mm to under ${band.toMm} mm is the same sign for this `
+    + 'purpose. Interpolating between the bands would put a sign further from the exit than either publication allows.',
+  );
+  notes.push(
+    "Both readings come from manufacturers' own guides to AS/NZS 2293.1, not from the standard. Table 5.1 governs and "
+    + 'is the only thing that settles it — check the office copy before this goes in a report.',
   );
 
   return {
     known: true,
     pictogramHeightMm: h,
-    illumination: args.illumination,
-    maxViewingDistanceM: smallest.maxViewingDistanceM,
+    illumination,
+    maxViewingDistanceM: answer,
     candidates,
     sourcesAgree: agree,
-    governing: 'AS/NZS 2293.1 Table 5.1 (pictorial element dimensions), cited by NCC Part E4 clause E4D8',
+    ...(cappedByRegulator
+      ? {
+        cappedBy:
+          `NCC Specification E4.8 Clause 5 (NCC 2022 Specification 25) — ${PHOTOLUMINESCENT_CAP_M} m for `
+          + 'photoluminescent exit signs',
+      }
+      : {}),
+    governing: isPhotoluminescent
+      ? 'NCC Specification E4.8 Clauses 3(a), 4(b) and 5 (NCC 2022 Specification 25), with AS/NZS 2293.1 Table 5.1 '
+        + 'behind Clause 4(b)'
+      : 'AS/NZS 2293.1 Table 5.1 (pictorial element dimensions), cited by NCC Part E4 clause E4D8',
     notes,
-    sourceIds: ['exiting-viewing', 'as2293-1', 'ncc-e4'],
+    sourceIds: isPhotoluminescent
+      ? ['ncc-spec-e48', ...band.sourceIds, 'as2293-1']
+      : [...band.sourceIds, 'as2293-1', 'ncc-e4'],
   };
 }
 
@@ -861,6 +1025,16 @@ export function checkSignPlacement(distanceM: number, sign: ViewingDistance): Pl
     };
   }
   const limits = sign.candidates.map((c) => c.maxViewingDistanceM);
+  // Math.min of nothing is Infinity, which would call every distance on earth
+  // "within". A sign with no readings behind it has not been checked.
+  if (!limits.length || !limits.every((l) => Number.isFinite(l))) {
+    return {
+      known: false,
+      reason: 'This sign carries no sourced viewing distance to check against.',
+      whatToDo: 'Work out the viewing distance for the sign first, or read it off the sign face.',
+      sourceIds: sign.sourceIds ?? ['as2293-1'],
+    };
+  }
   const strictest = Math.min(...limits);
   const generous = Math.max(...limits);
 
@@ -924,9 +1098,10 @@ export interface SpacingRow {
  * off the datasheet and nothing else. The second is the thing the table makes
  * visible: the two editions of AS/NZS 2293.1 do not give the same answer. A D80
  * fitting at 2.4 m could sit 22.0 m from the next one under the 2005 edition
- * and only 13.2 m under 2018. Below about 3.6 m the 2018 figures are identical
- * across every class, so a brighter fitting buys nothing at low mounting
- * heights — which is exactly the assumption a like-for-like replacement makes.
+ * and only 13.2 m under 2018. At 2.7 m and below the 2018 figures are identical
+ * across every class in this table, so a brighter fitting buys nothing at low
+ * mounting heights — which is exactly the assumption a like-for-like
+ * replacement makes. The classes part company again from 3 m up.
  *
  * The edition is therefore never defaulted. It has to be stated.
  */
@@ -1159,8 +1334,9 @@ export const BATTERY_LIFE_CAVEAT =
  * Accepts d/m/yyyy and ISO yyyy-mm-dd. It will not read 4/13/2020 as April the
  * thirteenth: a first field over twelve is a month that does not exist, and the
  * only safe thing to do with an American date in an Australian app is to reject
- * it loudly. Silently swapping the fields would put an install date eleven
- * months out into a replacement forecast.
+ * it loudly. Silently swapping the fields would put an install date months out
+ * — 4/12/2020 is 4 December here and 12 April there — and carry the error into
+ * every replacement forecast made from it.
  */
 export function parseAuDate(text: string): { y: number; m: number; d: number } | undefined {
   const s = text.trim();

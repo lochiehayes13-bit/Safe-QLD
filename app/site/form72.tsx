@@ -6,7 +6,7 @@ import { createForm72, deleteForm72, listForm72, type StoredForm72 } from '@/db/
 import { getSite } from '@/db/repo';
 import { validateForm72 } from '@/domain/form72';
 import {
-  FORM_TITLE, OCCUPIER_COPY_BUSINESS_DAYS, occupierCopyDueBy,
+  FORM_TITLE, OCCUPIER_COPY_BUSINESS_DAYS, occupierCopyDue,
 } from '@/export/form72';
 import { loadPrefs } from '@/app-prefs';
 import type { Site } from '@/domain/types';
@@ -129,7 +129,7 @@ export default function SiteForm72ListScreen() {
         const blockers = f.status === 'draft'
           ? validateForm72(f).filter((i) => i.blocking).length
           : 0;
-        const due = occupierCopyDueBy(f.testDate);
+        const due = occupierCopyDue(f.testDate);
         return (
           <Card key={f.id} onPress={() => router.push({ pathname: '/form72/[id]', params: { id: f.id } })}>
             <Rowed>
@@ -155,7 +155,14 @@ export default function SiteForm72ListScreen() {
                 <Chip label={`Occupier copy ${auDate(f.copyGivenAt)}`} tone="pass" />
               ) : null}
               {f.status === 'issued' && !f.copyGivenAt ? (
-                <Chip label={due ? `Copy due ${auDate(due)}` : 'Copy outstanding'} tone="fail" />
+                <Chip
+                  // Never "no deadline". A date the app cannot work out — a
+                  // test dated beyond the holidays Queensland has appointed, or
+                  // no test date at all — is still ten business days somebody
+                  // has to count by hand.
+                  label={due.date ? `Copy due ${auDate(due.date)}` : 'Copy due — count it by hand'}
+                  tone="fail"
+                />
               ) : null}
               {f.systemResult !== 'na' ? (
                 <Chip

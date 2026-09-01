@@ -1,6 +1,7 @@
 import {
   BATTERY_DESIGN_LIFE_YEARS,
   KNOWN_CLASSIFICATIONS,
+  MAX_TABULATED_PICTOGRAM_MM,
   MINIMUM_DURATION_MINUTES,
   MIN_TABULATED_PICTOGRAM_MM,
   OUTCOME_LABEL,
@@ -19,9 +20,11 @@ import {
   parseAuDate,
   requiredDuration,
   spacingSenseCheck,
+  strictestReading,
   summariseSite,
   type DischargeInput,
   type FittingResult,
+  type SignIllumination,
   type ViewingDistance,
 } from '@/domain/emergencyLighting';
 
@@ -38,7 +41,7 @@ import {
 
 const TODAY = new Date('2026-09-01T00:00:00Z');
 
-/** A completed test that reached the required duration and kept going. */
+/** A test run to the end, where the fitting illuminated and then went out. */
 const ranFull = (minutes: number): DischargeInput => ({ achievedMinutes: minutes, ending: 'extinguished' });
 
 describe('requiredDuration', () => {
@@ -62,6 +65,18 @@ describe('requiredDuration', () => {
     expect(requiredDuration(0).fromRating).toBe(false);
     expect(requiredDuration(-30).fromRating).toBe(false);
     expect(requiredDuration(Number.NaN).fromRating).toBe(false);
+  });
+
+  it('will not let a rating below the code minimum lower what the fitting has to achieve', () => {
+    // A rating only ever raises the bar. Held to a 30-minute label, a fitting
+    // that ran 35 minutes reads as a pass on a life safety system that is
+    // required to hold ninety, and the report says so in writing.
+    const r = requiredDuration(30);
+    expect(r.minutes).toBe(MINIMUM_DURATION_MINUTES);
+    expect(r.fromRating).toBe(false);
+    expect(r.note).toContain('below the');
+    expect(assessDischarge({ achievedMinutes: 35, ending: 'extinguished', ratedMinutes: 30 }).outcome)
+      .toBe('failed-early');
   });
 });
 
@@ -173,6 +188,19 @@ describe('assessDischarge — refusals', () => {
     expect(v.reason).toContain('seconds');
   });
 
+  it('refuses a fitting that "extinguished" after no time at all rather than calling it a flat battery', () => {
+    // Zero minutes and a lamp that went out cannot both be true. Read as a
+    // failed discharge it raises the battery defect against a fitting whose
+    // lamp is dead — the exact confusion this module exists to stop — so it is
+    // sent back to be recorded as never illuminated instead.
+    const v = assessDischarge({ achievedMinutes: 0, ending: 'extinguished' });
+    expect(v.outcome).toBe('unreadable');
+    expect(v.passed).toBeUndefined();
+    expect(v.defectCode).toBeUndefined();
+    expect(v.reason).toContain('never came on');
+    expect(assessDischarge({ achievedMinutes: 0, ending: 'still-lit' }).outcome).toBe('unreadable');
+  });
+
   it('refuses a record that says the fitting never lit and also ran for an hour', () => {
     const v = assessDischarge({ achievedMinutes: 60, ending: 'never-lit' });
     expect(v.outcome).toBe('unreadable');
@@ -246,28 +274,45 @@ describe('classify', () => {
 });
 
 describe('exitSignViewingDistance', () => {
-  it('answers with the strictest sourced reading and shows the one it did not use', () => {
-    // The two trade readings of Table 5.1 are a ratio of 160 and a ratio of 200.
-    // A 150 mm pictogram is therefore 24 m on one and 30 m on the other. The
-    // smaller is answered with so a sign that passes here passes on both.
+  it('reads the sourced bands rather than a ratio, and shows both publications', () => {
+    // Legrand Australia and Hochiki Australia both publish 100 mm as a 16 m
+    // sign, 150 mm as 24 m and 200 mm as 32 m. Two independent manufacturers
+    // agreeing is the only corroboration available for a table this app may not
+    // reproduce, so both readings are carried rather than collapsed into one.
     const r = exitSignViewingDistance({ pictogramHeightMm: 150, illumination: 'internally-illuminated' });
     expect(r.known).toBe(true);
     const known = r as ViewingDistance;
     expect(known.maxViewingDistanceM).toBe(24);
-    expect(known.candidates.map((c) => c.maxViewingDistanceM)).toEqual([24, 30]);
-    expect(known.sourcesAgree).toBe(false);
+    expect(known.candidates.map((c) => c.sourceId)).toEqual(['legrand-exit-viewing', 'hochiki-as2293']);
+    expect(known.sourcesAgree).toBe(true);
   });
 
-  it('says outright that the sources disagree instead of presenting one number as settled', () => {
-    const r = exitSignViewingDistance({ pictogramHeightMm: 150, illumination: 'internally-illuminated' }) as ViewingDistance;
-    expect(r.notes.join(' ')).toContain('The sources disagree');
-    expect(r.notes.join(' ')).toContain('this app cannot say');
+  it('reads a size between two bands down to its band, not up a straight line', () => {
+    // The one that a ratio gets wrong. A 120 mm element is a 16 m sign in both
+    // catalogues; multiplying 120 by 160 hands back 19.2 m and puts the sign
+    // three metres further from the exit than either publication allows.
+    const r = exitSignViewingDistance({ pictogramHeightMm: 120, illumination: 'internally-illuminated' }) as ViewingDistance;
+    expect(r.maxViewingDistanceM).toBe(16);
+    expect(r.notes.join(' ')).toContain('band, not a ratio');
   });
 
-  it('marks both readings low confidence, because both are second-hand', () => {
+  it('lands on the sizes signs are actually made in', () => {
+    // 100, 150, 200 and 250 mm are the four decal sizes on the market. Both
+    // sources print their bands with a strict inequality at each end, which
+    // would leave all four in no band at all; they are read inclusive at the
+    // lower bound. If this ever stops matching the catalogue the bands have
+    // been read the wrong way round.
+    const at = (mm: number) =>
+      (exitSignViewingDistance({ pictogramHeightMm: mm, illumination: 'internally-illuminated' }) as ViewingDistance)
+        .maxViewingDistanceM;
+    expect([at(100), at(150), at(200), at(250)]).toEqual([16, 24, 32, 40]);
+  });
+
+  it('names a manufacturer publication for every reading, and says the standard governs', () => {
     const r = exitSignViewingDistance({ pictogramHeightMm: 200, illumination: 'internally-illuminated' }) as ViewingDistance;
-    expect(r.candidates.every((c) => c.confidence === 'low')).toBe(true);
+    expect(r.candidates.every((c) => c.confidence === 'medium')).toBe(true);
     expect(r.governing).toContain('Table 5.1');
+    expect(r.notes.join(' ')).toContain("manufacturers' own guides");
   });
 
   it('refuses an externally illuminated sign rather than borrow a British multiplier', () => {
@@ -281,26 +326,91 @@ describe('exitSignViewingDistance', () => {
     expect(r.whatToDo).toContain('Table 5.1');
   });
 
-  it('caps a photoluminescent sign at 24 m whatever its size, on the regulator’s own clause', () => {
+  it('refuses a sign type it has never heard of instead of answering as though it were internal', () => {
+    // Nothing in the type system stops a sign type arriving off a register, and
+    // the internally illuminated answer is the most generous of the three. A
+    // silent fall-through would put an externally illuminated sign at twice the
+    // distance the standard allows.
+    const r = exitSignViewingDistance({
+      pictogramHeightMm: 150,
+      illumination: 'fluorescent' as unknown as SignIllumination,
+    });
+    expect(r.known).toBe(false);
+    if (r.known) throw new Error('expected a refusal');
+    expect(r.reason).toContain('fluorescent');
+  });
+
+  it('holds a photoluminescent sign to the regulator’s 24 m ceiling once its size passes it', () => {
     const big = exitSignViewingDistance({ pictogramHeightMm: 400, illumination: 'photoluminescent' }) as ViewingDistance;
-    const small = exitSignViewingDistance({ pictogramHeightMm: 100, illumination: 'photoluminescent' }) as ViewingDistance;
     expect(big.maxViewingDistanceM).toBe(24);
-    expect(small.maxViewingDistanceM).toBe(24);
     expect(big.cappedBy).toContain('Clause 5');
+    expect(big.notes[0]).toContain('ceiling is not a permission');
   });
 
-  it('says what it cannot check about a photoluminescent sign rather than implying it passed', () => {
-    const r = exitSignViewingDistance({ pictogramHeightMm: 200, illumination: 'photoluminescent' }) as ViewingDistance;
-    expect(r.notes.join(' ')).toContain('1.3 times');
+  it('does not hand a small photoluminescent sign the 24 m cap as though it earned it', () => {
+    // The cap is a ceiling on the Table 5.1 distance, not a grant of one. A
+    // 200 mm photoluminescent element counts as 153.8 mm once Clause 4(b)'s
+    // 1.3 factor is taken off it, which is a 24 m sign; a 150 mm element counts
+    // as 115.4 mm, which is a 16 m sign. Answering 24 m for the second would
+    // put it eight metres further from the exit than it can be read from.
+    const at200 = exitSignViewingDistance({ pictogramHeightMm: 200, illumination: 'photoluminescent' }) as ViewingDistance;
+    const at150 = exitSignViewingDistance({ pictogramHeightMm: 150, illumination: 'photoluminescent' }) as ViewingDistance;
+    expect(at200.maxViewingDistanceM).toBe(24);
+    expect(at150.maxViewingDistanceM).toBe(16);
+    expect(at150.cappedBy).toBeUndefined();
+  });
+
+  it('reads from closer than an internally illuminated sign of exactly the same size', () => {
+    // Which is the whole point of the 1.3 rule, and the thing a technician
+    // swapping one sign type for another gets wrong.
+    const pl = exitSignViewingDistance({ pictogramHeightMm: 200, illumination: 'photoluminescent' }) as ViewingDistance;
+    const internal = exitSignViewingDistance({ pictogramHeightMm: 200, illumination: 'internally-illuminated' }) as ViewingDistance;
+    expect(pl.maxViewingDistanceM).toBeLessThan(internal.maxViewingDistanceM);
+  });
+
+  it('says what it still cannot check about a photoluminescent sign', () => {
+    const r = exitSignViewingDistance({ pictogramHeightMm: 300, illumination: 'photoluminescent' }) as ViewingDistance;
+    expect(r.notes.join(' ')).toContain('1.3');
     expect(r.notes.join(' ')).toContain('100 lux');
-    expect(r.notes[0]).toContain('ceiling, not a permission');
+    expect(r.notes.join(' ')).toContain('15 mm');
   });
 
-  it('refuses a pictogram smaller than any table it has, instead of extrapolating a straight line', () => {
+  it('refuses a photoluminescent sign too small to survive the 1.3 derating', () => {
+    // 100 mm of photoluminescent element is 76.9 mm of Table 5.1 element, which
+    // is below anything either catalogue bands. The old answer here was 24 m.
+    const r = exitSignViewingDistance({ pictogramHeightMm: 100, illumination: 'photoluminescent' });
+    expect(r.known).toBe(false);
+    if (r.known) throw new Error('expected a refusal');
+    expect(r.reason).toContain('76.9 mm');
+    expect(r.whatToDo).toContain('130 mm');
+  });
+
+  it('refuses a pictogram smaller than any band it has, instead of extrapolating a straight line', () => {
     const r = exitSignViewingDistance({ pictogramHeightMm: 60, illumination: 'internally-illuminated' });
     expect(r.known).toBe(false);
     if (r.known) throw new Error('expected a refusal');
     expect(r.reason).toContain(`${MIN_TABULATED_PICTOGRAM_MM} mm`);
+  });
+
+  it('refuses a pictogram above the top band rather than continuing a formula neither source prints', () => {
+    const r = exitSignViewingDistance({ pictogramHeightMm: 350, illumination: 'internally-illuminated' });
+    expect(r.known).toBe(false);
+    if (r.known) throw new Error('expected a refusal');
+    expect(r.reason).toContain(`${MAX_TABULATED_PICTOGRAM_MM} mm`);
+    expect(r.whatToDo).toContain('printed on the sign face');
+  });
+
+  it('answers with the strictest reading wherever two publications differ', () => {
+    // Today both manufacturers agree band for band, so nothing in the bands
+    // themselves can prove this rule holds. It is the rule the whole section
+    // turns on — a sign inside the strictest reading is inside every reading —
+    // so it is asserted directly rather than left to a future disagreement.
+    const readings = [
+      { maxViewingDistanceM: 30, reading: 'generous', sourceId: 'hochiki-as2293' as const, confidence: 'low' as const },
+      { maxViewingDistanceM: 24, reading: 'strict', sourceId: 'legrand-exit-viewing' as const, confidence: 'low' as const },
+    ];
+    expect(strictestReading(readings)).toBe(24);
+    expect(strictestReading([])).toBeUndefined();
   });
 
   it('refuses a height that is not a measurement', () => {
@@ -308,16 +418,6 @@ describe('exitSignViewingDistance', () => {
       expect(exitSignViewingDistance({ pictogramHeightMm: h, illumination: 'internally-illuminated' }).known)
         .toBe(false);
     }
-  });
-
-  it('lands on the ratings signs are actually sold under', () => {
-    // 120 mm reads as a 24 m sign and 200 mm as a 40 m sign on the ratio of 200,
-    // which is why that reading is carried at all. If this ever stops matching
-    // the catalogue, one of the two readings has been dropped.
-    const s120 = exitSignViewingDistance({ pictogramHeightMm: 120, illumination: 'internally-illuminated' }) as ViewingDistance;
-    const s200 = exitSignViewingDistance({ pictogramHeightMm: 200, illumination: 'internally-illuminated' }) as ViewingDistance;
-    expect(s120.candidates.map((c) => c.maxViewingDistanceM)).toContain(24);
-    expect(s200.candidates.map((c) => c.maxViewingDistanceM)).toContain(40);
   });
 });
 
@@ -341,18 +441,39 @@ describe('checkSignPlacement', () => {
     expect(c.statement).toContain('A larger sign, or a second sign');
   });
 
-  it('says "I do not know" in the band the sources argue about', () => {
-    // 27 m is inside the 30 m reading and outside the 24 m one. Picking a side
-    // here is the failure — either a technician writes up a defect that is not
-    // one, or signs off a sign that is too far away.
+  it('fails a sign at 27 m rather than declining to call it', () => {
+    // This used to answer "uncertain" because a second, unsourced reading of
+    // Table 5.1 put a 150 mm sign at 30 m. No Australian publication supports
+    // that, and both that do put it at 24 m, so 27 m is simply too far.
     const c = checkSignPlacement(27, sign);
+    if (!c.known) throw new Error('expected a check');
+    expect(c.verdict).toBe('exceeds');
+  });
+
+  it('still says "I do not know" where the readings behind a sign disagree', () => {
+    // Kept reachable on purpose. Today both manufacturers agree band for band;
+    // the moment a third reading is added that does not, a sign in the disputed
+    // range has to be reported as unsettled rather than called either way.
+    const disputed = {
+      ...sign,
+      candidates: [sign.candidates[0]!, { ...sign.candidates[0]!, maxViewingDistanceM: 30 }],
+      sourcesAgree: false,
+    };
+    const c = checkSignPlacement(27, disputed);
     if (!c.known) throw new Error('expected a check');
     expect(c.verdict).toBe('uncertain');
     expect(c.reason).toContain('will not call it either way');
   });
 
+  it('refuses a sign carrying no readings at all rather than calling everything within', () => {
+    // Math.min of an empty list is Infinity, and "within the Infinity m limit"
+    // is how a sign at the far end of a warehouse passes.
+    const empty = { ...sign, candidates: [] };
+    expect(checkSignPlacement(999, empty).known).toBe(false);
+  });
+
   it('has no uncertain band on a photoluminescent sign, where the cap is a regulator’s', () => {
-    const pl = exitSignViewingDistance({ pictogramHeightMm: 200, illumination: 'photoluminescent' }) as ViewingDistance;
+    const pl = exitSignViewingDistance({ pictogramHeightMm: 260, illumination: 'photoluminescent' }) as ViewingDistance;
     expect(checkSignPlacement(23.9, pl)).toMatchObject({ verdict: 'within' });
     expect(checkSignPlacement(24.1, pl)).toMatchObject({ verdict: 'exceeds' });
   });
@@ -770,7 +891,10 @@ describe('sources', () => {
   it('gives every source a URL, a confidence and a reason for that confidence', () => {
     for (const [id, s] of Object.entries(SOURCES)) {
       expect(s.id).toBe(id);
-      expect(s.url).toMatch(/^https:\/\//);
+      // Absolute and resolvable rather than https specifically: one of the two
+      // manufacturer guides is published over plain HTTP, and citing an https
+      // URL that does not resolve would be worse than citing the real one.
+      expect(s.url).toMatch(/^https?:\/\/\S+$/);
       expect(['high', 'medium', 'low']).toContain(s.confidence);
       expect(s.basis.length).toBeGreaterThan(20);
       expect(s.ref.length).toBeGreaterThan(0);
@@ -781,9 +905,9 @@ describe('sources', () => {
     // The distinction that stops a supplier's blog being quoted in a report as
     // though it carried the same weight as the code.
     expect(SOURCES['ncc-spec-e48'].confidence).toBe('high');
-    expect(SOURCES['exiting-viewing'].confidence).toBe('low');
     expect(SOURCES['atts-intervals'].confidence).toBe('low');
     expect(SOURCES['clevertronics-spacing'].confidence).toBe('medium');
+    expect(SOURCES['legrand-exit-viewing'].confidence).toBe('medium');
   });
 
   it('resolves the ids every result carries, without repeating one', () => {

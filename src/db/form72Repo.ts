@@ -253,7 +253,20 @@ export async function listForm72(siteId?: string): Promise<StoredForm72[]> {
 export const ISSUED_REFUSAL = 'This Form 72 has been issued. The occupier is holding a copy of it, '
   + 'so it cannot be edited — raise a new form for the corrected test.';
 
-export type Form72Patch = Partial<Omit<StoredForm72, 'id' | 'siteId' | 'createdAt' | 'updatedAt' | 'status'>>;
+/**
+ * What a screen may change on a draft.
+ *
+ * issuedAt and copyGivenAt are not on it. They are not fields somebody types —
+ * they are the record of two events, and each has one way in: issueForm72,
+ * which refuses a form that cannot be issued, and recordOccupierCopy, which
+ * refuses a form that has not been. Left on the patch, copyGivenAt could be set
+ * on a draft, which is the one state the occupier cannot possibly have a copy
+ * in, and the refusal in recordOccupierCopy would be a rule with a door beside
+ * it.
+ */
+export type Form72Patch = Partial<Omit<
+  StoredForm72, 'id' | 'siteId' | 'createdAt' | 'updatedAt' | 'status' | 'issuedAt' | 'copyGivenAt'
+>>;
 
 /**
  * Edits a draft.
@@ -288,9 +301,22 @@ export async function updateForm72(id: string, patch: Form72Patch): Promise<void
   if (patch.booster !== undefined) put('booster', JSON.stringify(patch.booster));
   if (patch.sprinklerHydrostatic !== undefined) put('sprinklerHydrostatic', JSON.stringify(patch.sprinklerHydrostatic));
   if (patch.sprinklerFlow !== undefined) put('sprinklerFlow', JSON.stringify(patch.sprinklerFlow));
-  if (patch.overload !== undefined) {
-    put('overloadFlowLps', patch.overload?.flowLps ?? null);
-    put('overloadPressureKpa', patch.overload?.pressureKpa ?? null);
+  // Tested with `in` for the same reason as Part H below: undefined is the
+  // stored state that means no overload run was made, so clearing a run that
+  // was entered by mistake has to be able to write it back. Skipped on
+  // undefined, a mistyped run would stay in the database and keep printing on
+  // the form after the screen had shown it cleared.
+  if ('overload' in patch) {
+    const run = patch.overload;
+    // Half a run is not a run. A screen that fills the other half with zero to
+    // keep its own types happy would store a pump making 0 kPa at overload,
+    // which reads as catastrophic failure rather than as a test not done, so
+    // anything but two positive figures is stored as no run at all.
+    const made = run !== undefined
+      && Number.isFinite(run.flowLps) && run.flowLps > 0
+      && Number.isFinite(run.pressureKpa) && run.pressureKpa > 0;
+    put('overloadFlowLps', made ? run.flowLps : null);
+    put('overloadPressureKpa', made ? run.pressureKpa : null);
   }
   // Tested with `in` rather than against undefined, because undefined is the
   // stored value that means "nobody answered Part H" — a patch that sets it
@@ -307,7 +333,6 @@ export async function updateForm72(id: string, patch: Form72Patch): Promise<void
   if (patch.licenceNumber !== undefined) put('licenceNumber', patch.licenceNumber);
   if (patch.licenseeReportNumber !== undefined) put('licenseeReportNumber', patch.licenseeReportNumber ?? '');
   if (patch.signature !== undefined) put('signature', patch.signature ?? '');
-  if (patch.copyGivenAt !== undefined) put('copyGivenAt', patch.copyGivenAt ?? null);
 
   if (!fields.length) return;
   put('updatedAt', nowIso());

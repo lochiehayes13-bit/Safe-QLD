@@ -3,7 +3,7 @@ import {
   type BoosterTest, type FlowRow, type FlowTest, type Form72, type FormIssue, type PartResult,
   type SprinklerTestPoint, type TestDevice,
 } from '@/domain/form72';
-import { addWorkingDays } from '@/domain/qldCompliance';
+import { addQldBusinessDays } from '@/domain/occupierForm';
 import { formatAuDate } from './sheets';
 
 /**
@@ -76,6 +76,27 @@ export const FORM_72_SOURCES = [
     url: 'https://docest.com/doc/530085/form-72-fire-hydrant-testing-and-maintenance',
     confidence: 'medium',
   },
+  {
+    // Printed on the page as a figure a reader may act on, so it is sourced in
+    // the data like everything else. It is not on the department's form at all.
+    fact: 'The pump overload check — 150% of duty flow at not less than 65% of duty pressure. Taken '
+      + "from Safe QLD's own annual combined sprinkler and hydrant flow test certificate, which "
+      + 'states the rule and works it as 16 L/s at 700 kPa giving 24 L/s at 455 kPa. The same '
+      + 'certificate carries a second worked example at 560 kPa, which is 80% and disagrees with '
+      + 'its own rule; 65% is used and the disagreement is reported rather than resolved quietly. '
+      + 'The 150/65 pair is the ordinary fire pumpset acceptance point and is stated the same way '
+      + 'in the NFPA 20 and NFPA 25 pump curve requirements.',
+    url: 'https://www.nfpa.org/codes-and-standards/nfpa-20-standard-development/20',
+    confidence: 'medium',
+  },
+  {
+    fact: 'Business days are counted the way the Acts Interpretation Act 1954 (Qld) defines them, '
+      + 'against the appointed Queensland public holidays — the same count and the same holiday '
+      + 'table the occupier statement uses for its ten business days, so the app cannot give two '
+      + 'answers to one question.',
+    url: 'https://www.legislation.qld.gov.au/view/html/inforce/current/act-1954-003',
+    confidence: 'high',
+  },
 ] as const;
 
 export const FORM_VERSION = 'Version 1 – July 2014';
@@ -147,25 +168,93 @@ export const TESTER_RETENTION_YEARS = 5;
 // ---------------------------------------------------------------------------
 
 /**
- * When the occupier's copy is due.
+ * When the occupier's copy is due, and what the count could not account for.
  *
  * Business days, not calendar days, and counted from the test date rather than
  * from the day the form was typed up: MP 6.1 starts the clock at completion of
- * the work. Public holidays are not modelled, so an answer that lands near the
- * limit should be treated as the optimistic case.
+ * the work.
+ *
+ * The count is the app's own Queensland one, holidays and all. A weekends-only
+ * count was the obvious approach and it is wrong here for a reason that has
+ * nothing to do with accuracy: the occupier statement counts its ten business
+ * days against the appointed holidays, this form counts the same ten days under
+ * MP 6.1, and two different answers to "ten business days after the work" on
+ * two documents from the same job is how an office stops believing either. It
+ * also refuses outside the years whose holidays Queensland has actually
+ * appointed, rather than returning a date that assumes next decade's.
  */
-export function occupierCopyDueBy(testDate: string | undefined): string | undefined {
-  if (!testDate) return undefined;
-  return addWorkingDays(testDate, OCCUPIER_COPY_BUSINESS_DAYS) ?? undefined;
+export interface OccupierCopyDue {
+  /** The date the copy is due, absent when it cannot be known. */
+  date?: string;
+  /** Why there is no date. Present exactly when date is absent. */
+  reason?: string;
+  /** Public holidays skipped, so the document can show its working. */
+  holidaysApplied: string[];
+  /** What the count could not account for, in the count's own words. */
+  caveats: string[];
+  /** The definition the count is made under. */
+  legalRef?: string;
 }
 
-/** When the tester's own copy may finally be destroyed under MP 6.1 A5. */
+export function occupierCopyDue(testDate: string | undefined): OccupierCopyDue {
+  if (!testDate) {
+    return {
+      holidaysApplied: [],
+      caveats: [],
+      reason: 'The form has no test date, and the ten business days run from the day the work was '
+        + 'completed.',
+    };
+  }
+  const count = addQldBusinessDays(testDate.slice(0, 10), OCCUPIER_COPY_BUSINESS_DAYS);
+  return {
+    date: count.date,
+    reason: count.reason,
+    holidaysApplied: count.holidaysApplied.map((h) => `${h.name} ${formatAuDate(h.date)}`),
+    caveats: count.caveats,
+    legalRef: count.legalRef,
+  };
+}
+
+/**
+ * The due date on its own, for a list that has room for a date and nothing
+ * else. The reasons live on occupierCopyDue, and a screen that shows this
+ * without them must treat an absent date as "cannot be given" rather than as
+ * "no deadline".
+ */
+export function occupierCopyDueBy(testDate: string | undefined): string | undefined {
+  return occupierCopyDue(testDate).date;
+}
+
+/**
+ * When the tester's own copy may finally be destroyed under MP 6.1 A5.
+ *
+ * A test on 29 February lands on a date five years later that does not exist,
+ * and JavaScript rolls it forward to 1 March. That is left alone deliberately:
+ * the obligation is to keep the record for *at least* five years, so a day long
+ * is safe and a day short is not.
+ */
 export function testerCopyKeepUntil(testDate: string | undefined): string | undefined {
   if (!testDate) return undefined;
   const d = new Date(`${testDate.slice(0, 10)}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return undefined;
   d.setUTCFullYear(d.getUTCFullYear() + TESTER_RETENTION_YEARS);
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * The Queensland calendar date of an instant.
+ *
+ * Slicing the first ten characters off a timestamp is the obvious approach and
+ * it dates the document a day early: a form produced at eight on a Brisbane
+ * morning was stamped at 22:00 the previous day in UTC. Queensland is UTC+10
+ * all year, with no daylight saving to allow for.
+ */
+export function qldCalendarDate(instant: string | undefined): string | undefined {
+  if (!instant) return undefined;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(instant.trim())) return instant.trim();
+  const t = Date.parse(instant);
+  if (Number.isNaN(t)) return undefined;
+  return new Date(t + 10 * 3_600_000).toISOString().slice(0, 10);
 }
 
 /** The flow rates printed down Part D of the department's form. */
@@ -240,6 +329,20 @@ export interface Form72DocumentInput {
   companyName?: string;
   /** ISO timestamp the document was produced, for the Safe QLD footer. */
   generatedAt: string;
+  /**
+   * Whether the app holds this form as issued, and when.
+   *
+   * A form with nothing blocking it prints clean, and a clean print of a draft
+   * is indistinguishable from the statutory record — which matters because a
+   * draft is still editable. Hand that PDF to an occupier, change a figure the
+   * next day, and their copy and ours no longer say the same thing, which is
+   * the single thing the issued-form rule exists to prevent. So the page says
+   * which one it is. Absent means the caller did not say, and the page claims
+   * neither rather than inventing an answer.
+   */
+  status?: 'draft' | 'issued';
+  /** ISO timestamp the form was issued, where it has been. */
+  issuedAt?: string;
   /**
    * A pump run at overload, where one was done.
    *
@@ -506,7 +609,14 @@ function partE(form: Form72, input: Form72DocumentInput): string {
     : undefined;
 
   let overloadBlock = '';
-  if (r !== 'na') {
+  if (r === 'na' && input.overload) {
+    // The run is stored beside the parts, so an N/A booster part would
+    // otherwise drop a reading somebody took on site off the page entirely.
+    overloadBlock = '<div class="stated"><b>150% overload check</b> — an overload run is recorded '
+      + `against this form (${esc(input.overload.flowLps)} L/s at ${esc(input.overload.pressureKpa)} `
+      + 'kPa) while Part E is marked not applicable. One of the two is wrong, and the reading is '
+      + 'shown rather than discarded.</div>';
+  } else if (r !== 'na') {
     if (!check) {
       overloadBlock = '<div class="stated"><b>150% overload check</b> — cannot be stated. Part E does '
         + 'not record the system requirement as a flow and a pressure, and the check is a percentage '
@@ -634,10 +744,18 @@ function partH(form: Form72): string {
   yesNo(repairs, "Attach details (incl. action and date taken) in Licensee's report",
     'No action required in relation to repairs/corrective actions at this time')}</td></tr>
     <tr><td class="k">System</td><td class="v" colspan="3">${
-  tick('Pass', form.systemResult === 'pass')}${tick('Fail', form.systemResult === 'fail')}${
-  form.systemResult === 'na' ? tick('N/A', true) : ''}</td></tr>
+  tick('Pass', form.systemResult === 'pass')}${tick('Fail', form.systemResult === 'fail')}</td></tr>
     ${wide('System Notes', comment(form.systemNotes, form.systemResult))}
-  </table>`;
+  </table>
+  ${form.systemResult === 'na'
+    // The department's System row carries Pass and Fail and nothing else. An
+    // N/A box added here would be Safe QLD's box printed inside the
+    // department's part, where a reader has no way to tell the two apart — so
+    // neither box is ticked and the reason is written out, as in Part D.
+    ? '<div class="stated">Recorded as not applicable. The department\'s System row carries only '
+      + 'Pass and Fail, so neither is ticked; this line says why, rather than a box being added to '
+      + 'the department\'s form.</div>'
+    : ''}`;
 }
 
 function partI(form: Form72): string {
@@ -732,9 +850,10 @@ export function form72Html(input: Form72DocumentInput): string {
   const cautions = issues.filter((i) => !i.blocking);
   const issuable = canIssue(form);
 
-  const dueBy = occupierCopyDueBy(form.testDate);
+  const due = occupierCopyDue(form.testDate);
   const keepUntil = testerCopyKeepUntil(form.testDate);
   const company = input.companyName?.trim() || 'Safe QLD Fire Protection';
+  const generatedOn = qldCalendarDate(input.generatedAt);
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8" /><style>${CSS}</style></head><body>
   <div class="head">
@@ -770,14 +889,29 @@ export function form72Html(input: Form72DocumentInput): string {
 
   <div class="deptnote">${esc(DEPARTMENT_NOTE)}</div>
 
+  ${issuable && input.status === 'draft' ? `<div class="caution">
+    <b>Draft copy — this form has not been issued</b>
+    Nothing on it is outstanding, but the app still holds it as a draft, which means it can still be
+    edited. Issue it before it is given to anybody: a copy handed over now and the record kept
+    afterwards can end up saying different things, and the occupier's copy is the one that counts.
+  </div>` : ''}
+
   <div class="ours">
     <b>Not part of the department's form.</b>
-    Produced by ${esc(company)} from the readings recorded on site, ${esc(formatAuDate(input.generatedAt))}.
-    ${dueBy
-    ? `A copy is due to the building occupier by ${esc(formatAuDate(dueBy))} — ${OCCUPIER_COPY_BUSINESS_DAYS}
-       business days after the work, under QDC MP 6.1 acceptable solution A4(b). Public holidays are
-       not counted, so treat that date as the latest optimistic case.`
-    : 'The date a copy is due to the occupier cannot be given, because the form has no test date.'}
+    Produced by ${esc(company)} from the readings recorded on site${
+  generatedOn ? `, ${esc(formatAuDate(generatedOn))}` : ''}.
+    ${input.status === 'issued'
+    ? `Issued${input.issuedAt ? ` ${esc(formatAuDate(qldCalendarDate(input.issuedAt)))}` : ''}, and
+       held unaltered since.`
+    : ''}
+    ${due.date
+    ? `A copy is due to the building occupier by ${esc(formatAuDate(due.date))} — ${OCCUPIER_COPY_BUSINESS_DAYS}
+       business days after the work, under QDC MP 6.1 acceptable solution A4(b), counted as
+       ${esc(due.legalRef)} defines a business day.${
+  due.holidaysApplied.length
+    ? ` Public holidays passed over: ${esc(due.holidaysApplied.join('; '))}.`
+    : ' No public holiday falls inside that count.'} ${esc(due.caveats.join(' '))}`
+    : `The date a copy is due to the occupier cannot be given. ${esc(due.reason)}`}
     ${keepUntil
     ? `The person who carried out the maintenance keeps a record of this form until at least
        ${esc(formatAuDate(keepUntil))} — ${TESTER_RETENTION_YEARS} years, under MP 6.1 acceptable

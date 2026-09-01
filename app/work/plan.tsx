@@ -329,6 +329,12 @@ function VisitRow({ visit }: { visit: PlannedVisit }) {
           </Txt>
           <Rowed gap={2} wrap style={{ marginTop: t.space(1.5) }}>
             {visit.urgent ? <Chip label="Outside tolerance" tone="fail" /> : null}
+            {/* A breached routine that did not get the first day of the month.
+                The plan says overdue work goes first; where a shared visit or a
+                full day moved it, the office sees by how much. */}
+            {visit.urgent && visit.daysAfterEarliest ? (
+              <Chip label={`${visit.daysAfterEarliest} days after the first workable day`} tone="warn" />
+            ) : null}
             <Chip label={`≈ ${formatHours(visit.hours.hours)} est.`} />
             <Chip label={visit.clusterLabel} tone={visit.clusterMethod === 'locality' ? 'default' : 'warn'} />
             {visit.daysOfMargin !== undefined && visit.daysOfMargin >= 0 ? (

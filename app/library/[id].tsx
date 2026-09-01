@@ -2,7 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { Linking, Pressable, View } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { STANDARDS, type StandardClause } from '@/domain/standardsCatalogue';
+import { type StandardClause } from '@/domain/standardsCatalogue';
+import { LIBRARY, clauseProvenance } from '@/domain/standardsLibrary';
 import { SYSTEM_LABELS } from '@/seed/assetTypes';
 import { normalise } from '@/domain/tradeVocabulary';
 import { useTheme } from '@/theme';
@@ -29,7 +30,7 @@ export default function StandardScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [filter, setFilter] = useState('');
 
-  const doc = useMemo(() => STANDARDS.find((d) => d.id === id), [id]);
+  const doc = useMemo(() => LIBRARY.find((d) => d.id === id), [id]);
 
   const clauses = useMemo(() => {
     if (!doc) return [];
@@ -109,7 +110,7 @@ export default function StandardScreen() {
           {clauses.map((c, i) => (
             <View key={`${c.ref}-${i}`}>
               {i > 0 ? <Divider /> : null}
-              <ClauseRow clause={c} />
+              <ClauseRow clause={c} docId={doc.id} />
             </View>
           ))}
         </Card>
@@ -135,8 +136,18 @@ export default function StandardScreen() {
   );
 }
 
-function ClauseRow({ clause }: { clause: StandardClause }) {
+/**
+ * One clause, and where its explanation came from.
+ *
+ * The clause number and title were read out of the document. The sentence
+ * underneath was written by somebody, and this app's rule is that a written
+ * thing says so — a technician deciding whether to climb back down and find the
+ * actual clause is entitled to know whether they are reading an extraction or
+ * an interpretation, and how much that interpretation is worth.
+ */
+function ClauseRow({ clause, docId }: { clause: StandardClause; docId: string }) {
   const t = useTheme();
+  const prov = clauseProvenance(docId, clause);
   const body = (
     <Rowed gap={2} align="flex-start" style={{ paddingVertical: t.space(2) }}>
       <View style={{ width: 74 }}>
@@ -154,6 +165,19 @@ function ClauseRow({ clause }: { clause: StandardClause }) {
             it says.
           </Txt>
         )}
+        {prov ? (
+          <Rowed gap={1.5} align="center" style={{ marginTop: t.space(1.5) }} wrap>
+            <Chip
+              label={prov.fromExtraction ? 'From the document' : `Our reading · ${prov.confidence} confidence`}
+              tone={prov.confidence === 'high' ? 'pass' : prov.confidence === 'low' ? 'warn' : 'default'}
+            />
+          </Rowed>
+        ) : null}
+        {prov && !prov.fromExtraction ? (
+          <Txt size="xs" tone="faint" style={{ marginTop: t.space(1), lineHeight: 16 }}>
+            {prov.source}
+          </Txt>
+        ) : null}
         {clause.appFeature ? (
           <Rowed gap={2} align="center" style={{ marginTop: t.space(1.5) }}>
             <MaterialCommunityIcons name="arrow-right-circle-outline" size={14} color={t.color.accentText} />

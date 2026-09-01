@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { Stack, router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -32,23 +32,36 @@ import {
 export default function ModeScreen() {
   const t = useTheme();
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
-  const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState<TabKey | null>(null);
+  /** What this screen has been told to save, so a slow read cannot undo it. */
+  const chosen = useRef<AppMode | null>(null);
+  /** Saves run one after another: two quick taps must not land out of order. */
+  const writes = useRef<Promise<unknown>>(Promise.resolve());
 
   useEffect(() => {
-    void loadPrefs().then((p) => { setPrefs(p); setLoaded(true); });
+    void loadPrefs().then((stored) => {
+      // A tap that landed before the read came back wins. The stored value is
+      // older than the tap, and the person is looking at what they chose.
+      setPrefs(chosen.current ? { ...stored, appMode: chosen.current } : stored);
+    });
   }, []);
 
   const read = useMemo(() => readMode(prefs.appMode), [prefs.appMode]);
   const mode = read.mode;
 
   const choose = useCallback((next: AppMode) => {
-    setPrefs((prev) => {
-      const updated = { ...prev, appMode: next };
-      void savePrefs(updated);
-      return updated;
-    });
+    chosen.current = next;
+    setPrefs((prev) => ({ ...prev, appMode: next }));
+    // Merged over what is on disk, never over what this screen is holding. The
+    // mode is one field in the same blob as the rate card, the Simpro
+    // credentials and the technician's licence number, and this screen can be
+    // tapped before the read comes back — writing the defaults it starts with
+    // would take all of that with it. One field changes; nothing else is
+    // touched, whatever else has been saved since this screen opened.
+    writes.current = writes.current
+      .then(() => loadPrefs())
+      .then((stored) => savePrefs({ ...stored, appMode: next }));
   }, []);
 
   const stats = summarise(mode);
@@ -71,6 +84,26 @@ export default function ModeScreen() {
         />
 
         {read.assumed ? <Banner tone="warn" title="Mode not recognised" body={read.assumed} /> : null}
+
+        {/*
+          Said out loud rather than left to be discovered. The hubs still carry
+          their own hardcoded rows, so today this setting changes what this
+          screen reports and not what Today, Tools and Work list. A setting
+          that silently does nothing is the same failure as one that silently
+          removes something, and a technician who sets Technician and still
+          sees the work planner needs to know which of the two it is. This
+          banner comes out when a hub is built from navFor().
+        */}
+        <Banner
+          tone="warn"
+          title="Not wired to the hubs yet"
+          body={
+            'The Today, Tools and Work screens still list everything they always listed. Until '
+            + 'they are built from this list, choosing Technician changes what this screen reports '
+            + 'and not what those three show you. Nothing below is wrong about the app — it is '
+            + 'what each mode is for — but nothing is being hidden from you yet either.'
+          }
+        />
 
         <Card>
           <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>{MODE_BLURB[mode]}</Txt>

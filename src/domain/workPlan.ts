@@ -803,6 +803,18 @@ export interface PlannedVisit {
    */
   daysOfMargin?: number;
   latestSafeDate?: string;
+  /**
+   * On urgent work only: how many days later than the first workable day of the
+   * window this visit landed.
+   *
+   * It is not always zero, and the honest reason is that a site is attended
+   * once. An overdue routine sharing a site with a routine that cannot be done
+   * until the 20th is done on the 20th, because two drives to Ipswich costs
+   * more than the batching saves — but breached work sliding another fortnight
+   * is a decision somebody has to be able to see, not a rounding of the plan's
+   * own claim that overdue work goes first. Days already full push this up too.
+   */
+  daysAfterEarliest?: number;
 }
 
 export interface TechnicianDay {
@@ -1289,6 +1301,7 @@ export function planWork(routines: PlanRoutine[], sites: PlanSite[], options: Pl
       daysFromPreferred: daysBetween(feasible.preferred, day) ?? 0,
       daysOfMargin: feasible.latestSafeDate ? daysBetween(day, feasible.latestSafeDate) : undefined,
       latestSafeDate: feasible.latestSafeDate,
+      daysAfterEarliest: feasible.urgent && days[0] ? daysBetween(days[0], day) : undefined,
     };
     bin.hours += item.hours.hours;
     bin.clusters.add(item.cluster.id);
@@ -1415,11 +1428,21 @@ export function planWork(routines: PlanRoutine[], sites: PlanSite[], options: Pl
     );
   }
   if (summary.urgentVisits) {
+    const delayed = allVisits.filter((v) => v.urgent && (v.daysAfterEarliest ?? 0) > 0);
     notes.push(
       `${summary.urgentVisits} visit${summary.urgentVisits === 1 ? ' is' : 's are'} already outside tolerance. `
-      + 'They are placed on the earliest working day available and are not batched by suburb — being late is the '
+      + 'They are placed as early as the month allows and are not batched by suburb — being late is the '
       + 'bigger cost.',
     );
+    if (delayed.length) {
+      // The claim above is only true where nothing else got in the way. Saying
+      // so is the difference between a plan and a plan that reads well.
+      notes.push(
+        `${delayed.length} of those sit later than the first workable day: a site is attended once, so an `
+        + 'overdue routine sharing a visit with work that cannot start until later waits for it, and a day '
+        + 'already full pushes the rest along. Each visit says how many days by.',
+      );
+    }
   }
   if (!technicians) {
     notes.push('No technicians were given, so the window has no capacity and nothing could be placed.');
@@ -1463,7 +1486,10 @@ function emptySummary(): PlanSummary {
 export function formatHours(hours: number): string {
   if (!Number.isFinite(hours) || hours < 0) return '—';
   if (hours < 1) return `${Math.round(hours * 60)} min`;
-  return `${Number.isInteger(hours) ? hours : hours.toFixed(2).replace(/0$/, '')} h`;
+  // Strip the trailing zeros and the point they leave behind. Taking one zero
+  // off "5.00" leaves "5.0", which reads as a measured figure rather than a
+  // round one.
+  return `${hours.toFixed(2).replace(/\.?0+$/, '')} h`;
 }
 
 /**

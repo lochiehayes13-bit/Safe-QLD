@@ -148,9 +148,16 @@ describe('the standards catalogue', () => {
   });
 
   it("marks a clause nobody has written up as low confidence and says so", () => {
-    // The app holds the reference, not the standard. A clause with no
-    // description is a pointer and must not read as an answer.
-    const bare = ask('AS 2419.1 clause 8.8')[0]!;
+    /*
+     * The app holds the reference, not the standard. A clause with no
+     * description is a pointer and must not read as an answer.
+     *
+     * Clause 1.1 rather than 8.8: 8.8 has since been written up, and a test
+     * pinned to a clause that gets described later is a test that quietly
+     * changes what it is checking. A scope clause is a safer choice — it is the
+     * kind nobody writes up, because nothing on site turns on it.
+     */
+    const bare = ask('AS 2419.1 clause 1.1')[0]!;
     expect(bare.confidence).toBe('low');
     expect(bare.body).toContain('not going to guess');
   });

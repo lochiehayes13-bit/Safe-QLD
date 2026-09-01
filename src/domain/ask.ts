@@ -3,7 +3,7 @@ import { SERVICE_ROUTINES, SOURCE_LABEL } from '@/seed/serviceRoutines';
 import { EOL_VALUES } from '@/calc/eol';
 import { PROTOCOLS } from '@/calc/dipswitch';
 import { ASSET_TYPES, SYSTEM_LABELS } from '@/seed/assetTypes';
-import { STANDARDS } from '@/domain/standardsCatalogue';
+import { LIBRARY } from '@/domain/standardsLibrary';
 import { clauseQuery, expand, normalise as normaliseRef } from '@/domain/tradeVocabulary';
 
 /**
@@ -35,6 +35,12 @@ export interface Answer {
   route?: string;
   /** Internal, for ranking. */
   score: number;
+  /**
+   * Internal. How specific the entry is, for breaking a tie between two things
+   * that scored the same — a clause reference's depth, so 5.1.4 counts as more
+   * specific than 5.1.
+   */
+  specificity?: number;
 }
 
 export const KIND_LABEL: Record<AnswerKind, string> = {
@@ -333,7 +339,13 @@ export function ask(query: string, limit = 12): Answer[] {
     }, score(q, calc.title, hay, implied, consumed));
   }
 
-  for (const doc of STANDARDS) {
+  /*
+   * The merged library rather than the register alone. The register carries
+   * fifty-odd descriptions read out of the documents; the curated notes carry
+   * another two hundred, and searching only the register meant a question whose
+   * answer had been written up returned nothing but a clause number.
+   */
+  for (const doc of LIBRARY) {
     /*
      * Normalised with the reference-aware form, which keeps the dots. This
      * module's own normalise strips them, so "AS 2419.1:2005" would become
@@ -341,6 +353,17 @@ export function ask(query: string, limit = 12): Answer[] {
      * the jump silently degraded into an ordinary ranked search.
      */
     const designation = normaliseRef(doc.designation);
+
+    /*
+     * Scored first, added second, because a clause cannot be judged on its own.
+     * A section heading and the clause beneath it both match "how far off the
+     * wall", and the heading has the longer description — so it covers more of
+     * the question by surface area and outranks the clause that actually
+     * answers it. The pass below fixes that, and it needs to see the siblings.
+     */
+    const scored: { clause: typeof doc.clauses[number]; s: number; named: boolean }[] = [];
+    const bodies = new Map<string, string>();
+
     for (const clause of doc.clauses) {
       /*
        * A clause named outright is navigation, not search. "AS 2419.1 clause
@@ -359,10 +382,41 @@ export function ask(query: string, limit = 12): Answer[] {
         ?? `${doc.designation} clause ${clause.ref}. Nobody has written up what this clause covers, `
           + 'so the app is not going to guess — open your own copy of the standard.';
 
+      scored.push({
+        clause,
+        named: !!named,
+        s: named ? 900 : score(q, `${doc.designation} ${clause.ref}`, hay, implied, consumed),
+      });
+      // Keep the composed body with the clause so the second pass need not
+      // rebuild it.
+      bodies.set(clause.ref, body);
+    }
+
+    /*
+     * A section that contains the answer is a worse answer than the answer.
+     *
+     * "5.1 Spacing and Location of Point-type Detectors" and "5.1.4 Spacing
+     * from walls, partitions or air supply openings" both match "how far off
+     * the wall". Both are true. Only the second one answers it — and left
+     * alone the first wins, because its description is longer and therefore
+     * contains more of the question.
+     *
+     * So a clause whose own sub-clause also cleared the threshold is demoted
+     * below it. Only ever below its own children, never below an unrelated
+     * clause, and never at all where the technician named it outright.
+     */
+    for (const entry of scored) {
+      const child = scored.find((o) =>
+        o !== entry
+        && o.clause.ref.startsWith(`${entry.clause.ref}.`)
+        && o.s >= ANSWER_THRESHOLD);
+      const demoted = !entry.named && child ? Math.min(entry.s, child.s - 0.001) : entry.s;
+      const { clause } = entry;
+
       add({
         kind: 'clause',
         title: `${doc.designation} ${clause.ref} — ${clause.title}`,
-        body,
+        body: bodies.get(clause.ref)!,
         // Superseded editions still get answered, because they are what is
         // installed on most sites — but the answer says so rather than letting
         // a technician quote a withdrawn edition at a client.
@@ -373,11 +427,26 @@ export function ask(query: string, limit = 12): Answer[] {
         // described it, that is a pointer and nothing more.
         confidence: clause.covers ? 'high' : 'low',
         route: `/library/${doc.id}`,
-      }, named ? 900 : score(q, `${doc.designation} ${clause.ref}`, hay, implied, consumed));
+        // A clause reference's depth. See the tie-break in the sort below.
+        specificity: clause.ref.split('.').length,
+      }, demoted);
     }
   }
 
+  /*
+   * Score first, then specificity, then the title.
+   *
+   * The middle one is not cosmetic. A section heading and the clause under it
+   * both match "how far off the wall", and once both carry a written
+   * description they score the same — at which point an alphabetical tie-break
+   * hands the technician "5.1 Spacing and Location of Point-type Detectors"
+   * instead of "5.1.4 Spacing from walls, partitions or air supply openings".
+   * Both are true; only one answers the question. The deeper reference wins.
+   */
   return out
-    .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title))
+    .sort((a, b) =>
+      b.score - a.score
+      || (b.specificity ?? 0) - (a.specificity ?? 0)
+      || a.title.localeCompare(b.title))
     .slice(0, limit);
 }

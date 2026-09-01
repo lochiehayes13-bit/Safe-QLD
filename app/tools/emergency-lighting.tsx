@@ -206,7 +206,7 @@ function DischargeView() {
             <Banner
               tone="info"
               title={`Held to the ${MINIMUM_DURATION_MINUTES}-minute code minimum`}
-              body="The fitting's own rated duration was not entered. A fail against this is a fail on any rating; a pass only shows it met the floor."
+              body="Either no rated duration was entered, or one below the code minimum was — a rating cannot lower what a fitting has to achieve. A fail against this is a fail on any rating; a pass only shows it met the floor."
             />
           ) : null}
 
@@ -326,6 +326,8 @@ function SignView() {
     <>
       <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
         Measure the green running-man element itself, top to bottom — not the housing and not the whole sign face.
+        The answer comes off published bands, so a size between two of them reads as the smaller band rather than as a
+        number in between.
       </Txt>
 
       <Segmented
@@ -367,7 +369,7 @@ function SignView() {
               sign.cappedBy
                 ? sign.cappedBy
                 : sign.sourcesAgree
-                  ? 'Every source consulted agrees on this figure.'
+                  ? 'Every publication consulted gives this figure for a pictorial element of this size.'
                   : 'The strictest of the readings below. A sign inside this is inside all of them.'
             }
           />
@@ -375,10 +377,13 @@ function SignView() {
           <Card>
             <Label>Readings consulted</Label>
             {sign.candidates.map((c) => (
-              <View key={`${c.sourceId}-${c.factor}`} style={{ paddingVertical: t.space(1.5) }}>
+              <View key={`${c.sourceId}-${c.maxViewingDistanceM}`} style={{ paddingVertical: t.space(1.5) }}>
                 <Rowed gap={2}>
                   <Txt size="md" weight="700" mono>{c.maxViewingDistanceM} m</Txt>
-                  <Chip label={`${c.confidence} confidence`} tone={c.confidence === 'high' ? 'pass' : 'warn'} />
+                  <Chip
+                    label={`${c.confidence} confidence`}
+                    tone={c.confidence === 'high' ? 'pass' : c.confidence === 'medium' ? 'accent' : 'warn'}
+                  />
                 </Rowed>
                 <Txt size="xs" tone="muted" style={{ marginTop: 3, lineHeight: 17 }}>{c.reading}</Txt>
               </View>

@@ -32,12 +32,25 @@
  *     menu has never heard of is unreachable in exactly the way rule 1 forbids
  *     — this repository already had six of those. `auditManifest()` takes the
  *     real list of route files and names both kinds of drift, and the test
- *     runs it against the filesystem.
+ *     runs it against the filesystem. `auditLinks()` does the same job one
+ *     level down, on the links between the screens: a path this module prints
+ *     is only worth printing if the file at each step really does open the
+ *     next one, and two of those claims were wrong when they were first
+ *     written down from memory.
  *
  * There are no external facts in this module. Every route, label and parent
  * link was read out of this repository's own `app/` directory, which is why
  * the audit rather than a citation is what keeps it honest — the source is the
  * filesystem, and it is checked rather than quoted.
+ *
+ * What this module does **not** yet do: the Today, Tools and Work hubs still
+ * carry their own hardcoded rows, so choosing a mode changes what this module
+ * reports and not yet what those hubs list. `navFor()` returns exactly what a
+ * hub needs — tab, section, title, label, blurb and route — and until one of
+ * them is built from it, Technician mode describes the app that is intended
+ * rather than the app that ships. It is said here, and on the settings screen,
+ * because a setting that quietly does nothing is the same class of failure as
+ * a setting that quietly deletes something.
  */
 
 export type AppMode = 'technician' | 'office';
@@ -146,6 +159,19 @@ export interface Destination {
   root?: boolean;
   /** Screens this is opened from. Empty only on a root. */
   openedFrom: readonly string[];
+  /**
+   * A screen that opens this one whatever the mode, because the link is an
+   * action rather than a menu row.
+   *
+   * Hiding a destination takes its row out of the hubs; it does not and must
+   * not disarm a button in the middle of a piece of work. Van stock ends a
+   * restock on Purchase requests, and it does that for a technician too. Where
+   * that is true it is written down, because the alternative is this module
+   * telling somebody to go and search for a screen they were standing on
+   * thirty seconds ago. Must be one of `openedFrom`, and must itself be shown
+   * in every mode that hides this one — `validateManifest` checks both.
+   */
+  stillOpenedFrom?: string;
   /** What a technician would type looking for this. */
   terms: readonly string[];
   /** Why a technician does not need it. Required exactly where one is hidden. */
@@ -238,7 +264,9 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/work/notice/[id]', file: 'app/work/notice/[id].tsx', tab: 'today', section: 'Against a clock',
     label: 'Critical defect notice', needsContext: true, modes: BOTH,
-    openedFrom: ['/', '/work/defects'],
+    // Today only. The defects list raises a defect but does not open the
+    // notice — `auditLinks` is what caught this claim being written down.
+    openedFrom: ['/'],
     blurb: 'The written notice the occupier is owed within 24 hours, counting down.',
     terms: ['notice', 'critical', 'occupier', '24 hours', 'commissioner'],
   },
@@ -388,7 +416,9 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/report/[id]', file: 'app/report/[id].tsx', tab: 'sites', section: 'Paperwork',
     label: 'Test sheet', needsContext: true, modes: BOTH,
-    openedFrom: ['/site/[id]', '/work/reports', '/routine/run'],
+    // Running a routine ends in `router.back()`, not in the sheet, so it is
+    // not an opener however much it feels like one.
+    openedFrom: ['/site/[id]', '/work/reports'],
     blurb: 'The service report: one tap per device, everything else behind a tab so the list stays the screen.',
     terms: ['test sheet', 'report', 'service report', 'results'],
   },
@@ -531,6 +561,17 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['emergency lighting', 'exit sign', 'discharge', 'lux', 'viewing distance'],
   },
   {
+    route: '/library/law', file: 'app/library/law.tsx', tab: 'tools', section: 'Reference',
+    label: 'The regulation', modes: BOTH, openedFrom: ['/library'],
+    blurb: 'The Building Fire Safety Regulation indexed by who has to do what, with the words that decide reproduced.',
+    terms: ['regulation', 'bfsr', 'law', 'legislation', 'section 49', 'critical defect',
+      'occupier', 'penalty', 'statutory'],
+    keptBecause:
+      'Every clock this app counts comes from a section in here, and a technician being argued '
+      + 'with on site has no way to point at the section without it. It is Crown material '
+      + 'published free, so it costs nothing to carry.',
+  },
+  {
     route: '/library', file: 'app/library/index.tsx', tab: 'tools', section: 'Reference',
     label: 'Standards', modes: BOTH, openedFrom: ['/', '/tools'],
     blurb: 'The clause index and your own imported documents, searched the way the question gets asked, offline.',
@@ -646,6 +687,9 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/work/purchases', file: 'app/work/purchases.tsx', tab: 'work', section: 'Parts and stock',
     label: 'Purchase requests', modes: OFFICE, openedFrom: ['/work', '/work/stock'],
+    // Raising a restock lands on this screen, and it does that in Technician
+    // mode too — hiding the row must not break the middle of that action.
+    stillOpenedFrom: '/work/stock',
     blurb: 'Parts to order, queued until the phone has signal.',
     terms: ['purchase', 'order', 'request', 'parts', 'buy'],
     hiddenBecause:
@@ -712,12 +756,6 @@ const BY_ROUTE: ReadonlyMap<string, Destination> = new Map(
   DESTINATIONS.map((d) => [d.route, d]),
 );
 
-const ROOT_BY_TAB: Partial<Record<TabKey, string>> = (() => {
-  const out: Partial<Record<TabKey, string>> = {};
-  for (const d of DESTINATIONS) if (d.root) out[d.tab] = d.route;
-  return out;
-})();
-
 /** Undefined for a route the manifest has never heard of, rather than a guess. */
 export function destinationAt(route: string): Destination | undefined {
   return BY_ROUTE.get(route);
@@ -783,6 +821,11 @@ export type ReachChannel =
   | 'nav'
   /** Opened from the record it belongs to, which is itself reachable. */
   | 'record'
+  /**
+   * Not listed in this mode, but a screen that is still opens it as part of
+   * doing something — see `stillOpenedFrom`.
+   */
+  | 'opened'
   /** Not listed in this mode: found by name and opened from the result. */
   | 'search'
   /** Not listed, and it needs a record — so a direct link, or a minute in the other mode. */
@@ -798,7 +841,8 @@ export interface Reach {
   /** The same thing in a technician's words. */
   sentence: string;
   /**
-   * True only for `nav` and `record`.
+   * True only for `nav`, `record` and `opened` — the three that are a tap
+   * path somebody can follow without knowing the screen exists.
    *
    * Search is deliberately not a proof. Letting it count would make every
    * route trivially reachable and the guarantee meaningless — you cannot
@@ -819,15 +863,21 @@ function pathWords(chain: string[]): string {
  * The shortest tap path to a route in a mode, or undefined if this mode's
  * lists do not lead there. Parents are explored on their own copy of the
  * visited set, so one dead branch cannot poison a live one.
+ *
+ * Every step comes off `openedFrom`, including for the screens that sit in a
+ * hub. It is tempting to shortcut a hub row to "its tab root, then it" — the
+ * manifest already says which tab lists it — but that path is a guess, and it
+ * is wrong wherever a screen is listed under one tab and opened from another.
+ * Scan a tag is filed under Sites and opened from Tools; Today's run is filed
+ * under Today and opened from Work. A technician handed "Sites → Scan a tag"
+ * taps Sites, finds no such row, and stops believing the rest of the screen.
+ * `auditLinks` checks each of these steps against the real file, so a chain
+ * printed here is a chain that exists.
  */
 function provenChain(route: string, mode: AppMode, seen: Set<string>): string[] | undefined {
   const d = BY_ROUTE.get(route);
   if (!d || seen.has(route) || !d.modes.includes(mode)) return undefined;
   if (d.root) return [route];
-  if (!d.needsContext) {
-    const root = ROOT_BY_TAB[d.tab];
-    return root ? [root, route] : undefined;
-  }
   const next = new Set(seen).add(route);
   let best: string[] | undefined;
   for (const parent of d.openedFrom) {
@@ -849,6 +899,22 @@ export function reach(route: string, mode: AppMode): Reach | undefined {
       route, mode, reachable: true, proven: true, channel, chain,
       sentence: `${pathWords(chain)}.`,
     };
+  }
+
+  // Hidden here, but a screen this mode does show still opens it in the middle
+  // of a piece of work. Saying "go and search for it" would be a lie told to
+  // somebody who was on it a minute ago, so the real path is given instead.
+  if (!d.modes.includes(mode) && d.stillOpenedFrom) {
+    const via = provenChain(d.stillOpenedFrom, mode, new Set());
+    if (via) {
+      const chain = [...via, route];
+      return {
+        route, mode, reachable: true, proven: true, channel: 'opened', chain,
+        sentence:
+          `Not listed in ${MODE_LABEL[mode]}, but ${labelOf(d.stillOpenedFrom)} still opens it: `
+          + `${pathWords(chain)}. Nothing was deleted.`,
+      };
+    }
   }
 
   if (d.modes.includes(mode)) {
@@ -877,8 +943,8 @@ export function reach(route: string, mode: AppMode): Reach | undefined {
     route, mode, reachable: true, proven: false, channel: 'search', chain: [],
     sentence:
       `Not shown in ${MODE_LABEL[mode]}. Search "${d.label.toLowerCase()}" under Settings → `
-      + `Technician or office and it opens from the result, or go straight to ${d.route}. `
-      + 'Nothing was deleted.',
+      + 'Technician or office and it opens from the result, or put this device in '
+      + `${MODE_LABEL['office']} for a minute. Nothing was deleted.`,
   };
 }
 
@@ -955,8 +1021,12 @@ function normalise(s: string): string {
  *
  * Below two characters it returns nothing at all. A one-letter query matches
  * half the app, and half the app is not an answer.
+ *
+ * The mode is required rather than defaulted. `hidden` on every result is a
+ * statement about one mode, and a default would answer it for whichever mode
+ * the caller forgot to mention.
  */
-export function searchDestinations(query: string, mode: AppMode = DEFAULT_MODE, limit = 8): DestinationHit[] {
+export function searchDestinations(query: string, mode: AppMode, limit = 8): DestinationHit[] {
   const q = normalise(query);
   if (q.length < 2) return [];
   const words = q.split(' ');
@@ -1023,6 +1093,48 @@ export function auditManifest(routeFiles: readonly string[]): ManifestAudit {
 }
 
 /**
+ * Checks that every claimed parent really does open its child.
+ *
+ * `auditManifest` proves the screens exist; this proves the links between them
+ * do. That matters because `openedFrom` is what `reach()` prints: an entry
+ * written from memory rather than from the file turns into a tap path on the
+ * settings screen that a technician follows and does not find. Two of them
+ * were wrong when this was first written — the defects list was credited with
+ * opening the critical defect notice, and running a routine with opening the
+ * test sheet, and neither file contains the link.
+ *
+ * Takes a reader rather than touching the filesystem, for the same reason
+ * `auditManifest` takes a list: this module has to load where there is no
+ * `app/` directory. A reader that returns undefined is reported, not assumed
+ * away — an unreadable parent is not a verified one.
+ */
+export function auditLinks(read: (file: string) => string | undefined): string[] {
+  const problems: string[] = [];
+  for (const d of DESTINATIONS) {
+    for (const parentRoute of d.openedFrom) {
+      const parent = BY_ROUTE.get(parentRoute);
+      if (!parent) continue; // validateManifest names this one.
+      const src = read(parent.file);
+      if (src === undefined) {
+        problems.push(`${parent.file} could not be read, so the link to ${d.route} is unverified.`);
+        continue;
+      }
+      // Two forms appear in this app: the object form, which carries the route
+      // verbatim including `[id]`, and a template literal, which carries
+      // everything up to the segment and then interpolates it.
+      const dynamicAt = d.route.indexOf('[');
+      const found = dynamicAt < 0
+        ? [`'${d.route}'`, `"${d.route}"`, `\`${d.route}\``].some((form) => src.includes(form))
+        : src.includes(d.route) || src.includes(`${d.route.slice(0, dynamicAt)}\${`);
+      if (!found) {
+        problems.push(`${parent.file} does not open ${d.route}, but the manifest says it does.`);
+      }
+    }
+  }
+  return problems;
+}
+
+/**
  * Everything that must be true of the manifest, said once.
  *
  * Returns the problems in plain sentences rather than throwing: the settings
@@ -1059,6 +1171,22 @@ export function validateManifest(): string[] {
     if (!d.root && !d.openedFrom.length) problems.push(`${d.route} is opened from nowhere.`);
     for (const parent of d.openedFrom) {
       if (!BY_ROUTE.has(parent)) problems.push(`${d.route} says it opens from ${parent}, which is not in the manifest.`);
+    }
+
+    if (d.stillOpenedFrom) {
+      if (!d.openedFrom.includes(d.stillOpenedFrom)) {
+        problems.push(`${d.route} says ${d.stillOpenedFrom} still opens it but does not list it as an opener.`);
+      }
+      // The promise is only worth making if the screen making it is on the
+      // technician's phone in the mode that hides this one.
+      for (const mode of APP_MODES) {
+        if (!d.modes.includes(mode) && !BY_ROUTE.get(d.stillOpenedFrom)?.modes.includes(mode)) {
+          problems.push(
+            `${d.route} says ${d.stillOpenedFrom} still opens it in ${MODE_LABEL[mode]}, `
+            + `which does not show ${d.stillOpenedFrom} either.`,
+          );
+        }
+      }
     }
   }
 

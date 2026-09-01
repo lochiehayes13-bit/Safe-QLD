@@ -5,8 +5,9 @@ import { File } from 'expo-file-system';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
-  STANDARDS, type StandardDoc, type StandardScope,
+  type StandardDoc, type StandardScope,
 } from '@/domain/standardsCatalogue';
+import { EXPLAINED_CLAUSES, LIBRARY, TOTAL_CLAUSES } from '@/domain/standardsLibrary';
 import { ask, explainQuery, type Answer } from '@/domain/ask';
 import { SYSTEM_LABELS } from '@/seed/assetTypes';
 import {
@@ -177,21 +178,21 @@ export default function LibraryScreen() {
 
   const systems = useMemo(() => {
     const seen = new Set<string>();
-    for (const d of STANDARDS) for (const s of d.systems) seen.add(s);
+    for (const d of LIBRARY) for (const s of d.systems) seen.add(s);
     return [...seen].sort();
   }, []);
 
   const shown = useMemo(
-    () => (system ? STANDARDS.filter((d) => d.systems.includes(system)) : STANDARDS),
+    () => (system ? LIBRARY.filter((d) => d.systems.includes(system)) : LIBRARY),
     [system],
   );
 
   const clauseCount = useMemo(
-    () => STANDARDS.reduce((n, d) => n + d.clauses.length, 0),
+    () => TOTAL_CLAUSES,
     [],
   );
   const writtenUp = useMemo(
-    () => STANDARDS.reduce((n, d) => n + d.clauses.filter((c) => c.covers).length, 0),
+    () => EXPLAINED_CLAUSES,
     [],
   );
 
@@ -284,12 +285,33 @@ export default function LibraryScreen() {
               <Rowed gap={2} align="center">
                 <MaterialCommunityIcons name="bookshelf" size={22} color={t.color.accentText} />
                 <View style={{ flex: 1 }}>
-                  <Txt weight="700">{STANDARDS.length} documents · {clauseCount} clauses</Txt>
+                  <Txt weight="700">{LIBRARY.length} documents · {clauseCount} clauses</Txt>
                   <Txt size="xs" tone="faint" style={{ lineHeight: 16 }}>
                     {writtenUp} written up in plain English. The rest are listed so they can be
                     found and cited, and say nothing further rather than guessing.
                   </Txt>
                 </View>
+              </Rowed>
+            </Card>
+
+            {/*
+              The regulation is the reason the rest of this exists, and it is
+              Crown material rather than a licensed standard — so it is here in
+              full rather than as a clause index, and it goes above the search
+              examples because "what am I actually obliged to do" is the
+              question underneath most of them.
+            */}
+            <Card onPress={() => router.push('/library/law')}>
+              <Rowed gap={2} align="center">
+                <MaterialCommunityIcons name="scale-balance" size={22} color={t.color.accentText} />
+                <View style={{ flex: 1 }}>
+                  <Txt weight="700">The regulation</Txt>
+                  <Txt size="xs" tone="faint" style={{ lineHeight: 16 }}>
+                    Building Fire Safety Regulation 2008, indexed by who has to do what. Every clock
+                    this app counts comes from a section in here.
+                  </Txt>
+                </View>
+                <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
               </Rowed>
             </Card>
 

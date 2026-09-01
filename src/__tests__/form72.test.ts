@@ -1,7 +1,7 @@
 import {
   DECLARATION, DEPARTMENT_NOTE, FORM_72_SOURCES, STANDARD_FLOW_RATES_LPS,
-  flowTableRows, form72Html, frictionalLossGaps, occupierCopyDueBy, testPointOutcome,
-  testerCopyKeepUntil, type Form72DocumentInput,
+  flowTableRows, form72Html, frictionalLossGaps, occupierCopyDue, occupierCopyDueBy,
+  qldCalendarDate, testPointOutcome, testerCopyKeepUntil, type Form72DocumentInput,
 } from '@/export/form72';
 import { MIGRATION_V12 } from '@/db/schemaForm72';
 import {
@@ -172,6 +172,23 @@ describe('N/A is a real answer and a blank is not', () => {
     );
   });
 
+  it('does not add an N/A box to a department part that has none', () => {
+    // Part H's System row prints Pass and Fail and nothing else. A third box
+    // here would be Safe QLD's, printed inside the department's part, where a
+    // reader has no way to tell whose it is.
+    const html = form72Html(doc({ form: issuable({ systemResult: 'na' }) }));
+    const system = between(html, '<td class="k">System</td>', 'System Notes');
+    expect(system).toContain('Pass');
+    expect(system).toContain('Fail');
+    // The empty System Notes box still says N/A, which is the department's own
+    // box answered. What must not appear is a third tick box beside Pass/Fail.
+    expect(system).not.toContain('N/A');
+    const partH = between(html, 'Part H — Compliance', 'Part I —');
+    expect(flat(partH)).toContain(
+      "Recorded as not applicable. The department's System row carries only Pass and Fail",
+    );
+  });
+
   it('marks an unanswered Part H question as unanswered rather than as a No', () => {
     const html = form72Html(doc({ form: issuable({ criticalDefectsIdentified: undefined }) }));
     const partH = between(html, 'Critical Defects Identified', 'Repairs/Corrective Actions');
@@ -260,6 +277,28 @@ describe('a form that cannot be issued says why, on its face', () => {
     const html = form72Html(doc({ form: issuable({ criticalDefectsIdentified: true }) }));
     expect(html).toContain('DRAFT — NOT FOR ISSUE');
     expect(flat(html)).toContain('Critical defects were identified but the system is marked as a pass.');
+  });
+
+  it('says a complete form is still only a draft, because a draft can still be edited', () => {
+    // Nothing is outstanding, so the page prints clean — and a clean print of a
+    // draft is indistinguishable from the statutory record. Hand it over, edit
+    // a figure tomorrow, and the occupier's copy and ours disagree.
+    const html = form72Html(doc({ status: 'draft' }));
+    expect(html).not.toContain('DRAFT — NOT FOR ISSUE');
+    expect(flat(html)).toContain('Draft copy — this form has not been issued');
+    expect(flat(html)).toContain("the occupier's copy is the one that counts");
+  });
+
+  it('says an issued form was issued, and when', () => {
+    const html = form72Html(doc({ status: 'issued', issuedAt: '2026-07-06T02:00:00.000Z' }));
+    expect(flat(html)).toContain('Issued 06/07/2026, and held unaltered since.');
+    expect(html).not.toContain('Draft copy');
+  });
+
+  it('claims neither when the caller did not say which it is', () => {
+    const html = form72Html(doc());
+    expect(html).not.toContain('Draft copy');
+    expect(html).not.toContain('held unaltered since');
   });
 });
 
@@ -408,6 +447,16 @@ describe('Part E — the arithmetic the form asks for', () => {
     expect(flat(html)).toContain('has not proved the pump at overload whatever pressure it held');
   });
 
+  it('shows an overload run recorded against a part marked N/A rather than dropping it', () => {
+    // The run is stored beside the parts, so an N/A booster would otherwise
+    // take a reading somebody took on site off the page without a word.
+    const html = form72Html(doc({
+      form: issuable({ booster: { result: 'na' } }), overload: { flowLps: 24, pressureKpa: 470 },
+    }));
+    expect(flat(html)).toContain('an overload run is recorded against this form (24 L/s at 470 kPa)');
+    expect(flat(html)).toContain('One of the two is wrong');
+  });
+
   it('says the check cannot be stated at all when Part E has no duty on it', () => {
     const html = form72Html(doc({
       form: issuable({ booster: { result: 'pass', boostPressureKpa: 1400 } }),
@@ -493,16 +542,51 @@ describe('the obligations that follow the form', () => {
     expect(flat(html)).toContain('under QDC MP 6.1 acceptable solution A4(b)');
   });
 
-  it('says the deadline is optimistic, because public holidays are not modelled', () => {
-    expect(flat(form72Html(doc()))).toContain('Public holidays are not counted');
+  it('skips Queensland public holidays, so a December job is not given a New Year deadline', () => {
+    // Counting weekends only, a test on Friday 18 December 2026 comes out due
+    // on 1 January 2027 — a public holiday, and wrong by three days. The count
+    // is the app's own, against the holidays the state has appointed, which is
+    // also the count the occupier statement uses for its ten business days.
+    expect(occupierCopyDueBy('2026-12-18')).toBe('2027-01-06');
+    const html = form72Html(doc({ form: issuable({ testDate: '2026-12-18' }) }));
+    expect(flat(html)).toContain('by 06/01/2027');
+    expect(flat(html)).toContain('Christmas Day 25/12/2026');
+    expect(flat(html)).toContain("New Year's Day 01/01/2027");
+  });
+
+  it('names the business day definition it counted under, and what it could not account for', () => {
+    const html = flat(form72Html(doc()));
+    expect(html).toContain('Acts Interpretation Act 1954 (Qld), sch 1 (business day)');
+    expect(html).toContain('No public holiday falls inside that count.');
+    expect(html).toContain('District show and special holidays are appointed per local government area');
+  });
+
+  it('refuses a deadline it would have to invent holidays for, rather than printing one', () => {
+    // The appointed holidays run out at the end of 2029. A date past that is a
+    // guess wearing a date's clothes, and this document is handed to a client.
+    const due = occupierCopyDue('2030-03-02');
+    expect(due.date).toBeUndefined();
+    expect(due.reason).toContain('Queensland public holidays are only known here');
+    const html = form72Html(doc({ form: issuable({ testDate: '2030-03-02' }) }));
+    expect(flat(html)).toContain('The date a copy is due to the occupier cannot be given.');
+    expect(flat(html)).toContain('only known here for 1/1/2025 to 31/12/2029');
   });
 
   it('cannot give a deadline for a form with no test date, and says so', () => {
     expect(occupierCopyDueBy(undefined)).toBeUndefined();
     const html = form72Html(doc({ form: issuable({ testDate: undefined }) }));
     expect(flat(html)).toContain(
-      'The date a copy is due to the occupier cannot be given, because the form has no test date.',
+      'The date a copy is due to the occupier cannot be given. The form has no test date, and the '
+      + 'ten business days run from the day the work was completed.',
     );
+  });
+
+  it('dates the document by the Queensland calendar, not by UTC', () => {
+    // Produced at eight on a Brisbane morning, which is 22:00 the previous day
+    // in UTC. Slicing the timestamp dates the form a day before it existed.
+    expect(qldCalendarDate('2026-07-06T22:00:00.000Z')).toBe('2026-07-07');
+    const html = form72Html(doc({ generatedAt: '2026-07-06T22:00:00.000Z' }));
+    expect(flat(html)).toContain('from the readings recorded on site, 07/07/2026');
   });
 
   it('states the five years the tester keeps their own copy', () => {

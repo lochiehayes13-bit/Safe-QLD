@@ -505,6 +505,44 @@ describe('overdue work goes first', () => {
     expect(visitFor(plan, 'ontime')[0]!.date).toBe('2026-10-02');
   });
 
+  it('says how many days late a breached routine actually landed, when it was not the first day', () => {
+    // A site is attended once. An overdue monthly at a site whose annual cannot
+    // start until the 20th is done on the 20th — one drive instead of two — and
+    // that is the right trade. What is not right is a plan that then says
+    // overdue work "goes first" and leaves the extra fortnight unsaid.
+    const plan = planWork(
+      [
+        routine({
+          siteId: 'a', routineId: 'det-monthly', frequency: 'monthly', state: 'overdue',
+          window: { earliest: '2026-06-01', latest: '2026-08-31' },
+        }),
+        routine({ siteId: 'a', routineId: 'det-annual', window: { earliest: '2026-10-20', latest: '2026-10-30' } }),
+      ],
+      [site({ siteId: 'a' })],
+      options(),
+    );
+    const visits = visitFor(plan, 'a');
+    expect(visits).toHaveLength(1);
+    expect(visits[0]!.urgent).toBe(true);
+    expect(visits[0]!.date).toBe('2026-10-20');
+    // Thirteen working... no: whole days from 1 October, which is what the
+    // office counts a breach in.
+    expect(visits[0]!.daysAfterEarliest).toBe(19);
+    expect(plan.notes.some((n) => /later than the first workable day/i.test(n))).toBe(true);
+  });
+
+  it('reports no delay at all on a breached routine that did get the first day', () => {
+    // The counterpart, so the field above cannot quietly become "always zero"
+    // or "always something".
+    const plan = planWork(
+      [routine({ siteId: 'a', state: 'overdue', window: { earliest: '2026-06-01', latest: '2026-08-31' } })],
+      [site({ siteId: 'a' })],
+      options(),
+    );
+    expect(visitFor(plan, 'a')[0]!.daysAfterEarliest).toBe(0);
+    expect(plan.notes.some((n) => /later than the first workable day/i.test(n))).toBe(false);
+  });
+
   it('does the most overdue first when several have breached', () => {
     const plan = planWork(
       [
@@ -583,20 +621,37 @@ describe('balancing the days', () => {
     // in any order that ignores that — alphabetical, by due date, by site —
     // fills the only day the monthly had with work that could have gone
     // anywhere, and the monthly is the one that breaches.
-    const plan = planWork(
-      [
-        routine({ siteId: 'alpha', window: { earliest: '2026-10-01', latest: '2026-10-02' } }),
-        routine({ siteId: 'zulu', routineId: 'det-monthly', frequency: 'monthly', window: { earliest: '2026-10-01', latest: '2026-10-01' } }),
-      ],
-      [
-        site({ siteId: 'alpha', assetCounts: [{ system: 'detection', count: 50 }] }),
-        site({ siteId: 'zulu', assetCounts: [{ system: 'detection', count: 50 }] }),
-      ],
-      options(),
-    );
-    expect(visitFor(plan, 'zulu')[0]!.date).toBe('2026-10-01');
-    expect(visitFor(plan, 'alpha')[0]!.date).toBe('2026-10-02');
-    expect(plan.unplanned).toHaveLength(0);
+    //
+    // The tight routine here deliberately closes LATER than the loose ones. An
+    // ordering by closing date alone gets the earlier fixture right by accident
+    // and this one wrong, which is the point of arranging it this way: the rule
+    // being proved is "least room to move first", not "earliest deadline first".
+    const tight = routine({
+      siteId: 'tight',
+      routineId: 'det-monthly',
+      frequency: 'monthly',
+      // Friday the 30th is the only working day in it; the 31st is a Saturday.
+      window: { earliest: '2026-10-30', latest: '2026-10-31' },
+    });
+    const loose = Array.from({ length: 5 }, (_, i) => routine({
+      siteId: `loose${i}`,
+      window: { earliest: '2026-10-26', latest: '2026-10-30' },
+    }));
+    const sites = ['tight', ...loose.map((r) => r.siteId)].map((siteId) => site({
+      siteId,
+      // Most of a day each, so the last week of the month holds one visit a day.
+      assetCounts: [{ system: 'detection', count: 50 }],
+    }));
+
+    const plan = planWork([...loose, tight], sites, options());
+
+    // The one with nowhere else to go got its day.
+    expect(visitFor(plan, 'tight')[0]?.date).toBe('2026-10-30');
+    // And the work that gave way is work that had four other days to choose
+    // from, reported by name rather than dropped.
+    expect(plan.unplanned).toHaveLength(1);
+    expect(plan.unplanned[0]!.reason).toBe('no-capacity');
+    expect(plan.unplanned[0]!.siteId).toMatch(/^loose/);
   });
 
   it('shares a day between technicians instead of overloading one', () => {
