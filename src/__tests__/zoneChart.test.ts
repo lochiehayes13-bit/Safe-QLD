@@ -143,6 +143,21 @@ describe('laying it out for a page', () => {
     expect(suggestedColumns(474)).toBe(4);
   });
 
+  it('changes column at the size it says it does, not one either side', () => {
+    /*
+     * Each threshold is the last count that still fits. Off by one and a chart
+     * gains a column it does not need or, worse, keeps one too few and runs
+     * onto a second sheet — which for a zone chart means the half at the panel
+     * and the half in somebody's van.
+     */
+    expect(suggestedColumns(24)).toBe(1);
+    expect(suggestedColumns(25)).toBe(2);
+    expect(suggestedColumns(60)).toBe(2);
+    expect(suggestedColumns(61)).toBe(3);
+    expect(suggestedColumns(150)).toBe(3);
+    expect(suggestedColumns(151)).toBe(4);
+  });
+
   it('never loses a row to columnising, at any size', () => {
     for (const size of [1, 5, 24, 32, 60, 150, 474]) {
       const rows = Array.from({ length: size }, (_, i) => ({

@@ -75,6 +75,17 @@ describe('entryHours', () => {
     expect(entryHours(entry({ startTime: '22:00', finishTime: '02:30' }))).toBe(4.5);
   });
 
+  it('reads the same start and finish as no time at all, not as a full day round', () => {
+    /*
+     * The overnight case and this one are the same comparison, and it decides
+     * between nought hours and twenty-four. A finish before a start means the
+     * shift crossed midnight and a day is added; a finish equal to the start is
+     * a typo or an abandoned row, and adding a day to it puts twenty-four
+     * hours on somebody's pay.
+     */
+    expect(entryHours(entry({ startTime: '06:30', finishTime: '06:30' }))).toBe(0);
+  });
+
   it('honours a manual override', () => {
     expect(entryHours(entry({ startTime: '06:30', finishTime: '14:30', hoursOverride: '7.5' }))).toBe(7.5);
   });
@@ -150,6 +161,36 @@ describe('validateTimesheet', () => {
   it('flags an implausibly long entry', () => {
     const issues = validateTimesheet(sheet([entry({ startTime: '04:00', finishTime: '23:00' })]));
     expect(issues.some((i) => i.message.includes('hours in one entry'))).toBe(true);
+  });
+
+  it('says an entry ending when it started is exactly that', () => {
+    // A row somebody started and did not finish. Silently worth twenty-four
+    // hours if the span is read the wrong way, and worth saying out loud
+    // either way.
+    const issues = validateTimesheet(sheet([entry({ startTime: '06:30', finishTime: '06:30' })]));
+    expect(issues.some((i) => i.message.includes('start and finish are the same'))).toBe(true);
+    expect(issues.some((i) => i.message.includes('hours in one entry'))).toBe(false);
+  });
+
+  it('treats a half-filled pair of times as no times, not as a bad shift', () => {
+    /*
+     * A start typed and the finish still to come. Counted as a complete pair
+     * it works out to nought hours and is reported as "start and finish are
+     * the same", which sends somebody looking at two times when only one is
+     * there.
+     */
+    const issues = validateTimesheet(sheet([entry({ finishTime: '' })]));
+    expect(issues.some((i) => i.message.includes('no times'))).toBe(true);
+    expect(issues.some((i) => i.message.includes('start and finish are the same'))).toBe(false);
+  });
+
+  it('leaves a sixteen-hour day alone and questions the one past it', () => {
+    // Sixteen hours is a long day and a real one — a full day and a callout
+    // on the end of it. Seventeen is worth a second look.
+    expect(validateTimesheet(sheet([entry({ startTime: '05:00', finishTime: '21:00' })]))
+      .some((i) => i.message.includes('hours in one entry'))).toBe(false);
+    expect(validateTimesheet(sheet([entry({ startTime: '05:00', finishTime: '22:00' })]))
+      .some((i) => i.message.includes('hours in one entry'))).toBe(true);
   });
 
   it('flags hours booked with no site name', () => {
