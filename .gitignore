@@ -90,3 +90,6 @@ app/**/*.js.map
 *.orig
 *.rej
 *~
+# The directory and, in a worktree, the symlink to it.
+node_modules
+node_modules/
