@@ -157,7 +157,7 @@ jobs:
           open this on the phone, tap the file when it finishes, and allow
           installing from that source when asked. It appears as **Safe QLD**.
 
-          Built from `${{ github.sha }}` on ${{ github.ref_name }}.
+          Built from `${{ github.event.pull_request.head.sha || github.sha }}` on ${{ github.head_ref || github.ref_name }}.
 
           Signed with the standard Android debug key: fine to sideload, not
           accepted by the Play Store.
