@@ -127,7 +127,7 @@ export function newestChange(
  * here anyway so "how current is this device" covers the figures a quote is
  * built from, which are the ones it is most costly to have stale.
  */
-export type SyncResource = 'sites' | 'jobs' | 'assets' | 'employees' | 'rates';
+export type SyncResource = 'sites' | 'jobs' | 'assets' | 'employees' | 'schedules' | 'rates';
 
 export interface SyncState {
   resource: SyncResource;

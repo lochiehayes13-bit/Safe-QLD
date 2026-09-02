@@ -334,6 +334,28 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['map', 'waze', 'navigate', 'directions', 'sites map', 'where', 'google maps'],
   },
 
+  // -- You in Simpro ---------------------------------------------------------
+  {
+    route: '/signin', file: 'app/signin.tsx', tab: 'today', section: 'You in Simpro',
+    label: 'Sign in to Simpro', modes: BOTH, openedFrom: ['/settings', '/whoami'],
+    blurb:
+      'The same login as Simpro Mobile, so the app knows who you are and notes you write are '
+      + 'yours in the office system.',
+    terms: ['sign in', 'login', 'log in', 'simpro login', 'account', 'password'],
+  },
+  {
+    route: '/whoami', file: 'app/whoami.tsx', tab: 'today', section: 'You in Simpro',
+    label: 'Who you are', modes: BOTH, openedFrom: ['/settings', '/signin', '/work/my-day'],
+    blurb: 'Pick yourself from the office employee list, for phones that do not sign in.',
+    terms: ['who am i', 'employee', 'technician', 'name', 'identity', 'pick'],
+  },
+  {
+    route: '/work/my-day', file: 'app/work/my-day.tsx', tab: 'today', section: 'You in Simpro',
+    label: 'My day', modes: BOTH, openedFrom: ['/shortcuts'],
+    blurb: 'The jobs the office has scheduled for you, today, tomorrow and the weeks ahead.',
+    terms: ['my day', 'my jobs', 'schedule', 'roster', 'today', 'tomorrow', 'scheduled for me'],
+  },
+
   // -- Sites -----------------------------------------------------------------
   {
     route: '/sites', file: 'app/(tabs)/sites.tsx', tab: 'sites', section: 'Your sites',

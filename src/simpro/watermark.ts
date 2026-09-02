@@ -52,6 +52,6 @@ export async function writeSyncState(state: SyncState, now: string): Promise<voi
 }
 
 export async function readAllSyncState(): Promise<SyncState[]> {
-  const resources: SyncResource[] = ['sites', 'jobs', 'assets', 'employees'];
+  const resources: SyncResource[] = ['sites', 'jobs', 'assets', 'employees', 'schedules'];
   return Promise.all(resources.map(readSyncState));
 }

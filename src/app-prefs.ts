@@ -22,6 +22,17 @@ export interface Prefs {
    */
   appMode: string;
   technicianName: string;
+  /**
+   * Which Simpro employee this phone belongs to, and their address there.
+   *
+   * Simpro's own id rather than a name, because the id is what a schedule
+   * block carries and what survives a rename. Blank until somebody picks
+   * themselves from the synced staff list or signs in with their Simpro
+   * login. The display name above is seeded from it only where it was blank
+   * and stays the technician's to edit — it is what goes on a report.
+   */
+  simproEmployeeId: string;
+  simproEmployeeEmail: string;
   technicianLicence: string;
   vehicleRego: string;
   companyName: string;
@@ -86,6 +97,8 @@ export const DEFAULT_PREFS: Prefs = {
   // who did not need it.
   appMode: 'technician',
   technicianName: '',
+  simproEmployeeId: '',
+  simproEmployeeEmail: '',
   technicianLicence: '',
   vehicleRego: '',
   companyName: 'Safe QLD Pty Ltd',

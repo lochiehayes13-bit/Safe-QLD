@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Linking, Switch, View } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SimproClient } from '@/simpro/client';
 import { simproConfigFromPrefs } from '@/simpro/config';
@@ -26,6 +26,13 @@ import { effectiveRateCard, formatCents, parseCents, type LabourRate, type Servi
 import type { RateCardImport } from '@/simpro/rateCard';
 import { formatBytes } from '@/share/pack';
 import { MODE_BLURB, MODE_LABEL, readMode } from '@/domain/appMode';
+import { signOut } from '@/simpro/auth';
+import { readSignedOutReason, readUserSession, type UserSession } from '@/simpro/userSession';
+import { describeBuild, describeUpdateCheck } from '@/domain/updateCheck';
+import { buildInfo } from '@/update/buildInfo';
+import {
+  checkForUpdate, clearToken as clearGhToken, hasToken as hasGhToken, storeToken as storeGhToken, useUpdateCheck,
+} from '@/update/check';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
 
@@ -37,6 +44,11 @@ export default function SettingsScreen() {
   const [hasSecret, setHasSecret] = useState(false);
   const [aiKey, setAiKey] = useState('');
   const [hasAi, setHasAi] = useState(false);
+  const [ghToken, setGhToken] = useState('');
+  /** The person signed in to Simpro on this phone, and why they are not if the app ended it. */
+  const [session, setSession] = useState<UserSession | null>(null);
+  const [signedOutReason, setSignedOutReason] = useState<string | null>(null);
+  const [hasGh, setHasGh] = useState(false);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ name: string; readable: boolean; total: number | null; error?: string }[] | null>(null);
   /** What the last connection attempt actually established, kept beside the endpoint list. */
@@ -67,12 +79,18 @@ export default function SettingsScreen() {
   const bundled = bundledCatalogueSize();
   /** What the automatic sync last did, and whether one is running now. */
   const auto = useAutoSync();
+  /** Whether a newer build has been published, and when that was last asked. */
+  const updateCheck = useUpdateCheck();
+  const build = useMemo(() => buildInfo(), []);
 
   useEffect(() => {
     void loadPrefs().then(setPrefs);
     void loadRateCard().then(setCard);
     void SimproClient.hasSecret().then(setHasSecret);
     void hasAiKey().then(setHasAi);
+    void hasGhToken().then(setHasGh);
+    void readUserSession().then(setSession);
+    void readSignedOutReason().then(setSignedOutReason);
     void readAllSyncState().then(setSyncState);
     void pendingSyncCount().then(setPending);
     void startCatalogueSeed()
@@ -86,6 +104,14 @@ export default function SettingsScreen() {
       setStorage(0);
     }
   }, []);
+
+  // Sign-in and the staff picker push over this screen and pop back; what
+  // they changed has to show without a remount.
+  useFocusEffect(useCallback(() => {
+    void loadPrefs().then(setPrefs);
+    void readUserSession().then(setSession);
+    void readSignedOutReason().then(setSignedOutReason);
+  }, []));
 
   // An automatic run changes what "how current" and "waiting to sync" say, and
   // this screen may well be open while one finishes.
@@ -303,6 +329,61 @@ export default function SettingsScreen() {
         <Field label="Company" value={prefs.companyName} onChangeText={(v) => update({ companyName: v })} />
         <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
           These prefill reports, baseline data and timesheets so you are not retyping them on every job.
+        </Txt>
+      </Card>
+
+      <H2>You in Simpro</H2>
+      <Card>
+        {prefs.simproEmployeeId ? (
+          <Rowed gap={3}>
+            <MaterialCommunityIcons name="account-check-outline" size={22} color={t.color.pass} />
+            <View style={{ flex: 1 }}>
+              <Txt weight="700">{prefs.technicianName || `Employee ${prefs.simproEmployeeId}`}</Txt>
+              <Txt size="sm" tone="muted">
+                Employee {prefs.simproEmployeeId}{prefs.simproEmployeeEmail ? ` · ${prefs.simproEmployeeEmail}` : ''}
+              </Txt>
+            </View>
+          </Rowed>
+        ) : (
+          <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
+            This phone does not know who holds it yet. Sign in with your Simpro login, or pick yourself
+            from the staff list.
+          </Txt>
+        )}
+        <View style={{ height: t.space(2.5) }} />
+        <Rowed gap={2}>
+          <Button title="Sign in with Simpro" onPress={() => router.push('/signin')} style={{ flex: 1 }} />
+          <Button
+            title={prefs.simproEmployeeId ? 'Change who I am' : 'Pick who I am'}
+            variant="secondary"
+            onPress={() => router.push('/whoami')}
+            style={{ flex: 1 }}
+          />
+        </Rowed>
+        {session ? (
+          <>
+            <View style={{ height: t.space(2.5) }} />
+            <Rowed gap={2}>
+              <Txt size="sm" tone="pass" style={{ flex: 1 }}>
+                Signed in{session.label ? ` as ${session.label}` : ''}. Notes you write are yours in Simpro.
+              </Txt>
+              <Button
+                title="Sign out"
+                variant="ghost"
+                compact
+                onPress={() => { void signOut().then(() => { setSession(null); setSignedOutReason(null); }); }}
+              />
+            </Rowed>
+          </>
+        ) : signedOutReason ? (
+          <>
+            <View style={{ height: t.space(2.5) }} />
+            <Banner tone="warn" title="Signed out by the app" body={signedOutReason} />
+          </>
+        ) : null}
+        <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
+          Signing in uses the same login as Simpro Mobile. Until someone signs in, this phone talks to
+          Simpro as the office's shared API key, and My day filters the schedule by the name above.
         </Txt>
       </Card>
 
@@ -809,6 +890,66 @@ export default function SettingsScreen() {
           Calculations and reference data follow Australian practice and cite their sources where they have one. They do not
           replace the current standard, the panel manufacturer's documentation, or your own judgement on site.
         </Txt>
+        <Divider />
+        <Label>This build</Label>
+        <Txt size="sm" style={{ marginTop: 4 }}>{describeBuild(build)}</Txt>
+        {build.version ? <Txt size="xs" tone="faint">Version {build.version}</Txt> : null}
+        <Txt
+          size="xs"
+          tone={updateCheck.record.result?.verdict === 'newer' ? 'accent' : updateCheck.record.lastError ? 'warn' : 'faint'}
+          style={{ marginTop: t.space(1.5), lineHeight: 17 }}
+        >
+          {updateCheck.inFlight ? 'Checking for a newer build…' : describeUpdateCheck(updateCheck.record, new Date())}
+        </Txt>
+        <View style={{ height: t.space(2) }} />
+        <Button
+          title="Check now"
+          variant="secondary"
+          compact
+          loading={updateCheck.inFlight}
+          onPress={() => { void checkForUpdate({ force: true }); }}
+        />
+        <Divider />
+        {hasGh ? (
+          <>
+            <Txt size="sm" tone="pass">A GitHub token is held in this device's keystore.</Txt>
+            <View style={{ height: t.space(2.5) }} />
+            <Button
+              title="Remove the token"
+              variant="ghost"
+              compact
+              onPress={() => { void clearGhToken().then(() => setHasGh(false)); }}
+            />
+          </>
+        ) : (
+          <>
+            <Field
+              label="GitHub token for update checks (optional)"
+              value={ghToken}
+              onChangeText={setGhToken}
+              placeholder="github_pat_…"
+              autoCapitalize="none"
+              hint="Only needed while the releases are on the private repository. A fine-grained token with read-only access to that one repository is enough. Held in the hardware keystore, never in ordinary app storage."
+            />
+            <View style={{ height: t.space(2.5) }} />
+            <Button
+              title="Save the token"
+              variant="secondary"
+              compact
+              disabled={!ghToken.trim()}
+              onPress={() => {
+                if (!ghToken.trim()) return;
+                void storeGhToken(ghToken).then(() => {
+                  setGhToken('');
+                  setHasGh(true);
+                  // The token was pasted because the last check could not
+                  // see the release; ask again with it straight away.
+                  void checkForUpdate({ force: true });
+                });
+              }}
+            />
+          </>
+        )}
         <View style={{ height: t.space(2) }} />
         <Button title="Safe QLD website" variant="ghost" compact onPress={() => void Linking.openURL('https://www.safeqldfire.com.au')} />
       </Card>

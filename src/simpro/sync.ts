@@ -1,10 +1,13 @@
 import { SimproClient, SimproError, type SimproConfig } from './client';
-import { SimproResources } from './resources';
+import { SimproResources, scheduleDateFilter } from './resources';
 import { assessIncremental, nextWatermark, planIncremental, type SyncResource } from './incremental';
 import { readSyncState, writeSyncState } from './watermark';
 import { flushSoon } from './flushSoon';
 import { createSite, listSites, updateSite } from '@/db/repo';
 import { saveRateCard } from '@/db/rateCardRepo';
+import { replaceEmployees } from '@/db/employeeRepo';
+import { replaceScheduleWindow } from '@/db/scheduleRepo';
+import { scheduleWindow } from '@/domain/myDay';
 import { upsertJob, enqueueSync, pendingSync, markSynced, markSyncFailed, type JobRecord } from '@/db/opsRepo';
 import { matchSiteByRefOrName } from '@/domain/siteNames';
 import type { OutboundAssetTest } from '@/domain/outboundWork';
@@ -53,6 +56,10 @@ export interface SyncResult {
   /** Labour rates and service fees read from the office system's setup. */
   ratesRead: number;
   feesRead: number;
+  /** Staff on the office's books, so a phone can say whose it is. */
+  employeesRead: number;
+  /** Schedule blocks in the window around today, for everyone — the day screen filters. */
+  schedulesRead: number;
   errors: string[];
   /**
    * Whether each resource actually came down incrementally.
@@ -104,7 +111,7 @@ export async function pullFromSimpro(
   const result: SyncResult = {
     sitesAdded: 0, sitesUpdated: 0, jobsAdded: 0, jobsUpdated: 0,
     assetsAdded: 0, assetsUpdated: 0, assetsWithoutSite: 0,
-    ratesRead: 0, feesRead: 0,
+    ratesRead: 0, feesRead: 0, employeesRead: 0, schedulesRead: 0,
     errors: [], modes: {}, notes: [],
   };
   const startedAt = new Date().toISOString();
@@ -115,11 +122,11 @@ export async function pullFromSimpro(
   const missing = await SimproClient.missingCredentials(config);
   if (missing) {
     result.errors.push(missing);
-    onProgress?.({ stage: 'Not connected', done: 0, total: 4 });
+    onProgress?.({ stage: 'Not connected', done: 0, total: 6 });
     return result;
   }
 
-  onProgress?.({ stage: 'Reading sites', done: 0, total: 4 });
+  onProgress?.({ stage: 'Reading sites', done: 0, total: 6 });
 
   // Read against the watermark even on a full pull: the mark is still recorded,
   // so switching back to incremental later has somewhere to start from.
@@ -225,7 +232,7 @@ export async function pullFromSimpro(
     }, startedAt);
   }
 
-  onProgress?.({ stage: 'Reading jobs', done: 1, total: 4 });
+  onProgress?.({ stage: 'Reading jobs', done: 1, total: 6 });
 
   const jobState = await readSyncState('jobs');
   const jobPlan = planIncremental('jobs', jobState.lastChangeSeenAt, { force });
@@ -263,7 +270,7 @@ export async function pullFromSimpro(
     result.errors.push(describe(e, 'jobs'));
   }
 
-  onProgress?.({ stage: 'Reading assets', done: 2, total: 4 });
+  onProgress?.({ stage: 'Reading assets', done: 2, total: 6 });
 
   /*
    * The register itself: 12,546 assets across 898 of the office's sites.
@@ -378,7 +385,7 @@ export async function pullFromSimpro(
     result.errors.push(describe(e, 'assets'));
   }
 
-  onProgress?.({ stage: 'Reading rates', done: 3, total: 4 });
+  onProgress?.({ stage: 'Reading rates', done: 3, total: 6 });
 
   // Always whole: the setup endpoints carry no modification date, so there is
   // nothing to ask "what changed" against. It is cheap — a rate card is tens of
@@ -412,7 +419,84 @@ export async function pullFromSimpro(
     result.errors.push(describe(e, 'rates'));
   }
 
-  onProgress?.({ stage: 'Done', done: 4, total: 4 });
+  onProgress?.({ stage: 'Reading employees', done: 4, total: 6 });
+
+  /*
+   * The staff list, whole, every time. A few dozen rows, no modification date
+   * to filter on, and the reason it exists is to let a phone say whose it is —
+   * so somebody who has left must stop being offered, which only a wholesale
+   * replace guarantees. Its own try: a key that cannot read employees still
+   * gets its sites and assets, and says so in one line.
+   */
+  try {
+    const people = await api.employees();
+    result.employeesRead = await replaceEmployees(people);
+    result.modes.employees = 'full';
+    result.notes.push(
+      `${result.employeesRead} ${result.employeesRead === 1 ? 'employee' : 'employees'} read from Simpro.`,
+    );
+    await writeSyncState({
+      resource: 'employees',
+      lastSyncedAt: startedAt,
+      lastChangeSeenAt: startedAt,
+      lastRecordCount: result.employeesRead,
+      mode: 'full',
+    }, startedAt);
+  } catch (e) {
+    result.errors.push(describe(e, 'employees'));
+  }
+
+  onProgress?.({ stage: 'Reading schedules', done: 5, total: 6 });
+
+  /*
+   * The office's schedule for a window around today — a week back, three
+   * weeks ahead — for everyone, so the day screen can pick out one person's
+   * without a second sync when the phone learns whose it is.
+   *
+   * One read with a date-range filter, which Simpro documents but this
+   * sandbox could not confirm against the build. If the build rejects the
+   * filter the server's own words go into the notes, and today and tomorrow
+   * are read a day at a time instead, so the technician still gets the two
+   * days that matter most. The window replaced locally is the one actually
+   * read, so a fallback does not throw away the rest of the month.
+   */
+  try {
+    const window = scheduleWindow(startedAt);
+    let covered = { from: window.from, to: window.to };
+    let blocks: Awaited<ReturnType<SimproResources['schedulesBetween']>>;
+    try {
+      blocks = await api.schedulesBetween(window.from, window.to);
+    } catch (e) {
+      const rejectedFilter = e instanceof SimproError && (e.status === 400 || e.status === 422);
+      if (!rejectedFilter) throw e;
+      result.notes.push(
+        `Simpro rejected the schedule date filter Date=${scheduleDateFilter(window.from, window.to)} `
+        + `— it said: ${e.message} Only today and tomorrow were read, a day at a time.`,
+      );
+      blocks = [
+        ...(await api.schedulesForDate(window.today)),
+        ...(await api.schedulesForDate(window.tomorrow)),
+      ];
+      covered = { from: window.today, to: window.tomorrow };
+    }
+    result.schedulesRead = await replaceScheduleWindow(covered.from, covered.to, blocks);
+    result.modes.schedules = 'full';
+    result.notes.push(
+      `${result.schedulesRead} schedule ${result.schedulesRead === 1 ? 'block' : 'blocks'} read `
+      + `for ${covered.from} to ${covered.to}.`,
+    );
+    await writeSyncState({
+      resource: 'schedules',
+      lastSyncedAt: startedAt,
+      lastChangeSeenAt: startedAt,
+      lastRecordCount: result.schedulesRead,
+      mode: 'full',
+    }, startedAt);
+  } catch (e) {
+    result.errors.push(describe(e, 'schedules'));
+  }
+
+  onProgress?.({ stage: 'Done', done: 6, total: 6 });
   return result;
 }
 

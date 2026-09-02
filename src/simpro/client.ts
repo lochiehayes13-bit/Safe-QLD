@@ -1,4 +1,10 @@
 import * as SecureStore from 'expo-secure-store';
+import {
+  describeOAuthFailure, expiresAtFrom, parseTokenResponse, tokenRequestBody, tokenUrl,
+  type TokenGrant, type TokenSet,
+} from './oauth';
+import { clearUserSession, readUserSession, writeUserSession } from './userSession';
+import type { CurrentUser } from './identity';
 
 /**
  * Simpro REST API client.
@@ -21,9 +27,6 @@ import * as SecureStore from 'expo-secure-store';
 
 const TOKEN_KEY = 'safeqld.simpro.token';
 const SECRET_KEY = 'safeqld.simpro.clientSecret';
-
-/** Refresh this far ahead of expiry so an in-flight request never carries a dead token. */
-const EXPIRY_MARGIN_SECONDS = 120;
 
 /** The build limit is 10/sec; pacing below it leaves headroom for office traffic. */
 const REQUESTS_PER_SECOND = 8;
@@ -129,61 +132,133 @@ export class SimproClient {
 
   // ------------------------------------------------------------------- token
 
-  private async fetchToken(): Promise<string> {
-    // Behind a proxy the server holds the credentials; the device sends none.
-    if (this.config.proxyUrl) return 'proxy';
-
-    const secret = await SecureStore.getItemAsync(SECRET_KEY);
-    if (!secret) {
+  /**
+   * One token request for every grant the app uses.
+   *
+   * The office's API key (client_credentials), a person's password, the code
+   * a browser login hands back, and a refresh all go through the same door,
+   * because they differ only in the form body — ./oauth builds it — and in
+   * how a refusal is worded. The client-credentials wording is kept as it
+   * was: that refusal is the one a technician can fix in Settings, and it
+   * has to read as such rather than as a raw OAuth error.
+   */
+  static async tokenExchange(config: SimproConfig, grant: TokenGrant): Promise<TokenSet> {
+    const secret = config.proxyUrl ? undefined : ((await SecureStore.getItemAsync(SECRET_KEY)) ?? undefined);
+    if (!config.proxyUrl && !secret) {
       throw new SimproError('No Simpro client secret is stored on this device. Add it in Settings.');
     }
 
-    const body = new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: this.config.clientId,
-      client_secret: secret,
-    }).toString();
-
-    const res = await fetch(`https://${this.config.buildDomain}/oauth2/token`, {
+    const res = await fetch(tokenUrl(config), {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
-      body,
+      body: tokenRequestBody(config, grant, secret),
     });
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      // Simpro answers bad client credentials with 400 and an `invalid_client`
-      // body, not 401. Matching only on 401 meant the one error a person can
-      // actually fix surfaced as a raw HTTP dump with a JSON blob in it.
-      const badCredentials = res.status === 401 || (res.status === 400 && text.includes('invalid_client'));
-      throw new SimproError(
-        badCredentials
-          ? 'Simpro rejected the client ID or secret. Check them in Settings, and confirm the secret has not been regenerated.'
-          : `Could not get a Simpro token (HTTP ${res.status}). ${text.slice(0, 200)}`,
-        res.status,
-      );
+      if (grant.grant_type === 'client_credentials') {
+        // Simpro answers bad client credentials with 400 and an `invalid_client`
+        // body, not 401. Matching only on 401 meant the one error a person can
+        // actually fix surfaced as a raw HTTP dump with a JSON blob in it.
+        const badCredentials = res.status === 401 || (res.status === 400 && text.includes('invalid_client'));
+        throw new SimproError(
+          badCredentials
+            ? 'Simpro rejected the client ID or secret. Check them in Settings, and confirm the secret has not been regenerated.'
+            : `Could not get a Simpro token (HTTP ${res.status}). ${text.slice(0, 200)}`,
+          res.status,
+        );
+      }
+      throw new SimproError(describeOAuthFailure(res.status, text), res.status);
     }
 
-    const json = (await res.json()) as { access_token?: string; expires_in?: number };
-    if (!json.access_token) throw new SimproError('Simpro returned no access token.');
+    try {
+      return parseTokenResponse(await res.json());
+    } catch (e) {
+      throw new SimproError(e instanceof Error ? e.message : String(e), res.status);
+    }
+  }
 
-    const lifetime = json.expires_in ?? 3600;
-    this.token = {
-      accessToken: json.access_token,
-      expiresAt: Date.now() + (lifetime - EXPIRY_MARGIN_SECONDS) * 1000,
-    };
-    return json.access_token;
+  /** The office's own token. Behind a proxy the server holds the credentials; the device sends none. */
+  private async fetchToken(): Promise<string> {
+    if (this.config.proxyUrl) return 'proxy';
+    const t = await SimproClient.tokenExchange(this.config, { grant_type: 'client_credentials' });
+    this.token = { accessToken: t.accessToken, expiresAt: expiresAtFrom(Date.now(), t.expiresInSeconds) };
+    return t.accessToken;
+  }
+
+  /**
+   * The signed-in person's token, or null when there is nobody signed in.
+   *
+   * A person's session comes first so that what they write is theirs in the
+   * office system. A spent session is renewed with its refresh token; one the
+   * server will not renew is ended, with the server's words kept for
+   * Settings, and the office's key carries on underneath — a sync must not
+   * stop because somebody's login lapsed overnight.
+   */
+  private async userToken(): Promise<string | null> {
+    const session = await readUserSession();
+    if (!session) return null;
+    if (Date.now() < session.expiresAt) {
+      this.token = { accessToken: session.accessToken, expiresAt: session.expiresAt };
+      return session.accessToken;
+    }
+    if (!session.refreshToken) {
+      await clearUserSession('Your Simpro sign-in expired and the build gave no way to renew it. Sign in again.');
+      return null;
+    }
+    try {
+      const t = await SimproClient.tokenExchange(this.config, {
+        grant_type: 'refresh_token', refresh_token: session.refreshToken,
+      });
+      const expiresAt = expiresAtFrom(Date.now(), t.expiresInSeconds);
+      await writeUserSession({
+        accessToken: t.accessToken,
+        refreshToken: t.refreshToken ?? session.refreshToken,
+        expiresAt,
+        label: session.label,
+      });
+      this.token = { accessToken: t.accessToken, expiresAt };
+      return t.accessToken;
+    } catch (e) {
+      await clearUserSession(`Simpro would not renew your sign-in: ${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }
+  }
+
+  private async resolveToken(): Promise<string> {
+    if (this.config.proxyUrl) return 'proxy';
+    return (await this.userToken()) ?? this.fetchToken();
   }
 
   private async getToken(): Promise<string> {
     if (this.token && Date.now() < this.token.expiresAt) return this.token.accessToken;
     // Collapse concurrent refreshes so a burst of calls triggers one token request.
     if (!this.tokenPromise) {
-      this.tokenPromise = this.fetchToken().finally(() => {
+      this.tokenPromise = this.resolveToken().finally(() => {
         this.tokenPromise = null;
       });
     }
     return this.tokenPromise;
+  }
+
+  /**
+   * Who the current token belongs to, in Simpro's words, or null where the
+   * build does not offer the endpoint. Any field may be missing.
+   */
+  async currentUser(): Promise<CurrentUser | null> {
+    try {
+      const { data } = await this.request<{ ID?: number | string; Name?: string; Email?: string }>(
+        'GET', `${this.apiRoot}/currentUser/`,
+      );
+      return {
+        id: data.ID !== undefined && data.ID !== null ? String(data.ID) : undefined,
+        name: data.Name?.trim() || undefined,
+        email: data.Email?.trim() || undefined,
+      };
+    } catch (e) {
+      if (e instanceof SimproError && e.status === 404) return null;
+      throw e;
+    }
   }
 
   // ------------------------------------------------------------------ paceing
