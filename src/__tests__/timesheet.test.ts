@@ -395,3 +395,26 @@ describe('hydrating an entry from an older saved sheet', () => {
     expect(hydrateEntry(raw, () => 'gen').extras).toEqual(['Call-out', 'Travel']);
   });
 });
+
+describe('week dates on a Brisbane phone', () => {
+  // The bug this guards was invisible under jest's UTC clock: weekDates built
+  // local-midnight dates and read them back as UTC, one day early east of
+  // Greenwich. These assert the calendar is stable regardless of device zone.
+  const withTz = (tz: string, fn: () => void) => {
+    const prev = process.env.TZ;
+    process.env.TZ = tz;
+    try { fn(); } finally { process.env.TZ = prev; }
+  };
+
+  it('starts the week on the day asked for, in Brisbane', () => {
+    withTz('Australia/Brisbane', () => {
+      expect(weekDates('2026-08-31')[0]).toBe('2026-08-31');
+      expect(weekDates('2026-08-31')[6]).toBe('2026-09-06');
+    });
+  });
+
+  it('names the weekday the same in Brisbane and in UTC', () => {
+    withTz('Australia/Brisbane', () => { expect(dayName('2026-08-31')).toBe('Mon'); });
+    withTz('UTC', () => { expect(dayName('2026-08-31')).toBe('Mon'); });
+  });
+});

@@ -146,17 +146,23 @@ const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 /** Short weekday name for an ISO date, as the sheet prints it. */
 export function dayName(isoDate: string): string {
-  const d = new Date(`${isoDate}T00:00:00`);
-  return Number.isNaN(d.getTime()) ? '' : (DAY_NAMES[d.getDay()] ?? '');
+  // Built on UTC so a date-only string reads as the same weekday on every
+  // device, rather than shifting on a phone east or west of Greenwich.
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) ? '' : (DAY_NAMES[d.getUTCDay()] ?? '');
 }
 
 /** The seven ISO dates of the week beginning on the given date. */
 export function weekDates(weekStarting: string): string[] {
-  const start = new Date(`${weekStarting}T00:00:00`);
+  // All UTC. The old version built the start date at local midnight and then
+  // read the days back with toISOString(), which is UTC — so on a Brisbane
+  // phone every date on the sheet came out a day early. A timesheet is a
+  // calendar of days, not instants, so it is computed in one zone throughout.
+  const start = new Date(`${weekStarting}T00:00:00Z`);
   if (Number.isNaN(start.getTime())) return [];
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(start);
-    d.setDate(start.getDate() + i);
+    d.setUTCDate(start.getUTCDate() + i);
     return d.toISOString().slice(0, 10);
   });
 }

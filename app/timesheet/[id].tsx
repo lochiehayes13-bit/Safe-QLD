@@ -17,7 +17,8 @@ import {
 import { timesheetSheet, timesheetSummarySheet } from '@/export/safeqldForms';
 import { formatAuDate } from '@/export/sheets';
 import { shareFile, writeXlsx } from '@/export/files';
-import { newId } from '@/db';
+import { newId, nowIso } from '@/db';
+import { qldIsoDay } from '@/domain/qldTime';
 import { useTheme, type Theme } from '@/theme';
 import { Button, Card, Chip, Rowed, Screen, Txt } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
@@ -233,7 +234,7 @@ function DayCard({
   const leave = entries.map(leaveOf).find(Boolean) ?? null;
   const jobs = entries.filter((e) => !leaveOf(e));
   const worked = dayWorkedHours(entries, date);
-  const isToday = date === new Date().toISOString().slice(0, 10);
+  const isToday = date === (qldIsoDay(nowIso()) ?? '');
 
   return (
     <Card style={{ borderColor: isToday ? t.color.accent : t.color.border, borderWidth: isToday ? 2 : 1 }}>

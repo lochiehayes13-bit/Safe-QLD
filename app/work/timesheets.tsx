@@ -4,6 +4,8 @@ import { Stack, router, useFocusEffect } from 'expo-router';
 import { createTimesheet, listTimesheets } from '@/db/timesheetRepo';
 import { timesheetTotals, type Timesheet } from '@/domain/timesheet';
 import { loadPrefs } from '@/app-prefs';
+import { qldIsoDay } from '@/domain/qldTime';
+import { nowIso } from '@/db';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
 import { Button, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
@@ -18,14 +20,19 @@ export default function TimesheetsScreen() {
 
   const startWeek = async () => {
     const prefs = await loadPrefs();
-    // Weeks start on the Monday of the current week.
-    const now = new Date();
-    const day = now.getDay();
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - ((day + 6) % 7));
+    // The Monday of the current Queensland week. Built from the Queensland
+    // calendar day rather than the device clock: before 10am a UTC day is
+    // still yesterday here, and a week that starts on Sunday reads as wrong.
+    // qldIsoDay only refuses an unparseable instant, and nowIso() never is one.
+    const todayIso = qldIsoDay(nowIso());
+    if (!todayIso) return;
+    const noon = new Date(`${todayIso}T12:00:00Z`);
+    const weekday = noon.getUTCDay();
+    noon.setUTCDate(noon.getUTCDate() - ((weekday + 6) % 7));
+    const monday = noon.toISOString().slice(0, 10);
 
     const sheet = await createTimesheet({
-      weekStarting: monday.toISOString().slice(0, 10),
+      weekStarting: monday,
       employeeName: prefs.technicianName,
       vehicleRego: prefs.vehicleRego,
     });
