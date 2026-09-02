@@ -164,30 +164,6 @@ const str = (v: unknown): string | undefined => {
   return s === '' ? undefined : s;
 };
 
-const SCHEDULE_COLUMNS = 'ID,Type,Reference,Staff,Date,Blocks,Job';
-
-/**
- * One schedule row, however it was asked for.
- *
- * A block can be split across the day — two hours in the morning and two
- * after another site — so the start is the first block's and the end is the
- * last's. Anything between is the same job and does not need saying.
- */
-function mapSchedule(s: RawSchedule, fallbackDate: string): SimproScheduleBlock {
-  const blocks = s.Blocks ?? [];
-  return {
-    id: String(s.ID ?? ''),
-    jobId: s.Job?.ID !== undefined ? String(s.Job.ID) : undefined,
-    reference: str(s.Reference),
-    staffId: s.Staff?.ID !== undefined ? String(s.Staff.ID) : undefined,
-    staffName: str(s.Staff?.Name),
-    date: str(s.Date) ?? fallbackDate,
-    startTime: str(blocks[0]?.StartTime),
-    endTime: str(blocks[blocks.length - 1]?.EndTime),
-    type: str(s.Type),
-  };
-}
-
 export class SimproResources {
   constructor(private readonly client: SimproClient) {}
 
@@ -274,27 +250,19 @@ export class SimproResources {
 
   async schedulesForDate(date: string, maxRecords = 500): Promise<SimproScheduleBlock[]> {
     const raw = await this.client.listAll<RawSchedule>('schedules/', {
-      columns: SCHEDULE_COLUMNS,
+      columns: 'ID,Type,Reference,Staff,Date,Blocks,Job',
       Date: date,
     }, maxRecords);
-    return raw.map((s) => mapSchedule(s, date));
-  }
-
-  /**
-   * Every schedule block dated between two days, inclusive.
-   *
-   * One read for the whole window rather than one per day: the window the
-   * sync uses is four weeks, and twenty-eight reads a sync — paced at eight
-   * a second, on every phone, twice a day — is not nothing on a build shared
-   * with the office. Whether the build honours the filter is the caller's to
-   * find out; it is told the server's exact words if not.
-   */
-  async schedulesBetween(from: string, to: string, maxRecords = 2000): Promise<SimproScheduleBlock[]> {
-    const raw = await this.client.listAll<RawSchedule>('schedules/', {
-      columns: SCHEDULE_COLUMNS,
-      Date: scheduleDateFilter(from, to),
-    }, maxRecords);
-    return raw.map((s) => mapSchedule(s, from));
+    return raw.map((s) => ({
+      id: String(s.ID ?? ''),
+      jobId: s.Job?.ID !== undefined ? String(s.Job.ID) : undefined,
+      reference: str(s.Reference),
+      staffName: str(s.Staff?.Name),
+      date: str(s.Date) ?? date,
+      startTime: str(s.Blocks?.[0]?.StartTime),
+      endTime: str(s.Blocks?.[0]?.EndTime),
+      type: str(s.Type),
+    }));
   }
 
   async employees(maxRecords = 500): Promise<SimproEmployee[]> {
@@ -310,7 +278,6 @@ export class SimproResources {
       email: str(e.PrimaryContact?.Email),
       phone: str(e.PrimaryContact?.CellPhone) ?? str(e.PrimaryContact?.WorkPhone),
       position: str(e.Position),
-      archived: e.Archived === true,
     }));
   }
 
