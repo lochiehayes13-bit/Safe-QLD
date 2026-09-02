@@ -1,9 +1,20 @@
 import {
+  blankEntry,
+  copyDay,
   dayName,
+  dayWorkedHours,
   entryHours,
+  filterJobOptions,
   groupByDate,
+  hydrateEntry,
+  jobOptions,
+  leaveOf,
   parseTime,
+  previousDayWithEntries,
+  setLeave,
   timesheetTotals,
+  toggleExtra,
+  usualTimes,
   validateTimesheet,
   weekDates,
   type Timesheet,
@@ -27,6 +38,7 @@ function entry(p: Partial<TimesheetEntry> = {}): TimesheetEntry {
     lwop: p.lwop ?? '',
     publicHoliday: p.publicHoliday ?? '',
     comments: p.comments ?? '',
+    extras: p.extras ?? [],
   };
 }
 
@@ -233,5 +245,153 @@ describe('dates', () => {
     ]);
     expect(groups.map((g) => g.date)).toEqual(['2026-08-12', '2026-08-13']);
     expect(groups[0]!.entries).toHaveLength(2);
+  });
+});
+
+/**
+ * The day-oriented editor.
+ *
+ * The screen thinks in two shapes — a job with hours, or a day off of one
+ * kind — and these are the translations between that and the flat row payroll
+ * still receives. The failures worth guarding are a leave column that outlives
+ * a switch to a worked day, a copy that quietly carries yesterday's leave, and
+ * a job list that offers a job twice.
+ */
+describe('leave on an entry', () => {
+  const base = (): TimesheetEntry => ({
+    id: 'e', date: '2026-09-07', jobNumber: '', siteName: '', serviceReportNumber: '',
+    startTime: '', finishTime: '', hourKind: 'ord',
+    sick: '', rdo: '', annual: '', lwop: '', publicHoliday: '', comments: '', extras: [],
+  });
+
+  it('reads the one leave column that is set', () => {
+    expect(leaveOf({ ...base(), annual: '7.6' })).toEqual({ kind: 'annual', hours: 7.6 });
+  });
+
+  it('is null for a worked day', () => {
+    expect(leaveOf({ ...base(), startTime: '06:30', finishTime: '14:30' })).toBeNull();
+  });
+
+  it('setting a leave kind clears the times and every other leave column', () => {
+    const worked = { ...base(), startTime: '06:30', finishTime: '14:30', sick: '4' };
+    const off = setLeave(worked, 'annual', 7.6);
+    expect({ annual: off.annual, sick: off.sick, start: off.startTime, finish: off.finishTime })
+      .toEqual({ annual: '7.6', sick: '', start: '', finish: '' });
+  });
+
+  it('setting hours to zero clears the day off, so a mistaken tap is undoable', () => {
+    const off = setLeave(base(), 'rdo', 7.6);
+    expect(leaveOf(setLeave(off, 'rdo', 0))).toBeNull();
+  });
+});
+
+describe('allowances', () => {
+  it('adds one and takes it away, case-insensitively', () => {
+    const e = blankEntry('e', '2026-09-07');
+    const withCallout = toggleExtra(e, 'Call-out');
+    expect(withCallout.extras).toEqual(['Call-out']);
+    expect(toggleExtra(withCallout, 'call-out').extras).toEqual([]);
+  });
+
+  it('will not add a blank label', () => {
+    expect(toggleExtra(blankEntry('e', '2026-09-07'), '   ').extras).toEqual([]);
+  });
+});
+
+describe('copying the previous day', () => {
+  const day = (date: string, over: Partial<TimesheetEntry> = {}) => ({ ...blankEntry(`${date}-${Math.random()}`, date), jobNumber: '43747', siteName: 'BRIC', startTime: '06:30', finishTime: '14:30', ...over });
+  let n = 0;
+  const ids = () => `new-${++n}`;
+
+  it('carries the jobs, times and allowances but not the report number or notes', () => {
+    const entries = [day('2026-09-07', { serviceReportNumber: 'SR-1', comments: 'did a thing', extras: ['Call-out'] })];
+    const [copied] = copyDay(entries, '2026-09-07', '2026-09-08', ids);
+    expect({ job: copied!.jobNumber, start: copied!.startTime, extras: copied!.extras, sr: copied!.serviceReportNumber, notes: copied!.comments })
+      .toEqual({ job: '43747', start: '06:30', extras: ['Call-out'], sr: '', notes: '' });
+  });
+
+  it('never copies a day off', () => {
+    const entries = [setLeave(blankEntry('x', '2026-09-07'), 'annual', 7.6)];
+    expect(copyDay(entries, '2026-09-07', '2026-09-08', ids)).toEqual([]);
+  });
+
+  it('finds the nearest earlier day that has entries', () => {
+    const entries = [day('2026-09-07'), day('2026-09-09')];
+    expect(previousDayWithEntries(entries, '2026-09-10')).toBe('2026-09-09');
+    expect(previousDayWithEntries(entries, '2026-09-08')).toBe('2026-09-07');
+    expect(previousDayWithEntries(entries, '2026-09-07')).toBeNull();
+  });
+
+  it('counts only worked hours in a day, not leave', () => {
+    const entries = [day('2026-09-07'), setLeave(blankEntry('l', '2026-09-07'), 'annual', 7.6)];
+    expect(dayWorkedHours(entries, '2026-09-07')).toBe(8);
+  });
+});
+
+describe('the job list', () => {
+  const mkSheet = (weekStarting: string, es: Partial<TimesheetEntry>[]): Timesheet => ({
+    id: `s-${weekStarting}`, employeeName: 'L', vehicleRego: '', kilometerReading: '',
+    weekStarting, entries: es.map((e, i) => ({ ...blankEntry(`e${i}`, weekStarting), ...e })),
+    managerName: '', checkedBy: '', status: 'submitted', createdAt: '', updatedAt: '',
+  });
+
+  it('offers the most recent jobs first and never the same one twice', () => {
+    const sheets = [
+      mkSheet('2026-08-24', [{ jobNumber: '100', siteName: 'A' }]),
+      mkSheet('2026-08-31', [{ jobNumber: '200', siteName: 'B' }, { jobNumber: '100', siteName: 'A' }]),
+    ];
+    const opts = jobOptions(sheets, []);
+    expect(opts.map((o) => o.jobNumber)).toEqual(['200', '100']);
+  });
+
+  it('adds the office open jobs after the recent ones and drops completed', () => {
+    const opts = jobOptions([], [
+      { externalId: '900', siteName: 'Open site', status: 'scheduled' },
+      { externalId: '901', siteName: 'Done site', status: 'complete' },
+    ]);
+    expect(opts.map((o) => o.jobNumber)).toEqual(['900']);
+  });
+
+  it('does not offer a day off as a job', () => {
+    const off = mkSheet('2026-08-31', [{ annual: '7.6' }]);
+    expect(jobOptions([off], [])).toEqual([]);
+  });
+
+  it('filters by number or site, case-insensitively', () => {
+    const opts = jobOptions([], [
+      { externalId: '900', siteName: 'Emsworth St', status: 'scheduled' },
+      { externalId: '901', siteName: 'Carina Depot', status: 'scheduled' },
+    ]);
+    expect(filterJobOptions(opts, 'ems').map((o) => o.jobNumber)).toEqual(['900']);
+    expect(filterJobOptions(opts, '901').map((o) => o.siteName)).toEqual(['Carina Depot']);
+  });
+});
+
+describe('the usual times', () => {
+  const mk = (start: string, finish: string): TimesheetEntry => ({ ...blankEntry('e', '2026-09-07'), startTime: start, finishTime: finish });
+  it('is the pair worked most often', () => {
+    const sheet: Timesheet = {
+      id: 's', employeeName: '', vehicleRego: '', kilometerReading: '', weekStarting: '2026-09-07',
+      entries: [mk('06:30', '14:30'), mk('06:30', '14:30'), mk('07:00', '15:00')],
+      managerName: '', checkedBy: '', status: 'draft', createdAt: '', updatedAt: '',
+    };
+    expect(usualTimes([sheet])).toEqual({ start: '06:30', finish: '14:30' });
+  });
+  it('falls back to the standard day when there is no history', () => {
+    expect(usualTimes([])).toEqual({ start: '06:30', finish: '14:30' });
+  });
+});
+
+describe('hydrating an entry from an older saved sheet', () => {
+  it('fills a missing extras array and every missing text field', () => {
+    const raw = { id: 'e', date: '2026-09-07', jobNumber: '1' } as Partial<TimesheetEntry>;
+    const e = hydrateEntry(raw, () => 'gen');
+    expect({ extras: e.extras, sick: e.sick, comments: e.comments, hourKind: e.hourKind })
+      .toEqual({ extras: [], sick: '', comments: '', hourKind: 'ord' });
+  });
+
+  it('drops a non-string that snuck into extras', () => {
+    const raw = { extras: ['Call-out', 5, '', 'Travel'] } as unknown as Partial<TimesheetEntry>;
+    expect(hydrateEntry(raw, () => 'gen').extras).toEqual(['Call-out', 'Travel']);
   });
 });

@@ -228,7 +228,9 @@ export function timesheetSheet(sheet: Timesheet): Sheet {
         input(e.annual),
         input(e.lwop),
         input(e.publicHoliday),
-        input(e.comments),
+        // Extras go in with the comments rather than in columns of their own,
+        // so the sheet keeps the shape payroll's template has.
+        input([...(e.extras ?? []), e.comments].filter((x) => x.trim()).join(' · ')),
       ]);
     });
   }

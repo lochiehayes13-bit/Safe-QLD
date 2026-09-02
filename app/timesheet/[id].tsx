@@ -1,189 +1,121 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, View } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { getTimesheet, saveTimesheet } from '@/db/timesheetRepo';
-import { listSites } from '@/db/repo';
+import * as MailComposer from 'expo-mail-composer';
+import { getTimesheet, listTimesheets, saveTimesheet } from '@/db/timesheetRepo';
+import { listJobs, type JobRecord } from '@/db/opsRepo';
 import {
-  dayName, entryHours, groupByDate, timesheetTotals, validateTimesheet, weekDates,
-  type HourKind, type Timesheet, type TimesheetEntry,
+  DEFAULT_EXTRAS, LEAVE_KINDS, LEAVE_LABEL, STANDARD_DAY_HOURS,
+  blankEntry, copyDay, dayName, dayWorkedHours, entryHours, filterJobOptions, jobOptions,
+  leaveOf, previousDayWithEntries, setLeave, timesheetTotals, toggleExtra, usualTimes, weekDates,
+  type HourKind, type JobOption, type LeaveKind, type Timesheet, type TimesheetEntry,
 } from '@/domain/timesheet';
-import { valueTimesheet } from '@/domain/timesheetValue';
-import { effectiveRateCard, formatCents } from '@/domain/rates';
-import { loadRateCard, type StoredRateCard } from '@/db/rateCardRepo';
-import { loadPrefs, DEFAULT_PREFS, type Prefs } from '@/app-prefs';
-import type { Site } from '@/domain/types';
+import {
+  TIMESHEET_INBOX, timesheetBody, timesheetNotReady, timesheetSubject,
+} from '@/domain/timesheetEmail';
 import { timesheetSheet, timesheetSummarySheet } from '@/export/safeqldForms';
 import { formatAuDate } from '@/export/sheets';
 import { shareFile, writeXlsx } from '@/export/files';
-import * as MailComposer from 'expo-mail-composer';
-import {
-  TIMESHEET_INBOX,
-  timesheetBody,
-  timesheetNotReady,
-  timesheetSubject,
-} from '@/domain/timesheetEmail';
 import { newId } from '@/db';
-import { useTheme } from '@/theme';
-import {
-  Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Segmented, StatTile, Txt,
-} from '@/components/ui';
+import { useTheme, type Theme } from '@/theme';
+import { Button, Card, Chip, Rowed, Screen, Txt } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
 
 /**
- * Weekly timesheet.
+ * The weekly timesheet, rebuilt around the day.
  *
- * Hours are derived from start and finish rather than typed, and the sheet
- * flags the things the office sends back — a malformed time, hours with no job
- * against them — before it is submitted rather than a week later.
+ * The old screen laid out every payroll column on every row — three hour
+ * buckets and five leave boxes — and asked the technician to be a payroll
+ * clerk on a phone. This one thinks the way the day does: each day is either
+ * a run of jobs with hours, or it is off. So a job is picked from a list of
+ * the jobs they actually work, the hours default to the times they usually
+ * start and finish, and a day off is one tap and one number rather than
+ * finding the right box among five.
+ *
+ * The heavy things payroll still needs — overtime, the rate-card value — are
+ * one tap away on the entry rather than in front of every entry. Everything
+ * still lands in the same xlsx the office already reads.
  */
 export default function TimesheetScreen() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [sheet, setSheet] = useState<Timesheet | null>(null);
-  // Loaded-and-absent is not the same as still loading. See RecordGate.
   const [missing, setMissing] = useState(false);
-  const [sites, setSites] = useState<Site[]>([]);
+  const [jobs, setJobs] = useState<JobRecord[]>([]);
+  const [history, setHistory] = useState<Timesheet[]>([]);
   const [busy, setBusy] = useState(false);
-  const [showIssues, setShowIssues] = useState(true);
-  const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
-  const [card, setCard] = useState<StoredRateCard>({ rates: [], fees: [] });
-  const [chargeAttendance, setChargeAttendance] = useState(false);
-  const [showValue, setShowValue] = useState(false);
+  const [picking, setPicking] = useState<{ date: string } | null>(null);
 
   useEffect(() => {
     if (!id) return;
-    void getTimesheet(id).then((found) => {
-      setSheet(found);
-      setMissing(!found);
-    });
-    void listSites().then(setSites);
-    void loadPrefs().then(setPrefs);
-    void loadRateCard().then(setCard);
+    void getTimesheet(id).then((found) => { setSheet(found); setMissing(!found); });
+    void listJobs({ limit: 400 }).then(setJobs);
+    void listTimesheets().then(setHistory);
   }, [id]);
 
-  const update = useCallback((patch: Partial<Timesheet>) => {
-    setSheet((prev) => {
-      if (!prev) return prev;
-      const next = { ...prev, ...patch };
-      void saveTimesheet(next);
-      return next;
-    });
+  const persist = useCallback((next: Timesheet) => {
+    setSheet(next);
+    void saveTimesheet(next);
   }, []);
 
-  const updateEntry = useCallback((entryId: string, patch: Partial<TimesheetEntry>) => {
+  const setEntries = useCallback((entries: TimesheetEntry[]) => {
     setSheet((prev) => {
       if (!prev) return prev;
-      const next = { ...prev, entries: prev.entries.map((e) => (e.id === entryId ? { ...e, ...patch } : e)) };
+      const next = { ...prev, entries };
       void saveTimesheet(next);
       return next;
     });
   }, []);
 
   const totals = useMemo(() => (sheet ? timesheetTotals(sheet) : null), [sheet]);
-  const issues = useMemo(() => (sheet ? validateTimesheet(sheet) : []), [sheet]);
   const days = useMemo(() => (sheet ? weekDates(sheet.weekStarting) : []), [sheet]);
+  const options = useMemo(
+    () => jobOptions(history.filter((h) => h.id !== id), jobs.map((j) => ({
+      externalId: j.externalId, siteName: j.siteName, status: j.status,
+    }))),
+    [history, jobs, id],
+  );
+  const times = useMemo(() => usualTimes(history), [history]);
 
-  /**
-   * The other side of the sheet: what the week's attendances are worth.
-   *
-   * A timesheet is a payroll document, so this is deliberately behind a tap and
-   * labelled as an estimate. It exists because the figure otherwise arrives a
-   * month later in the invoice run, by which time a week priced wrongly is
-   * already history.
-   */
-  const value = useMemo(() => {
-    if (!sheet) return null;
-    const eff = effectiveRateCard(card, prefs);
-    if (!eff.rates.length && !eff.fees.length) return null;
-    return { ...valueTimesheet(sheet, { ...eff, chargeAttendance }), note: eff.note };
-  }, [sheet, prefs, card, chargeAttendance]);
+  if (!sheet || !totals) return <RecordGate missing={missing} what="timesheet" />;
 
-  const addEntry = (date: string) => {
-    if (!sheet) return;
-    const entry: TimesheetEntry = {
-      id: newId(),
-      date,
-      jobNumber: '',
-      siteName: '',
-      serviceReportNumber: '',
-      startTime: '',
-      finishTime: '',
-      hourKind: 'ord',
-      sick: '',
-      rdo: '',
-      annual: '',
-      lwop: '',
-      publicHoliday: '',
-      comments: '',
-    };
-    update({ entries: [...sheet.entries, entry] });
+  const addJob = (date: string, opt: JobOption | null) => {
+    const entry = blankEntry(newId(), date);
+    entry.startTime = times.start;
+    entry.finishTime = times.finish;
+    if (opt) { entry.jobNumber = opt.jobNumber; entry.siteName = opt.siteName; entry.siteId = opt.siteId; }
+    setEntries([...sheet.entries, entry]);
+    setPicking(null);
   };
 
-  const exportSheet = async () => {
-    if (!sheet) return;
-    setBusy(true);
-    try {
-      const name = `Timesheet ${sheet.employeeName || ''} ${formatAuDate(sheet.weekStarting)}`.trim();
-      const file = writeXlsx(name, [timesheetSheet(sheet), timesheetSummarySheet(sheet)]);
-      await shareFile(file, 'Timesheet');
-    } finally {
-      setBusy(false);
-    }
+  const dupPrevious = (date: string) => {
+    const from = previousDayWithEntries(sheet.entries, date);
+    if (!from) { Alert.alert('Nothing to copy', 'No earlier day this week has any jobs on it yet.'); return; }
+    const copied = copyDay(sheet.entries, from, date, newId);
+    if (!copied.length) { Alert.alert('Nothing to copy', `${dayName(from)} is a day off, so there is nothing to bring across.`); return; }
+    setEntries([...sheet.entries, ...copied]);
   };
 
-  /**
-   * Sends the week to accounts.
-   *
-   * Opens the technician's own mail app with everything filled in rather than
-   * posting it from somewhere in the background. That means the email genuinely
-   * comes from them — payroll can reply to the person who worked the hours —
-   * and they see what is being sent before it goes, which matters when the
-   * thing being sent is their own pay.
-   *
-   * The sheet is marked submitted only once the mail app reports it sent. A
-   * cancelled email leaving a sheet marked submitted is how a week goes
-   * missing: the technician believes it is gone and the office never had it.
-   */
   const emailSheet = async () => {
-    if (!sheet) return;
-
     const blocked = timesheetNotReady(sheet);
-    if (blocked) {
-      Alert.alert('Not ready to send', blocked);
-      return;
-    }
-
+    if (blocked) { Alert.alert('Not ready to send', blocked); return; }
     setBusy(true);
     try {
       if (!(await MailComposer.isAvailableAsync())) {
-        Alert.alert(
-          'No mail app set up',
-          'This phone has no email account configured, so the timesheet cannot be sent from here. '
-          + 'Use Export instead and attach the file yourself.',
-        );
+        Alert.alert('No mail app set up', 'This phone has no email account configured. Use Export and attach the file yourself.');
         return;
       }
-
       const name = `Timesheet ${sheet.employeeName || ''} ${formatAuDate(sheet.weekStarting)}`.trim();
       const file = writeXlsx(name, [timesheetSheet(sheet), timesheetSummarySheet(sheet)]);
-
       const { status } = await MailComposer.composeAsync({
-        recipients: [TIMESHEET_INBOX],
-        subject: timesheetSubject(sheet),
-        body: timesheetBody(sheet),
-        attachments: [file.uri],
+        recipients: [TIMESHEET_INBOX], subject: timesheetSubject(sheet), body: timesheetBody(sheet), attachments: [file.uri],
       });
-
       if (status === MailComposer.MailComposerStatus.SENT) {
-        update({ status: 'submitted' });
-        Alert.alert('Sent', `Your timesheet has gone to ${TIMESHEET_INBOX} and is marked submitted.`);
+        persist({ ...sheet, status: 'submitted' });
+        Alert.alert('Sent', `Your week has gone to ${TIMESHEET_INBOX} and is marked submitted.`);
       } else {
-        // Covers cancelled and saved-as-draft alike. Neither reached anyone.
-        Alert.alert(
-          'Not sent',
-          'The email was not sent, so this sheet is still a draft. Nothing has gone to the office.',
-        );
+        Alert.alert('Not sent', 'The email was not sent, so this sheet is still a draft. Nothing has gone to the office.');
       }
     } catch (e) {
       Alert.alert('Could not send', e instanceof Error ? e.message : String(e));
@@ -192,296 +124,382 @@ export default function TimesheetScreen() {
     }
   };
 
-  // `totals` is derived from the sheet, so a missing sheet is the only reason
-  // both are absent — but a sheet that loaded with no derivable totals is a
-  // different fault, and this does not claim the record is gone for it.
-  if (!sheet) return <RecordGate missing={missing} what="timesheet" />;
-  if (!totals) {
-    return (
-      <Screen>
-        <Txt tone="muted">Working out the week&rsquo;s totals…</Txt>
-      </Screen>
-    );
-  }
+  const exportSheet = async () => {
+    setBusy(true);
+    try {
+      const name = `Timesheet ${sheet.employeeName || ''} ${formatAuDate(sheet.weekStarting)}`.trim();
+      const file = writeXlsx(name, [timesheetSheet(sheet), timesheetSummarySheet(sheet)]);
+      await shareFile(file, 'Timesheet');
+    } finally { setBusy(false); }
+  };
 
-  const grouped = groupByDate(sheet.entries);
-  const byDate = new Map(grouped.map((g) => [g.date, g.entries]));
+  const extraChoices = useMemo(() => {
+    const used = new Set<string>();
+    for (const h of history) for (const e of h.entries) for (const x of e.extras ?? []) used.add(x);
+    const out = [...DEFAULT_EXTRAS];
+    for (const x of used) if (!out.some((y) => y.toLowerCase() === x.toLowerCase())) out.push(x);
+    return out;
+  }, [history]);
 
   return (
     <>
       <Stack.Screen options={{ title: `Week of ${formatAuDate(sheet.weekStarting)}` }} />
       <Screen>
-        <Rowed gap={2}>
-          <StatTile label="Ordinary" value={totals.ord} />
-          <StatTile label="Overtime" value={totals.ot} tone={totals.ot ? 'warn' : 'default'} />
-          <StatTile label="Double" value={totals.dt} tone={totals.dt ? 'warn' : 'default'} />
-          <StatTile label="Total" value={totals.grand} tone="accent" />
-        </Rowed>
+        <View style={{ gap: t.space(1) }}>
+          <Rowed gap={2}>
+            <Txt size="display" weight="800" style={{ letterSpacing: -1, flex: 1 }}>{totals.grand}<Txt size="lg" tone="muted" weight="700"> h</Txt></Txt>
+            <Chip label={sheet.status === 'submitted' ? 'Submitted' : 'Draft'} tone={sheet.status === 'submitted' ? 'pass' : 'warn'} />
+          </Rowed>
+          <Rowed gap={2} wrap>
+            <Txt size="sm" tone="muted">{totals.worked} worked</Txt>
+            {totals.ot ? <Txt size="sm" tone="warn">· {totals.ot} O/T</Txt> : null}
+            {totals.dt ? <Txt size="sm" tone="warn">· {totals.dt} D/T</Txt> : null}
+            {totals.grand - totals.worked ? <Txt size="sm" tone="muted">· {Math.round((totals.grand - totals.worked) * 100) / 100} leave</Txt> : null}
+            {!sheet.employeeName.trim() ? <Txt size="sm" tone="fail">· no name set</Txt> : null}
+          </Rowed>
+        </View>
 
-        {issues.length && showIssues ? (
-          <Pressable onPress={() => setShowIssues(false)}>
-            <Banner
-              tone="warn"
-              title={`${issues.length} thing${issues.length === 1 ? '' : 's'} to check before submitting`}
-              body={issues.slice(0, 6).map((i) => i.message).join('\n')}
-            />
-          </Pressable>
-        ) : null}
+        {days.map((date) => (
+          <DayCard
+            key={date}
+            date={date}
+            entries={sheet.entries.filter((e) => e.date === date)}
+            theme={t}
+            extraChoices={extraChoices}
+            onAdd={() => setPicking({ date })}
+            onQuickAdd={() => addJob(date, null)}
+            onDuplicate={() => dupPrevious(date)}
+            onLeave={(kind, hours) => {
+              const existing = sheet.entries.find((e) => e.date === date && leaveOf(e));
+              if (existing) {
+                setEntries(sheet.entries.map((e) => e.id === existing.id ? setLeave(e, kind, hours) : e));
+              } else {
+                setEntries([...sheet.entries, setLeave(blankEntry(newId(), date), kind, hours)]);
+              }
+            }}
+            onChange={(entry) => setEntries(sheet.entries.map((e) => e.id === entry.id ? entry : e))}
+            onRemove={(entryId) => setEntries(sheet.entries.filter((e) => e.id !== entryId))}
+            canDuplicate={previousDayWithEntries(sheet.entries, date) !== null}
+          />
+        ))}
 
         <Card>
-          <Field label="Employee" value={sheet.employeeName} onChangeText={(v) => update({ employeeName: v })} autoCapitalize="words" />
-          <View style={{ height: t.space(2.5) }} />
-          <Rowed gap={2} align="flex-start">
-            <View style={{ flex: 1 }}>
-              <Field label="Vehicle rego" value={sheet.vehicleRego} onChangeText={(v) => update({ vehicleRego: v })} autoCapitalize="characters" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Field label="Kilometers" value={sheet.kilometerReading} onChangeText={(v) => update({ kilometerReading: v })} keyboardType="numeric" />
-            </View>
+          <Txt size="xs" tone="faint" weight="700" style={{ textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: t.space(2) }}>Your details</Txt>
+          <LabeledInput label="Name" value={sheet.employeeName} onChange={(v) => persist({ ...sheet, employeeName: v })} autoCapitalize="words" theme={t} />
+          <Rowed gap={2} align="flex-start" style={{ marginTop: t.space(2) }}>
+            <View style={{ flex: 1 }}><LabeledInput label="Vehicle" value={sheet.vehicleRego} onChange={(v) => persist({ ...sheet, vehicleRego: v })} autoCapitalize="characters" theme={t} /></View>
+            <View style={{ flex: 1 }}><LabeledInput label="Odometer" value={sheet.kilometerReading} onChange={(v) => persist({ ...sheet, kilometerReading: v })} keyboardType="numeric" theme={t} /></View>
           </Rowed>
         </Card>
 
-        <H2>Days</H2>
-        {days.map((date) => {
-          const entries = byDate.get(date) ?? [];
-          const dayTotal = entries.reduce((n, e) => n + entryHours(e), 0);
-          return (
-            <Card key={date}>
-              <Rowed style={{ justifyContent: 'space-between' }}>
-                <Rowed gap={2}>
-                  <Txt weight="700">{dayName(date)}</Txt>
-                  <Txt tone="muted" size="sm">{formatAuDate(date)}</Txt>
-                </Rowed>
-                {dayTotal > 0 ? <Chip label={`${dayTotal} h`} tone="accent" /> : null}
-              </Rowed>
-
-              {entries.map((e) => (
-                <EntryEditor
-                  key={e.id}
-                  entry={e}
-                  sites={sites}
-                  onChange={(patch) => updateEntry(e.id, patch)}
-                  onRemove={() => update({ entries: sheet.entries.filter((x) => x.id !== e.id) })}
-                />
-              ))}
-
-              <Button
-                title={entries.length ? 'Add another entry' : 'Add entry'}
-                variant="ghost"
-                compact
-                onPress={() => addEntry(date)}
-                style={{ marginTop: t.space(2) }}
-              />
-            </Card>
-          );
-        })}
-
-        {value ? (
-          <>
-            <H2>What this week is worth</H2>
-            <Card>
-              {!showValue ? (
-                <Button
-                  title={`Price ${value.hours} hour${value.hours === 1 ? '' : 's'} at the rate card`}
-                  variant="secondary"
-                  onPress={() => setShowValue(true)}
-                />
-              ) : (
-                <>
-                  <Segmented
-                    value={chargeAttendance ? 'callout' : 'contract'}
-                    onChange={(v) => setChargeAttendance(v === 'callout')}
-                    options={[
-                      { value: 'contract', label: 'Contract visit' },
-                      { value: 'callout', label: 'Chargeable callout' },
-                    ]}
-                  />
-                  <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 16 }}>
-                    {chargeAttendance
-                      ? 'The attendance fee is charged once per visit and covers its stated minutes; only the time past that bills again.'
-                      : 'Routine servicing under an agreement: hours only, no attendance fee.'}
-                  </Txt>
-                  <Divider />
-                  {value.entries.map((v) => (
-                    <Rowed key={v.entryId} style={{ justifyContent: 'space-between' }} align="flex-start">
-                      <View style={{ flex: 1 }}>
-                        <Txt size="sm">{v.siteName || v.jobNumber}</Txt>
-                        <Txt size="xs" tone="faint">
-                          {formatAuDate(v.date)} · {v.hours} hr{v.hours === 1 ? '' : 's'}
-                          {v.band === 'after-hours' ? ' · after hours' : ''}
-                        </Txt>
-                      </View>
-                      <Txt size="sm">{formatCents(v.charge.totalCents)}</Txt>
-                    </Rowed>
-                  ))}
-                  <Divider />
-                  <Rowed style={{ justifyContent: 'space-between' }}>
-                    <Txt size="sm" tone="muted">Excluding GST</Txt>
-                    <Txt size="sm" tone="muted">{formatCents(value.subtotalCents)}</Txt>
-                  </Rowed>
-                  <Rowed style={{ justifyContent: 'space-between', marginTop: t.space(1) }}>
-                    <Txt size="sm" weight="700">Week, inc GST</Txt>
-                    <Txt size="sm" weight="700">{formatCents(value.totalCents)}</Txt>
-                  </Rowed>
-                  {value.warnings.length ? (
-                    <Txt size="xs" tone="warn" style={{ marginTop: t.space(2), lineHeight: 16 }}>
-                      {value.warnings.join(' ')}
-                    </Txt>
-                  ) : null}
-                  <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 16 }}>
-                    {value.note}
-                  </Txt>
-                  <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5), lineHeight: 16 }}>
-                    An estimate, not an invoice. Variations, agreed caps
-                    and what the contract already covers are not visible from a timesheet — the
-                    office system raises the bill.
-                  </Txt>
-                </>
-              )}
-            </Card>
-          </>
-        ) : null}
-
-        <H2>Sign off</H2>
-        <Card>
-          <Field label="Manager" value={sheet.managerName} onChangeText={(v) => update({ managerName: v })} autoCapitalize="words" />
-          <View style={{ height: t.space(2.5) }} />
-          <Field label="Checked by" value={sheet.checkedBy} onChangeText={(v) => update({ checkedBy: v })} autoCapitalize="words" />
-        </Card>
-
+        <Button title="Email to accounts" onPress={() => { void emailSheet(); }} loading={busy} icon={<MaterialCommunityIcons name="send-outline" size={20} color={t.color.onAccent} />} />
         <Rowed gap={2}>
+          <Button title="Export" variant="secondary" onPress={() => { void exportSheet(); }} loading={busy} style={{ flex: 1 }} />
           <Button
-            title={sheet.status === 'submitted' ? 'Mark as draft' : 'Mark submitted'}
-            variant="secondary"
+            title={sheet.status === 'submitted' ? 'Back to draft' : 'Mark submitted'}
+            variant="ghost"
+            onPress={() => persist({ ...sheet, status: sheet.status === 'submitted' ? 'draft' : 'submitted' })}
             style={{ flex: 1 }}
-            onPress={() => update({ status: sheet.status === 'submitted' ? 'draft' : 'submitted' })}
           />
-          <Button title="Export" variant="secondary" onPress={exportSheet} loading={busy} style={{ flex: 1 }} />
         </Rowed>
-
-        <Button title="Email to accounts" onPress={emailSheet} loading={busy} />
         <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-          Opens your own mail app with the week filled in and the sheet attached, addressed to{' '}
-          {TIMESHEET_INBOX}. It sends from you, so payroll can reply to you, and nothing is marked
-          submitted until the mail app says it went.
-        </Txt>
-
-        <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-          Hours come from the start and finish times. Enter an override only when the times do not tell the whole story.
+          Goes to {TIMESHEET_INBOX} from your own mail app, so payroll can reply to you. Nothing is
+          marked submitted until the mail app says it sent.
         </Txt>
       </Screen>
+
+      <JobPicker
+        visible={picking !== null}
+        options={options}
+        theme={t}
+        onPick={(opt) => picking && addJob(picking.date, opt)}
+        onBlank={() => picking && addJob(picking.date, null)}
+        onClose={() => setPicking(null)}
+      />
     </>
   );
 }
 
-function EntryEditor({
-  entry,
-  sites,
-  onChange,
-  onRemove,
-}: {
-  entry: TimesheetEntry;
-  sites: Site[];
-  onChange: (patch: Partial<TimesheetEntry>) => void;
-  onRemove: () => void;
-}) {
-  const t = useTheme();
-  const [expanded, setExpanded] = useState(false);
-  const hours = entryHours(entry);
+// ---------------------------------------------------------------------------
 
-  // Sites the tech already has in the app, so the name matches the report.
-  const suggestions = useMemo(() => {
-    const q = entry.siteName.trim().toLowerCase();
-    if (!q || q.length < 2) return [];
-    return sites.filter((s) => s.name.toLowerCase().includes(q) && s.name !== entry.siteName).slice(0, 4);
-  }, [entry.siteName, sites]);
+function DayCard({
+  date, entries, theme: t, extraChoices, onAdd, onQuickAdd, onDuplicate, onLeave, onChange, onRemove, canDuplicate,
+}: {
+  date: string; entries: TimesheetEntry[]; theme: Theme; extraChoices: string[];
+  onAdd: () => void; onQuickAdd: () => void; onDuplicate: () => void;
+  onLeave: (kind: LeaveKind, hours: number) => void;
+  onChange: (entry: TimesheetEntry) => void; onRemove: (id: string) => void; canDuplicate: boolean;
+}) {
+  const leave = entries.map(leaveOf).find(Boolean) ?? null;
+  const jobs = entries.filter((e) => !leaveOf(e));
+  const worked = dayWorkedHours(entries, date);
+  const isToday = date === new Date().toISOString().slice(0, 10);
 
   return (
-    <View
-      style={{
-        marginTop: t.space(3),
-        paddingTop: t.space(3),
-        borderTopWidth: 1,
-        borderTopColor: t.color.border,
-        gap: t.space(2.5),
-      }}
-    >
-      <Rowed gap={2} align="flex-start">
-        <View style={{ flex: 1 }}>
-          <Field label="Job / site name" value={entry.siteName} onChangeText={(v) => onChange({ siteName: v, siteId: undefined })} />
-        </View>
-        <Pressable onPress={onRemove} hitSlop={10} style={{ paddingTop: 24 }}>
-          <MaterialCommunityIcons name="close-circle-outline" size={20} color={t.color.textFaint} />
-        </Pressable>
+    <Card style={{ borderColor: isToday ? t.color.accent : t.color.border, borderWidth: isToday ? 2 : 1 }}>
+      <Rowed gap={2}>
+        <Txt weight="800" style={{ letterSpacing: -0.2 }}>{dayName(date)}</Txt>
+        <Txt size="sm" tone="muted" style={{ flex: 1 }}>{formatAuDate(date)}</Txt>
+        {worked > 0 ? <Chip label={`${worked} h`} tone="accent" /> : leave ? <Chip label={LEAVE_LABEL[leave.kind]} tone="warn" /> : null}
       </Rowed>
 
-      {suggestions.length ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2) }}>
-          {suggestions.map((s) => (
-            <Chip key={s.id} label={s.name} onPress={() => onChange({ siteName: s.name, siteId: s.id })} />
+      {leave ? (
+        <View style={{ marginTop: t.space(2.5), gap: t.space(2) }}>
+          <LeavePicker date={date} selected={leave.kind} hours={leave.hours} onLeave={onLeave} theme={t} />
+          <Pressable onPress={() => onLeave(leave.kind, 0)} hitSlop={6}>
+            <Txt size="sm" tone="accent" weight="700">Actually, I worked — clear this</Txt>
+          </Pressable>
+        </View>
+      ) : (
+        <>
+          {jobs.map((e) => (
+            <JobEntry key={e.id} entry={e} theme={t} extraChoices={extraChoices} onChange={onChange} onRemove={() => onRemove(e.id)} />
           ))}
-        </ScrollView>
-      ) : null}
 
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.space(2), marginTop: t.space(2.5) }}>
+            <TileButton icon="plus" label={jobs.length ? 'Add a job' : 'Add a job'} onPress={onAdd} theme={t} primary />
+            {canDuplicate ? <TileButton icon="content-copy" label="Copy previous day" onPress={onDuplicate} theme={t} /> : null}
+            {!jobs.length ? <LeaveButton onLeave={onLeave} theme={t} /> : null}
+          </View>
+        </>
+      )}
+    </Card>
+  );
+}
+
+function JobEntry({
+  entry, theme: t, extraChoices, onChange, onRemove,
+}: { entry: TimesheetEntry; theme: Theme; extraChoices: string[]; onChange: (e: TimesheetEntry) => void; onRemove: () => void }) {
+  const [open, setOpen] = useState(false);
+  const hours = entryHours(entry);
+  return (
+    <View style={{ marginTop: t.space(3), paddingTop: t.space(3), borderTopWidth: 1, borderTopColor: t.color.border, gap: t.space(2) }}>
       <Rowed gap={2} align="flex-start">
         <View style={{ flex: 1 }}>
-          <Field label="Job #" value={entry.jobNumber} onChangeText={(v) => onChange({ jobNumber: v })} keyboardType="numeric" />
+          <Txt weight="700" numberOfLines={1}>{entry.siteName || entry.jobNumber || 'Untitled job'}</Txt>
+          {entry.jobNumber && entry.siteName ? <Txt size="xs" tone="faint">Job {entry.jobNumber}</Txt> : null}
         </View>
-        <View style={{ flex: 1 }}>
-          <Field label="Report #" value={entry.serviceReportNumber} onChangeText={(v) => onChange({ serviceReportNumber: v })} />
-        </View>
+        <Txt weight="800" tone={hours ? 'accent' : 'faint'} style={{ fontFamily: t.font.mono }}>{hours || '—'} h</Txt>
+        <Pressable onPress={onRemove} hitSlop={10}><MaterialCommunityIcons name="close-circle-outline" size={22} color={t.color.textFaint} /></Pressable>
       </Rowed>
 
-      <Rowed gap={2} align="flex-start">
-        <View style={{ flex: 1 }}>
-          <Field label="Start" value={entry.startTime} onChangeText={(v) => onChange({ startTime: v })} placeholder="06:30" keyboardType="numeric" />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Field label="Finish" value={entry.finishTime} onChangeText={(v) => onChange({ finishTime: v })} placeholder="14:30" keyboardType="numeric" />
-        </View>
-        <View style={{ flex: 0.9, alignItems: 'center', paddingTop: 22 }}>
-          <Txt size="xl" weight="700" tone={hours ? 'accent' : 'faint'}>{hours || '—'}</Txt>
-          <Txt size="xs" tone="faint">hours</Txt>
-        </View>
+      <Rowed gap={2}>
+        <TimeBox label="Start" value={entry.startTime} onChange={(v) => onChange({ ...entry, startTime: v })} theme={t} />
+        <MaterialCommunityIcons name="arrow-right" size={18} color={t.color.textFaint} />
+        <TimeBox label="Finish" value={entry.finishTime} onChange={(v) => onChange({ ...entry, finishTime: v })} theme={t} />
+        {entry.hourKind !== 'ord' ? <Chip label={entry.hourKind === 'ot' ? 'O/T' : 'D/T'} tone="warn" /> : null}
       </Rowed>
 
-      <Segmented
-        value={entry.hourKind}
-        onChange={(v) => onChange({ hourKind: v as HourKind })}
-        options={[
-          { value: 'ord', label: 'Ordinary' },
-          { value: 'ot', label: 'Overtime' },
-          { value: 'dt', label: 'Double time' },
-        ]}
-      />
-
-      <Field label="Comments" value={entry.comments} onChangeText={(v) => onChange({ comments: v })} placeholder="e.g. Shutdown MAINS & FIP cutover" />
-
-      <Pressable onPress={() => setExpanded((v) => !v)}>
+      <Pressable onPress={() => setOpen((v) => !v)} hitSlop={6}>
         <Rowed gap={1}>
-          <Txt size="sm" tone="accent" weight="700">{expanded ? 'Hide leave and override' : 'Leave and override'}</Txt>
-          <MaterialCommunityIcons name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color={t.color.accentText} />
+          <Txt size="sm" tone="accent" weight="700">{open ? 'Fewer options' : 'Overtime, allowances, notes'}</Txt>
+          <MaterialCommunityIcons name={open ? 'chevron-up' : 'chevron-down'} size={16} color={t.color.accentText} />
         </Rowed>
       </Pressable>
 
-      {expanded ? (
-        <>
-          <Rowed gap={2} align="flex-start">
-            <View style={{ flex: 1 }}><Field label="Sick" value={entry.sick} onChangeText={(v) => onChange({ sick: v })} keyboardType="decimal-pad" /></View>
-            <View style={{ flex: 1 }}><Field label="RDO" value={entry.rdo} onChangeText={(v) => onChange({ rdo: v })} keyboardType="decimal-pad" /></View>
-            <View style={{ flex: 1 }}><Field label="Annual" value={entry.annual} onChangeText={(v) => onChange({ annual: v })} keyboardType="decimal-pad" /></View>
-            <View style={{ flex: 1 }}><Field label="LWOP" value={entry.lwop} onChangeText={(v) => onChange({ lwop: v })} keyboardType="decimal-pad" /></View>
-            <View style={{ flex: 1 }}><Field label="Pub hol" value={entry.publicHoliday} onChangeText={(v) => onChange({ publicHoliday: v })} keyboardType="decimal-pad" /></View>
-          </Rowed>
-          <Field
+      {open ? (
+        <View style={{ gap: t.space(2.5) }}>
+          <View style={{ flexDirection: 'row', gap: t.space(2) }}>
+            {(['ord', 'ot', 'dt'] as HourKind[]).map((k) => (
+              <Pressable
+                key={k}
+                onPress={() => onChange({ ...entry, hourKind: k })}
+                style={{
+                  flex: 1, minHeight: 44, borderRadius: t.radius.md, alignItems: 'center', justifyContent: 'center',
+                  backgroundColor: entry.hourKind === k ? t.color.accent : t.color.surfaceAlt,
+                }}
+              >
+                <Txt size="sm" weight="700" style={{ color: entry.hourKind === k ? t.color.onAccent : t.color.textMuted }}>
+                  {k === 'ord' ? 'Ordinary' : k === 'ot' ? 'Overtime' : 'Double'}
+                </Txt>
+              </Pressable>
+            ))}
+          </View>
+
+          <View style={{ gap: t.space(1.5) }}>
+            <Txt size="xs" tone="faint" weight="700" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }}>Allowances</Txt>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.space(2) }}>
+              {extraChoices.map((x) => {
+                const on = (entry.extras ?? []).some((y) => y.toLowerCase() === x.toLowerCase());
+                return <Chip key={x} label={x} selected={on} onPress={() => onChange(toggleExtra(entry, x))} />;
+              })}
+            </View>
+          </View>
+
+          <LabeledInput label="Report #" value={entry.serviceReportNumber} onChange={(v) => onChange({ ...entry, serviceReportNumber: v })} theme={t} />
+          <LabeledInput label="Notes" value={entry.comments} onChange={(v) => onChange({ ...entry, comments: v })} placeholder="e.g. Shutdown MAINS & FIP cutover" theme={t} />
+          <LabeledInput
             label="Hours override"
             value={entry.hoursOverride ?? ''}
-            onChangeText={(v) => onChange({ hoursOverride: v })}
+            onChange={(v) => onChange({ ...entry, hoursOverride: v })}
             keyboardType="decimal-pad"
-            hint="Leave blank to use the hours derived from start and finish"
+            placeholder="Only if the times do not tell the whole story"
+            theme={t}
           />
-        </>
+        </View>
       ) : null}
     </View>
+  );
+}
+
+function LeaveButton({ onLeave, theme: t }: { onLeave: (kind: LeaveKind, hours: number) => void; theme: Theme }) {
+  const [open, setOpen] = useState(false);
+  if (!open) return <TileButton icon="palm-tree" label="Day off" onPress={() => setOpen(true)} theme={t} />;
+  return (
+    <View style={{ width: '100%', gap: t.space(2) }}>
+      <LeavePicker date="" selected={null} hours={STANDARD_DAY_HOURS} onLeave={(k, h) => { onLeave(k, h); setOpen(false); }} theme={t} />
+    </View>
+  );
+}
+
+function LeavePicker({
+  selected, hours, onLeave, theme: t,
+}: { date: string; selected: LeaveKind | null; hours: number; onLeave: (kind: LeaveKind, hours: number) => void; theme: Theme }) {
+  const h = hours > 0 ? hours : STANDARD_DAY_HOURS;
+  return (
+    <View style={{ gap: t.space(2) }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.space(2) }}>
+        {LEAVE_KINDS.map((k) => (
+          <Pressable
+            key={k}
+            onPress={() => onLeave(k, h)}
+            style={{
+              paddingHorizontal: t.space(3), minHeight: 44, borderRadius: t.radius.md, justifyContent: 'center',
+              backgroundColor: selected === k ? t.color.warn : t.color.surfaceAlt,
+              borderWidth: 1, borderColor: selected === k ? t.color.warn : t.color.border,
+            }}
+          >
+            <Txt size="sm" weight="700" style={{ color: selected === k ? t.color.onAccent : t.color.textMuted }}>{LEAVE_LABEL[k]}</Txt>
+          </Pressable>
+        ))}
+      </View>
+      {selected ? (
+        <Rowed gap={2}>
+          <Txt size="sm" tone="muted">Hours</Txt>
+          <Timeless value={String(hours)} onChange={(v) => { const n = parseFloat(v); onLeave(selected, Number.isFinite(n) ? n : 0); }} theme={t} />
+          <Txt size="xs" tone="faint">a standard day is {STANDARD_DAY_HOURS}</Txt>
+        </Rowed>
+      ) : null}
+    </View>
+  );
+}
+
+function JobPicker({
+  visible, options, theme: t, onPick, onBlank, onClose,
+}: {
+  visible: boolean; options: JobOption[]; theme: Theme;
+  onPick: (opt: JobOption) => void; onBlank: () => void; onClose: () => void;
+}) {
+  const [q, setQ] = useState('');
+  const filtered = useMemo(() => filterJobOptions(options, q), [options, q]);
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
+      <View style={{ flex: 1, backgroundColor: t.color.bg }}>
+        <Rowed gap={2} style={{ padding: t.space(4), paddingBottom: t.space(2) }}>
+          <Txt size="xl" weight="800" style={{ flex: 1 }}>Pick a job</Txt>
+          <Pressable onPress={onClose} hitSlop={10}><MaterialCommunityIcons name="close" size={26} color={t.color.textMuted} /></Pressable>
+        </Rowed>
+        <View style={{ paddingHorizontal: t.space(4) }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.space(2), backgroundColor: t.color.surface, borderWidth: 1, borderColor: t.color.border, borderRadius: t.radius.pill, paddingHorizontal: t.space(4), minHeight: t.touch }}>
+            <MaterialCommunityIcons name="magnify" size={20} color={t.color.textFaint} />
+            <TextInput value={q} onChangeText={setQ} placeholder="Job number or site" placeholderTextColor={t.color.textFaint} autoFocus style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md }} />
+          </View>
+        </View>
+        <ScrollView contentContainerStyle={{ padding: t.space(4), gap: t.space(2) }}>
+          <Pressable onPress={onBlank} style={{ padding: t.space(3.5), borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.color.border, borderStyle: 'dashed' }}>
+            <Txt weight="700">Type it myself</Txt>
+            <Txt size="xs" tone="muted">A job that is not in this list yet</Txt>
+          </Pressable>
+          {filtered.map((o) => (
+            <Pressable
+              key={`${o.source}:${o.jobNumber}:${o.siteName}`}
+              onPress={() => onPick(o)}
+              style={({ pressed }) => ({ padding: t.space(3.5), borderRadius: t.radius.lg, backgroundColor: pressed ? t.color.surfaceAlt : t.color.surface, borderWidth: 1, borderColor: t.color.border })}
+            >
+              <Rowed gap={2}>
+                <View style={{ flex: 1 }}>
+                  <Txt weight="700" numberOfLines={1}>{o.siteName || `Job ${o.jobNumber}`}</Txt>
+                  <Txt size="xs" tone="faint">{o.jobNumber ? `Job ${o.jobNumber}` : 'No job number'} · {o.source === 'recent' ? 'you worked this recently' : 'open in Simpro'}</Txt>
+                </View>
+                <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
+              </Rowed>
+            </Pressable>
+          ))}
+          {filtered.length === 0 ? <Txt tone="muted" style={{ textAlign: 'center', marginTop: t.space(4) }}>Nothing matches. Tap “Type it myself”.</Txt> : null}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Small inputs
+
+function LabeledInput({
+  label, value, onChange, placeholder, keyboardType, autoCapitalize, theme: t,
+}: {
+  label: string; value: string; onChange: (v: string) => void; placeholder?: string;
+  keyboardType?: 'default' | 'numeric' | 'decimal-pad'; autoCapitalize?: 'none' | 'words' | 'characters'; theme: Theme;
+}) {
+  return (
+    <View style={{ gap: t.space(1) }}>
+      <Txt size="xs" tone="muted" weight="700" style={{ textTransform: 'uppercase', letterSpacing: 0.6 }}>{label}</Txt>
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        placeholder={placeholder}
+        placeholderTextColor={t.color.textFaint}
+        keyboardType={keyboardType}
+        autoCapitalize={autoCapitalize}
+        style={{ color: t.color.text, fontSize: t.font.size.md, backgroundColor: t.color.surfaceAlt, borderRadius: t.radius.md, borderWidth: 1, borderColor: t.color.border, paddingHorizontal: t.space(3), minHeight: t.touch }}
+      />
+    </View>
+  );
+}
+
+function TimeBox({ label, value, onChange, theme: t }: { label: string; value: string; onChange: (v: string) => void; theme: Theme }) {
+  return (
+    <View style={{ flex: 1, gap: 2 }}>
+      <Txt size="xs" tone="faint" weight="700">{label}</Txt>
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        placeholder="06:30"
+        placeholderTextColor={t.color.textFaint}
+        keyboardType="default"
+        style={{ color: t.color.text, fontSize: t.font.size.lg, fontFamily: t.font.mono, backgroundColor: t.color.surfaceAlt, borderRadius: t.radius.md, borderWidth: 1, borderColor: t.color.border, paddingHorizontal: t.space(3), minHeight: 52, textAlign: 'center' }}
+      />
+    </View>
+  );
+}
+
+function Timeless({ value, onChange, theme: t }: { value: string; onChange: (v: string) => void; theme: Theme }) {
+  return (
+    <TextInput
+      value={value}
+      onChangeText={onChange}
+      keyboardType="decimal-pad"
+      style={{ color: t.color.text, fontSize: t.font.size.lg, fontFamily: t.font.mono, backgroundColor: t.color.surfaceAlt, borderRadius: t.radius.md, borderWidth: 1, borderColor: t.color.border, paddingHorizontal: t.space(3), minHeight: 48, minWidth: 80, textAlign: 'center' }}
+    />
+  );
+}
+
+function TileButton({ icon, label, onPress, theme: t, primary }: {
+  icon: React.ComponentProps<typeof MaterialCommunityIcons>['name']; label: string; onPress: () => void; theme: Theme; primary?: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: 'row', alignItems: 'center', gap: t.space(2),
+        paddingHorizontal: t.space(3.5), minHeight: 48, borderRadius: t.radius.md,
+        backgroundColor: primary ? t.color.accent : pressed ? t.color.surfaceAlt : t.color.surface,
+        borderWidth: primary ? 0 : 1, borderColor: t.color.border,
+        opacity: pressed ? 0.85 : 1,
+      })}
+    >
+      <MaterialCommunityIcons name={icon} size={20} color={primary ? t.color.onAccent : t.color.accentText} />
+      <Txt weight="700" style={{ color: primary ? t.color.onAccent : t.color.text }}>{label}</Txt>
+    </Pressable>
   );
 }

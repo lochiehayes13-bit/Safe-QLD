@@ -70,6 +70,8 @@ export function timesheetBody(sheet: Timesheet): string {
         if (Number.isFinite(v) && v > 0) bits.push(`${hours(v)}h ${label}`);
       }
 
+      for (const extra of e.extras ?? []) bits.push(extra);
+
       const job = [e.jobNumber.trim(), e.siteName.trim()].filter(Boolean).join(' · ');
       const head = `${dayName(e.date)} ${auDate(e.date)}`.trim();
       lines.push(`${head}  ${job || 'No job recorded'}`);
