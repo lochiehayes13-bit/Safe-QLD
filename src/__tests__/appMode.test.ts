@@ -248,7 +248,7 @@ describe('technician mode', () => {
 
 describe('the grouping', () => {
   it('runs in the order a technician works: today, the site, the tools, the paperwork, setup', () => {
-    expect(navFor('technician').map((g) => g.tab)).toEqual(['today', 'sites', 'tools', 'work', 'settings']);
+    expect(navFor('technician').map((g) => g.tab)).toEqual(['today', 'sites', 'map', 'tools', 'work', 'settings']);
     expect(navFor('office').map((g) => g.tab)).toEqual([...TAB_ORDER]);
   });
 

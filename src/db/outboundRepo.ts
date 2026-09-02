@@ -6,7 +6,7 @@ import type { RoutineRun } from './routineRunRepo';
 import type { Defect } from '@/domain/types';
 import {
   keyIdentity, planOutboundWork,
-  type CompletedRoutineRun, type OutboundDefect, type OutboundPlan, type OutboundResult,
+  type CompletedRoutineRun, type OutboundDefect, type OutboundPhoto, type OutboundPlan, type OutboundResult,
 } from '@/domain/outboundWork';
 import { RUN_WINDOW_HOURS, belongsToRun, latestPerSubject, runWindow } from '@/domain/runWindow';
 
@@ -78,6 +78,24 @@ export async function acceptedKeys(): Promise<string[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<{ key: string }>('SELECT key FROM outbound_accepted');
   return rows.map((r) => r.key);
+}
+
+/**
+ * The photographs already in the outbound queue, by content key.
+ *
+ * A photograph is not posted from the send screen; it is queued and goes when
+ * there is signal, so `outbound_accepted` never hears of it. The plan reads
+ * the queue instead: a photograph waiting, uploaded, or sent with no reply is
+ * one the plan must not queue again. A failed one is left out on purpose —
+ * the file was missing or the server refused it five times, and pressing
+ * send again is how a person asks for another go.
+ */
+export async function queuedAttachmentKeys(): Promise<string[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ contentKey: string | null }>(
+    "SELECT contentKey FROM sync_queue WHERE kind = 'attachment' AND status IN ('pending', 'sent', 'unknown')",
+  );
+  return rows.map((r) => r.contentKey).filter((k): k is string => !!k);
 }
 
 export async function recordAccepted(input: {
@@ -163,9 +181,16 @@ export async function resultsForRun(run: RoutineRun): Promise<OutboundResult[]> 
   return out;
 }
 
-/** Maps a stored defect onto the fields the office needs, and no others. */
-export function toOutboundDefect(d: Defect, sentToOfficeAt?: string): OutboundDefect {
+/**
+ * Maps a stored defect onto the fields the office needs, and no others.
+ *
+ * The photographs are handed over only where the caller looked them up on
+ * disk: a path with no size is a file the plan cannot send, and a defect
+ * record alone does not know whether its files are still there.
+ */
+export function toOutboundDefect(d: Defect, sentToOfficeAt?: string, photos?: OutboundPhoto[]): OutboundDefect {
   return {
+    photos,
     id: d.id,
     location: d.location,
     description: d.description,
@@ -213,13 +238,26 @@ export interface RunPlan {
 export async function planForRun(
   run: RoutineRun,
   siteName: string,
-  options: { reportRef?: string; siteAddress?: string } = {},
+  options: {
+    reportRef?: string;
+    siteAddress?: string;
+    /** Settings' "Send photos to Simpro attachments". Absent means on. */
+    sendPhotos?: boolean;
+    /**
+     * Looks the photo paths up on disk and reports each one's size, or no
+     * size where the file has gone. Supplied by the screen because this
+     * module cannot import the file system and still run under the test
+     * runner. Absent, the plan states the count and attaches nothing.
+     */
+    photoSizes?: (paths: readonly string[]) => OutboundPhoto[];
+  } = {},
 ): Promise<RunPlan> {
-  const [jobId, results, rawDefects, sent] = await Promise.all([
+  const [jobId, results, rawDefects, sent, queuedPhotos] = await Promise.all([
     jobForRun(run.id),
     resultsForRun(run),
     defectsForRun(run),
     acceptedKeys(),
+    queuedAttachmentKeys(),
   ]);
 
   const completed: CompletedRoutineRun = {
@@ -237,7 +275,9 @@ export async function planForRun(
     reportRef: options.reportRef,
   };
 
-  const defects = rawDefects.map((d) => toOutboundDefect(d));
+  const defects = rawDefects.map((d) => toOutboundDefect(
+    d, undefined, options.photoSizes && d.photos.length ? options.photoSizes(d.photos) : undefined,
+  ));
 
   /*
    * The run row's own counts are handed over to be cross-checked rather than
@@ -246,7 +286,8 @@ export async function planForRun(
    * nothing, because the office would act on whichever number went out.
    */
   const plan = planOutboundWork(completed, results, defects, {
-    alreadySentKeys: sent,
+    alreadySentKeys: [...sent, ...queuedPhotos],
+    sendPhotos: options.sendPhotos,
     declaredCounts: results.length
       ? { passed: run.checksPassed, failed: run.checksFailed, notTested: run.checksNotTested }
       : undefined,

@@ -5,14 +5,13 @@ import { Alert, Pressable, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
-  getOccupierStatement, updateOccupierStatement, type OccupierStatement,
+  getOccupierStatement, updateOccupierStatement, type OccupierRow, type OccupierStatement,
 } from '@/db/occupierRepo';
 import { queryAssets } from '@/db/assetRepo';
 import { listDefects } from '@/db/repo';
 import { assetTypeById } from '@/seed/assetTypes';
-import {
-  occupierStatementIssues, type OccupierStatementRow,
-} from '@/domain/qldCompliance';
+import { occupierStatementIssues } from '@/domain/qldCompliance';
+import { occupierEvidenceFromAssets, prefillOccupierRows } from '@/domain/formsFromAssets';
 import {
   COMMISSIONER_COPY_BUSINESS_DAYS, citeSources, commissionerCopyDeadline, qldBusinessDaysBetween,
   toFilledRow,
@@ -77,7 +76,7 @@ export default function OccupierStatementScreen() {
     await updateOccupierStatement(rec.id, p);
   };
 
-  const setRow = (installation: string, p: Partial<OccupierStatementRow>) => {
+  const setRow = (installation: string, p: Partial<OccupierRow>) => {
     if (!rec) return;
     void patch({
       rows: rec.rows.map((r) => (r.installation === installation ? { ...r, ...p } : r)),
@@ -87,10 +86,14 @@ export default function OccupierStatementScreen() {
   /**
    * Fills the list from the site's own register and defect history.
    *
-   * An installation is proposed as present when the site has an asset for it,
-   * and marked as having had a notice when a critical defect against that
-   * system was noticed inside the statement period. Nothing is ticked that the
-   * site's own data does not support.
+   * An installation is proposed as present when the register holds equipment
+   * for it and as not present when the register holds this site's equipment
+   * and none of it is that installation; a row the register cannot speak to —
+   * lifts, air handling, fire mains — is left as the occupier had it. The
+   * dates the register holds go on the row beside the answer, so the occupier
+   * is signing against a last-test date rather than a memory. A critical
+   * defect against a system inside the period marks the notice column.
+   * Nothing is ticked that the site's own data does not support.
    */
   const prefill = async () => {
     if (!rec) return;
@@ -101,12 +104,11 @@ export default function OccupierStatementScreen() {
         listDefects(rec.siteId),
       ]);
 
-      const present = new Set<string>();
-      for (const a of assets) {
-        const system = assetTypeById(a.assetTypeId)?.system;
-        const installation = system ? installationForSystem(system).installation : undefined;
-        if (installation) present.add(installation);
-      }
+      const evidence = occupierEvidenceFromAssets(assets);
+      const present = new Set(
+        evidence.installations.filter((e) => e.knowledge === 'present').map((e) => e.installation),
+      );
+      const absent = evidence.installations.filter((e) => e.knowledge === 'absent').map((e) => e.installation);
 
       const inPeriod = (iso?: string | null) => {
         // The Queensland day, not the UTC one: a notice given at eight on a
@@ -149,21 +151,38 @@ export default function OccupierStatementScreen() {
         noticed.set(installation, !existing || (rectified && rectified > existing) ? rectified : existing);
       }
 
-      const rows = rec.rows.map((r) => {
-        const isPresent = r.present || present.has(r.installation);
+      const rows = prefillOccupierRows(rec.rows, evidence).map((r) => {
+        // A notice the register knows of is ticked whether or not the register
+        // knows the installation is there: the defect was recorded against
+        // this site, and an occupier who unticks it is contradicting our file.
         const hadNotice = r.criticalDefectNoticeGiven || noticed.has(r.installation);
         return {
           ...r,
-          present: isPresent,
+          present: r.present || noticed.has(r.installation),
           criticalDefectNoticeGiven: hadNotice,
           rectifiedDate: r.rectifiedDate || noticed.get(r.installation) || undefined,
         };
       });
 
       await patch({ rows });
+      const equipment = evidence.unplaced.map((u) => `${u.count} ${u.label.toLowerCase()}${u.count === 1 ? '' : 's'}`);
       setPrefilled(
         `${present.size} installation${present.size === 1 ? '' : 's'} found in the register` +
         (noticed.size ? `, ${noticed.size} with a critical defect notice this period.` : '.') +
+        (absent.length
+          ? `\n\nNot in the register, so proposed as not present: ${absent.join('; ')}.`
+          : '') +
+        (equipment.length
+          ? `\n\nIn the register but not placed on a row, because the row depends on what it serves: `
+            + `${equipment.join(', ')}. Place ${equipment.length === 1 ? 'it' : 'them'} by hand.`
+          : '') +
+        (evidence.unrecognised
+          ? `\n\n${evidence.unrecognised} asset${evidence.unrecognised === 1 ? '' : 's'} of a type the app did not recognise `
+            + `${evidence.unrecognised === 1 ? 'was' : 'were'} not counted.`
+          : '') +
+        (!evidence.total
+          ? '\n\nThe register holds no equipment for this site, so nothing was proposed from it.'
+          : '') +
         (unplaced.length
           ? `\n\n${unplaced.length} critical defect${unplaced.length === 1 ? '' : 's'} could not be `
             + `put against a row and ${unplaced.length === 1 ? 'is' : 'are'} not on the form: `
@@ -403,11 +422,17 @@ export default function OccupierStatementScreen() {
 function InstallationRow({
   row, onChange,
 }: {
-  row: OccupierStatementRow;
-  onChange: (p: Partial<OccupierStatementRow>) => void;
+  row: OccupierRow;
+  onChange: (p: Partial<OccupierRow>) => void;
 }) {
   const t = useTheme();
   const needsDate = row.criticalDefectNoticeGiven && !row.rectifiedDate?.trim();
+  // What the register holds for this row, where the prefill found any. Shown
+  // as a line rather than a field: it is ours to report, not theirs to edit.
+  const register = [
+    row.lastMaintainedDate ? `last tested ${formatAuDate(row.lastMaintainedDate)}` : null,
+    row.nextDueDate ? `next due ${formatAuDate(row.nextDueDate)}` : null,
+  ].filter(Boolean).join(' · ');
 
   return (
     <Card>
@@ -427,6 +452,7 @@ function InstallationRow({
       {row.present ? (
         <View style={{ marginTop: t.space(2.5), gap: t.space(2) }}>
           <Divider />
+          {register ? <Txt size="xs" tone="muted">Register: {register}</Txt> : null}
           <Field
             label="Maintained to"
             value={row.nominatedStandard ?? ''}

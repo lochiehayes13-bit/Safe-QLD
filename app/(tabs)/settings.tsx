@@ -8,6 +8,7 @@ import { holdAutoSync, runAutoSync, useAutoSync } from '@/simpro/autoSync';
 import { describeAutoSync } from '@/simpro/autoSyncPolicy';
 import { registerAutoSyncTask, unregisterAutoSyncTask } from '@/simpro/autoSyncTask';
 import { clearKey as clearAiKey, hasKey as hasAiKey, storeKey as storeAiKey } from '@/ai/client';
+import { clearPlacesKey, hasPlacesKey, storePlacesKey } from '@/geo/placesKey';
 import { PRIVACY_NOTE } from '@/ai/grounding';
 import { loadPrefs, savePrefs, DEFAULT_PREFS, type Prefs } from '@/app-prefs';
 import { clearExports, exportsSize } from '@/export/files';
@@ -15,7 +16,7 @@ import { listPhotoFiles } from '@/export/photoFiles';
 import { photoStorageReport } from '@/db/photoRepo';
 import { clearAllDrafts, listDrafts } from '@/hooks/useDraft';
 import type { StorageReport } from '@/domain/photoStore';
-import { pendingSyncCount } from '@/db/opsRepo';
+import { attachmentQueueSummary, pendingSyncCount, type AttachmentQueueSummary } from '@/db/opsRepo';
 import { bundledCatalogueSize, startCatalogueSeed } from '@/seed/catalogueSeed';
 import { flushQueue, pullFromSimpro, type SyncProgress } from '@/simpro/sync';
 import { describeStaleness, type SyncState } from '@/simpro/incremental';
@@ -44,6 +45,9 @@ export default function SettingsScreen() {
   const [hasSecret, setHasSecret] = useState(false);
   const [aiKey, setAiKey] = useState('');
   const [hasAi, setHasAi] = useState(false);
+  /** The optional Google Places key for the map's place search. Keystore only; see geo/placesKey. */
+  const [placesKey, setPlacesKey] = useState('');
+  const [hasPlaces, setHasPlaces] = useState(false);
   const [ghToken, setGhToken] = useState('');
   /** The person signed in to Simpro on this phone, and why they are not if the app ended it. */
   const [session, setSession] = useState<UserSession | null>(null);
@@ -67,6 +71,8 @@ export default function SettingsScreen() {
    */
   const [drafts, setDrafts] = useState<{ key: string; bytes: number }[]>([]);
   const [pending, setPending] = useState(0);
+  /** Photographs bound for Simpro job attachments, by where they stand in the queue. */
+  const [attachments, setAttachments] = useState<AttachmentQueueSummary>({ pending: 0, unknown: 0, failed: 0, sent: 0 });
   const [syncing, setSyncing] = useState(false);
   const [syncState, setSyncState] = useState<SyncState[]>([]);
   const [progress, setProgress] = useState<SyncProgress | null>(null);
@@ -88,11 +94,13 @@ export default function SettingsScreen() {
     void loadRateCard().then(setCard);
     void SimproClient.hasSecret().then(setHasSecret);
     void hasAiKey().then(setHasAi);
+    void hasPlacesKey().then(setHasPlaces);
     void hasGhToken().then(setHasGh);
     void readUserSession().then(setSession);
     void readSignedOutReason().then(setSignedOutReason);
     void readAllSyncState().then(setSyncState);
     void pendingSyncCount().then(setPending);
+    void attachmentQueueSummary().then(setAttachments);
     void startCatalogueSeed()
       .then(({ count }) => setCatalogue(count))
       .catch(() => setCatalogue(0));
@@ -118,6 +126,7 @@ export default function SettingsScreen() {
   useEffect(() => {
     void readAllSyncState().then(setSyncState);
     void pendingSyncCount().then(setPending);
+    void attachmentQueueSummary().then(setAttachments);
   }, [auto.record.lastRunAt]);
 
   const update = useCallback((patch: Partial<Prefs>) => {
@@ -267,6 +276,7 @@ export default function SettingsScreen() {
     try {
       const r = await flushQueue(configFor());
       setPending(await pendingSyncCount());
+      setAttachments(await attachmentQueueSummary());
       Alert.alert(
         'Queue sent',
         `${r.sent} sent${r.failed ? `, ${r.failed} failed and will retry` : ''}. ${r.remaining} still waiting.`,
@@ -432,6 +442,49 @@ export default function SettingsScreen() {
               onPress={() => {
                 if (!aiKey.trim()) return;
                 void storeAiKey(aiKey).then(() => { setAiKey(''); setHasAi(true); });
+              }}
+            />
+          </>
+        )}
+      </Card>
+
+      <H2>The map</H2>
+      <Card>
+        <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
+          Searching the map for a place that is not one of our sites asks OpenStreetMap, which is free
+          and knows every address. A Google Places key finds shops by name as well; each search then
+          costs the account the key belongs to a fraction of a cent.
+        </Txt>
+        <View style={{ height: t.space(3) }} />
+        {hasPlaces ? (
+          <>
+            <Txt size="sm" tone="pass">A Google Places key is held in this device's keystore.</Txt>
+            <View style={{ height: t.space(2.5) }} />
+            <Button
+              title="Remove the key"
+              variant="ghost"
+              compact
+              onPress={() => { void clearPlacesKey().then(() => setHasPlaces(false)); }}
+            />
+          </>
+        ) : (
+          <>
+            <Field
+              label="Google Places key (optional)"
+              value={placesKey}
+              onChangeText={setPlacesKey}
+              placeholder="AIza…"
+              autoCapitalize="none"
+              hint="Held in the hardware keystore, never in ordinary app storage. Without one the map searches OpenStreetMap."
+            />
+            <View style={{ height: t.space(2.5) }} />
+            <Button
+              title="Save the key"
+              variant="secondary"
+              disabled={!placesKey.trim()}
+              onPress={() => {
+                if (!placesKey.trim()) return;
+                void storePlacesKey(placesKey).then(() => { setPlacesKey(''); setHasPlaces(true); });
               }}
             />
           </>
@@ -646,6 +699,41 @@ export default function SettingsScreen() {
             variant={prefs.simproWriteAssetTests ? 'danger' : 'secondary'}
             compact
             onPress={() => update({ simproWriteAssetTests: !prefs.simproWriteAssetTests })}
+          />
+        </Rowed>
+
+        <Divider />
+        <Label>Send photos to Simpro attachments</Label>
+        <Txt size="xs" tone="faint" style={{ marginTop: 4, marginBottom: t.space(2), lineHeight: 17 }}>
+          On by default. When a service is sent from Send to the office, each defect photograph goes
+          onto the Simpro job as its own attachment, named by site, location and date, and is never
+          public. Photos over 4 MB are downscaled first. Off keeps them on the phone and in the
+          report, and the job note says so.
+        </Txt>
+        <Rowed gap={2}>
+          <MaterialCommunityIcons
+            name={prefs.simproSendPhotos ? 'image-multiple' : 'image-off-outline'}
+            size={18}
+            color={prefs.simproSendPhotos ? t.color.accent : t.color.textFaint}
+          />
+          <Txt
+            size="sm"
+            tone={attachments.failed || attachments.unknown ? 'warn' : attachments.pending ? 'muted' : 'faint'}
+            style={{ flex: 1, lineHeight: 19 }}
+          >
+            {[
+              attachments.pending
+                ? `${attachments.pending} photo${attachments.pending === 1 ? '' : 's'} waiting to upload`
+                : 'No photos waiting to upload',
+              attachments.unknown ? `${attachments.unknown} sent with no reply` : null,
+              attachments.failed ? `${attachments.failed} could not be sent` : null,
+            ].filter(Boolean).join(' · ')}
+            {attachments.sent ? ` · ${attachments.sent} uploaded` : ''}
+          </Txt>
+          <Switch
+            value={prefs.simproSendPhotos}
+            onValueChange={(on) => update({ simproSendPhotos: on })}
+            trackColor={{ true: t.color.accent, false: t.color.border }}
           />
         </Rowed>
 

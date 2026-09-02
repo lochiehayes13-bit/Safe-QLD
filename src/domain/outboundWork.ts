@@ -3,6 +3,8 @@ import {
   rectificationDueAt, type As1851Class,
 } from '@/domain/qldCompliance';
 import { qldDay, qldIsoDay, qldMoment } from '@/domain/qldTime';
+import { queueKey } from '@/domain/queueKey';
+import { extensionFor } from '@/domain/photoStore';
 
 /**
  * Pushing a completed routine service back to the office system.
@@ -17,6 +19,13 @@ import { qldDay, qldIsoDay, qldMoment } from '@/domain/qldTime';
  * This module is the mapping and nothing else: plain data in, a plan of
  * outbound items out. It cannot reach the database or the network, which is
  * what makes every decision below testable on its own.
+ *
+ * Three things go out of it: the service record and any critical defect
+ * notice as job notes, the photographs of each defect as job attachments —
+ * one file each, named so the office can read them without opening them — and
+ * a short "work completed" note when a job is marked complete on the phone.
+ * The attachments are planned here and queued by the send layer, because a
+ * photograph is a few megabytes and a basement has no signal.
  *
  * Four rules shape it.
  *
@@ -227,11 +236,29 @@ export interface OutboundDefect {
   assetNumber?: string;
   photoCount?: number;
   /**
+   * The photographs themselves, where the caller could find them.
+   *
+   * Each carries its size on disk, which is how the caller says the file is
+   * still there: a photograph whose file has gone has no size, and the plan
+   * declines it out loud rather than queueing an upload that can never run.
+   * Absent altogether (an older caller, or one that did not look), and the
+   * count above is all the note can say.
+   */
+  photos?: OutboundPhoto[];
+  /**
    * Set once the office has this defect. The office system is the record for it
    * from that moment, so it is never sent again — a second copy reads as a
    * second defect and gets a second job.
    */
   sentToOfficeAt?: string;
+}
+
+/** One photograph of a defect, as stored on the phone. */
+export interface OutboundPhoto {
+  /** The path as the defect record holds it — relative to document storage, or an absolute file URI. */
+  path: string;
+  /** Bytes on disk. Undefined means the file could not be found. */
+  sizeBytes?: number;
 }
 
 /** The completed run, as the app recorded it. */
@@ -280,6 +307,12 @@ export interface PlanOptions {
   fullRecordAt?: string;
   /** Overrides the note body budget. Used by tests and by a future documented limit. */
   bodyLimit?: number;
+  /**
+   * Whether defect photographs go to the job as attachments. On unless the
+   * technician has switched it off in Settings; off, the note still states
+   * the count and says where the photographs are.
+   */
+  sendPhotos?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -289,12 +322,12 @@ export interface PlanOptions {
 /**
  * The transport kind.
  *
- * The queue dispatches 'job-note', 'purchase-order' and 'asset-test', and
- * silently marks anything else as sent — so a kind invented here without a
- * matching branch in flushQueue drops a technician's service record on the
- * floor without a word. Add both together or neither.
+ * The queue dispatches 'job-note', 'purchase-order', 'asset-test' and
+ * 'attachment', and silently marks anything else as sent — so a kind invented
+ * here without a matching branch in flushQueue drops a technician's service
+ * record on the floor without a word. Add both together or neither.
  */
-export type OutboundWorkKind = 'job-note' | 'asset-test';
+export type OutboundWorkKind = 'job-note' | 'asset-test' | 'attachment';
 
 /**
  * A test result going back onto the asset in the office system.
@@ -331,10 +364,33 @@ export interface OutboundJobNote {
   fullRecordAt: string;
 }
 
-export interface OutboundItem {
+/**
+ * A photograph going onto the job as an attachment.
+ *
+ * The file itself is not here — a plan is data a screen shows and a test
+ * inspects, and a base64 photograph is megabytes of neither. The send layer
+ * reads the file at `localUri` when it uploads, so a path that is stored
+ * relative to document storage still resolves after the app is reinstalled
+ * and the container path moves.
+ */
+export interface OutboundAttachment {
+  jobId: string;
+  /** As the defect record holds it: relative to document storage, or an absolute file URI. */
+  localUri: string;
+  /** "<site> — <defect location> — <date>.jpg", numbered where a defect has several. */
+  filename: string;
+  mimeType: string;
+  /** What the photograph is of, for a queue screen. Never sent: Simpro attachments carry no caption. */
+  subject: string;
+  sizeBytes: number;
+  /** The queue's content key: job, filename and size. Repeated in the item so the queue row carries it. */
+  key: string;
+}
+
+export interface OutboundNoteItem {
   /**
-   * Always a job note. This type is the composed note plan, not the queue row —
-   * the queue stores `kind` and arbitrary JSON, and an asset test is enqueued
+   * A job note. This type is the composed note plan, not the queue row — the
+   * queue stores `kind` and arbitrary JSON, and an asset test is enqueued
    * directly rather than composed here.
    */
   kind: 'job-note';
@@ -344,6 +400,33 @@ export interface OutboundItem {
   description: string;
   /** Critical items are ordered first and must not be batched behind anything. */
   urgency: 'critical' | 'routine';
+}
+
+export interface OutboundAttachmentItem {
+  kind: 'attachment';
+  key: string;
+  payload: OutboundAttachment;
+  description: string;
+  /** Never critical: the notice is the urgent thing, and it says the photographs are coming. */
+  urgency: 'routine';
+}
+
+export type OutboundItem = OutboundNoteItem | OutboundAttachmentItem;
+
+/**
+ * The two shapes a plan item takes, told apart.
+ *
+ * A note is posted and read back; an attachment is queued and uploaded. A
+ * screen or a sender that treats the union as a note reads `.note` off a
+ * photograph and renders nothing, so the guards are exported rather than
+ * each caller writing its own `kind ===` and drifting.
+ */
+export function isNoteItem(item: OutboundItem): item is OutboundNoteItem {
+  return item.kind === 'job-note';
+}
+
+export function isAttachmentItem(item: OutboundItem): item is OutboundAttachmentItem {
+  return item.kind === 'attachment';
 }
 
 export type OutboundWarningCode =
@@ -358,6 +441,7 @@ export type OutboundWarningCode =
   | 'critical-not-verbally-notified'
   | 'critical-severity-disagrees'
   | 'photos-not-sent'
+  | 'photo-file-missing'
   | 'money-in-free-text'
   | 'asset-unidentified'
   | 'truncated'
@@ -425,13 +509,43 @@ export const WITHHELD_FROM_SIMPRO: { what: string; why: string }[] = [
       + 'read as the notice having been given, when giving it is a separate act with its own record.',
   },
   {
-    what: 'Photographs',
-    why: 'There is no attachment endpoint wired, so a note that referred to photos as attached would be wrong. '
-      + 'The count is stated and the photos stay with the report.',
+    what: 'Photographs of a defect with no Simpro job, or whose file is no longer on the phone',
+    why: 'An attachment has to go onto a job, and a guessed job number files evidence against somebody else\'s '
+      + 'work. A photograph whose file has gone cannot be read, so the note states the count and says the file '
+      + 'is missing rather than pretending it was sent.',
   },
   {
     what: 'Defects the office already has',
     why: 'A second copy of a defect reads as a second defect and gets a second job raised against it.',
+  },
+];
+
+/**
+ * What does go to the job, and in what form. Held as data beside the withheld
+ * list so a screen can show both and a technician can see the whole picture.
+ */
+export const PUSHED_TO_SIMPRO: { what: string; how: string }[] = [
+  {
+    what: 'The service record',
+    how: 'One appended job note per attendance: the counts, the not-tested reasons, the defects raised and '
+      + 'the failed assets, with a reference key so a retry is recognised and never posts twice.',
+  },
+  {
+    what: 'Critical defect notices',
+    how: 'One appended job note per critical defect, sent ahead of the service record and marked in the '
+      + 'subject line, with the statutory clocks stated in Queensland time.',
+  },
+  {
+    what: 'Photographs of each defect',
+    how: `One job attachment per photograph, named "${'<site> — <defect location> — <date>.jpg'}" and numbered `
+      + 'where a defect has several, so the office can read what a file is without opening it. Photographs '
+      + 'over 4 MB are downscaled before upload (longest edge 2000 px, JPEG quality 0.85). Attachments are '
+      + 'never public. Switch off in Settings under "Send photos to Simpro attachments".',
+  },
+  {
+    what: 'A work-completed note',
+    how: 'One short appended note when a job is marked complete on the phone: what was done, when and by '
+      + 'whom. The job\'s stage and status in Simpro are left for the office to change.',
   },
 ];
 
@@ -538,6 +652,187 @@ export function keysInNoteText(text: string): string[] {
 
 function marker(key: string): string {
   return `[${MARKER_PREFIX}${key}]`;
+}
+
+// ---------------------------------------------------------------------------
+// Attachments
+// ---------------------------------------------------------------------------
+
+/**
+ * How long an attachment name may run, all in.
+ *
+ * Simpro does not publish a limit. Windows stops at 255 and a site name plus a
+ * plant-room description can get most of the way there, so each part is capped
+ * on its own and the whole is capped again — a name cut at the end loses the
+ * date, which is the part the office sorts by.
+ */
+export const ATTACHMENT_NAME_MAX = 150;
+const ATTACHMENT_PART_MAX = 60;
+
+/** The dash the name is built on: an em dash with spaces, which no file system objects to. */
+const NAME_SEPARATOR = ' — ';
+
+/**
+ * One part of a file name, made safe.
+ *
+ * The characters no file system accepts are replaced rather than dropped, so
+ * "Level 3/4 riser" reads "Level 3-4 riser" and not "Level 34 riser", which is
+ * a different place.
+ */
+function safeNamePart(text: string | undefined, fallback: string): string {
+  const cleaned = (text ?? '')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s.-]+|[\s.-]+$/g, '')
+    .trim();
+  const part = cleaned || fallback;
+  return part.length > ATTACHMENT_PART_MAX ? part.slice(0, ATTACHMENT_PART_MAX).trimEnd() : part;
+}
+
+/**
+ * The date as it goes into a file name: dd-mm-yyyy on the Queensland calendar.
+ *
+ * Dashes rather than the slashes Australians write, because a slash is a path
+ * separator on every operating system the office runs. Day first so the name
+ * reads the way the office reads a date; the year is there so it still sorts
+ * inside a folder that spans one.
+ */
+function fileDay(iso: string | undefined): string {
+  const day = qldIsoDay(iso);
+  if (!day) return 'date-not-recorded';
+  const [y, m, d] = day.split('-');
+  return `${d}-${m}-${y}`;
+}
+
+/**
+ * The name a defect photograph gets in Simpro.
+ *
+ * "<site> — <defect location> — <date>.jpg", so somebody in the office can tell
+ * from the file list which building and which fault it shows, and when. The
+ * second and later photographs of one defect get " (2)", " (3)" before the
+ * extension; a name reused within a job would either be refused by the server
+ * or, worse, quietly kept as two files nobody can tell apart.
+ */
+export function attachmentFilename(input: {
+  siteName: string;
+  location: string;
+  /** The day the defect was raised, as an ISO instant or day. */
+  raisedAt: string | undefined;
+  /** The stored path, for its extension. Defaults to jpg where it does not say. */
+  path?: string;
+  /** 1-based position among this defect's photographs. */
+  sequence?: number;
+}): string {
+  const base = [
+    safeNamePart(input.siteName, 'Site not recorded'),
+    safeNamePart(input.location, 'Location not recorded'),
+    fileDay(input.raisedAt),
+  ].join(NAME_SEPARATOR);
+  const suffix = input.sequence && input.sequence > 1 ? ` (${input.sequence})` : '';
+  const ext = `.${extensionFor(input.path ?? '')}`;
+  const room = ATTACHMENT_NAME_MAX - suffix.length - ext.length;
+  const stem = base.length > room ? base.slice(0, room).trimEnd() : base;
+  return `${stem}${suffix}${ext}`;
+}
+
+/** The MIME type the upload declares, read off the stored extension. */
+export function mimeTypeForPhoto(path: string): string {
+  switch (extensionFor(path)) {
+    case 'png': return 'image/png';
+    case 'webp': return 'image/webp';
+    case 'heic':
+    case 'heif': return 'image/heic';
+    default: return 'image/jpeg';
+  }
+}
+
+/**
+ * The queue's content key for an attachment: the job, the name and the size.
+ *
+ * Not the local path — it differs between phones and moves when the app is
+ * reinstalled — and not the bytes, which would mean reading a file to decide
+ * whether to queue it. The same photograph of the same defect on the same job
+ * produces the same key on every handset, which is what stops a second tap
+ * uploading it twice; a photograph that was retaken has a new size and goes
+ * up as the new file it is.
+ */
+export function attachmentContentKey(input: { jobId: string; filename: string; sizeBytes: number | undefined }): string {
+  return queueKey('attachment', { jobId: input.jobId, filename: input.filename, sizeBytes: input.sizeBytes ?? null });
+}
+
+export interface DefectPhotoPlan {
+  items: OutboundAttachmentItem[];
+  /** Photographs recorded on the defect whose file could not be found. */
+  missing: number;
+}
+
+/**
+ * The attachments for one defect's photographs, in the order they were taken.
+ *
+ * Numbering runs across the whole send rather than per defect, through the
+ * `used` map: two defects at "Plant room" raised the same day would otherwise
+ * both produce "<site> — Plant room — <date>.jpg" and the second would either
+ * be refused or file over the first. Pure, so a screen can show the names
+ * before anything is queued.
+ */
+export function attachmentsForDefect(
+  defect: Pick<OutboundDefect, 'id' | 'location' | 'raisedAt' | 'photos'>,
+  context: { jobId: string; siteName: string; used?: Map<string, number> },
+): DefectPhotoPlan {
+  const used = context.used ?? new Map<string, number>();
+  const items: OutboundAttachmentItem[] = [];
+  let missing = 0;
+  for (const photo of defect.photos ?? []) {
+    if (photo.sizeBytes === undefined || !(photo.sizeBytes > 0)) {
+      missing++;
+      continue;
+    }
+    // The stem is what collides, so the sequence is counted on it — with the
+    // extension left off, since a .png and a .jpg of the same stem are two
+    // names already.
+    const stem = attachmentFilename({
+      siteName: context.siteName, location: defect.location, raisedAt: defect.raisedAt,
+    }).replace(/\.[a-z0-9]+$/i, '');
+    const sequence = (used.get(stem) ?? 0) + 1;
+    used.set(stem, sequence);
+    const filename = attachmentFilename({
+      siteName: context.siteName, location: defect.location, raisedAt: defect.raisedAt, path: photo.path, sequence,
+    });
+    const key = attachmentContentKey({ jobId: context.jobId, filename, sizeBytes: photo.sizeBytes });
+    items.push({
+      kind: 'attachment',
+      key,
+      urgency: 'routine',
+      description: `Photo - ${defect.location.trim() || 'location not recorded'} - ${context.siteName} `
+        + `(job ${context.jobId}) - ${filename}`,
+      payload: {
+        jobId: context.jobId,
+        localUri: photo.path,
+        filename,
+        mimeType: mimeTypeForPhoto(photo.path),
+        subject: `Photo of defect at ${defect.location.trim() || 'an unrecorded location'}, ${context.siteName}`,
+        sizeBytes: photo.sizeBytes,
+        key,
+      },
+    });
+  }
+  return { items, missing };
+}
+
+/** What a note says about a defect's photographs, given how many are going to the job. */
+function photoLine(defect: OutboundDefect, going: number, filename: string | undefined): string | undefined {
+  const total = Math.max(defect.photoCount ?? 0, defect.photos?.length ?? 0);
+  if (!total) return undefined;
+  const plural = (n: number) => `${n} photo${n === 1 ? '' : 's'}`;
+  if (going === total) {
+    return `${plural(total)} being sent to this job's attachments${filename ? ` as "${filename}"` : ''}.`;
+  }
+  if (going > 0) {
+    return `${going} of ${plural(total)} being sent to this job's attachments${filename ? ` as "${filename}"` : ''}; `
+      + `the other ${total - going} ${total - going === 1 ? 'is' : 'are'} held with the report.`;
+  }
+  return `${plural(total)} held with the report; photos are not attached to this note.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -739,7 +1034,13 @@ function reasonsLine(summary: ServiceSummary): string | undefined {
   return `Not tested because: ${parts.join('; ')}${tail}.`;
 }
 
-function criticalBlock(defect: OutboundDefect, run: CompletedRoutineRun): string[] {
+/** How many of a defect's photographs are going to the job, and under what name. */
+interface PhotoOutcome {
+  going: number;
+  filename?: string;
+}
+
+function criticalBlock(defect: OutboundDefect, run: CompletedRoutineRun, photos: PhotoOutcome): string[] {
   const basis = criticalBasis(defect);
   /*
    * Both clocks run from the maintenance, not from the moment the defect was
@@ -780,10 +1081,8 @@ function criticalBlock(defect: OutboundDefect, run: CompletedRoutineRun): string
   if (rectifyDue) lines.push(`Rectification due by ${rectifyDue} (one month from the maintenance).`);
   if (defect.interimMeasures?.trim()) lines.push(`Interim measures: ${defect.interimMeasures.trim()}.`);
   if (defect.status !== 'open') lines.push(`Status recorded on site: ${defect.status}.`);
-  if (defect.photoCount) {
-    lines.push(`${defect.photoCount} photo${defect.photoCount === 1 ? '' : 's'} held with the report; `
-      + 'photos are not attached to this note.');
-  }
+  const photoNote = photoLine(defect, photos.going, photos.filename);
+  if (photoNote) lines.push(photoNote);
   return lines;
 }
 
@@ -807,10 +1106,13 @@ function composeSections(
   amended: boolean,
   /** Defects raised on this visit that the office already holds, so are not repeated here. */
   alreadyReported: number,
+  /** By defect id: how many photographs are going to the job. Absent means none. */
+  photos: Map<string, PhotoOutcome> = new Map(),
 ): NoteSection[] {
   const sections: NoteSection[] = [];
   const criticals = defects.filter(isCriticalDefect);
   const others = defects.filter((d) => !isCriticalDefect(d));
+  const photosOf = (d: OutboundDefect): PhotoOutcome => photos.get(d.id) ?? { going: 0 };
 
   const head = [
     `ROUTINE SERVICE - ${run.routineLabel} (${run.frequency}) - ${run.system}`,
@@ -857,7 +1159,7 @@ function composeSections(
 
   if (criticals.length) {
     const block = [`CRITICAL DEFECTS (${criticals.length}) - statutory clocks have started`];
-    for (const defect of criticals) block.push(criticalBlock(defect, run).join('\n'));
+    for (const defect of criticals) block.push(criticalBlock(defect, run, photosOf(defect)).join('\n'));
     sections.push({ id: 'critical defects', text: block.join('\n\n'), essential: true });
   }
 
@@ -865,8 +1167,12 @@ function composeSections(
     const block = [`OTHER DEFECTS RAISED (${others.length})`];
     for (const defect of others) {
       const label = AS1851_CLASS_LABEL[defect.as1851Class ?? 'non-critical'];
+      // The count and where the photographs are, but not the file name: a
+      // list line is read at a glance and the name is in the attachment list.
+      const photoNote = photoLine(defect, photosOf(defect).going, undefined);
       block.push(`- ${defect.location.trim() || 'location not recorded'}: ${defect.description.trim()} `
-        + `[${label}, raised ${qldDay(defect.raisedAt) ?? 'date not readable'}, ${defect.status}]`);
+        + `[${label}, raised ${qldDay(defect.raisedAt) ?? 'date not readable'}, ${defect.status}]`
+        + (photoNote ? ` - ${photoNote}` : ''));
     }
     sections.push({ id: 'other defects', text: block.join('\n'), essential: false });
   }
@@ -1118,11 +1424,60 @@ export function planOutboundWork(
         `No verbal notification is recorded for the critical defect at ${defect.location || 'an unrecorded location'}. `
         + `${AS1851_CLASS_OBLIGATION.critical.notify} The note says so rather than leaving it blank.`);
     }
-    if (defect.photoCount) {
+  }
+
+  /*
+   * The photographs, planned before any note is composed, because the notes
+   * say what became of them. Each goes as its own attachment item; what could
+   * not go is said here, and the note repeats it in fewer words. A defect the
+   * office already holds keeps its photographs too — they would arrive as
+   * evidence of a defect nobody can find on the job.
+   */
+  const photoOutcomes = new Map<string, PhotoOutcome>();
+  const attachments: OutboundAttachmentItem[] = [];
+  const sendPhotos = options.sendPhotos !== false;
+  const usedNames = new Map<string, number>();
+  for (const defect of sendableDefects) {
+    const where = defect.location || 'an unrecorded location';
+    const recorded = Math.max(defect.photoCount ?? 0, defect.photos?.length ?? 0);
+    if (!recorded) continue;
+    const plural = (n: number) => `${n} photo${n === 1 ? '' : 's'}`;
+    if (!sendPhotos) {
       caution('photos-not-sent',
-        `${defect.photoCount} photo${defect.photoCount === 1 ? '' : 's'} of the critical defect at `
-        + `${defect.location || 'an unrecorded location'} stay with the report; there is no attachment endpoint wired.`);
+        `${plural(recorded)} of the defect at ${where} stay on this phone and with the report: sending photos to `
+        + 'Simpro is switched off in Settings.');
+      continue;
     }
+    if (!defect.photos) {
+      // The caller counted them and did not hand them over. Nothing to queue,
+      // and the note must not read as though something was attached.
+      caution('photos-not-sent',
+        `${plural(recorded)} of the defect at ${where} stay with the report; the files were not supplied for `
+        + 'attaching, so the note states the count only.');
+      continue;
+    }
+    const planned = attachmentsForDefect(defect, { jobId, siteName: run.siteName, used: usedNames });
+    if (planned.missing) {
+      decline('photo-file-missing',
+        `${plural(planned.missing)} of the defect at ${where} ${planned.missing === 1 ? 'is' : 'are'} recorded but the `
+        + `file${planned.missing === 1 ? ' is' : 's are'} no longer on this device, so ${planned.missing === 1 ? 'it' : 'they'} `
+        + 'cannot be attached. The note says how many were taken.');
+    }
+    let going = 0;
+    for (const item of planned.items) {
+      if (alreadySent.has(item.key)) {
+        // The caller's list carries queued uploads as well as accepted ones,
+        // because a photograph waiting for signal is as sent as this plan is
+        // concerned: queueing it again would be the second copy.
+        decline('already-sent',
+          `${item.payload.filename} is already queued for, or on, job ${jobId} in Simpro (${item.key}). `
+          + 'It is not sent again.');
+        continue;
+      }
+      attachments.push(item);
+      going++;
+    }
+    photoOutcomes.set(defect.id, { going, filename: planned.items[0]?.payload.filename });
   }
 
   const fullRecordAt = options.fullRecordAt
@@ -1170,7 +1525,7 @@ export function planOutboundWork(
     }
 
     const body = [
-      ...criticalBlock(defect, run),
+      ...criticalBlock(defect, run, photoOutcomes.get(defect.id) ?? { going: 0 }),
       '',
       `Raised during ${run.routineLabel} at ${run.siteName}, `
         + `${qldDay(run.completedAt) ?? 'date not readable'}.`,
@@ -1277,7 +1632,7 @@ export function planOutboundWork(
   }
 
   const sections = composeSections(
-    run, summary, results, sendableDefects, serviceAmended, defects.length - sendableDefects.length,
+    run, summary, results, sendableDefects, serviceAmended, defects.length - sendableDefects.length, photoOutcomes,
   );
   const note = assemble(sections, serviceKey, fullRecordAt, bodyLimit);
   if (note.truncated) {
@@ -1310,5 +1665,106 @@ export function planOutboundWork(
     },
   });
 
+  // Photographs last. The notes say they are coming, and a note that lands
+  // after its evidence is easier to read than evidence that lands before
+  // anybody has been told what it shows.
+  items.push(...attachments);
+
   return { items, warnings, summary };
+}
+
+// ---------------------------------------------------------------------------
+// Work completed
+// ---------------------------------------------------------------------------
+
+/** The job as the phone holds it, at the moment it is marked complete. */
+export interface WorkCompletedJob {
+  /** The Simpro job number. Without one there is nowhere to put the note. */
+  externalId: string;
+  title: string;
+  siteName: string;
+  /** ISO instant the technician marked it complete. */
+  completedAt: string;
+  technician?: string;
+  /** The technician's own notes on the job, if any. */
+  notes?: string;
+  orderNo?: string;
+}
+
+/** The routine service done under the job, where one was recorded and linked. */
+export interface WorkCompletedRun {
+  routineLabel: string;
+  frequency: string;
+  system: string;
+  completedAt: string;
+  checksPassed?: number;
+  checksFailed?: number;
+  checksNotTested?: number;
+  defectsRaised?: number;
+}
+
+/**
+ * The short note that goes up when a job is marked complete on the phone.
+ *
+ * Deliberately not the service record: that carries the counts and the
+ * defects and goes through its own review. This says only that the work is
+ * done, when, and by whom, so the office sees it the moment it happens rather
+ * than when the paperwork lands — and it says in so many words that the job's
+ * stage in Simpro has not been touched, because a scheduler reading "work
+ * completed" would otherwise wonder why the job is still in progress.
+ *
+ * Keyed on the job and the Queensland day it was completed, so marking the
+ * same job complete twice in a day — a double tap, a re-open and re-close a
+ * minute later — is one note. Completing it again on another day is a
+ * different event and gets its own.
+ */
+export function workCompletedNote(job: WorkCompletedJob, run?: WorkCompletedRun): OutboundJobNote {
+  const jobId = job.externalId.trim();
+  const day = qldIsoDay(job.completedAt);
+  const identity = ['work-completed', jobId, day ?? job.completedAt];
+  const content = [
+    job.title, job.technician, job.notes, job.orderNo,
+    run?.routineLabel, run?.frequency, run?.system,
+    run?.checksPassed, run?.checksFailed, run?.checksNotTested, run?.defectsRaised,
+  ];
+  const key = outboundKey('SRV', identity, content);
+
+  const lines = [
+    `WORK COMPLETED - ${job.title.trim() || 'job'}`,
+    `Site: ${job.siteName}`,
+    `Completed: ${qldMoment(job.completedAt) ?? qldDay(job.completedAt) ?? 'date not readable'}`,
+    job.technician?.trim() ? `Technician: ${job.technician.trim()}` : 'Technician: not recorded',
+  ];
+  if (job.orderNo?.trim()) lines.push(`Order no: ${job.orderNo.trim()}`);
+  if (run) {
+    const counts = run.checksPassed !== undefined || run.checksFailed !== undefined || run.checksNotTested !== undefined
+      ? ` Results: ${run.checksPassed ?? 0} passed, ${run.checksFailed ?? 0} failed, ${run.checksNotTested ?? 0} not tested`
+        + `${run.defectsRaised ? `; ${run.defectsRaised} defect${run.defectsRaised === 1 ? '' : 's'} raised` : ''}.`
+      : '';
+    lines.push(`Routine: ${run.routineLabel} (${run.frequency}) - ${run.system}, `
+      + `${qldDay(run.completedAt) ?? 'date not readable'}.${counts} The service record note carries the detail.`);
+  }
+  const sections: NoteSection[] = [{ id: 'work completed', text: lines.join('\n'), essential: true }];
+  if (job.notes?.trim()) {
+    sections.push({ id: 'technician notes', text: `TECHNICIAN NOTES\n${job.notes.trim()}`, essential: false });
+  }
+  sections.push({
+    id: 'footer',
+    text: 'Marked complete in the Safe QLD field app. The job\'s stage and status in Simpro are not changed by '
+      + 'this note; the office closes the job.',
+    essential: true,
+  });
+
+  const fullRecordAt = `the job record for ${job.siteName} in the Safe QLD field app`;
+  const note = assemble(sections, key, fullRecordAt, NOTE_LIMITS.body.chars);
+  return {
+    jobId,
+    subject: subjectFor(`Work completed - ${job.siteName} - ${qldDay(job.completedAt) ?? ''}`),
+    note: note.text,
+    key,
+    truncated: note.truncated,
+    omittedChars: note.omittedChars,
+    omittedSections: note.omittedSections,
+    fullRecordAt,
+  };
 }

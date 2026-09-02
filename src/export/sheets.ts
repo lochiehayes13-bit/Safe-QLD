@@ -209,7 +209,9 @@ export function testResultSheet(rows: TestRow[]): Sheet {
       r.zoneNumber ?? '',
       r.zoneText ?? '',
       r.deviceText,
-      DEVICE_TYPE_LABEL[r.deviceType],
+      // A row from the asset register carries the register's own type label;
+      // the panel vocabulary has no word for an extinguisher.
+      r.assetType ?? DEVICE_TYPE_LABEL[r.deviceType],
       r.method ?? '',
       resultCell(r.result),
       r.comment ?? '',

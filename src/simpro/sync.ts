@@ -1,5 +1,8 @@
 import { SimproClient, SimproError, type SimproConfig } from './client';
 import { SimproResources, scheduleDateFilter } from './resources';
+import {
+  SimproMirror, dateSinceFilter, invoiceWindowStart, type PagedRead, type SimproCustomer, type SimproInvoice,
+} from './mirrorResources';
 import { assessIncremental, nextWatermark, planIncremental, type SyncResource } from './incremental';
 import { readSyncState, writeSyncState } from './watermark';
 import { flushSoon } from './flushSoon';
@@ -7,13 +10,22 @@ import { createSite, listSites, updateSite } from '@/db/repo';
 import { saveRateCard } from '@/db/rateCardRepo';
 import { replaceEmployees } from '@/db/employeeRepo';
 import { replaceScheduleWindow } from '@/db/scheduleRepo';
-import { scheduleWindow } from '@/domain/myDay';
+import { addDays, scheduleWindow } from '@/domain/myDay';
+import { qldIsoDay } from '@/domain/qldTime';
 import {
-  upsertJob, enqueueSync, pendingSync, markSynced, markSyncFailed, markSyncUnknown, setPurchaseStatus, type JobRecord,
+  upsertJob, getJob, enqueueSync, pendingSync, markSynced, markSyncFailed, markSyncUnknown, abandonSync,
+  setPurchaseStatus, type JobRecord,
 } from '@/db/opsRepo';
+import {
+  getQuote, heldJobExternalIds, jobDetailIsStale, jobRowFromSimpro, jobsWantingDetail, pruneCustomersNotSyncedAt,
+  quotesWantingDetail, replaceJobChildren, replaceQuoteChildren, scheduledJobExternalIds, upsertCustomer, upsertInvoice,
+  upsertQuote, upsertTasks, type JobChildren, type QuoteChildren,
+} from '@/db/mirrorRepo';
 import { withMarker } from '@/domain/queueKey';
 import { matchSiteByRefOrName } from '@/domain/siteNames';
-import type { OutboundAssetTest } from '@/domain/outboundWork';
+import { attachmentContentKey, type OutboundAssetTest, type OutboundAttachment } from '@/domain/outboundWork';
+import { uploadJobAttachment } from './attachments';
+import { AttachmentFileMissing, readAttachmentForUpload, type ReadAttachment } from './attachmentFiles';
 import { createAsset, findByExternalIds, updateAsset, type AssetRecord } from '@/db/assetRepo';
 import { mapSimproAsset, SIMPRO_ASSET_SOURCE, statusFor } from './assetSync';
 import type { Site } from '@/domain/types';
@@ -32,6 +44,13 @@ export const SIMPRO_SOURCE = 'simpro';
  * outbound work goes through a queue that survives the app closing and retries
  * on its own. And nothing from the office may quietly overwrite what someone
  * typed on site — a pull fills blanks and adds records, it does not clobber.
+ *
+ * The pull is a mirror, within what a phone should hold. Every site, job,
+ * quote, invoice and customer comes down at list level; what sits *under* a
+ * job — its sections and lines, notes, attachments, activity — is a dozen
+ * requests a job and comes down only for the jobs somebody is booked to,
+ * the ones the office touched lately, and the one somebody just opened.
+ * See syncJobDetail and prefetchJobDetails.
  */
 
 export interface SyncProgress {
@@ -39,6 +58,23 @@ export interface SyncProgress {
   done: number;
   total: number;
 }
+
+/** Stages a pull reports progress across. */
+const TOTAL_STAGES = 12;
+
+/** The job list ceiling. The build holds 4,562; the guard is against a runaway, not the book of work. */
+const JOB_CEILING = 6000;
+const QUOTE_CEILING = 6000;
+const INVOICE_CEILING = 6000;
+const CUSTOMER_CEILING = 10000;
+
+/** How long a job's children are trusted before a sync reads them again. */
+export const DETAIL_FRESH_MS = 15 * 60_000;
+/** How many job records one pull will read children for. A dozen requests each. */
+const DETAIL_PREFETCH_CAP = 60;
+const QUOTE_PREFETCH_CAP = 20;
+/** Jobs and quotes the office touched this recently get their children read ahead of being opened. */
+const MODIFIED_WINDOW_DAYS = 14;
 
 export interface SyncResult {
   sitesAdded: number;
@@ -63,6 +99,14 @@ export interface SyncResult {
   employeesRead: number;
   /** Schedule blocks in the window around today, for everyone — the day screen filters. */
   schedulesRead: number;
+  /** The mirror's list-level reads: companies and individuals, quotes, invoices in the window, tasks. */
+  customersRead: number;
+  quotesRead: number;
+  invoicesRead: number;
+  tasksRead: number;
+  /** Jobs and quotes whose children were read this run. */
+  jobDetailsRead: number;
+  quoteDetailsRead: number;
   errors: string[];
   /**
    * Whether each resource actually came down incrementally.
@@ -73,6 +117,19 @@ export interface SyncResult {
    */
   modes: Partial<Record<SyncResource, 'incremental' | 'full'>>;
   notes: string[];
+}
+
+export interface PullOptions {
+  incremental?: boolean;
+  /**
+   * Whose phone this is, so their booked jobs are the first to get their
+   * children read. Without it the whole schedule window is used, soonest
+   * first, and the cap decides how far that reaches.
+   */
+  staffId?: string;
+  staffName?: string;
+  /** Off to read lists only. On by default. */
+  prefetchDetails?: boolean;
 }
 
 /**
@@ -87,10 +144,37 @@ function matchSite(existing: Site[], externalId: string, name: string) {
   return matchSiteByRefOrName(existing, `SIMPRO:${externalId}`, name);
 }
 
+/**
+ * Every site held locally, keyed by the office's id.
+ *
+ * Seeded from the whole local table rather than from the sites a run
+ * happened to read: on an incremental pull a handful of sites come down,
+ * and an index built from those alone left every new job for any other
+ * site with no site at all — and the upsert never revisited siteId, so
+ * they stayed unlinked through every later pull.
+ */
+function indexSitesByRemote(sites: readonly Site[], seed?: Map<string, string>): Map<string, string> {
+  const map = new Map(seed);
+  for (const site of sites) {
+    const remoteId = site.externalSource === SIMPRO_SOURCE ? site.externalId : undefined;
+    const fromRef = site.siteRef?.startsWith('SIMPRO:') ? site.siteRef.slice('SIMPRO:'.length) : undefined;
+    const key = remoteId ?? fromRef;
+    if (key && !map.has(key)) map.set(key, site.id);
+  }
+  return map;
+}
+
+/** The note a stage adds when the build refused its column set and the thin list was read instead. */
+function columnsNote(what: string, read: PagedRead<unknown>): string | undefined {
+  return read.columnsRejected
+    ? `Simpro refused the ${what} column set, so only the thin list was read — it said: ${read.columnsRejected}`
+    : undefined;
+}
+
 export async function pullFromSimpro(
   config: SimproConfig,
   onProgress?: (p: SyncProgress) => void,
-  options?: { incremental?: boolean },
+  options?: PullOptions,
 ): Promise<SyncResult> {
   /*
    * A pull reads everything, every time.
@@ -111,25 +195,29 @@ export async function pullFromSimpro(
   const force = !options?.incremental;
   const client = new SimproClient(config);
   const api = new SimproResources(client);
+  const mirror = new SimproMirror(client);
   const result: SyncResult = {
     sitesAdded: 0, sitesUpdated: 0, jobsAdded: 0, jobsUpdated: 0,
     assetsAdded: 0, assetsUpdated: 0, assetsWithoutSite: 0,
     ratesRead: 0, feesRead: 0, employeesRead: 0, schedulesRead: 0,
+    customersRead: 0, quotesRead: 0, invoicesRead: 0, tasksRead: 0,
+    jobDetailsRead: 0, quoteDetailsRead: 0,
     errors: [], modes: {}, notes: [],
   };
   const startedAt = new Date().toISOString();
+  const progress = (stage: string, done: number, total = TOTAL_STAGES) => onProgress?.({ stage, done, total });
 
   // One check, before any stage runs. Each stage would otherwise fail on its
-  // own and report the same missing-secret sentence five times, which reads as
-  // five separate faults and hides the single thing that fixes all of them.
+  // own and report the same missing-secret sentence twelve times, which reads
+  // as twelve separate faults and hides the single thing that fixes all of them.
   const missing = await SimproClient.missingCredentials(config);
   if (missing) {
     result.errors.push(missing);
-    onProgress?.({ stage: 'Not connected', done: 0, total: 6 });
+    progress('Not connected', 0);
     return result;
   }
 
-  onProgress?.({ stage: 'Reading sites', done: 0, total: 6 });
+  progress('Reading sites', 0);
 
   // Read against the watermark even on a full pull: the mark is still recorded,
   // so switching back to incremental later has somewhere to start from.
@@ -153,7 +241,7 @@ export async function pullFromSimpro(
   const siteIdByExternal = new Map<string, string>();
 
   for (const [i, remote] of remoteSites.entries()) {
-    if (i % 25 === 0) onProgress?.({ stage: 'Sites', done: i, total: remoteSites.length });
+    if (i % 25 === 0) progress('Sites', i, remoteSites.length);
     try {
       const { match, ambiguous } = matchSite(existing, remote.id, remote.name);
       if (ambiguous) {
@@ -235,45 +323,41 @@ export async function pullFromSimpro(
     }, startedAt);
   }
 
-  onProgress?.({ stage: 'Reading jobs', done: 1, total: 6 });
+  progress('Reading jobs', 1);
+
+  const siteIdByRemote = indexSitesByRemote(existing, siteIdByExternal);
 
   /*
-   * Every site held locally, keyed by the office's id, for the jobs and the
-   * assets. Seeded from the whole local table rather than from the sites this
-   * run happened to read: on an incremental pull a handful of sites come down,
-   * and an index built from those alone left every new job for any other
-   * site with no site at all — and the upsert never revisited siteId, so they
-   * stayed unlinked through every later pull.
+   * Every job on the books, at list level, with the full column set.
+   *
+   * The ceiling was 500 against 4,562 jobs, so a full pull held the five
+   * hundred most recently changed and called itself a sync. The list row now
+   * carries what the job screen shows — order number, status and its colour,
+   * technicians, the sell total — and what sits under a job is read on demand
+   * further down.
    */
-  const siteIdByRemote = new Map(siteIdByExternal);
-  for (const site of existing) {
-    const remoteId = site.externalSource === SIMPRO_SOURCE ? site.externalId : undefined;
-    const fromRef = site.siteRef?.startsWith('SIMPRO:') ? site.siteRef.slice('SIMPRO:'.length) : undefined;
-    const key = remoteId ?? fromRef;
-    if (key && !siteIdByRemote.has(key)) siteIdByRemote.set(key, site.id);
-  }
-
   const jobState = await readSyncState('jobs');
   const jobPlan = planIncremental('jobs', jobState.lastChangeSeenAt, { force });
   const errorsBeforeJobs = result.errors.length;
 
   try {
-    const { jobs: remoteJobs, truncated: jobsTruncated } = await api.jobsPaged(jobPlan.query, 500);
+    const { jobs: remoteJobs, truncated: jobsTruncated } = await api.jobsPaged(jobPlan.query, JOB_CEILING);
     const outcome = assessIncremental(remoteJobs, jobPlan, jobState.lastRecordCount);
     result.modes.jobs = outcome.mode;
     if (outcome.note) result.notes.push(outcome.note);
     if (jobsTruncated) {
       result.notes.push(
-        'More than 500 jobs matched, so only the 500 most recently changed were read. '
+        `More than ${JOB_CEILING} jobs matched, so only the ${JOB_CEILING} most recently changed were read. `
         + 'The watermark was not moved, so the rest are still asked for next time.',
       );
     }
+    const held = await heldJobExternalIds();
     for (const [i, job] of remoteJobs.entries()) {
-      if (i % 25 === 0) onProgress?.({ stage: 'Jobs', done: i, total: remoteJobs.length });
+      if (i % 25 === 0) progress('Jobs', i, remoteJobs.length);
       try {
-        const before = await upsertJobFromSimpro(job, siteIdByRemote);
-        if (before) result.jobsAdded++;
-        else result.jobsUpdated++;
+        await upsertJob(jobRowFromSimpro(job, job.siteId ? siteIdByRemote.get(job.siteId) : undefined));
+        if (held.has(job.id)) result.jobsUpdated++;
+        else result.jobsAdded++;
       } catch (e) {
         result.errors.push(describe(e, `job ${job.id}`));
       }
@@ -296,7 +380,7 @@ export async function pullFromSimpro(
     result.errors.push(describe(e, 'jobs'));
   }
 
-  onProgress?.({ stage: 'Reading assets', done: 2, total: 6 });
+  progress('Reading assets', 2);
 
   /*
    * The register itself: 12,546 assets across 898 of the office's sites.
@@ -333,7 +417,7 @@ export async function pullFromSimpro(
     const known = await findByExternalIds(SIMPRO_ASSET_SOURCE, remoteAssets.map((a) => a.id));
 
     for (const [i, remote] of remoteAssets.entries()) {
-      if (i % 100 === 0) onProgress?.({ stage: 'Assets', done: i, total: remoteAssets.length });
+      if (i % 100 === 0) progress('Assets', i, remoteAssets.length);
       try {
         const mapped = mapSimproAsset(remote);
         if (mapped.unmappedType) {
@@ -409,7 +493,7 @@ export async function pullFromSimpro(
     result.errors.push(describe(e, 'assets'));
   }
 
-  onProgress?.({ stage: 'Reading rates', done: 3, total: 6 });
+  progress('Reading rates', 3);
 
   // Always whole: the setup endpoints carry no modification date, so there is
   // nothing to ask "what changed" against. It is cheap — a rate card is tens of
@@ -443,7 +527,7 @@ export async function pullFromSimpro(
     result.errors.push(describe(e, 'rates'));
   }
 
-  onProgress?.({ stage: 'Reading employees', done: 4, total: 6 });
+  progress('Reading employees', 4);
 
   /*
    * The staff list, whole, every time. A few dozen rows, no modification date
@@ -470,7 +554,7 @@ export async function pullFromSimpro(
     result.errors.push(describe(e, 'employees'));
   }
 
-  onProgress?.({ stage: 'Reading schedules', done: 5, total: 6 });
+  progress('Reading schedules', 5);
 
   /*
    * The office's schedule for a window around today — a week back, three
@@ -520,31 +604,234 @@ export async function pullFromSimpro(
     result.errors.push(describe(e, 'schedules'));
   }
 
-  onProgress?.({ stage: 'Done', done: 6, total: 6 });
-  return result;
-}
+  progress('Reading customers', 6);
 
-async function upsertJobFromSimpro(
-  job: Awaited<ReturnType<SimproResources['jobs']>>[number],
-  siteIdByExternal: Map<string, string>,
-): Promise<boolean> {
-  const record: Partial<JobRecord> & { siteName: string; title: string } = {
-    // A stable local id keyed off the external one, so re-pulling updates
-    // rather than duplicating.
-    id: `simpro-${job.id}`,
-    externalId: job.id,
-    siteId: job.siteId ? siteIdByExternal.get(job.siteId) : undefined,
-    siteName: job.siteName ?? 'Unknown site',
-    customerName: job.customerName,
-    title: job.title,
-    jobType: job.type,
-    stage: job.stage,
-    dueAt: job.dueAt,
-    scheduledFor: job.issuedAt,
-    status: job.stage?.toLowerCase() === 'complete' ? 'complete' : 'scheduled',
-  };
-  await upsertJob(record);
-  return true;
+  /*
+   * Every customer — 2,482 companies and a handful of individuals — at list
+   * level. Whole on a full pull, and then the ones the pull did not see are
+   * pruned: a customer deleted in the office has to leave the phone too, and
+   * only a full read can say who was not there. The individuals are read in
+   * their own try so an unverified column set on four rows cannot cost the
+   * companies.
+   */
+  const customerState = await readSyncState('customers');
+  const customerPlan = planIncremental('customers', customerState.lastChangeSeenAt, { force });
+  const errorsBeforeCustomers = result.errors.length;
+  try {
+    const companies = await mirror.companiesPaged(customerPlan.query, CUSTOMER_CEILING);
+    const companiesNote = columnsNote('customer', companies);
+    if (companiesNote) result.notes.push(companiesNote);
+    let individuals: SimproCustomer[] = [];
+    try {
+      const read = await mirror.individualsPaged(customerPlan.query, CUSTOMER_CEILING);
+      const note = columnsNote('individual customer', read);
+      if (note) result.notes.push(note);
+      individuals = read.items;
+    } catch (e) {
+      result.notes.push(`Individual customers were not read: ${describe(e, 'individuals')}`);
+    }
+    const customers = [...companies.items, ...individuals];
+    const outcome = assessIncremental(customers, customerPlan, customerState.lastRecordCount);
+    result.modes.customers = outcome.mode;
+    if (outcome.note) result.notes.push(outcome.note);
+    if (companies.truncated) {
+      result.notes.push(`The customer read stopped at ${companies.items.length} records before reaching the end.`);
+    }
+    for (const [i, c] of customers.entries()) {
+      if (i % 100 === 0) progress('Customers', i, customers.length);
+      try {
+        if (c.id) await upsertCustomer(c, startedAt);
+        result.customersRead++;
+      } catch (e) {
+        result.errors.push(describe(e, `customer ${c.id}`));
+      }
+    }
+    if (result.errors.length === errorsBeforeCustomers) {
+      if (outcome.mode === 'full' && !companies.truncated) {
+        const pruned = await pruneCustomersNotSyncedAt(startedAt);
+        if (pruned) result.notes.push(`${pruned} ${pruned === 1 ? 'customer' : 'customers'} no longer in Simpro removed.`);
+      }
+      await writeSyncState({
+        resource: 'customers',
+        lastSyncedAt: startedAt,
+        ...nextWatermark(
+          customers as unknown as Record<string, unknown>[], outcome.mode, startedAt, customerState, companies.truncated,
+        ),
+        mode: outcome.mode,
+      }, startedAt);
+    }
+  } catch (e) {
+    result.errors.push(describe(e, 'customers'));
+  }
+
+  progress('Reading quotes', 7);
+
+  const quoteState = await readSyncState('quotes');
+  const quotePlan = planIncremental('quotes', quoteState.lastChangeSeenAt, { force });
+  const errorsBeforeQuotes = result.errors.length;
+  try {
+    const read = await mirror.quotesPaged(quotePlan.query, QUOTE_CEILING);
+    const note = columnsNote('quote', read);
+    if (note) result.notes.push(note);
+    const outcome = assessIncremental(read.items, quotePlan, quoteState.lastRecordCount);
+    result.modes.quotes = outcome.mode;
+    if (outcome.note) result.notes.push(outcome.note);
+    if (read.truncated) {
+      result.notes.push(`More than ${QUOTE_CEILING} quotes matched, so only the most recently changed were read.`);
+    }
+    for (const [i, q] of read.items.entries()) {
+      if (i % 50 === 0) progress('Quotes', i, read.items.length);
+      try {
+        if (q.id) await upsertQuote(q, q.siteId ? siteIdByRemote.get(q.siteId) : undefined, startedAt);
+        result.quotesRead++;
+      } catch (e) {
+        result.errors.push(describe(e, `quote ${q.id}`));
+      }
+    }
+    if (result.errors.length === errorsBeforeQuotes) {
+      await writeSyncState({
+        resource: 'quotes',
+        lastSyncedAt: startedAt,
+        ...nextWatermark(read.items as unknown as Record<string, unknown>[], outcome.mode, startedAt, quoteState, read.truncated),
+        mode: outcome.mode,
+      }, startedAt);
+    }
+  } catch (e) {
+    result.errors.push(describe(e, 'quotes'));
+  }
+
+  progress('Reading invoices', 8);
+
+  /*
+   * Two years of invoices by issue date on a full pull; only what changed on
+   * an incremental one. Two years is what a conversation on site reaches
+   * back to — "you still owe us for March" — and the rest stays in the
+   * office where the money is chased.
+   */
+  const invoiceState = await readSyncState('invoices');
+  const invoicePlan = planIncremental('invoices', invoiceState.lastChangeSeenAt, { force });
+  const errorsBeforeInvoices = result.errors.length;
+  try {
+    const query = invoicePlan.mode === 'full'
+      ? { DateIssued: dateSinceFilter(invoiceWindowStart(startedAt)) }
+      : invoicePlan.query;
+    const read = await mirror.invoicesPaged(query, INVOICE_CEILING);
+    const note = columnsNote('invoice', read);
+    if (note) result.notes.push(note);
+    const outcome = assessIncremental(read.items, invoicePlan, invoiceState.lastRecordCount);
+    result.modes.invoices = outcome.mode;
+    if (outcome.note) result.notes.push(outcome.note);
+    if (read.truncated) {
+      result.notes.push(`More than ${INVOICE_CEILING} invoices matched, so only the most recently changed were read.`);
+    }
+    for (const [i, inv] of read.items.entries()) {
+      if (i % 50 === 0) progress('Invoices', i, read.items.length);
+      try {
+        if (inv.id) await upsertInvoice(inv, startedAt);
+        result.invoicesRead++;
+      } catch (e) {
+        result.errors.push(describe(e, `invoice ${inv.id}`));
+      }
+    }
+    if (result.errors.length === errorsBeforeInvoices) {
+      await writeSyncState({
+        resource: 'invoices',
+        lastSyncedAt: startedAt,
+        ...nextWatermark(read.items as unknown as Record<string, unknown>[], outcome.mode, startedAt, invoiceState, read.truncated),
+        mode: outcome.mode,
+      }, startedAt);
+    }
+  } catch (e) {
+    result.errors.push(describe(e, 'invoices'));
+  }
+
+  progress('Reading tasks', 9);
+
+  // A handful of rows, read whole; the company list carries no job link, so
+  // the rows are upserted rather than replaced and keep the link a job read made.
+  try {
+    const read = await mirror.tasks();
+    const note = columnsNote('task', read);
+    if (note) result.notes.push(note);
+    result.tasksRead = await upsertTasks(read.items, startedAt);
+    result.modes.tasks = 'full';
+    await writeSyncState({
+      resource: 'tasks',
+      lastSyncedAt: startedAt,
+      lastChangeSeenAt: startedAt,
+      lastRecordCount: result.tasksRead,
+      mode: 'full',
+    }, startedAt);
+  } catch (e) {
+    result.errors.push(describe(e, 'tasks'));
+  }
+
+  if (options?.prefetchDetails !== false) {
+    progress('Reading job details', 10);
+
+    /*
+     * What sits under a job, for the jobs that will be opened: the ones on
+     * the schedule from today out, this person's first where the phone knows
+     * whose it is, and then whatever the office touched in the last
+     * fortnight. Capped, because each is a dozen requests, and skipped where
+     * read in the last quarter hour.
+     */
+    try {
+      const window = scheduleWindow(startedAt);
+      const scheduled = await scheduledJobExternalIds({
+        from: window.today, to: window.to, staffId: options?.staffId, staffName: options?.staffName,
+      });
+      const wanted = await jobsWantingDetail({
+        preferExternalIds: scheduled,
+        modifiedSince: addDays(window.today, -MODIFIED_WINDOW_DAYS),
+        maxAgeMs: DETAIL_FRESH_MS,
+        limit: DETAIL_PREFETCH_CAP,
+      });
+      const out = await readJobDetails(mirror, siteIdByRemote, wanted, (done, total) => progress('Job details', done, total));
+      result.jobDetailsRead = out.read;
+      if (out.failures.length) {
+        result.notes.push(
+          `${out.failures.length} of ${wanted.length} job records could not be read in full: `
+          + out.failures.slice(0, 3).map((f) => `job ${f.externalId}: ${f.error}`).join('; ')
+          + (out.failures.length > 3 ? '; …' : ''),
+        );
+      }
+    } catch (e) {
+      result.errors.push(describe(e, 'job details'));
+    }
+
+    progress('Reading quote details', 11);
+
+    try {
+      const today = qldIsoDay(startedAt) ?? '';
+      const wanted = await quotesWantingDetail({
+        modifiedSince: addDays(today, -MODIFIED_WINDOW_DAYS),
+        maxAgeMs: DETAIL_FRESH_MS,
+        limit: QUOTE_PREFETCH_CAP,
+      });
+      const failures: string[] = [];
+      for (const [i, id] of wanted.entries()) {
+        progress('Quote details', i, wanted.length);
+        try {
+          await readQuoteDetail(mirror, siteIdByRemote, id);
+          result.quoteDetailsRead++;
+        } catch (e) {
+          failures.push(`quote ${id}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      if (failures.length) {
+        result.notes.push(
+          `${failures.length} of ${wanted.length} quote records could not be read in full: `
+          + failures.slice(0, 3).join('; ') + (failures.length > 3 ? '; …' : ''),
+        );
+      }
+    } catch (e) {
+      result.errors.push(describe(e, 'quote details'));
+    }
+  }
+
+  progress('Done', TOTAL_STAGES);
+  return result;
 }
 
 function describe(e: unknown, what: string): string {
@@ -557,12 +844,223 @@ function describe(e: unknown, what: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// What sits under a job: read on demand
+// ---------------------------------------------------------------------------
+
+export type JobDetailOutcome =
+  | { status: 'synced'; /** Child families that could not be read, with the server's words. */ partial: string[] }
+  | { status: 'fresh' }
+  | { status: 'missing' }
+  | { status: 'not-simpro' }
+  | { status: 'failed'; error: string };
+
+/**
+ * Reads one job's record and everything under it, and stores it.
+ *
+ * The record itself has to come back or nothing is written. Each child
+ * family — sections and lines, notes, attachments, the timeline, tasks,
+ * invoices — is its own request and its own try: a key that cannot read
+ * notes still gets the sections, and the family it could not read is left
+ * as it was rather than wiped. The job is stamped read either way, so a
+ * permission the office has not granted is not asked for every minute.
+ */
+async function readOneJobDetail(
+  mirror: SimproMirror,
+  siteIdByRemote: Map<string, string>,
+  job: Pick<JobRecord, 'id' | 'externalId'>,
+): Promise<string[]> {
+  const externalId = job.externalId!;
+  const detail = await mirror.jobDetail(externalId);
+  const siteId = detail.siteId ? siteIdByRemote.get(detail.siteId) : undefined;
+  await upsertJob({ ...jobRowFromSimpro(detail, siteId), id: job.id });
+
+  const partial: string[] = [];
+  const children: Partial<JobChildren> = {};
+  const attempt = async <K extends keyof JobChildren>(key: K, what: string, read: () => Promise<JobChildren[K]>) => {
+    try {
+      children[key] = await read();
+    } catch (e) {
+      partial.push(`${what}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  await attempt('sections', 'sections', () => mirror.jobSections(externalId));
+  await attempt('notes', 'notes', () => mirror.jobNotes(externalId));
+  await attempt('attachments', 'attachments', () => mirror.jobAttachments(externalId));
+  await attempt('timeline', 'timeline', () => mirror.jobTimelines(externalId));
+  await attempt('tasks', 'tasks', () => mirror.jobTasks(externalId));
+
+  let invoices: SimproInvoice[] = [];
+  try {
+    invoices = await mirror.jobInvoices(externalId);
+  } catch (e) {
+    partial.push(`invoices: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  const at = new Date().toISOString();
+  await replaceJobChildren(job.id, children, at);
+  for (const inv of invoices) {
+    if (inv.id) await upsertInvoice(inv, at);
+  }
+  return partial;
+}
+
+async function readJobDetails(
+  mirror: SimproMirror,
+  siteIdByRemote: Map<string, string>,
+  jobs: readonly { id: string; externalId: string }[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<{ read: number; failures: { externalId: string; error: string }[] }> {
+  let read = 0;
+  const failures: { externalId: string; error: string }[] = [];
+  for (const [i, job] of jobs.entries()) {
+    onProgress?.(i, jobs.length);
+    try {
+      await readOneJobDetail(mirror, siteIdByRemote, job);
+      read++;
+    } catch (e) {
+      failures.push({ externalId: job.externalId, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return { read, failures };
+}
+
+/**
+ * Reads a job's record and children now, for the screen that just opened it.
+ *
+ * Skipped where they were read in the last quarter hour, unless forced: a
+ * screen that re-reads on every focus would otherwise spend a dozen
+ * requests each time somebody flicks back to it. A job that did not come
+ * from the office has nothing to read.
+ */
+export async function syncJobDetail(
+  config: SimproConfig,
+  localJobId: string,
+  options: { force?: boolean; maxAgeMs?: number } = {},
+): Promise<JobDetailOutcome> {
+  const job = await getJob(localJobId);
+  if (!job) return { status: 'missing' };
+  if (!job.externalId) return { status: 'not-simpro' };
+  if (!options.force && !jobDetailIsStale(job, options.maxAgeMs ?? DETAIL_FRESH_MS)) return { status: 'fresh' };
+
+  const missing = await SimproClient.missingCredentials(config);
+  if (missing) return { status: 'failed', error: missing };
+
+  try {
+    const mirror = new SimproMirror(new SimproClient(config));
+    const siteIdByRemote = indexSitesByRemote(await listSites());
+    const partial = await readOneJobDetail(mirror, siteIdByRemote, job);
+    return { status: 'synced', partial };
+  } catch (e) {
+    return { status: 'failed', error: describe(e, `job ${job.externalId}`) };
+  }
+}
+
+/**
+ * Reads the children of several jobs, the way a pull does at its end, for a
+ * caller that knows which ones matter — a day screen, say, before the van
+ * leaves signal. Jobs read within the last quarter hour are skipped unless
+ * forced; the cap is the same as the pull's.
+ */
+export async function prefetchJobDetails(
+  config: SimproConfig,
+  options: { jobIds: readonly string[]; force?: boolean; limit?: number },
+  onProgress?: (p: SyncProgress) => void,
+): Promise<{ read: number; skipped: number; failures: { jobId: string; error: string }[] }> {
+  const missing = await SimproClient.missingCredentials(config);
+  if (missing) return { read: 0, skipped: 0, failures: options.jobIds.map((jobId) => ({ jobId, error: missing })) };
+
+  const mirror = new SimproMirror(new SimproClient(config));
+  const siteIdByRemote = indexSitesByRemote(await listSites());
+  const limit = options.limit ?? DETAIL_PREFETCH_CAP;
+
+  const wanted: { id: string; externalId: string }[] = [];
+  let skipped = 0;
+  for (const id of options.jobIds) {
+    const job = await getJob(id);
+    if (!job?.externalId) { skipped++; continue; }
+    if (!options.force && !jobDetailIsStale(job, DETAIL_FRESH_MS)) { skipped++; continue; }
+    if (wanted.length >= limit) { skipped++; continue; }
+    wanted.push({ id: job.id, externalId: job.externalId });
+  }
+
+  const out = await readJobDetails(mirror, siteIdByRemote, wanted, (done, total) =>
+    onProgress?.({ stage: 'Job details', done, total }));
+  const byExternal = new Map(wanted.map((w) => [w.externalId, w.id]));
+  return {
+    read: out.read,
+    skipped,
+    failures: out.failures.map((f) => ({ jobId: byExternal.get(f.externalId) ?? f.externalId, error: f.error })),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Quotes: the same, on demand
+// ---------------------------------------------------------------------------
+
+async function readQuoteDetail(mirror: SimproMirror, siteIdByRemote: Map<string, string>, externalId: string): Promise<string[]> {
+  const detail = await mirror.quoteDetail(externalId);
+  const at = new Date().toISOString();
+  await upsertQuote(detail, detail.siteId ? siteIdByRemote.get(detail.siteId) : undefined, at);
+
+  const partial: string[] = [];
+  const children: Partial<QuoteChildren> = {};
+  const attempt = async <K extends keyof QuoteChildren>(key: K, read: () => Promise<QuoteChildren[K]>) => {
+    try {
+      children[key] = await read();
+    } catch (e) {
+      partial.push(`${key}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  await attempt('sections', () => mirror.quoteSections(externalId));
+  await attempt('notes', () => mirror.quoteNotes(externalId));
+  await attempt('attachments', () => mirror.quoteAttachments(externalId));
+  await replaceQuoteChildren(externalId, children, at);
+  return partial;
+}
+
+export type QuoteDetailOutcome =
+  | { status: 'synced'; partial: string[] }
+  | { status: 'fresh' }
+  | { status: 'missing' }
+  | { status: 'failed'; error: string };
+
+/** Reads one quote's record and children now. Skipped where read in the last quarter hour unless forced. */
+export async function syncQuoteDetail(
+  config: SimproConfig,
+  quoteExternalId: string,
+  options: { force?: boolean; maxAgeMs?: number } = {},
+): Promise<QuoteDetailOutcome> {
+  const quote = await getQuote(quoteExternalId);
+  if (!quote) return { status: 'missing' };
+  if (!options.force && !jobDetailIsStale(quote, options.maxAgeMs ?? DETAIL_FRESH_MS)) return { status: 'fresh' };
+
+  const missing = await SimproClient.missingCredentials(config);
+  if (missing) return { status: 'failed', error: missing };
+
+  try {
+    const mirror = new SimproMirror(new SimproClient(config));
+    const siteIdByRemote = indexSitesByRemote(await listSites());
+    const partial = await readQuoteDetail(mirror, siteIdByRemote, quoteExternalId);
+    return { status: 'synced', partial };
+  } catch (e) {
+    return { status: 'failed', error: describe(e, `quote ${quoteExternalId}`) };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Outbound
 // ---------------------------------------------------------------------------
 
-export type OutboundKind = 'job-note' | 'purchase-order';
+/**
+ * What the queue carries. Every kind here has a branch in flushQueue; a kind
+ * without one is marked sent and silently dropped, which is why the two are
+ * added together or not at all.
+ */
+export type OutboundKind = 'job-note' | 'purchase-order' | 'asset-test' | 'attachment';
 
 export interface JobNotePayload { jobId: string; subject: string; note: string }
+/** A photograph bound for a job's attachments. The plan builds it; see attachmentsForDefect. */
+export type JobAttachmentPayload = OutboundAttachment;
 export interface PurchaseOrderPayload {
   /** The local purchase request, so the order id Simpro returns can be written back onto it. */
   requestId?: string;
@@ -588,6 +1086,44 @@ export async function queueJobNote(payload: JobNotePayload): Promise<void> {
 export async function queuePurchaseOrder(payload: PurchaseOrderPayload): Promise<void> {
   await enqueueSync('purchase-order', payload);
   flushSoon();
+}
+
+/**
+ * Queues one photograph for a job's attachments.
+ *
+ * The file is not read here. A photograph is megabytes and the phone may be
+ * in a basement, so the queue row carries the path and the file is read the
+ * moment it is sent. The key is the job, the name and the size on disk —
+ * never the path, which differs between phones and moves on reinstall — so
+ * the same photograph of the same defect queues once however many times the
+ * send screen is pressed. Returns whether it was already there.
+ */
+export async function queueJobAttachment(payload: JobAttachmentPayload): Promise<{ id: string; duplicate: boolean }> {
+  const key = attachmentContentKey({ jobId: payload.jobId, filename: payload.filename, sizeBytes: payload.sizeBytes });
+  const row = await enqueueSync('attachment', { ...payload, key }, { contentKey: key });
+  if (!row.duplicate) flushSoon();
+  return row;
+}
+
+/**
+ * The file behind a queued attachment, or why it could not be read.
+ *
+ * A read failure is never an unknown outcome — no request went out — and a
+ * missing file is final: no retry brings it back, so it is said once and the
+ * item is closed. Anything else (no memory for the bitmap, a locked file)
+ * gets the ordinary retries.
+ */
+async function readQueuedAttachment(
+  payload: JobAttachmentPayload,
+): Promise<{ file: ReadAttachment } | { error: string; permanent: boolean }> {
+  try {
+    return { file: await readAttachmentForUpload(payload) };
+  } catch (e) {
+    return {
+      error: e instanceof Error ? e.message : String(e),
+      permanent: e instanceof AttachmentFileMissing,
+    };
+  }
 }
 
 export interface FlushResult {
@@ -625,6 +1161,22 @@ export async function flushQueue(config: SimproConfig): Promise<FlushResult> {
       } else if (item.kind === 'asset-test') {
         const p = payload as OutboundAssetTest;
         await api.postAssetTest(p.externalAssetId, p.result, p.testedAt, p.serviceLevelId);
+      } else if (item.kind === 'attachment') {
+        const p = payload as JobAttachmentPayload;
+        const read = await readQueuedAttachment(p);
+        if ('error' in read) {
+          failed++;
+          if (read.permanent) await abandonSync(item.id, read.error);
+          else await markSyncFailed(item.id, read.error);
+          continue;
+        }
+        // A 2xx without a file id in the reply is still accepted bytes; the
+        // reply shape was not verified on the live build, so it is not
+        // insisted on. An upload that got no reply at all falls through to
+        // the unknown rule below like any other post.
+        await uploadJobAttachment(client, p.jobId, {
+          filename: read.file.filename, mimeType: read.file.mimeType, base64: read.file.base64,
+        });
       } else {
         // Unknown kinds are marked done rather than retried forever.
         await markSynced(item.id);

@@ -1,8 +1,10 @@
 import {
-  NOTE_LIMITS, SOURCES, WITHHELD_FROM_SIMPRO,
-  isCriticalDefect, keyIdentity, keysInNoteText, outboundKey, planOutboundWork, qldDay, qldIsoDay,
-  qldMoment, summariseRun, truncateOnSentence,
-  type CompletedRoutineRun, type OutboundDefect, type OutboundResult,
+  ATTACHMENT_NAME_MAX, NOTE_LIMITS, PUSHED_TO_SIMPRO, SOURCES, WITHHELD_FROM_SIMPRO,
+  attachmentContentKey, attachmentFilename, attachmentsForDefect, isAttachmentItem, isCriticalDefect, isNoteItem,
+  keyIdentity, keysInNoteText, mimeTypeForPhoto, outboundKey, planOutboundWork, qldDay, qldIsoDay,
+  qldMoment, summariseRun, truncateOnSentence, workCompletedNote,
+  type CompletedRoutineRun, type OutboundAttachment, type OutboundDefect, type OutboundNoteItem, type OutboundPlan,
+  type OutboundResult,
 } from '@/domain/outboundWork';
 import {
   acceptedKeys, keysAlreadyOnJob, sendOutboundPlan, type SimproPoster,
@@ -48,6 +50,18 @@ const defect = (over: Partial<OutboundDefect> = {}): OutboundDefect => ({
   raisedAt: '2026-07-03T04:30:00.000Z',
   ...over,
 });
+
+/**
+ * The i-th note in a plan. Every test below that reads a note body reads it
+ * through this, because a plan's items are notes and attachments together
+ * and only a note has a body; the photographs come after the notes, so the
+ * numbering the tests were written with still holds.
+ */
+const noteAt = (plan: OutboundPlan, i = 0): OutboundNoteItem => {
+  const item = plan.items.filter(isNoteItem)[i];
+  if (!item) throw new Error(`no note item at ${i} (plan has ${plan.items.length} items)`);
+  return item;
+};
 
 describe('Queensland dates', () => {
   it('reads an instant as the Queensland day, not the UTC one', () => {
@@ -389,8 +403,8 @@ describe('planOutboundWork — a critical defect', () => {
 
   it('says so in the subject of both notes, in case only one is ever read', () => {
     const plan = criticalPlan();
-    expect(plan.items[0]!.payload.subject).toContain('CRITICAL DEFECT');
-    expect(plan.items[1]!.payload.subject).toContain('CRITICAL DEFECT RAISED');
+    expect(noteAt(plan).payload.subject).toContain('CRITICAL DEFECT');
+    expect(noteAt(plan, 1).payload.subject).toContain('CRITICAL DEFECT RAISED');
   });
 
   it('says plainly when nobody recorded the verbal notification', () => {
@@ -424,7 +438,7 @@ describe('planOutboundWork — a critical defect', () => {
       [pass('1')],
       [defect({ severity: 'critical', raisedAt: '2026-07-02T23:00:00.000Z' })],
     );
-    const note = plan.items[0]!.payload.note;
+    const note = noteAt(plan).payload.note;
     expect(note).toContain('Raised: 03/07/2026');
     expect(note).toContain('due by 04/07/2026 17:00 (Qld)');
   });
@@ -438,7 +452,7 @@ describe('planOutboundWork — a critical defect', () => {
     const plan = planOutboundWork(
       run({ completedAt: '2026-07-03' }), [pass('1')], [defect({ severity: 'critical' })],
     );
-    const note = plan.items[0]!.payload.note;
+    const note = noteAt(plan).payload.note;
     expect(note).toContain('due within 24 hours of the maintenance');
     expect(note).not.toMatch(/due by \d\d\/\d\d\/\d{4} \d\d:\d\d/);
     // The one-month clock survives, because a calendar day is all it needs.
@@ -448,18 +462,23 @@ describe('planOutboundWork — a critical defect', () => {
   it('names the occupier for the written notice and the responsible entity for the verbal one', () => {
     // Two obligations to two audiences. A notice addressed to the wrong one is
     // not the notice the regulation asks for.
-    const note = criticalPlan().items[0]!.payload.note;
+    const note = noteAt(criticalPlan()).payload.note;
     expect(note).toContain('Written critical defect notice to the occupier');
     expect(note).toContain('Verbally to the responsible entity');
   });
 
-  it('says the photos stay with the report rather than implying they were attached', () => {
+  it('says the photos stay with the report when only a count was handed over', () => {
+    // A caller that counted the photographs and did not supply the files has
+    // given the plan nothing to attach, and the note must not read as though
+    // something was.
     const plan = planOutboundWork(run(), [pass('1')], [
       defect({ severity: 'critical', photoCount: 3 }),
     ]);
     const warn = plan.warnings.find((w) => w.code === 'photos-not-sent');
     expect(warn?.message).toContain('3 photos');
-    expect(warn?.message).toContain('no attachment endpoint');
+    expect(warn?.message).toContain('stay with the report');
+    expect(plan.items.filter(isAttachmentItem)).toEqual([]);
+    expect(noteAt(plan).payload.note).toContain('3 photos held with the report');
   });
 });
 
@@ -527,7 +546,7 @@ describe('planOutboundWork — a critical defect the office has already seen', (
       alreadySentKeys: [first.items[0]!.key],
     });
     expect(again.items).toHaveLength(1);
-    expect(again.items[0]!.payload.subject).toContain('CRITICAL DEFECT RAISED');
+    expect(noteAt(again).payload.subject).toContain('CRITICAL DEFECT RAISED');
   });
 
   it('goes out again marked as an amendment when the record has changed', () => {
@@ -542,10 +561,10 @@ describe('planOutboundWork — a critical defect the office has already seen', (
     ], { alreadySentKeys: [first.items[0]!.key] });
 
     expect(changed.warnings.map((w) => w.code)).toContain('amended-record');
-    const note = changed.items[0]!.payload.note;
+    const note = noteAt(changed).payload.note;
     expect(note).toContain('AMENDED: this replaces the critical defect notice sent earlier');
     // And the first one was not marked, so the word means something.
-    expect(first.items[0]!.payload.note).not.toContain('AMENDED:');
+    expect(noteAt(first).payload.note).not.toContain('AMENDED:');
     // A changed record is a new key, or the office cannot tell the two apart.
     expect(changed.items[0]!.key).not.toBe(first.items[0]!.key);
   });
@@ -555,7 +574,7 @@ describe('planOutboundWork — a critical defect the office has already seen', (
     // but the technician is told, and the note says where the rest is.
     const wordy = 'The sprinkler control valve was found closed and padlocked. '.repeat(90);
     const plan = planOutboundWork(run(), [pass('1')], [critical({ description: wordy })]);
-    const item = plan.items.find((i) => i.urgency === 'critical')!;
+    const item = plan.items.filter(isNoteItem).find((i) => i.urgency === 'critical')!;
 
     expect(item.payload.truncated).toBe(true);
     expect(plan.warnings.some((w) => w.code === 'truncated' && w.message.includes('Level 3 east'))).toBe(true);
@@ -569,30 +588,30 @@ describe('planOutboundWork — the service note', () => {
       pass('1'),
       pass('2', { outcome: 'not-tested', notTestedReason: 'Ward in use' }),
     ], []);
-    expect(plan.items[0]!.payload.subject).toContain('NOT TESTED');
+    expect(noteAt(plan).payload.subject).toContain('NOT TESTED');
   });
 
   it('leaves the not-tested phrase out when nothing was missed', () => {
     const plan = planOutboundWork(run(), [pass('1')], []);
-    expect(plan.items[0]!.payload.subject).not.toContain('NOT TESTED');
+    expect(noteAt(plan).payload.subject).not.toContain('NOT TESTED');
   });
 
   it('never lets a subject exceed what the client will send', () => {
     // Cut here rather than by the client, so what is lost is visible.
     const plan = planOutboundWork(run({ siteName: 'A'.repeat(400) }), [pass('1')], []);
-    expect(plan.items[0]!.payload.subject.length).toBeLessThanOrEqual(NOTE_LIMITS.subject.chars);
+    expect(noteAt(plan).payload.subject.length).toBeLessThanOrEqual(NOTE_LIMITS.subject.chars);
   });
 
   it('carries its own key in the note text, so the office can see the service was reported', () => {
     const plan = planOutboundWork(run(), [pass('1')], []);
-    const item = plan.items[0]!;
+    const item = noteAt(plan);
     expect(keysInNoteText(item.payload.note)).toContain(item.key);
   });
 
   it('points at where the full record lives', () => {
     const plan = planOutboundWork(run({ reportRef: 'SR-1042' }), [pass('1')], []);
-    expect(plan.items[0]!.payload.note).toContain('SR-1042');
-    expect(plan.items[0]!.payload.fullRecordAt).toContain('SR-1042');
+    expect(noteAt(plan).payload.note).toContain('SR-1042');
+    expect(noteAt(plan).payload.fullRecordAt).toContain('SR-1042');
   });
 
   it('says an asset could not be identified rather than sending an internal id', () => {
@@ -600,7 +619,7 @@ describe('planOutboundWork — the service note', () => {
       { assetId: 'internal-uuid-99', outcome: 'pass' },
     ], []);
     expect(plan.warnings.map((w) => w.code)).toContain('asset-unidentified');
-    expect(plan.items[0]!.payload.note).not.toContain('internal-uuid-99');
+    expect(noteAt(plan).payload.note).not.toContain('internal-uuid-99');
   });
 
   it('flags a price typed into a note but still sends the words as written', () => {
@@ -613,7 +632,7 @@ describe('planOutboundWork — the service note', () => {
     const warn = plan.warnings.find((w) => w.code === 'money-in-free-text');
     expect(warn?.severity).toBe('caution');
     expect(plan.items).toHaveLength(1);
-    expect(plan.items[0]!.payload.note).toContain('$450');
+    expect(noteAt(plan).payload.note).toContain('$450');
   });
 
   it('flags a price typed into a not-tested reason, which is where one usually lands', () => {
@@ -654,7 +673,7 @@ describe('planOutboundWork — the service note', () => {
     ], []);
     const warn = plan.warnings.find((w) => w.code === 'not-tested-reason-missing');
     expect(warn?.message).toContain('reason not recorded');
-    expect(plan.items[0]!.payload.note).toContain('reason not recorded');
+    expect(noteAt(plan).payload.note).toContain('reason not recorded');
   });
 
   it('counts a passed asset but never lists it, so the not-tested list survives', () => {
@@ -663,9 +682,9 @@ describe('planOutboundWork — the service note', () => {
      * the not-tested list is the one thing on this note that must not be lost.
      */
     const plan = planOutboundWork(run(), Array.from({ length: 40 }, (_, i) => pass(String(i + 1))), []);
-    expect(plan.items[0]!.payload.note).toContain('40 passed');
-    expect(plan.items[0]!.payload.note).not.toContain('#37');
-    expect(plan.items[0]!.payload.truncated).toBe(false);
+    expect(noteAt(plan).payload.note).toContain('40 passed');
+    expect(noteAt(plan).payload.note).not.toContain('#37');
+    expect(noteAt(plan).payload.truncated).toBe(false);
   });
 
   it('reports what was cut when the note does not fit, and says so in the note', () => {
@@ -679,7 +698,7 @@ describe('planOutboundWork — the service note', () => {
       [],
       { bodyLimit: 1200 },
     );
-    const item = plan.items[0]!;
+    const item = noteAt(plan);
     expect(item.payload.truncated).toBe(true);
     expect(item.payload.omittedChars).toBeGreaterThan(0);
     expect(item.payload.note).toContain('TRUNCATED');
@@ -698,7 +717,7 @@ describe('planOutboundWork — the service note', () => {
       [],
       { bodyLimit: 1200 },
     );
-    const item = plan.items[0]!;
+    const item = noteAt(plan);
     expect(keysInNoteText(item.payload.note)).toContain(item.key);
   });
 
@@ -732,7 +751,7 @@ describe('a note that will not fit', () => {
     // That is the case the rule exists for: without it this is squeezed in
     // after a defect list that stops mid-sentence.
     const plan = planOutboundWork(run({ notes: 'Ask reception.' }), [pass('1')], defects);
-    const note = plan.items[0]!.payload;
+    const note = noteAt(plan).payload;
 
     expect(note.omittedSections).toEqual(['other defects shortened', 'technician notes']);
     expect(note.note).not.toContain('TECHNICIAN NOTES');
@@ -759,7 +778,7 @@ describe('a note that will not fit', () => {
       results,
       defects,
     );
-    expect(plan.items[0]!.payload.omittedSections).toEqual([
+    expect(noteAt(plan).payload.omittedSections).toEqual([
       'other defects shortened', 'not tested assets', 'technician notes',
     ]);
   });
@@ -802,7 +821,7 @@ describe('planOutboundWork — what the office actually reads', () => {
   it('puts the counts in the note itself, not only in the returned object', () => {
     // Nobody in the office opens a payload. The number that decides whether the
     // job can be invoiced has to be in the words.
-    const note = busy().items[1]!.payload.note;
+    const note = noteAt(busy(), 1).payload.note;
     expect(note).toContain('Tested 31: 30 passed, 1 failed');
     expect(note).toContain('Not tested: 9');
     expect(note).toContain('No access to tenancy (9)');
@@ -813,7 +832,7 @@ describe('planOutboundWork — what the office actually reads', () => {
      * The failure this whole module exists for: "service complete" on a job
      * that was nine assets short, invoiced in full because the note said so.
      */
-    const note = busy().items[1]!.payload.note;
+    const note = noteAt(busy(), 1).payload.note;
     expect(note).not.toMatch(/service complete/i);
     expect(note).toContain('9 of 40 assets were NOT tested');
     expect(note).toContain('The routine is not complete for those assets.');
@@ -821,8 +840,8 @@ describe('planOutboundWork — what the office actually reads', () => {
 
   it('says every asset was tested only when that is true', () => {
     const clean = planOutboundWork(run(), [pass('1'), pass('2')], []);
-    expect(clean.items[0]!.payload.note).toContain('Every asset with a result recorded on this visit was tested.');
-    expect(busy().items[1]!.payload.note).not.toContain('was tested. An asset nobody reached');
+    expect(noteAt(clean).payload.note).toContain('Every asset with a result recorded on this visit was tested.');
+    expect(noteAt(busy(), 1).payload.note).not.toContain('was tested. An asset nobody reached');
   });
 
   it("does not claim more than it can see, because it never gets the routine's register", () => {
@@ -832,7 +851,7 @@ describe('planOutboundWork — what the office actually reads', () => {
      * unqualified "every asset was tested" would be the same lie in a quieter
      * voice — read as a complete routine and invoiced as one.
      */
-    const note = planOutboundWork(run(), [pass('1'), pass('2')], []).items[0]!.payload.note;
+    const note = noteAt(planOutboundWork(run(), [pass('1'), pass('2')], [])).payload.note;
     expect(note).toContain('An asset nobody reached carries no result and is not counted above.');
     expect(note).not.toMatch(/every asset (on this visit )?was tested/i);
   });
@@ -840,7 +859,7 @@ describe('planOutboundWork — what the office actually reads', () => {
   it('puts the critical defect above the other defects and the failures in the note', () => {
     // A critical defect four screens down gets read on Monday, by which time the
     // 24-hour written notice is already late.
-    const note = busy().items[1]!.payload.note;
+    const note = noteAt(busy(), 1).payload.note;
     const critical = note.indexOf('*** CRITICAL DEFECT ***');
     expect(critical).toBeGreaterThan(-1);
     expect(critical).toBeLessThan(note.indexOf('OTHER DEFECTS RAISED'));
@@ -853,7 +872,7 @@ describe('planOutboundWork — what the office actually reads', () => {
      * from the defect, and rectification one month from the maintenance — counted
      * from the Queensland day, not the UTC one it was stamped with.
      */
-    const note = busy().items[0]!.payload.note;
+    const note = noteAt(busy()).payload.note;
     expect(note).toContain('Raised: 03/07/2026');
     expect(note).toContain('due by 04/07/2026 14:30 (Qld)');
     expect(note).toContain('Rectification due by 03/08/2026');
@@ -883,7 +902,7 @@ describe('planOutboundWork — what the office actually reads', () => {
      * critical defect block, and the block that carries a 24-hour statutory
      * clock falls off the end of the note that was supposed to carry it.
      */
-    const note = wordyReasons().items[1]!.payload.note;
+    const note = noteAt(wordyReasons(), 1).payload.note;
     expect(note).toContain('*** CRITICAL DEFECT ***');
     expect(note).toContain('Rectification due by');
     expect(note.length).toBeLessThanOrEqual(1800);
@@ -896,7 +915,7 @@ describe('planOutboundWork — what the office actually reads', () => {
      * complete is the one line on this note the office acts on, and it sat below
      * an unbounded list of reasons where a cut reached it first.
      */
-    const note = wordyReasons().items[1]!.payload.note;
+    const note = noteAt(wordyReasons(), 1).payload.note;
     expect(note).toContain('12 of 12 assets were NOT tested');
     expect(note).toContain('Defects raised: 1, of which 1 CRITICAL.');
     expect(note).toContain('TRUNCATED');
@@ -912,7 +931,7 @@ describe('planOutboundWork — what the office actually reads', () => {
       defect({ id: 'd-1' }),
       defect({ id: 'd-2', sentToOfficeAt: '2026-07-03T05:00:00.000Z' }),
     ]);
-    const note = plan.items[0]!.payload.note;
+    const note = noteAt(plan).payload.note;
     expect(note).toContain('Defects raised: 1');
     expect(note).toContain('A further 1 defect was raised on this visit and already reported to the office');
   });
@@ -921,8 +940,8 @@ describe('planOutboundWork — what the office actually reads', () => {
     // Two phones on the same visit produce the same words, so a duplicate in the
     // office is recognisable by eye as well as by key.
     const rows = [pass('10'), pass('2'), pass('1', { outcome: 'fail' })];
-    const a = planOutboundWork(run(), rows, []).items[0]!.payload.note;
-    const b = planOutboundWork(run(), [...rows].reverse(), []).items[0]!.payload.note;
+    const a = noteAt(planOutboundWork(run(), rows, [])).payload.note;
+    const b = noteAt(planOutboundWork(run(), [...rows].reverse(), [])).payload.note;
     expect(b).toBe(a);
   });
 
@@ -935,13 +954,13 @@ describe('planOutboundWork — what the office actually reads', () => {
       [defect({ severity: 'critical' })],
       { bodyLimit: 1500 },
     );
-    for (const item of plan.items) {
+    for (const item of plan.items.filter(isNoteItem)) {
       expect(item.payload.note.length).toBeLessThanOrEqual(1500);
       expect(keysInNoteText(item.payload.note)).toContain(item.key);
     }
     // The two things that must survive a cut, whatever else goes.
-    expect(plan.items[1]!.payload.note).toContain('Not tested: 120');
-    expect(plan.items[1]!.payload.note).toContain('*** CRITICAL DEFECT ***');
+    expect(noteAt(plan, 1).payload.note).toContain('Not tested: 120');
+    expect(noteAt(plan, 1).payload.note).toContain('*** CRITICAL DEFECT ***');
   });
 });
 
@@ -1013,7 +1032,7 @@ describe('sendOutboundPlan', () => {
     // The queue knows what this handset sent. It does not know what the handset
     // it replaced sent, and the duplicate would land in the office either way.
     const plan = criticalPlan();
-    const existing = plan.items[0]!;
+    const existing = noteAt(plan);
     const { client, posted } = poster({
       listAll: async <T,>(): Promise<T[]> => ([{ Note: existing.payload.note }] as unknown as T[]),
     });
@@ -1097,7 +1116,7 @@ describe('sendOutboundPlan', () => {
     const { client } = poster({
       listAll: async <T,>(): Promise<T[]> => ([
         { Note: 'Attended, all good.' },
-        { Subject: 'Service', Note: plan.items[1]!.payload.note },
+        { Subject: 'Service', Note: noteAt(plan, 1).payload.note },
       ] as unknown as T[]),
     });
     const keys = await keysAlreadyOnJob(client, 'JOB-1');
@@ -1176,10 +1195,382 @@ describe('reading a job that has more notes than the limit', () => {
     const plan = planOutboundWork(run(), [pass('1')], []);
     const { client } = posterWith({
       truncated: false,
-      notes: [jobNote(plan.items[0]!.payload.note)],
+      notes: [jobNote(noteAt(plan).payload.note)],
     });
     const report = await sendOutboundPlan(client as never, plan);
     expect(report.skipped).toBeGreaterThan(0);
     expect(report.sent).toBe(0);
+  });
+});
+
+/**
+ * Photographs.
+ *
+ * A photograph is the evidence behind a defect, and the office asked for it
+ * beside the note that describes the fault. What is worth proving is not the
+ * upload — that is the queue's — but the naming, which is how the office
+ * reads a file without opening it; the key, which is what stops a second tap
+ * uploading the same photograph twice; and that a file gone from the phone
+ * is said out loud rather than queued for an upload that can never run.
+ */
+describe('attachment names', () => {
+  const raised = '2026-07-02T22:30:00.000Z';
+
+  it('reads as site, location and Queensland date, so the office can tell what a file is from the list', () => {
+    // 22:30 UTC on the 2nd is 08:30 on the 3rd in Brisbane, and the name says the 3rd.
+    expect(attachmentFilename({ siteName: 'An Example Building', location: 'Level 3 east', raisedAt: raised, path: 'photos/x.jpg' }))
+      .toBe('An Example Building — Level 3 east — 03-07-2026.jpg');
+  });
+
+  it('numbers the second and later photographs of one defect before the extension', () => {
+    expect(attachmentFilename({ siteName: 'S', location: 'L', raisedAt: raised, sequence: 1 })).toBe('S — L — 03-07-2026.jpg');
+    expect(attachmentFilename({ siteName: 'S', location: 'L', raisedAt: raised, sequence: 2 })).toBe('S — L — 03-07-2026 (2).jpg');
+  });
+
+  it('replaces the characters no file system takes rather than dropping them', () => {
+    // "Level 34 riser" is a different place from "Level 3/4 riser".
+    expect(attachmentFilename({ siteName: 'S', location: 'Level 3/4 riser: north', raisedAt: raised }))
+      .toBe('S — Level 3-4 riser- north — 03-07-2026.jpg');
+  });
+
+  it('keeps the extension the file has, and falls back to jpg where it has none', () => {
+    expect(attachmentFilename({ siteName: 'S', location: 'L', raisedAt: raised, path: 'photos/x.png' })).toMatch(/\.png$/);
+    expect(attachmentFilename({ siteName: 'S', location: 'L', raisedAt: raised, path: 'photos/x.HEIC' })).toMatch(/\.heic$/);
+    expect(attachmentFilename({ siteName: 'S', location: 'L', raisedAt: raised })).toMatch(/\.jpg$/);
+  });
+
+  it('says the date was not recorded rather than inventing one', () => {
+    expect(attachmentFilename({ siteName: 'S', location: 'L', raisedAt: undefined })).toBe('S — L — date-not-recorded.jpg');
+  });
+
+  it('shortens each part on its own, so a long site name cannot push the date off the end', () => {
+    const name = attachmentFilename({ siteName: 'A'.repeat(300), location: 'B'.repeat(300), raisedAt: raised, sequence: 2 });
+    expect(name.length).toBeLessThanOrEqual(ATTACHMENT_NAME_MAX);
+    expect(name).toMatch(/ — 03-07-2026 \(2\)\.jpg$/);
+    expect(name).toContain('A — B');
+  });
+
+  it('never leaves a part empty', () => {
+    expect(attachmentFilename({ siteName: '', location: '   ', raisedAt: raised }))
+      .toBe('Site not recorded — Location not recorded — 03-07-2026.jpg');
+  });
+});
+
+describe('attachment keys', () => {
+  it('is the same on every phone: the job, the name and the size, never the path', () => {
+    const a = attachmentContentKey({ jobId: 'JOB-1', filename: 'S — L — 03-07-2026.jpg', sizeBytes: 1200 });
+    const b = attachmentContentKey({ jobId: 'JOB-1', filename: 'S — L — 03-07-2026.jpg', sizeBytes: 1200 });
+    expect(a).toBe(b);
+    expect(a).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it('changes with the file, so a retaken photograph goes up as the new file it is', () => {
+    const before = attachmentContentKey({ jobId: 'JOB-1', filename: 'x.jpg', sizeBytes: 1200 });
+    expect(attachmentContentKey({ jobId: 'JOB-1', filename: 'x.jpg', sizeBytes: 1201 })).not.toBe(before);
+    expect(attachmentContentKey({ jobId: 'JOB-2', filename: 'x.jpg', sizeBytes: 1200 })).not.toBe(before);
+    expect(attachmentContentKey({ jobId: 'JOB-1', filename: 'y.jpg', sizeBytes: 1200 })).not.toBe(before);
+  });
+
+  it('declares the type off the stored extension, and jpeg where it cannot tell', () => {
+    expect(mimeTypeForPhoto('photos/a.png')).toBe('image/png');
+    expect(mimeTypeForPhoto('photos/a.webp')).toBe('image/webp');
+    expect(mimeTypeForPhoto('photos/a.heic')).toBe('image/heic');
+    expect(mimeTypeForPhoto('photos/a.jpeg')).toBe('image/jpeg');
+    expect(mimeTypeForPhoto('photos/a')).toBe('image/jpeg');
+  });
+});
+
+describe('attachmentsForDefect', () => {
+  const context = { jobId: 'JOB-1', siteName: 'An Example Building' };
+
+  it('makes one item per photograph on disk and counts the ones whose file has gone', () => {
+    const plan = attachmentsForDefect(defect({
+      photos: [{ path: 'photos/a.jpg', sizeBytes: 1200 }, { path: 'photos/gone.jpg' }, { path: 'photos/c.png', sizeBytes: 900 }],
+    }), context);
+    expect(plan.missing).toBe(1);
+    expect(plan.items.map((i) => i.payload.filename)).toEqual([
+      'An Example Building — Level 3 east — 03-07-2026.jpg',
+      'An Example Building — Level 3 east — 03-07-2026 (2).png',
+    ]);
+  });
+
+  it('carries what the queue needs, and a key that matches the payload', () => {
+    const [item] = attachmentsForDefect(defect({ photos: [{ path: 'photos/a.jpg', sizeBytes: 1200 }] }), context).items;
+    expect(item!.kind).toBe('attachment');
+    expect(item!.urgency).toBe('routine');
+    expect(item!.payload).toEqual({
+      jobId: 'JOB-1',
+      localUri: 'photos/a.jpg',
+      filename: 'An Example Building — Level 3 east — 03-07-2026.jpg',
+      mimeType: 'image/jpeg',
+      subject: 'Photo of defect at Level 3 east, An Example Building',
+      sizeBytes: 1200,
+      key: attachmentContentKey({ jobId: 'JOB-1', filename: 'An Example Building — Level 3 east — 03-07-2026.jpg', sizeBytes: 1200 }),
+    });
+    expect(item!.key).toBe(item!.payload.key);
+    expect(item!.description).toContain('JOB-1');
+  });
+
+  it('numbers across defects at the same place on the same day, so two files cannot share a name', () => {
+    // Two defects in the plant room raised the same day would otherwise both
+    // produce "<site> — Plant room — <date>.jpg" and the second would file
+    // over the first, or be refused.
+    const used = new Map<string, number>();
+    const first = attachmentsForDefect(defect({ id: 'd-1', location: 'Plant room', photos: [{ path: 'photos/a.jpg', sizeBytes: 1 }] }), { ...context, used });
+    const second = attachmentsForDefect(defect({ id: 'd-2', location: 'Plant room', photos: [{ path: 'photos/b.jpg', sizeBytes: 1 }] }), { ...context, used });
+    expect(first.items[0]!.payload.filename).toBe('An Example Building — Plant room — 03-07-2026.jpg');
+    expect(second.items[0]!.payload.filename).toBe('An Example Building — Plant room — 03-07-2026 (2).jpg');
+  });
+
+  it('plans nothing for a defect with no photographs', () => {
+    expect(attachmentsForDefect(defect(), context)).toEqual({ items: [], missing: 0 });
+  });
+});
+
+describe('planOutboundWork — photographs', () => {
+  const photos = (): OutboundDefect['photos'] => [
+    { path: 'photos/a.jpg', sizeBytes: 1200 }, { path: 'photos/b.jpg', sizeBytes: 2400 },
+  ];
+
+  it('plans one attachment per photograph, after the notes', () => {
+    const plan = planOutboundWork(run(), [pass('1')], [defect({ photos: photos() })]);
+    expect(plan.items.map((i) => i.kind)).toEqual(['job-note', 'attachment', 'attachment']);
+    const attachments = plan.items.filter(isAttachmentItem);
+    expect(attachments.map((a) => a.payload.jobId)).toEqual(['JOB-1', 'JOB-1']);
+    expect(attachments.map((a) => a.payload.localUri)).toEqual(['photos/a.jpg', 'photos/b.jpg']);
+    expect(attachments.every((a) => a.urgency === 'routine')).toBe(true);
+    expect(plan.warnings.map((w) => w.code)).not.toContain('photos-not-sent');
+  });
+
+  it('says in the note that the photographs are going to the attachments', () => {
+    const plan = planOutboundWork(run(), [pass('1')], [defect({ photos: photos() })]);
+    expect(noteAt(plan).payload.note).toContain("2 photos being sent to this job's attachments");
+  });
+
+  it('names the file in a critical defect notice, which is the one the office opens first', () => {
+    const plan = planOutboundWork(run(), [pass('1')], [defect({ severity: 'critical', photos: photos() })]);
+    expect(noteAt(plan).payload.note)
+      .toContain('2 photos being sent to this job\'s attachments as "An Example Building — Level 3 east — 03-07-2026.jpg"');
+  });
+
+  it('keeps a critical notice ahead of its photographs', () => {
+    // The notice is the urgent thing, and it says the photographs are coming.
+    const plan = planOutboundWork(run(), [pass('1')], [defect({ severity: 'critical', photos: photos() })]);
+    expect(plan.items[0]!.kind).toBe('job-note');
+    expect(plan.items[0]!.urgency).toBe('critical');
+    expect(plan.items.at(-1)!.kind).toBe('attachment');
+  });
+
+  it('declines a photograph whose file is gone, out loud, and still sends the rest', () => {
+    const plan = planOutboundWork(run(), [pass('1')], [
+      defect({ photos: [{ path: 'photos/a.jpg', sizeBytes: 1200 }, { path: 'photos/gone.jpg' }] }),
+    ]);
+    const warn = plan.warnings.find((w) => w.code === 'photo-file-missing');
+    expect(warn?.severity).toBe('declined');
+    expect(warn?.message).toContain('no longer on this device');
+    expect(plan.items.filter(isAttachmentItem)).toHaveLength(1);
+    expect(noteAt(plan).payload.note).toContain("1 of 2 photos being sent to this job's attachments; the other 1 is held with the report");
+  });
+
+  it('keeps them on the phone when the switch is off, and says so in the note', () => {
+    const plan = planOutboundWork(run(), [pass('1')], [defect({ photos: photos() })], { sendPhotos: false });
+    expect(plan.items.filter(isAttachmentItem)).toEqual([]);
+    const warn = plan.warnings.find((w) => w.code === 'photos-not-sent');
+    expect(warn?.severity).toBe('caution');
+    expect(warn?.message).toContain('switched off in Settings');
+    expect(noteAt(plan).payload.note).toContain('2 photos held with the report; photos are not attached to this note');
+  });
+
+  it('does not queue a photograph that is already queued or on the job', () => {
+    const first = planOutboundWork(run(), [pass('1')], [defect({ photos: photos() })]);
+    const [a, b] = first.items.filter(isAttachmentItem);
+    const again = planOutboundWork(run(), [pass('1')], [defect({ photos: photos() })], { alreadySentKeys: [a!.key] });
+    expect(again.items.filter(isAttachmentItem).map((i) => i.key)).toEqual([b!.key]);
+    const declined = again.warnings.find((w) => w.code === 'already-sent');
+    expect(declined?.message).toContain(a!.payload.filename);
+    expect(declined?.message).toContain('already queued for, or on, job JOB-1');
+    // And the note counts only what is going this time.
+    expect(noteAt(again).payload.note).toContain('1 of 2 photos being sent');
+  });
+
+  it('leaves the photographs of a defect the office already holds where they are', () => {
+    // They would arrive as evidence of a defect nobody can find on the job.
+    const plan = planOutboundWork(run(), [pass('1')], [
+      defect({ photos: photos(), sentToOfficeAt: '2026-07-04T00:00:00.000Z' }),
+    ]);
+    expect(plan.items.filter(isAttachmentItem)).toEqual([]);
+  });
+
+  it('gives the same attachment key on every phone, so a reinstall cannot upload twice', () => {
+    const a = planOutboundWork(run({ runId: 'row-1' }), [pass('1')], [defect({ photos: photos() })]);
+    const b = planOutboundWork(run({ runId: 'row-99' }), [pass('1')], [defect({ photos: photos() })]);
+    expect(b.items.filter(isAttachmentItem).map((i) => i.key)).toEqual(a.items.filter(isAttachmentItem).map((i) => i.key));
+  });
+
+  it('names photographs in what goes to the job, beside the list of what never does', () => {
+    const pushed = PUSHED_TO_SIMPRO.map((p) => p.what.toLowerCase()).join(' | ');
+    expect(pushed).toContain('photographs');
+    expect(pushed).toContain('work-completed');
+    expect(PUSHED_TO_SIMPRO.every((p) => p.how.trim().length > 40)).toBe(true);
+  });
+});
+
+/**
+ * The work-completed note.
+ *
+ * Short on purpose: the service record carries the counts and the defects
+ * and goes through its own review. This says the work is done, when and by
+ * whom, the moment the job is marked complete — and says in so many words
+ * that the job's stage in Simpro was not touched, because "work completed"
+ * beside a job still in progress reads as a fault otherwise.
+ */
+describe('workCompletedNote', () => {
+  const job = {
+    externalId: '43747',
+    title: 'Six-monthly routine',
+    siteName: 'An Example Building',
+    completedAt: '2026-07-03T04:30:00.000Z',
+    technician: 'A Technician',
+  };
+
+  it('says what was done, when in Queensland time, by whom, and that the stage in Simpro is untouched', () => {
+    const note = workCompletedNote(job);
+    expect(note.jobId).toBe('43747');
+    expect(note.subject).toBe('Work completed - An Example Building - 03/07/2026');
+    expect(note.note).toContain('WORK COMPLETED - Six-monthly routine');
+    expect(note.note).toContain('Site: An Example Building');
+    expect(note.note).toContain('Completed: 03/07/2026 14:30 (Qld)');
+    expect(note.note).toContain('Technician: A Technician');
+    expect(note.note).toContain('stage and status in Simpro are not changed by this note');
+    expect(note.note).not.toContain('2026-07-03');
+    expect(note.truncated).toBe(false);
+  });
+
+  it('carries its key in the text, keyed on the job and the Queensland day', () => {
+    const note = workCompletedNote(job);
+    expect(keysInNoteText(note.note)).toEqual([note.key]);
+    // A re-open and re-close an hour later is the same completion.
+    expect(workCompletedNote({ ...job, completedAt: '2026-07-03T06:00:00.000Z' }).key).toBe(note.key);
+    // The next day is a different event; so is a different job.
+    expect(workCompletedNote({ ...job, completedAt: '2026-07-04T04:30:00.000Z' }).key).not.toBe(note.key);
+    expect(workCompletedNote({ ...job, externalId: '43748' }).key).not.toBe(note.key);
+  });
+
+  it('names the routine service and its counts where a run was linked', () => {
+    const note = workCompletedNote(job, {
+      routineLabel: 'Annual detection service', frequency: 'yearly', system: 'Detection',
+      completedAt: '2026-07-03T04:30:00.000Z', checksPassed: 10, checksFailed: 1, checksNotTested: 2, defectsRaised: 1,
+    });
+    expect(note.note).toContain('Routine: Annual detection service (yearly) - Detection, 03/07/2026.');
+    expect(note.note).toContain('Results: 10 passed, 1 failed, 2 not tested; 1 defect raised.');
+    expect(note.note).toContain('The service record note carries the detail.');
+  });
+
+  it("carries the technician's own notes and the order number, and says when there is no technician", () => {
+    const note = workCompletedNote({ ...job, technician: undefined, notes: 'Key returned to reception.', orderNo: 'PO-77' });
+    expect(note.note).toContain('Technician: not recorded');
+    expect(note.note).toContain('Order no: PO-77');
+    expect(note.note).toContain('TECHNICIAN NOTES\nKey returned to reception.');
+  });
+
+  it('never states a price, and says so when the mapping is asked', () => {
+    // Money is the office's record; a completed note is not the place for a figure.
+    const note = workCompletedNote({ ...job, notes: 'All done.' });
+    expect(note.note).not.toMatch(/\$\s?\d/);
+  });
+});
+
+/**
+ * The send layer and the photographs.
+ *
+ * A photograph is queued, not posted: the plan's attachment items are handed
+ * to whatever queue the caller supplies and reported as queued, never sent,
+ * so a technician leaving site knows the notes have landed and the photos
+ * are waiting for signal.
+ */
+describe('sendOutboundPlan — photographs', () => {
+  interface Posted { path: string; body: unknown }
+
+  const poster = () => {
+    const posted: Posted[] = [];
+    const client: SimproPoster = {
+      listAll: async <T,>(): Promise<T[]> => [],
+      request: async <T,>(_method: string, path: string, options: { body?: unknown } = {}) => {
+        posted.push({ path, body: options.body });
+        return { data: {} as T, total: null };
+      },
+    };
+    return { client, posted };
+  };
+
+  const photoPlan = () => planOutboundWork(run(), [pass('1')], [
+    defect({ photos: [{ path: 'photos/a.jpg', sizeBytes: 1200 }] }),
+  ]);
+
+  it('queues a photograph rather than posting it, and says queued rather than sent', async () => {
+    const { client, posted } = poster();
+    const queued: OutboundAttachment[] = [];
+    const report = await sendOutboundPlan(client, photoPlan(), {
+      checkRemote: false,
+      queueAttachment: async (payload) => { queued.push(payload); return { duplicate: false }; },
+    });
+    expect({ sent: report.sent, queued: report.queued, failed: report.failed }).toEqual({ sent: 1, queued: 1, failed: 0 });
+    // Only the note went over the wire.
+    expect(posted.map((p) => p.path)).toEqual(['jobs/JOB-1/notes/']);
+    expect(queued.map((q) => q.filename)).toEqual(['An Example Building — Level 3 east — 03-07-2026.jpg']);
+    expect(report.outcomes.map((o) => o.status)).toEqual(['sent', 'queued']);
+  });
+
+  it('reports a photograph the queue already holds as a duplicate, not as newly queued', async () => {
+    const { client } = poster();
+    const report = await sendOutboundPlan(client, photoPlan(), {
+      checkRemote: false,
+      queueAttachment: async () => ({ duplicate: true }),
+    });
+    expect({ queued: report.queued, skipped: report.skipped }).toEqual({ queued: 0, skipped: 1 });
+  });
+
+  it('leaves a photograph unattempted, out loud, when no queue was supplied', async () => {
+    // Quietly dropping it would leave a report that reads as though everything went.
+    const { client } = poster();
+    const report = await sendOutboundPlan(client, photoPlan(), { checkRemote: false });
+    expect(report.notAttempted).toBe(1);
+    const outcome = report.outcomes.find((o) => o.status === 'not-attempted');
+    expect(outcome?.error).toContain('No upload queue');
+    expect(report.sent).toBe(1);
+  });
+
+  it('does not count a queued photograph as accepted: the queue is its record', async () => {
+    const { client } = poster();
+    const plan = photoPlan();
+    const report = await sendOutboundPlan(client, plan, {
+      checkRemote: false,
+      queueAttachment: async () => ({ duplicate: false }),
+    });
+    expect(acceptedKeys(report)).toEqual([noteAt(plan).key]);
+  });
+
+  it('skips a photograph the caller already knows is queued, without asking the queue', async () => {
+    const { client } = poster();
+    const plan = photoPlan();
+    const attachment = plan.items.find(isAttachmentItem)!;
+    let asked = 0;
+    const report = await sendOutboundPlan(client, plan, {
+      checkRemote: false,
+      alreadySent: [attachment.key],
+      queueAttachment: async () => { asked++; return { duplicate: false }; },
+    });
+    expect(asked).toBe(0);
+    expect(report.skipped).toBe(1);
+  });
+
+  it('reports a queue that failed against that photograph alone', async () => {
+    const { client } = poster();
+    const report = await sendOutboundPlan(client, photoPlan(), {
+      checkRemote: false,
+      queueAttachment: async () => { throw new Error('database is locked'); },
+    });
+    expect({ sent: report.sent, failed: report.failed }).toEqual({ sent: 1, failed: 1 });
+    expect(report.outcomes.find((o) => o.status === 'failed')?.error).toBe('database is locked');
   });
 });

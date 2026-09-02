@@ -1,16 +1,17 @@
 import {
-  OSM_ATTRIBUTION, PIN_COLOUR, PIN_KINDS, PIN_LABEL, RECENT_DAYS,
-  buildPins, centreScript, classifyJob, filterPins, filterScript, formatCount, googleMapsUrl,
-  jobPositions, jsLiteral, mapHtml, parseMapMessage, siteAddressLine, wazeUrl,
-  type LatLng, type MapJob, type MapSite, type PinKind,
+  DEFAULT_KINDS, OSM_ATTRIBUTION, PIN_COLOUR, PIN_KINDS, PIN_LABEL, RECENT_DAYS,
+  buildPins, centreScript, classifyJob, filterPins, filterScript, formatCount, googleMapsUrl, isRecentDay,
+  jobPositions, jsLiteral, mapHtml, parseMapMessage, pinSearchText, placesScript, quoteIsOpen, recentSinceDay,
+  selectScript, siteAddressLine, visibleKind, wazeUrl,
+  type LatLng, type MapJob, type MapQuote, type MapSite, type PinKind,
 } from '@/domain/mapPins';
 
 /**
  * The service map's rules.
  *
  * Checked at the boundaries, because that is where a map lies: a job finished
- * sixty days ago is either the last green dot or a site that has gone grey, and
- * the two read as different companies.
+ * ninety days ago is either the last green dot or a site that has gone grey,
+ * and the two read as different companies.
  */
 
 const NOW = '2026-09-02T02:00:00.000Z';
@@ -26,6 +27,11 @@ function job(patch: Partial<MapJob> = {}): MapJob {
   return { id: `j${seq}`, siteId: 's1', title: `Job ${seq}`, status: 'scheduled', ...patch };
 }
 
+function quote(patch: Partial<MapQuote> = {}): MapQuote {
+  seq += 1;
+  return { externalId: `${500 + seq}`, siteId: 's1', name: `Quote ${seq}`, isClosed: false, ...patch };
+}
+
 // Made-up sites in made-up places.
 const SITES: MapSite[] = [
   { id: 's1', name: 'Riverbend Plaza', address: '12 Example St', suburb: 'Springfield', state: 'QLD', postcode: '4300', clientName: 'Acme Property' },
@@ -38,13 +44,27 @@ const POSITIONS = new Map<string, LatLng>([
   ['s2', { latitude: -27.4, longitude: 153.1 }],
 ]);
 
+const ALL = new Set<PinKind>(PIN_KINDS);
+
+describe('the kinds', () => {
+  it('are ordered strongest first, with the quote between recent work and a plain site', () => {
+    expect(PIN_KINDS).toEqual(['open', 'upcoming', 'recent', 'quote', 'site']);
+    expect(PIN_COLOUR.quote).toBe('#B197FC');
+  });
+
+  it('start with the live work and the sites on, and the quarter’s invoices and the quotes off', () => {
+    expect([...DEFAULT_KINDS].sort()).toEqual(['open', 'site', 'upcoming']);
+  });
+});
+
 describe('classifying a job', () => {
-  it('is recent when completed within the last sixty days, inclusive', () => {
+  it('is recent when completed within the window, inclusive', () => {
+    expect(RECENT_DAYS).toBe(90);
     expect(classifyJob(job({ status: 'complete', completedAt: daysFromNow(-1) }), NOW)).toBe('recent');
     expect(classifyJob(job({ status: 'complete', completedAt: daysFromNow(-RECENT_DAYS) }), NOW)).toBe('recent');
   });
 
-  it('drops a job completed more than sixty days ago', () => {
+  it('drops a job completed before the window', () => {
     const justOver = new Date(Date.parse(NOW) - RECENT_DAYS * DAY_MS - 1).toISOString();
     expect(classifyJob(job({ status: 'complete', completedAt: justOver }), NOW)).toBeNull();
     expect(classifyJob(job({ status: 'complete', completedAt: daysFromNow(-200) }), NOW)).toBeNull();
@@ -59,8 +79,10 @@ describe('classifying a job', () => {
   });
 
   it('falls back through the dates a finished job carries', () => {
-    // The office sync never stamps completedAt, so the due date stands in.
-    expect(classifyJob(job({ stage: 'Invoiced', scheduledFor: daysFromNow(-90), dueAt: daysFromNow(-5) }), NOW)).toBe('recent');
+    // The office sync never stamps completedAt; its completion day comes
+    // first, then the due date, then the issue date.
+    expect(classifyJob(job({ stage: 'Invoiced', scheduledFor: daysFromNow(-200), dueAt: daysFromNow(-100), completedDate: '2026-08-20' }), NOW)).toBe('recent');
+    expect(classifyJob(job({ stage: 'Invoiced', scheduledFor: daysFromNow(-200), dueAt: daysFromNow(-5) }), NOW)).toBe('recent');
     expect(classifyJob(job({ stage: 'Invoiced', scheduledFor: daysFromNow(-5) }), NOW)).toBe('recent');
     // With no date at all it is not shown rather than shown forever.
     expect(classifyJob(job({ status: 'complete' }), NOW)).toBeNull();
@@ -80,15 +102,38 @@ describe('classifying a job', () => {
   });
 });
 
+describe('the recent window on the Queensland calendar', () => {
+  it('starts ninety days back, as a Queensland day', () => {
+    // 2 September minus 90 days is 4 June; the instant is midday Brisbane.
+    expect(recentSinceDay(NOW)).toBe('2026-06-04');
+  });
+
+  it('takes an invoice day on or after the start and not one before it', () => {
+    const since = recentSinceDay(NOW);
+    expect(isRecentDay('2026-06-04', since)).toBe(true);
+    expect(isRecentDay('2026-09-01', since)).toBe(true);
+    expect(isRecentDay('2026-06-03', since)).toBe(false);
+    expect(isRecentDay(undefined, since)).toBe(false);
+    expect(isRecentDay('not a day', since)).toBe(false);
+  });
+
+  it('knows an open quote from a closed or converted one', () => {
+    expect(quoteIsOpen(quote())).toBe(true);
+    expect(quoteIsOpen(quote({ isClosed: true }))).toBe(false);
+    expect(quoteIsOpen(quote({ jobExternalId: '4001' }))).toBe(false);
+  });
+});
+
 describe('building pins', () => {
   it('gives each located site one pin and counts the rest as unlocated', () => {
     const built = buildPins({ sites: SITES, jobs: [], positions: POSITIONS, now: NOW });
     expect(built.pins.map((p) => p.siteId).sort()).toEqual(['s1', 's2']);
     expect(built.unlocated).toBe(1);
-    expect(built.counts).toEqual({ open: 0, upcoming: 0, recent: 0, site: 2 });
+    expect(built.counts).toEqual({ open: 0, upcoming: 0, recent: 0, quote: 0, site: 2 });
+    expect(built.pins.every((p) => p.kind === 'site' && p.kinds.length === 1)).toBe(true);
   });
 
-  it('colours a site by its strongest job: open over upcoming over recent over site', () => {
+  it('colours a site by its strongest kind and carries every kind it has, strongest first', () => {
     const jobs = [
       job({ siteId: 's1', status: 'complete', completedAt: daysFromNow(-2) }),
       job({ siteId: 's1', scheduledFor: daysFromNow(4) }),
@@ -99,34 +144,89 @@ describe('building pins', () => {
     const built = buildPins({ sites: SITES, jobs, positions: POSITIONS, now: NOW });
     const byId = new Map(built.pins.map((p) => [p.siteId, p]));
     expect(byId.get('s1')?.kind).toBe('open');
+    expect(byId.get('s1')?.kinds).toEqual(['open', 'upcoming', 'recent', 'site']);
     expect(byId.get('s2')?.kind).toBe('upcoming');
-    expect(built.counts).toEqual({ open: 1, upcoming: 1, recent: 0, site: 0 });
+    expect(byId.get('s2')?.kinds).toEqual(['upcoming', 'recent', 'site']);
+    // A site counts under every kind it has, so the legend says how many
+    // sites have recent work, not how many are coloured green.
+    expect(built.counts).toEqual({ open: 1, upcoming: 2, recent: 2, quote: 0, site: 2 });
   });
 
   it('goes grey when the only jobs are old history', () => {
     const jobs = [job({ siteId: 's1', status: 'complete', completedAt: daysFromNow(-400) })];
     const built = buildPins({ sites: SITES, jobs, positions: POSITIONS, now: NOW });
-    expect(built.pins.find((p) => p.siteId === 's1')?.kind).toBe('site');
-    expect(built.pins.find((p) => p.siteId === 's1')?.lines).toEqual([]);
+    const pin = built.pins.find((p) => p.siteId === 's1')!;
+    expect(pin.kind).toBe('site');
+    expect(pin.kinds).toEqual(['site']);
+    expect(pin.lines).toEqual([]);
+    expect(pin.refs).toEqual([]);
   });
 
-  it('carries the popup text: name, address, client and up to three job lines', () => {
+  it('is recent on the strength of an invoice inside the window, from the invoices table', () => {
+    const sites: MapSite[] = [
+      { ...SITES[0]!, lastInvoicedAt: '2026-08-05' },
+      { ...SITES[1]!, lastInvoicedAt: '2026-05-01' },
+    ];
+    const built = buildPins({ sites, jobs: [], positions: POSITIONS, now: NOW });
+    const byId = new Map(built.pins.map((p) => [p.siteId, p]));
+    expect(byId.get('s1')?.kind).toBe('recent');
+    expect(byId.get('s1')?.lines).toEqual(['Invoiced · 05/08/2026']);
+    expect(byId.get('s2')?.kind).toBe('site');
+    expect(built.counts.recent).toBe(1);
+  });
+
+  it('is a quote where an open quote sits on the site, and not for a closed or converted one', () => {
+    const quotes = [
+      quote({ siteId: 's1', externalId: '555', name: 'Sprinkler upgrade' }),
+      quote({ siteId: 's2', externalId: '556', isClosed: true }),
+      quote({ siteId: 's2', externalId: '557', jobExternalId: '9' }),
+      quote({ siteId: undefined, externalId: '558' }),
+    ];
+    const built = buildPins({ sites: SITES, jobs: [], quotes, positions: POSITIONS, now: NOW });
+    const byId = new Map(built.pins.map((p) => [p.siteId, p]));
+    expect(byId.get('s1')?.kind).toBe('quote');
+    expect(byId.get('s1')?.kinds).toEqual(['quote', 'site']);
+    expect(byId.get('s1')?.lines).toEqual(['Quote 555 · Sprinkler upgrade']);
+    expect(byId.get('s1')?.refs).toEqual(['555']);
+    expect(byId.get('s2')?.kind).toBe('site');
+    expect(built.counts.quote).toBe(1);
+  });
+
+  it('ranks a job on now above a quote, and a quote above a plain site', () => {
+    const jobs = [job({ siteId: 's1', status: 'in-progress', externalId: '43747' })];
+    const quotes = [quote({ siteId: 's1', externalId: '555' })];
+    const pin = buildPins({ sites: SITES, jobs, quotes, positions: POSITIONS, now: NOW }).pins.find((p) => p.siteId === 's1')!;
+    expect(pin.kinds).toEqual(['open', 'quote', 'site']);
+    expect(pin.refs).toEqual(['43747', '555']);
+  });
+
+  it('carries the card text: name, address, client, customer and up to three lines', () => {
     const jobs = [
       job({ siteId: 's1', title: 'Annual service', scheduledFor: '2026-09-10T00:00:00.000Z' }),
       job({ siteId: 's1', title: 'Callout', status: 'in-progress', scheduledFor: '2026-09-01T00:00:00.000Z' }),
       job({ siteId: 's1', title: 'Old invoice', status: 'complete', completedAt: daysFromNow(-3) }),
       job({ siteId: 's1', title: 'Another old invoice', status: 'complete', completedAt: daysFromNow(-4) }),
     ];
-    const pin = buildPins({ sites: SITES, jobs, positions: POSITIONS, now: NOW }).pins.find((p) => p.siteId === 's1')!;
+    const sites: MapSite[] = [{ ...SITES[0]!, customerExternalId: '812', customerName: 'Acme Property Pty Ltd' }];
+    const pin = buildPins({ sites, jobs, positions: POSITIONS, now: NOW }).pins.find((p) => p.siteId === 's1')!;
     expect(pin.title).toBe('Riverbend Plaza');
     expect(pin.subtitle).toBe('12 Example St, Springfield QLD 4300');
+    // The office's client name wins where the site has one; the customer id
+    // travels regardless.
     expect(pin.client).toBe('Acme Property');
+    expect(pin.customerExternalId).toBe('812');
     expect(pin.latitude).toBe(-27.6);
     expect(pin.lines).toHaveLength(3);
     // Most pressing first, and the date is the Queensland day in Australian order.
     expect(pin.lines[0]).toBe('Callout · 01/09/2026');
     expect(pin.lines[1]).toBe('Annual service · 10/09/2026');
     expect(pin.lines[2]).toMatch(/^Old invoice · \d\d\/\d\d\/\d{4}$/);
+  });
+
+  it('uses the customer name where the site has no client', () => {
+    const sites: MapSite[] = [{ ...SITES[0]!, clientName: undefined, customerName: 'Harbourline Body Corporate' }];
+    const pin = buildPins({ sites, jobs: [], positions: POSITIONS, now: NOW }).pins[0]!;
+    expect(pin.client).toBe('Harbourline Body Corporate');
   });
 
   it('falls back to a job’s own coordinates for a site the cache has not reached', () => {
@@ -154,28 +254,47 @@ describe('building pins', () => {
 });
 
 describe('filtering pins', () => {
-  const jobs = [job({ siteId: 's1', status: 'in-progress' })];
-  const pins = buildPins({ sites: SITES, jobs, positions: POSITIONS, now: NOW }).pins;
-  const all = new Set<PinKind>(PIN_KINDS);
+  const jobs = [job({ siteId: 's1', status: 'in-progress', externalId: '43747', title: 'Callout' })];
+  const quotes = [quote({ siteId: 's2', externalId: '555' })];
+  const pins = buildPins({ sites: SITES, jobs, quotes, positions: POSITIONS, now: NOW }).pins;
 
   it('matches the client name, case-insensitively', () => {
-    expect(filterPins(pins, { kinds: all, query: 'northwind' }).map((p) => p.siteId)).toEqual(['s2']);
-    expect(filterPins(pins, { kinds: all, query: '  ACME ' }).map((p) => p.siteId)).toEqual(['s1']);
+    expect(filterPins(pins, { kinds: ALL, query: 'northwind' }).map((p) => p.siteId)).toEqual(['s2']);
+    expect(filterPins(pins, { kinds: ALL, query: '  ACME ' }).map((p) => p.siteId)).toEqual(['s1']);
   });
 
   it('matches the site name and the address', () => {
-    expect(filterPins(pins, { kinds: all, query: 'harbour' }).map((p) => p.siteId)).toEqual(['s2']);
-    expect(filterPins(pins, { kinds: all, query: 'example st' }).map((p) => p.siteId)).toEqual(['s1']);
+    expect(filterPins(pins, { kinds: ALL, query: 'harbour' }).map((p) => p.siteId)).toEqual(['s2']);
+    expect(filterPins(pins, { kinds: ALL, query: 'example st' }).map((p) => p.siteId)).toEqual(['s1']);
   });
 
-  it('drops the kinds that are switched off', () => {
-    expect(filterPins(pins, { kinds: new Set<PinKind>(['site']), query: '' }).map((p) => p.siteId)).toEqual(['s2']);
+  it('matches a job number and a quote number', () => {
+    expect(filterPins(pins, { kinds: ALL, query: '43747' }).map((p) => p.siteId)).toEqual(['s1']);
+    expect(filterPins(pins, { kinds: ALL, query: '555' }).map((p) => p.siteId)).toEqual(['s2']);
+    expect(pinSearchText(pins[0]!)).toContain('43747');
+  });
+
+  it('treats the kinds as layers: a site whose colour is off goes grey rather than vanishing', () => {
+    const grey = filterPins(pins, { kinds: new Set<PinKind>(['site']), query: '' });
+    expect(grey.map((p) => [p.siteId, p.kind])).toEqual([['s1', 'site'], ['s2', 'site']]);
+    // And the pin handed back is a copy coloured for these layers, not the original recoloured.
+    expect(pins.find((p) => p.siteId === 's1')?.kind).toBe('open');
+  });
+
+  it('hides the plain sites when only the live layers are on', () => {
     expect(filterPins(pins, { kinds: new Set<PinKind>(['open']), query: '' }).map((p) => p.siteId)).toEqual(['s1']);
+    expect(filterPins(pins, { kinds: new Set<PinKind>(['quote']), query: '' }).map((p) => p.siteId)).toEqual(['s2']);
     expect(filterPins(pins, { kinds: new Set<PinKind>(), query: '' })).toEqual([]);
   });
 
+  it('picks the strongest layer that is on', () => {
+    const pin = { kinds: ['open', 'recent', 'site'] as PinKind[] };
+    expect(visibleKind(pin, new Set<PinKind>(['recent', 'site']))).toBe('recent');
+    expect(visibleKind(pin, new Set<PinKind>(['upcoming']))).toBeNull();
+  });
+
   it('shows everything for an empty query', () => {
-    expect(filterPins(pins, { kinds: all, query: '' })).toHaveLength(2);
+    expect(filterPins(pins, { kinds: ALL, query: '' })).toHaveLength(2);
   });
 });
 
@@ -189,12 +308,14 @@ describe('links out', () => {
   });
 
   it('reads the page’s messages and nothing else', () => {
-    expect(parseMapMessage(JSON.stringify({ type: 'navigate', app: 'waze', lat: -27.5, lng: 153 })))
-      .toEqual({ type: 'navigate', app: 'waze', latitude: -27.5, longitude: 153 });
-    expect(parseMapMessage(JSON.stringify({ type: 'open', siteId: 's1' }))).toEqual({ type: 'open', siteId: 's1' });
-    expect(parseMapMessage(JSON.stringify({ type: 'navigate', app: 'apple', lat: -27.5, lng: 153 }))).toBeNull();
-    expect(parseMapMessage(JSON.stringify({ type: 'navigate', app: 'waze', lat: 0, lng: 0 }))).toBeNull();
-    expect(parseMapMessage(JSON.stringify({ type: 'open' }))).toBeNull();
+    expect(parseMapMessage(JSON.stringify({ type: 'select', siteId: 's1' }))).toEqual({ type: 'select', siteId: 's1' });
+    expect(parseMapMessage(JSON.stringify({ type: 'place', placeId: 'osm:1' }))).toEqual({ type: 'place', placeId: 'osm:1' });
+    expect(parseMapMessage(JSON.stringify({ type: 'clear' }))).toEqual({ type: 'clear' });
+    expect(parseMapMessage(JSON.stringify({ type: 'select' }))).toBeNull();
+    expect(parseMapMessage(JSON.stringify({ type: 'place', placeId: '' }))).toBeNull();
+    // The page no longer navigates or opens anything itself; the card does.
+    expect(parseMapMessage(JSON.stringify({ type: 'navigate', app: 'waze', lat: -27.5, lng: 153 }))).toBeNull();
+    expect(parseMapMessage(JSON.stringify({ type: 'open', siteId: 's1' }))).toBeNull();
     expect(parseMapMessage('not json')).toBeNull();
   });
 });
@@ -236,11 +357,19 @@ describe('the page', () => {
     expect(page).toContain('leaflet@1.9.4');
   });
 
-  it('carries every kind’s colour and label for the legend', () => {
-    for (const kind of PIN_KINDS) {
-      expect(page).toContain(PIN_COLOUR[kind]);
-      expect(page).toContain(PIN_LABEL[kind]);
-    }
+  it('carries every kind’s colour, and the layers that start on', () => {
+    for (const kind of PIN_KINDS) expect(page).toContain(PIN_COLOUR[kind]);
+    expect(page).toContain(`var DEFAULT_KINDS = ${jsLiteral(DEFAULT_KINDS)};`);
+    const custom = mapHtml(pins, { centre: { latitude: -27.47, longitude: 153.02 }, zoom: 9, dark: true, kinds: ['open'] });
+    expect(custom).toContain('var DEFAULT_KINDS = ["open"];');
+    // Labels are the card's business now, not the page's.
+    expect(page).not.toContain(PIN_LABEL.open);
+  });
+
+  it('gives the page only what it draws with: no names, no addresses, just the search text', () => {
+    expect(page).toContain('"search":');
+    expect(page).not.toContain('"title":');
+    expect(page).not.toContain('"subtitle":');
   });
 
   it('darkens the tiles only in dark mode', () => {
@@ -249,13 +378,28 @@ describe('the page', () => {
     expect(light).not.toContain('.leaflet-tile-pane{filter:invert(1)');
   });
 
-  it('exposes the two hooks the screen drives it through', () => {
+  it('exposes the hooks the screen drives it through', () => {
     expect(page).toContain('window.__setFilter = function');
+    expect(page).toContain('window.__setPlaces = function');
+    expect(page).toContain('window.__select = function');
     expect(page).toContain('window.__centre = function');
     expect(filterScript(new Set<PinKind>(['open', 'site']), 'a<b')).toBe(
-      'window.__setFilter && window.__setFilter(["open","site"], "a\\u003cb"); true;',
+      'window.__setFilter && window.__setFilter(["open","site"], "a\\u003cb", false); true;',
     );
+    expect(filterScript(new Set<PinKind>(['open']), 'x', true)).toContain(', true); true;');
     expect(centreScript(-27.5, 153.1)).toBe('window.__centre && window.__centre(-27.5, 153.1); true;');
+    expect(placesScript([{ id: 'osm:1', name: 'Bunnings <b>', latitude: -27.5, longitude: 153 }])).toBe(
+      'window.__setPlaces && window.__setPlaces([{"id":"osm:1","lat":-27.5,"lng":153,"name":"Bunnings \\u003cb>"}]); true;',
+    );
+    expect(selectScript({ siteId: 's1' })).toBe('window.__select && window.__select({"siteId":"s1"}); true;');
+    expect(selectScript(null)).toBe('window.__select && window.__select(null); true;');
+  });
+
+  it('posts a selection rather than opening anything itself', () => {
+    expect(page).toContain("post({ type: 'select', siteId: p.siteId })");
+    expect(page).toContain("post({ type: 'place', placeId: place.id })");
+    expect(page).toContain("post({ type: 'clear' })");
+    expect(page).not.toContain('onclick=');
   });
 });
 
@@ -268,8 +412,8 @@ describe('small helpers', () => {
   });
 
   it('writes an address line without stray commas for missing parts', () => {
-    expect(siteAddressLine({ id: 'x', name: 'X', suburb: 'Springfield', state: 'QLD' })).toBe('Springfield QLD');
-    expect(siteAddressLine({ id: 'x', name: 'X', address: '5 Example Rd' })).toBe('5 Example Rd');
-    expect(siteAddressLine({ id: 'x', name: 'X' })).toBe('');
+    expect(siteAddressLine({ suburb: 'Springfield', state: 'QLD' })).toBe('Springfield QLD');
+    expect(siteAddressLine({ address: '5 Example Rd' })).toBe('5 Example Rd');
+    expect(siteAddressLine({})).toBe('');
   });
 });

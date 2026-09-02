@@ -103,7 +103,7 @@ export function readMode(value: unknown): { mode: AppMode; assumed?: string } {
 // Tabs
 // ---------------------------------------------------------------------------
 
-export type TabKey = 'today' | 'sites' | 'tools' | 'work' | 'settings';
+export type TabKey = 'today' | 'sites' | 'map' | 'tools' | 'work' | 'settings';
 
 /**
  * The order a technician works, which is also the order of the tab bar.
@@ -114,11 +114,12 @@ export type TabKey = 'today' | 'sites' | 'tools' | 'work' | 'settings';
  * navigation built from this manifest agrees with the bar rather than
  * presenting a second, different order to learn.
  */
-export const TAB_ORDER: readonly TabKey[] = ['today', 'sites', 'tools', 'work', 'settings'];
+export const TAB_ORDER: readonly TabKey[] = ['today', 'sites', 'map', 'tools', 'work', 'settings'];
 
 export const TAB_LABEL: Record<TabKey, string> = {
   today: 'Home',
   sites: 'Sites',
+  map: 'Map',
   tools: 'Tools',
   work: 'Work',
   settings: 'Settings',
@@ -127,6 +128,7 @@ export const TAB_LABEL: Record<TabKey, string> = {
 export const TAB_BLURB: Record<TabKey, string> = {
   today: 'The question bar, the modules you chose, and anything running against a clock.',
   sites: 'The site in front of you, and everything recorded against it.',
+  map: 'Every place we service on a map, and whether the place you are looking at is ours.',
   tools: 'The calculations and the reference, all of it offline.',
   work: 'The records the office needs, and the stock to do the work.',
   settings: 'This device, this technician, and how the app behaves.',
@@ -254,7 +256,8 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/work/job/[id]', file: 'app/work/job/[id].tsx', tab: 'today', section: 'The day',
-    label: 'Job', needsContext: true, modes: BOTH, openedFrom: ['/work/jobs'],
+    label: 'Job', needsContext: true, modes: BOTH,
+    openedFrom: ['/work/jobs', '/customer/[id]', '/quotes/simpro/[id]', '/invoices/[id]'],
     blurb: 'The site briefing: what is already broken, and what the last person found.',
     terms: ['job', 'briefing', 'attendance'],
   },
@@ -324,15 +327,6 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['suggest', 'suggestion', 'feedback', 'idea', 'bug', 'improve', 'wrong'],
   },
 
-  // -- Where the work is -----------------------------------------------------
-  {
-    route: '/map', file: 'app/map.tsx', tab: 'today', section: 'Where the work is',
-    label: 'Service map', modes: BOTH, openedFrom: ['/sites', '/shortcuts'],
-    blurb:
-      'Every site on a map, jobs coloured by state, with Waze and Google Maps one tap from '
-      + 'a pin.',
-    terms: ['map', 'waze', 'navigate', 'directions', 'sites map', 'where', 'google maps'],
-  },
 
   // -- You in Simpro ---------------------------------------------------------
   {
@@ -377,7 +371,8 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/site/[id]', file: 'app/site/[id].tsx', tab: 'sites', section: 'Your sites',
-    label: 'Site', needsContext: true, modes: BOTH, openedFrom: ['/sites', '/work/job/[id]'],
+    label: 'Site', needsContext: true, modes: BOTH,
+    openedFrom: ['/sites', '/work/job/[id]', '/customer/[id]', '/quotes/simpro/[id]'],
     blurb: 'One site: its systems, its history, its paperwork, and the pack that hands it to another technician.',
     terms: ['site', 'building', 'pack'],
   },
@@ -537,6 +532,17 @@ export const DESTINATIONS: readonly Destination[] = [
     openedFrom: ['/site/[id]', '/work/baselines'],
     blurb: 'The commissioning record, saved on every keystroke so a lock screen costs nothing.',
     terms: ['baseline', 'commissioning', 'as installed'],
+  },
+
+  // -- Map -------------------------------------------------------------------
+  {
+    route: '/map', file: 'app/(tabs)/map.tsx', tab: 'map', section: 'The map',
+    label: 'Map', root: true, modes: BOTH, openedFrom: [],
+    blurb:
+      'Every place we service, jobs coloured by state, open quotes and recent invoices, a search '
+      + 'over our sites and any place at all, and whether the place you are looking at is a '
+      + 'customer of ours.',
+    terms: ['map', 'waze', 'navigate', 'directions', 'sites map', 'where', 'google maps', 'customer', 'place'],
   },
 
   // -- Tools -----------------------------------------------------------------
@@ -729,13 +735,56 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/quotes', file: 'app/quotes/index.tsx', tab: 'work', section: 'Records',
-    label: 'Quotes', modes: OFFICE, openedFrom: ['/work'],
+    label: 'Quotes', modes: OFFICE, openedFrom: ['/work', '/quotes/simpro'],
+    // The office's quotes carry a switch to these, and it works in Technician
+    // mode too — hiding the row must not turn that switch into a dead end.
+    stillOpenedFrom: '/quotes/simpro',
     blurb: 'Every quote across every site, ordered by what needs an answer soonest.',
     terms: ['quotes', 'quotations', 'price', 'accepted', 'expired', 'lapsed', 'out with clients'],
     hiddenBecause:
       'A quote carries cost and margin, and the answer to "what did we quote for this?" given on '
       + 'the spot commits the company to a number nobody has checked. The quote itself is raised '
       + 'from the site and priced by the office, and this is the same half of the work.',
+  },
+  {
+    route: '/quotes/simpro', file: 'app/quotes/simpro.tsx', tab: 'work', section: 'Records',
+    label: 'Simpro quotes', modes: BOTH, openedFrom: ['/quotes', '/shortcuts', '/customer/[id]', '/site/[id]'],
+    blurb: 'The office\'s quotes as Simpro holds them: open, approved, and the job each one became.',
+    terms: ['simpro quotes', 'office quotes', 'quote number', 'approved', 'converted', 'sell'],
+    keptBecause:
+      'The figure on one of these is the office\'s own, already sent to the customer, so reading it '
+      + 'out commits nobody to anything new — and "what did we quote for this?" is asked of the '
+      + 'technician on site far more often than of the office. The phone\'s own quote builder '
+      + 'stays hidden; this is the mirror, not the pen.',
+  },
+  {
+    route: '/quotes/simpro/[id]', file: 'app/quotes/simpro/[id].tsx', tab: 'work', section: 'Records',
+    label: 'Simpro quote', needsContext: true, modes: BOTH, openedFrom: ['/quotes/simpro', '/customer/[id]'],
+    blurb: 'One quote as the office holds it: the sections and lines, the notes, the files, and the job it became.',
+    terms: ['quote', 'simpro', 'lines', 'sections', 'attachments', 'converted'],
+  },
+  {
+    route: '/invoices', file: 'app/invoices/index.tsx', tab: 'work', section: 'Records',
+    label: 'Invoices', modes: BOTH, openedFrom: ['/shortcuts', '/customer/[id]', '/site/[id]'],
+    blurb: 'Two years of the office\'s invoices, unpaid first, with what is still owed on each.',
+    terms: ['invoices', 'invoice', 'unpaid', 'owing', 'paid', 'billing', 'balance due'],
+    keptBecause:
+      'Whether a site has paid is the first thing a customer raises when a technician turns up, '
+      + 'and "I will have to check with the office" from a phone that holds the answer is the '
+      + 'wrong reply. These are the office\'s sell figures only; nothing here shows a cost.',
+  },
+  {
+    route: '/invoices/[id]', file: 'app/invoices/[id].tsx', tab: 'work', section: 'Records',
+    label: 'Invoice', needsContext: true, modes: BOTH, openedFrom: ['/invoices', '/work/job/[id]', '/customer/[id]'],
+    blurb: 'One invoice: what it bills, for whom, when it is due, and how much of it has been paid.',
+    terms: ['invoice', 'balance', 'due', 'paid', 'jobs billed'],
+  },
+  {
+    route: '/customer/[id]', file: 'app/customer/[id].tsx', tab: 'work', section: 'Records',
+    label: 'Customer', needsContext: true, modes: BOTH,
+    openedFrom: ['/work/job/[id]', '/quotes/simpro/[id]', '/invoices/[id]', '/site/[id]'],
+    blurb: 'A customer as the office holds them: who to ring, their sites, and their jobs, quotes and invoices.',
+    terms: ['customer', 'client', 'company', 'contact', 'sites', 'who to ring'],
   },
   {
     route: '/work/reports', file: 'app/work/reports.tsx', tab: 'work', section: 'Records',

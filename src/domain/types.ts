@@ -284,6 +284,15 @@ export interface ServiceReport {
   qdcCompliance?: boolean;
   inProperWorkingOrder?: boolean;
   hardcopyLeftOnSite?: boolean;
+  /**
+   * What the customer's own report leads with, and what the office files by.
+   * Offered from the Simpro mirror where the site has one unambiguous job,
+   * otherwise typed; never guessed.
+   */
+  jobNumber?: string;
+  customerName?: string;
+  siteContactName?: string;
+  siteContactPhone?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -295,6 +304,14 @@ export interface TestRow {
   reportId: string;
   /** Link back to the point, when the row came from a config. */
   pointId?: string;
+  /**
+   * The register asset this row tests, when the row came from the asset
+   * register rather than a panel configuration. A result marked here is
+   * written back onto that asset.
+   */
+  assetId?: string;
+  /** The register's own type label ("Fire extinguisher"), which the panel vocabulary has no word for. */
+  assetType?: string;
   /** Denormalised so a report stays readable even if the config is deleted. */
   pointRef?: string;
   loopNumber?: number;

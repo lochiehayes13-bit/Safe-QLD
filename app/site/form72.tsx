@@ -4,7 +4,9 @@ import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { createForm72, deleteForm72, listForm72, type StoredForm72 } from '@/db/form72Repo';
 import { getSite } from '@/db/repo';
-import { validateForm72 } from '@/domain/form72';
+import { queryAssets } from '@/db/assetRepo';
+import { validateForm72, emptyForm72 } from '@/domain/form72';
+import { applyForm72Prefill, form72FromAssets } from '@/domain/formsFromAssets';
 import {
   FORM_TITLE, OCCUPIER_COPY_BUSINESS_DAYS, occupierCopyDue,
 } from '@/export/form72';
@@ -49,14 +51,30 @@ export default function SiteForm72ListScreen() {
     if (!site) return;
     setCreating(true);
     try {
-      const prefs = await loadPrefs();
+      const [prefs, assets] = await Promise.all([
+        loadPrefs(),
+        queryAssets({ siteId: site.id, limit: 5000 }),
+      ]);
+      /*
+       * The register's hydrants, boosters, pumps, tanks and valve sets go on
+       * the form before anybody types. The office's sites keep their
+       * equipment in the register and nowhere else, and a form that opened
+       * with every list blank on those sites was a form filled from memory.
+       * Nothing the register does not hold is invented: the blank stays
+       * blank, and Part A says what was and was not found.
+       */
+      const blank = emptyForm72({ id: '', siteId: site.id, siteName: site.name, now: '' });
+      const parts = applyForm72Prefill(blank, form72FromAssets(assets));
       const rec = await createForm72({
         siteId: site.id,
         siteName: site.name,
-        siteAddress: site.address ?? '',
+        // The whole address, as the form prints it. The street alone left
+        // the suburb off a statutory document.
+        siteAddress: [site.address, site.suburb, site.state, site.postcode].filter(Boolean).join(' '),
         contractor: prefs.companyName,
         licenseeName: prefs.technicianName,
         licenceNumber: prefs.technicianLicence,
+        parts,
       });
       router.push({ pathname: '/form72/[id]', params: { id: rec.id } });
     } catch (e) {
@@ -121,8 +139,8 @@ export default function SiteForm72ListScreen() {
         <EmptyState
           title="No Form 72 for this site yet"
           body={'This is the department’s form for periodic testing and maintenance of a '
-            + 'hydrant or sprinkler system. Start one and it fills in from the site and your '
-            + 'licence details.'}
+            + 'hydrant or sprinkler system. Start one and it fills in from the site, its asset '
+            + 'register and your licence details.'}
         />
       ) : null}
 

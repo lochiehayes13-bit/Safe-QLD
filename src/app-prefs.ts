@@ -51,6 +51,15 @@ export interface Prefs {
    */
   simproWriteAssetTests: boolean;
   /**
+   * Whether defect photographs go onto the Simpro job as attachments.
+   *
+   * On by default, unlike the asset-test switch above: an attachment is
+   * appended, never overwrites anything, and a photograph beside the note
+   * that describes the fault is what the office asked for. Off keeps them on
+   * the phone and in the report, and the notes say so.
+   */
+  simproSendPhotos: boolean;
+  /**
    * Whether the office copy is kept current without anybody pressing anything.
    *
    * On by default, because "I'm sick of syncing" was the whole brief: changes
@@ -120,6 +129,7 @@ export const DEFAULT_PREFS: Prefs = {
   simproClientId: '6564738df3bba3cd587e3dacb58a1d',
   simproProxyUrl: '',
   simproWriteAssetTests: false,
+  simproSendPhotos: true,
   autoSync: true,
   shortcuts: DEFAULT_SHORTCUTS,
   supervisorEmail: company.email,

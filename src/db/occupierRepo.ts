@@ -3,6 +3,15 @@ import {
   OCCUPIER_STATEMENT_INSTALLATIONS,
   type OccupierStatementRow,
 } from '@/domain/qldCompliance';
+import type { StoredStatementRow } from '@/domain/occupierForm';
+
+/**
+ * A stored row: the statement's answer, plus what the asset register said
+ * about the installation when the row was last filled from it. The register's
+ * dates ride along in the same JSON so a statement opened next year still
+ * shows what it was prepared against.
+ */
+export type OccupierRow = OccupierStatementRow & Pick<StoredStatementRow, 'lastMaintainedDate' | 'nextDueDate'>;
 
 /**
  * Occupier statement persistence.
@@ -21,7 +30,7 @@ export interface OccupierStatement {
   premisesAddress: string;
   periodStart: string;
   periodEnd: string;
-  rows: OccupierStatementRow[];
+  rows: OccupierRow[];
   signedBy: string;
   signedPosition: string;
   signature?: string | null;
@@ -44,10 +53,10 @@ const COLUMNS = [
 type Column = (typeof COLUMNS)[number];
 
 function hydrate(row: StatementRow): OccupierStatement {
-  let rows: OccupierStatementRow[] = [];
+  let rows: OccupierRow[] = [];
   try {
     const parsed: unknown = JSON.parse(row.rows);
-    if (Array.isArray(parsed)) rows = parsed as OccupierStatementRow[];
+    if (Array.isArray(parsed)) rows = parsed as OccupierRow[];
   } catch {
     rows = [];
   }
@@ -55,7 +64,7 @@ function hydrate(row: StatementRow): OccupierStatement {
 }
 
 /** One row per prescribed installation, in the order the statement lists them. */
-export function emptyRows(): OccupierStatementRow[] {
+export function emptyRows(): OccupierRow[] {
   return OCCUPIER_STATEMENT_INSTALLATIONS.map((installation) => ({
     installation,
     present: false,

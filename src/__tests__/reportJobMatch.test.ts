@@ -116,3 +116,66 @@ describe('the job number a report carries', () => {
     expect(jobNumberForReport([job()], { siteId: 's1', from: '1/5/2026', to: '31/5/2026' })).toEqual({});
   });
 });
+
+/**
+ * The job offered to a test sheet being filled in today.
+ *
+ * A sheet is written on site, now. The question is whether there is one open
+ * job here today; a job the office has completed is not the one being worked,
+ * however recently it was scheduled. The number is offered rather than
+ * applied, and where the app would have to guess it says so instead.
+ */
+import { jobToOffer, type OpenJobCandidate } from '@/domain/reportJobMatch';
+
+const open = (over: Partial<OpenJobCandidate> = {}): OpenJobCandidate => ({
+  id: 'j1',
+  externalId: '43747',
+  siteId: 's1',
+  status: 'scheduled',
+  // Nine in the morning in Brisbane on the second of September, which is
+  // still the first in UTC — the day has to be resolved in Queensland.
+  scheduledFor: '2026-09-01T23:00:00.000Z',
+  ...over,
+});
+
+const TODAY = { siteId: 's1', today: '2026-09-02' };
+
+describe('the job offered to a test sheet', () => {
+  it('is the one open job scheduled at the site today', () => {
+    expect(jobToOffer([open()], TODAY)).toMatchObject({ jobNumber: '43747', basis: 'today' });
+  });
+
+  it('ignores a job the office has already completed, and one at another site', () => {
+    expect(jobToOffer([open({ status: 'complete' })], TODAY)).toEqual({});
+    expect(jobToOffer([open({ siteId: 's2' })], TODAY)).toEqual({});
+  });
+
+  it('falls back to the only open job at the site when nothing is booked today', () => {
+    const out = jobToOffer([open({ scheduledFor: '2026-08-20T00:00:00.000Z' })], TODAY);
+    expect(out).toMatchObject({ jobNumber: '43747', basis: 'only-open' });
+  });
+
+  it('refuses to choose between two jobs today, and says which', () => {
+    const out = jobToOffer([open(), open({ id: 'j2', externalId: '43999' })], TODAY);
+    expect(out.jobNumber).toBeUndefined();
+    expect(out.reason).toContain('2 jobs are scheduled at this site today');
+    expect(out.reason).toContain('43747, 43999');
+  });
+
+  it('refuses to choose between two open jobs when nothing is booked today', () => {
+    const out = jobToOffer([
+      open({ scheduledFor: '2026-08-20T00:00:00.000Z' }),
+      open({ id: 'j2', externalId: '43999', scheduledFor: undefined }),
+    ], TODAY);
+    expect(out.jobNumber).toBeUndefined();
+    expect(out.reason).toContain('2 jobs are open at this site');
+  });
+
+  it('counts a job re-synced twice as one job', () => {
+    expect(jobToOffer([open(), open()], TODAY)).toMatchObject({ jobNumber: '43747' });
+  });
+
+  it('offers nothing where today cannot be read', () => {
+    expect(jobToOffer([open()], { siteId: 's1', today: 'yesterday' })).toEqual({});
+  });
+});

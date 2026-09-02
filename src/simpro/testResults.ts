@@ -1,6 +1,7 @@
 import type { SimproClient } from './client';
 import {
-  keysInNoteText, type OutboundItem, type OutboundJobNote, type OutboundPlan,
+  isAttachmentItem, keysInNoteText, type OutboundAttachment, type OutboundItem, type OutboundJobNote,
+  type OutboundPlan,
 } from '@/domain/outboundWork';
 
 /**
@@ -31,9 +32,16 @@ import {
  * not for a permission that will not fix itself before somebody changes it in
  * Simpro.
  *
- * Nothing here writes to a job's own fields. Every call is an appended note, so
- * a phone that has been offline for a week cannot overwrite an edit made in the
- * office yesterday.
+ * Notes are posted here and now, because the technician is looking at the
+ * screen and wants to know they landed. Photographs are not: a plan's
+ * attachment items are handed to the outbound queue, one row each, through a
+ * function the caller supplies — this module cannot reach the database, and
+ * a photograph is megabytes that should go when there is signal rather than
+ * hold the screen. The report says "queued" for those, never "sent".
+ *
+ * Nothing here writes to a job's own fields. Every call is an appended note or
+ * an added attachment, so a phone that has been offline for a week cannot
+ * overwrite an edit made in the office yesterday.
  *
  * The client is taken as the two calls this layer actually makes rather than as
  * the class. A real `SimproClient` satisfies it, and so does a stand-in — which
@@ -66,14 +74,14 @@ function statusOf(e: unknown): number | undefined {
   return typeof status === 'number' ? status : undefined;
 }
 
-export type SendStatus = 'sent' | 'skipped-duplicate' | 'failed' | 'not-attempted';
+export type SendStatus = 'sent' | 'queued' | 'skipped-duplicate' | 'failed' | 'not-attempted';
 
 export interface SendOutcome {
   key: string;
   description: string;
   urgency: OutboundItem['urgency'];
   status: SendStatus;
-  /** Present only on 'failed', in the words the caller should show a technician. */
+  /** Present on 'failed', and on a 'not-attempted' that has a reason of its own, in words a technician can act on. */
   error?: string;
 }
 
@@ -88,6 +96,8 @@ export type RemoteCheck = 'checked' | 'unavailable' | 'not-requested';
 export interface SendReport {
   outcomes: SendOutcome[];
   sent: number;
+  /** Photographs handed to the outbound queue. They go when there is signal, not now. */
+  queued: number;
   skipped: number;
   failed: number;
   notAttempted: number;
@@ -108,6 +118,13 @@ export interface SendOptions {
   checkRemote?: boolean;
   /** How far back through a job's notes to look. A busy job accumulates hundreds. */
   maxNotesRead?: number;
+  /**
+   * Where a plan's photographs go: the outbound queue, one row each. Supplied
+   * by the caller because this module cannot reach the database. Without it
+   * the attachments are reported as not attempted, out loud, rather than
+   * quietly left out of a report that says everything went.
+   */
+  queueAttachment?: (payload: OutboundAttachment) => Promise<{ duplicate: boolean }>;
 }
 
 /** Only what is read back; Simpro returns far more. */
@@ -230,6 +247,7 @@ export async function sendOutboundPlan(
   const report: SendReport = {
     outcomes,
     sent: 0,
+    queued: 0,
     skipped: 0,
     failed: 0,
     notAttempted: 0,
@@ -270,29 +288,59 @@ export async function sendOutboundPlan(
 
   let stopped = false;
   for (const item of plan.items) {
+    const outcome = (status: SendOutcome['status'], error?: string): void => {
+      outcomes.push({ key: item.key, description: item.description, urgency: item.urgency, status, error });
+    };
     if (stopped) {
-      outcomes.push({ key: item.key, description: item.description, urgency: item.urgency, status: 'not-attempted' });
+      outcome('not-attempted');
       report.notAttempted++;
       continue;
     }
     if (known.has(item.key)) {
-      outcomes.push({ key: item.key, description: item.description, urgency: item.urgency, status: 'skipped-duplicate' });
+      outcome('skipped-duplicate');
       report.skipped++;
       continue;
     }
+
+    if (isAttachmentItem(item)) {
+      /*
+       * A photograph is queued, not posted. The queue keys it on its content
+       * and reports a second copy as a duplicate, which is the same answer as
+       * a marker already on the job; a queue that cannot be reached is a
+       * failure of this item alone and does not stop the notes behind it.
+       */
+      if (!options.queueAttachment) {
+        outcome('not-attempted', 'No upload queue was supplied for photographs, so this one stays on the phone.');
+        report.notAttempted++;
+        continue;
+      }
+      try {
+        const queued = await options.queueAttachment(item.payload);
+        known.add(item.key);
+        if (queued.duplicate) {
+          outcome('skipped-duplicate');
+          report.skipped++;
+        } else {
+          outcome('queued');
+          report.queued++;
+        }
+      } catch (e) {
+        outcome('failed', e instanceof Error ? e.message : String(e));
+        report.failed++;
+      }
+      continue;
+    }
+
     try {
       await postJobNote(client, item.payload);
       // Recorded immediately so a second item carrying the same key — which
       // should not happen, but a plan is data and data is edited — cannot post
       // twice inside one run.
       known.add(item.key);
-      outcomes.push({ key: item.key, description: item.description, urgency: item.urgency, status: 'sent' });
+      outcome('sent');
       report.sent++;
     } catch (e) {
-      outcomes.push({
-        key: item.key, description: item.description, urgency: item.urgency,
-        status: 'failed', error: describe(e),
-      });
+      outcome('failed', describe(e));
       report.failed++;
       // A permission or credential failure will not fix itself before somebody
       // changes it in Simpro, so the rest of the queue is left alone rather than
@@ -310,7 +358,9 @@ export async function sendOutboundPlan(
  *
  * What the caller persists so the next attempt skips them. A failure contributes
  * nothing: an item that timed out may or may not have landed, and the marker on
- * the server is what settles it on the next run.
+ * the server is what settles it on the next run. A queued photograph
+ * contributes nothing either — the queue is its record until it is uploaded,
+ * and the plan reads the queue.
  */
 export function acceptedKeys(report: SendReport): string[] {
   return report.outcomes

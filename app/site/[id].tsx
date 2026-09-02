@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { qldIsoDay } from '@/domain/qldTime';
-import { Alert, View } from 'react-native';
+import { Alert, Linking, Pressable, View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
@@ -12,8 +12,13 @@ import { createAssessment, listAssessments } from '@/db/assessmentRepo';
 import { configTotals, siteToConfig } from '@/share/siteToConfig';
 import { encodePack, formatBytes } from '@/share/pack';
 import { shareFile, writePack, writePdf } from '@/export/files';
+import { formatAuDate } from '@/export/sheets';
 import { buildRoutineReport } from '@/db/routineReportRepo';
 import { listJobs } from '@/db/opsRepo';
+import { listJobsFor, listQuotes, siteStats, type CustomerStats } from '@/db/mirrorRepo';
+import { contactActions } from '@/domain/jobPresentation';
+import { formatCents } from '@/domain/rates';
+import { siteCustomers, type SiteCustomer } from '@/domain/siteSimpro';
 import { jobNumberForReport } from '@/domain/reportJobMatch';
 import { routineServiceReportHtml, tallyReport } from '@/export/routineServiceReport';
 import { nowIso } from '@/db';
@@ -21,7 +26,7 @@ import type { Defect, Panel, ServiceReport, Site } from '@/domain/types';
 import { PANEL_CATALOGUE } from '@/parsers';
 import { useTheme } from '@/theme';
 import {
-  Button, Card, Chip, EmptyState, H2, Rowed, Screen, StatTile, Txt,
+  Button, Card, Chip, EmptyState, H2, Label, Rowed, Screen, StatTile, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
 
@@ -39,6 +44,9 @@ export default function SiteScreen() {
   const [creating, setCreating] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [reporting, setReporting] = useState(false);
+  // The office's side of this site — the customer, the counts and what is
+  // owed — read from the mirror beside the phone's own records.
+  const [office, setOffice] = useState<{ stats: CustomerStats; quoteCount: number; customers: SiteCustomer[] } | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -57,6 +65,13 @@ export default function SiteScreen() {
     setReports(r);
     setDefects(d);
     setPointCount(n);
+    // The office's records last, so the mirror never holds up the site's own.
+    const [stats, jobs, quotes] = await Promise.all([
+      siteStats(id),
+      listJobsFor({ siteId: id, limit: 500 }),
+      listQuotes({ siteId: id, limit: 500 }),
+    ]);
+    setOffice({ stats, quoteCount: quotes.length, customers: siteCustomers(jobs, quotes) });
   }, [id]);
 
   useFocusEffect(
@@ -108,6 +123,9 @@ export default function SiteScreen() {
 
   const openDefects = defects.filter((d) => d.status === 'open');
   const criticalDefects = openDefects.filter((d) => d.severity === 'critical');
+  const customer = office?.customers[0];
+  const otherCustomers = office ? Math.max(0, office.customers.length - 1) : 0;
+  const ways = contactActions({ mobile: site.contactMobile, workPhone: site.contactWorkPhone, email: site.contactEmail });
 
   /**
    * Packs this site for another technician.
@@ -262,6 +280,104 @@ export default function SiteScreen() {
           />
           <View style={{ flex: 1 }} />
         </Rowed>
+
+        {/*
+          * The office's side of the site. Who it belongs to, who to ring and
+          * what is owed live in Simpro, and until now only the office could
+          * see them; a technician on the doorstep is the one who gets asked.
+          */}
+        {site.externalId || office?.stats.jobsTotal || office?.quoteCount ? (
+          <>
+            <H2>From Simpro</H2>
+            <Card>
+              <Label>Customer</Label>
+              {customer ? (
+                <Pressable
+                  onPress={() => router.push({ pathname: '/customer/[id]', params: { id: customer.externalId } })}
+                  hitSlop={4}
+                  style={{ minHeight: 44, justifyContent: 'center' }}
+                >
+                  <Rowed gap={2}>
+                    <Txt weight="700" tone="accent" style={{ flex: 1 }}>{customer.name ?? `Customer ${customer.externalId}`}</Txt>
+                    <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
+                  </Rowed>
+                </Pressable>
+              ) : (
+                <Txt size="sm" tone="faint" style={{ marginTop: 4 }}>
+                  {site.clientName
+                    ? `${site.clientName} — the customer record opens once a job or quote here has synced.`
+                    : 'The office has no job or quote here yet, so there is no customer to open.'}
+                </Txt>
+              )}
+              {otherCustomers ? (
+                <Txt size="xs" tone="faint">
+                  Work here has also been billed to {otherCustomers} other customer{otherCustomers === 1 ? '' : 's'}.
+                </Txt>
+              ) : null}
+
+              <View style={{ marginTop: t.space(3) }}>
+                <Label>Site contact</Label>
+                {site.contactName || ways.length ? (
+                  <>
+                    <Txt weight="700" style={{ marginTop: 4 }}>{site.contactName || 'Unnamed contact'}</Txt>
+                    {ways.length ? (
+                      <Rowed gap={2} wrap style={{ marginTop: t.space(2) }}>
+                        {ways.map((w) => (
+                          <Button
+                            key={w.href}
+                            title={w.label}
+                            variant="secondary"
+                            compact
+                            icon={<MaterialCommunityIcons name={w.kind === 'email' ? 'email-outline' : w.kind === 'mobile' ? 'cellphone' : 'phone-outline'} size={18} color={t.color.text} />}
+                            onPress={() => void Linking.openURL(w.href)}
+                          />
+                        ))}
+                      </Rowed>
+                    ) : (
+                      <Txt size="sm" tone="faint">The office has no number or email for them.</Txt>
+                    )}
+                  </>
+                ) : (
+                  <Txt size="sm" tone="faint" style={{ marginTop: 4 }}>The office lists no contact for this site.</Txt>
+                )}
+              </View>
+            </Card>
+            {office ? (
+              <>
+                <NavRow
+                  icon="clipboard-list-outline"
+                  title="Jobs"
+                  subtitle={office.stats.jobsTotal
+                    ? `${office.stats.jobsTotal} job${office.stats.jobsTotal === 1 ? '' : 's'} on the books · ${office.stats.jobsOpen} open`
+                    : 'None on the books for this site'}
+                  onPress={() => router.push({ pathname: '/work/jobs', params: { siteId: site.id } })}
+                />
+                <NavRow
+                  icon="file-sign"
+                  title="Simpro quotes"
+                  subtitle={office.quoteCount
+                    ? `${office.quoteCount} quote${office.quoteCount === 1 ? '' : 's'} · ${office.stats.quotesOpen} still open`
+                    : 'Nothing quoted for this site'}
+                  onPress={() => router.push({ pathname: '/quotes/simpro', params: { siteId: site.id } })}
+                />
+                <NavRow
+                  icon="receipt-text-outline"
+                  title="Invoices"
+                  subtitle={office.stats.invoicesUnpaidCents
+                    ? `${formatCents(office.stats.invoicesUnpaidCents)} unpaid against this site's jobs`
+                    : 'Nothing owing in the two years the phone holds'}
+                  onPress={() => router.push({ pathname: '/invoices', params: { siteId: site.id } })}
+                />
+                <Txt size="xs" tone="faint">
+                  {[
+                    site.externalId ? `Simpro site ${site.externalId}.` : 'Not matched to a Simpro site.',
+                    office.stats.lastJobAt ? `Last job issued ${formatAuDate(office.stats.lastJobAt)}.` : undefined,
+                  ].filter(Boolean).join(' ')}
+                </Txt>
+              </>
+            ) : null}
+          </>
+        ) : null}
 
         <H2>Browse</H2>
         <NavRow

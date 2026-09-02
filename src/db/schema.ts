@@ -16,6 +16,8 @@ import { MIGRATION_V14 } from './schemaSimpro';
 import { MIGRATION_V15 } from './schemaGeocode';
 import { MIGRATION_V16 } from './schemaEmployees';
 import { MIGRATION_V17 } from './schemaV17';
+import { MIGRATION_V18 } from './schemaMirror';
+import { MIGRATION_V19 } from './schemaForms';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -306,6 +308,16 @@ export const MIGRATIONS: string[] = [
   // v17 — a content key on queued sends so nothing posts twice, and the three
   // record-of-maintenance answers the report screen asked and never kept
   MIGRATION_V17,
+
+  // v18 — the Simpro mirror: what a job holds, and the quotes, invoices,
+  // customers and tasks around it, so a job opened on site is not a heading
+  // and a blank
+  MIGRATION_V18,
+
+  // v19 — test rows that know which asset they tested, and the job number,
+  // customer and site contact on a report, so the forms work from the asset
+  // register the office's sites actually have
+  MIGRATION_V19,
 ];
 
 /**

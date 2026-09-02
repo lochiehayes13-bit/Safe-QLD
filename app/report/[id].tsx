@@ -1,15 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, FlatList, Pressable, ScrollView, View } from 'react-native';
-import { Stack, router, useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
-  addCheckRows, addPointsToReport, getPanel, getReport, getSite, listCheckRows,
-  listDefects, listTestRows, queryPoints, setTestResult, updateCheckRow, updateReport,
+  addAssetRowsToReport, addCheckRows, addPointsToReport, assetIdsOnReport, getPanel, getReport, getSite,
+  listCheckRows, listDefects, listTestRows, queryPoints, recordTestRowOnAsset, setTestResult, updateCheckRow,
+  updateReport, updateTestRow,
 } from '@/db/repo';
+import { queryAssets, type AssetRecord } from '@/db/assetRepo';
+import { getCustomer, listJobsFor, readJobJson } from '@/db/mirrorRepo';
+import type { JobRecord } from '@/db/opsRepo';
 import type { CheckRow, Defect, Panel, ServiceReport, Site, TestResult, TestRow } from '@/domain/types';
+import { isServiceable, testRowsFromAssets } from '@/domain/formsFromAssets';
+import { jobToOffer, type JobOffer } from '@/domain/reportJobMatch';
+import { qldIsoDay } from '@/domain/qldTime';
 import { DEVICE_TYPE_LABEL, DEFAULT_TEST_METHOD } from '@/parsers/deviceType';
-import { SERVICE_ROUTINES, routinesForSystem, type ServiceRoutine } from '@/seed/serviceRoutines';
+import { SERVICE_ROUTINES, type ServiceRoutine } from '@/seed/serviceRoutines';
 import { checkSheet, defectSheet, reportCoverSheet, testResultSheet, type ReportBundle } from '@/export/sheets';
 import { serviceReportHtml } from '@/export/pdf';
 import { shareFile, writePdf, writeXlsx } from '@/export/files';
@@ -17,6 +24,7 @@ import {
   CERTIFICATION_STATEMENT, validateMaintenanceRecord, type MaintenanceRecord,
 } from '@/domain/qldCompliance';
 import { loadPrefs } from '@/app-prefs';
+import { nowIso } from '@/db';
 import { useTheme } from '@/theme';
 import {
   Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Segmented, Txt,
@@ -30,6 +38,16 @@ import { SignaturePad } from '@/components/SignaturePad';
  * Marking a device is one tap, because a sheet can run to hundreds of rows and
  * anything slower gets done on paper and typed up later — which is where
  * accuracy goes. Everything else is behind a tab so the list stays the screen.
+ *
+ * The rows come from wherever the site's equipment is. A site with a panel
+ * configuration gets its loop devices from the points; every site the office
+ * syncs gets its equipment from the asset register, which is where the three
+ * thousand Simpro sites keep theirs. Until the register was read here, "add
+ * every device" on one of those sites added nothing and the sheet stayed blank.
+ *
+ * A result marked against a register asset is written back onto it — the
+ * same timeline event and last-result update a routine run makes — so the
+ * register stays true to what was done on the sheet.
  */
 type Tab = 'devices' | 'checks' | 'sign';
 
@@ -45,6 +63,12 @@ export default function ReportScreen() {
   const [rows, setRows] = useState<TestRow[]>([]);
   const [checks, setChecks] = useState<CheckRow[]>([]);
   const [defects, setDefects] = useState<Defect[]>([]);
+  /** The site's register, which is what the sheet is built from on an office site. */
+  const [assets, setAssets] = useState<AssetRecord[]>([]);
+  /** The office's jobs at this site, and which of them the sheet is offered. */
+  const [jobs, setJobs] = useState<JobRecord[]>([]);
+  const [offer, setOffer] = useState<JobOffer>({});
+  const [technician, setTechnician] = useState('');
   const [tab, setTab] = useState<Tab>('devices');
   const [filter, setFilter] = useState<'all' | 'untested' | 'failed'>('all');
   const [busy, setBusy] = useState(false);
@@ -54,23 +78,52 @@ export default function ReportScreen() {
 
   const load = useCallback(async () => {
     if (!id) return;
-    const r = await getReport(id);
+    const found = await getReport(id);
+    setMissing(!found);
+    if (!found) { setReport(null); return; }
+    const [s, p, tr, cr, df, prefs, siteAssets, siteJobs] = await Promise.all([
+      getSite(found.siteId),
+      found.panelId ? getPanel(found.panelId) : Promise.resolve(null),
+      listTestRows(found.id),
+      listCheckRows(found.id),
+      listDefects(found.siteId),
+      loadPrefs(),
+      queryAssets({ siteId: found.siteId, limit: 5000 }),
+      listJobsFor({ siteId: found.siteId, limit: 200 }),
+    ]);
+
+    /*
+     * What the app already knows goes on the report before anybody types.
+     *
+     * The technician, licence and company are in Settings; the customer and
+     * site contact are on the site the office synced. Every report used to
+     * open with all of them blank and "Technician name is blank" at the top
+     * of the readiness list, on a phone that knew the name. Blanks only: a
+     * report somebody has edited keeps what they wrote.
+     */
+    const patch: Partial<ServiceReport> = {};
+    if (!found.technicianName?.trim() && prefs.technicianName) patch.technicianName = prefs.technicianName;
+    if (!found.technicianLicence?.trim() && prefs.technicianLicence) patch.technicianLicence = prefs.technicianLicence;
+    if (!found.companyName?.trim() && prefs.companyName) patch.companyName = prefs.companyName;
+    if (!found.customerName?.trim() && s?.clientName) patch.customerName = s.clientName;
+    if (!found.siteContactName?.trim() && s?.contactName) {
+      patch.siteContactName = s.contactName;
+      if (!found.siteContactPhone?.trim()) patch.siteContactPhone = s.contactMobile ?? s.contactWorkPhone;
+    }
+    const r = { ...found, ...patch };
+    if (Object.keys(patch).length) await updateReport(r.id, patch);
+
     setReport(r);
-    setMissing(!r);
-    if (!r) return;
     // The record-of-maintenance answers live on the report now, not on the
     // screen: they used to vanish when the screen was left.
     setQdcAffirmed(r.qdcCompliance === true);
     setWorkingOrder(r.inProperWorkingOrder ?? null);
     setHardcopyLeft(r.hardcopyLeftOnSite === true);
-    const [s, p, tr, cr, df] = await Promise.all([
-      getSite(r.siteId),
-      r.panelId ? getPanel(r.panelId) : Promise.resolve(null),
-      listTestRows(r.id),
-      listCheckRows(r.id),
-      listDefects(r.siteId),
-    ]);
     setSite(s); setPanel(p); setRows(tr); setChecks(cr); setDefects(df);
+    setAssets(siteAssets);
+    setJobs(siteJobs);
+    setTechnician(r.technicianName ?? prefs.technicianName);
+    setOffer(jobToOffer(siteJobs, { siteId: r.siteId, today: qldIsoDay(nowIso()) ?? '' }));
   }, [id]);
 
   useEffect(() => { void load(); }, [load]);
@@ -87,15 +140,39 @@ export default function ReportScreen() {
     return rows;
   }, [rows, filter]);
 
+  /** Register assets not yet on the sheet, so the button can say how many it would add. */
+  const notOnSheet = useMemo(() => {
+    const held = new Set(rows.map((r) => r.assetId).filter(Boolean));
+    return assets.filter((a) => isServiceable(a) && !held.has(a.id)).length;
+  }, [assets, rows]);
+
   const mark = async (row: TestRow, result: TestResult) => {
     void Haptics.impactAsync(
       result === 'fail' ? Haptics.ImpactFeedbackStyle.Heavy : Haptics.ImpactFeedbackStyle.Light,
     );
+    const at = nowIso();
     // Update locally first so a long list stays responsive.
-    setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, result, testedAt: new Date().toISOString() } : r)));
+    setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, result, testedAt: at } : r)));
     await setTestResult(row.id, result);
+    // A row from the register carries its result back to the register.
+    if (row.assetId) await recordTestRowOnAsset(row, result, technician, at);
   };
 
+  const comment = async (row: TestRow, text: string) => {
+    setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, comment: text } : r)));
+    await updateTestRow(row.id, { comment: text });
+  };
+
+  /**
+   * Every device the site has, onto the sheet.
+   *
+   * A panel report takes its panel's points and nothing else. A site report
+   * takes the points of every panel on the site and then the register — less
+   * the detection system where a panel configuration already listed it, so a
+   * detector is not on the sheet twice and the coverage figure is not halved.
+   * Assets already on the sheet are skipped, so this can be pressed again
+   * after a sync brought new equipment.
+   */
   const addAllDevices = async () => {
     if (!report) return;
     setBusy(true);
@@ -106,12 +183,36 @@ export default function ReportScreen() {
         includeUnused: false,
         limit: 20000,
       });
-      if (!points.length) {
-        Alert.alert('No devices', 'This site has no device list yet. Import one, or add points by hand first.');
+      const added: string[] = [];
+      const panelRowsAlready = rows.some((r) => r.pointId && !r.assetId);
+      if (points.length && !panelRowsAlready) {
+        const n = await addPointsToReport(report.id, points);
+        added.push(`${n} panel device${n === 1 ? '' : 's'}`);
+      }
+      if (!report.panelId) {
+        const fromRegister = testRowsFromAssets(assets, {
+          skipAssetIds: await assetIdsOnReport(report.id),
+          skipSystems: points.length || panelRowsAlready ? new Set(['detection']) : undefined,
+          firstSortIndex: rows.length + (points.length && !panelRowsAlready ? points.length : 0),
+        });
+        const n = await addAssetRowsToReport(report.id, fromRegister);
+        if (n) added.push(`${n} asset${n === 1 ? '' : 's'} from the register`);
+      }
+      if (!added.length) {
+        Alert.alert(
+          'No devices',
+          report.panelId
+            ? (points.length
+              ? 'Every point on this panel is already on the sheet.'
+              : 'This panel has no points yet. Import its configuration first.')
+            : assets.length
+              ? 'Every asset in the register is already on this sheet.'
+              : 'The register holds no equipment for this site and no panel configuration has been imported. '
+                + 'Sync from Simpro, import a register, or add assets to the site first.',
+        );
         return;
       }
-      const n = await addPointsToReport(report.id, points);
-      Alert.alert('Added', `${n} device${n === 1 ? '' : 's'} added to the test sheet.`);
+      Alert.alert('Added', `${added.join(' and ')} added to the test sheet.`);
       void load();
     } finally {
       setBusy(false);
@@ -132,6 +233,38 @@ export default function ReportScreen() {
       })),
     );
     void load();
+  };
+
+  const patchReport = (patch: Partial<ServiceReport>) => {
+    if (!report) return;
+    setReport({ ...report, ...patch });
+    if (patch.technicianName !== undefined) setTechnician(patch.technicianName);
+    void updateReport(report.id, patch);
+  };
+
+  /**
+   * Takes the offered job, and with it what the office knows about the job.
+   *
+   * The customer on the job outranks the customer on the site: a body
+   * corporate's building can be serviced under a managing agent's job, and it
+   * is the job's customer who receives the report. The site contact on the
+   * job is the person the office booked it with.
+   */
+  const acceptJob = async () => {
+    if (!report || !offer.jobNumber) return;
+    const patch: Partial<ServiceReport> = { jobNumber: offer.jobNumber };
+    const job = jobs.find((j) => j.id === offer.job?.id);
+    if (job) {
+      const contact = readJobJson(job).siteContact;
+      if (contact?.name) {
+        patch.siteContactName = contact.name;
+        patch.siteContactPhone = contact.mobile ?? contact.workPhone ?? report.siteContactPhone;
+      }
+      const customer = job.customerExternalId ? await getCustomer(job.customerExternalId) : null;
+      if (customer?.name) patch.customerName = customer.name;
+      else if (job.customerName) patch.customerName = job.customerName;
+    }
+    patchReport(patch);
   };
 
   /**
@@ -182,7 +315,7 @@ export default function ReportScreen() {
     if (!b) return;
     setBusy(true);
     try {
-      const html = serviceReportHtml(b, new Date().toISOString(), {
+      const html = serviceReportHtml(b, nowIso(), {
         qdcCompliance: qdcAffirmed,
         inProperWorkingOrder: workingOrder,
         hardcopyLeftOnSite: hardcopyLeft,
@@ -215,6 +348,8 @@ export default function ReportScreen() {
 
   if (!report) return <RecordGate missing={missing} what="service report" />;
 
+  const offered = offer.jobNumber && report.jobNumber?.trim() !== offer.jobNumber ? offer : null;
+
   return (
     <>
       <Stack.Screen options={{ title: site?.name ?? 'Test sheet' }} />
@@ -223,7 +358,10 @@ export default function ReportScreen() {
           <Rowed style={{ justifyContent: 'space-between' }}>
             <View style={{ flex: 1 }}>
               <Txt weight="700" numberOfLines={1}>{report.title}</Txt>
-              <Txt size="sm" tone="muted">{report.frequency} · {report.serviceDate}</Txt>
+              <Txt size="sm" tone="muted">
+                {report.frequency} · {report.serviceDate}
+                {report.jobNumber ? ` · Job ${report.jobNumber}` : ''}
+              </Txt>
             </View>
             <Chip label={report.status === 'complete' ? 'Complete' : 'Draft'} tone={report.status === 'complete' ? 'pass' : 'warn'} />
           </Rowed>
@@ -255,15 +393,28 @@ export default function ReportScreen() {
 
         {tab === 'devices' ? (
           <>
-            <View style={{ paddingHorizontal: t.space(4), paddingBottom: t.space(2) }}>
+            <View style={{ paddingHorizontal: t.space(4), paddingBottom: t.space(2), gap: t.space(2) }}>
               {rows.length ? (
                 <Rowed gap={2} wrap>
                   <Chip label="All" selected={filter === 'all'} onPress={() => setFilter('all')} />
                   <Chip label="Untested" selected={filter === 'untested'} onPress={() => setFilter('untested')} />
                   <Chip label="Failed" selected={filter === 'failed'} onPress={() => setFilter('failed')} tone="fail" />
+                  {notOnSheet && !report.panelId ? (
+                    <Chip label={`+ ${notOnSheet} from the register`} tone="accent" onPress={() => void addAllDevices()} />
+                  ) : null}
                 </Rowed>
               ) : (
-                <Button title="Add every device to this sheet" onPress={addAllDevices} loading={busy} />
+                <>
+                  <Button title="Add every device to this sheet" onPress={addAllDevices} loading={busy} />
+                  <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
+                    {report.panelId
+                      ? 'The points on this panel.'
+                      : assets.length
+                        ? `${assets.filter(isServiceable).length} assets in this site's register, grouped by system and in walk order`
+                          + (panel ? ', plus the panel points' : '') + '.'
+                        : 'This site has nothing in its asset register yet. Sync from Simpro or import a register first.'}
+                  </Txt>
+                </>
               )}
             </View>
 
@@ -275,7 +426,10 @@ export default function ReportScreen() {
               maxToRenderPerBatch={20}
               windowSize={11}
               removeClippedSubviews
-              renderItem={({ item, index }) => <TestRowItem row={item} index={index} onMark={mark} />}
+              keyboardShouldPersistTaps="handled"
+              renderItem={({ item, index }) => (
+                <TestRowItem row={item} index={index} onMark={mark} onComment={comment} />
+              )}
               ListEmptyComponent={
                 rows.length ? (
                   <Txt tone="faint" style={{ padding: t.space(6), textAlign: 'center' }}>
@@ -321,7 +475,10 @@ export default function ReportScreen() {
         ) : null}
 
         {tab === 'sign' ? (
-          <ScrollView contentContainerStyle={{ padding: t.space(4), paddingTop: 0, gap: t.space(3), paddingBottom: t.space(20) }}>
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ padding: t.space(4), paddingTop: 0, gap: t.space(3), paddingBottom: t.space(20) }}
+          >
             {readiness.length ? (
               <Banner
                 tone="warn"
@@ -332,28 +489,84 @@ export default function ReportScreen() {
               <Banner tone="pass" title="Ready to send" body="Everything the office asks for is filled in." />
             )}
 
+            <H2>Job</H2>
+            {offered ? (
+              <Card>
+                <Txt weight="600">
+                  Simpro job {offered.jobNumber}
+                  {offered.job?.title ? ` — ${offered.job.title}` : ''}
+                </Txt>
+                <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+                  {offered.basis === 'today'
+                    ? 'The one job scheduled at this site today.'
+                    : 'Nothing is scheduled here today; this is the only open job at the site.'}
+                  {' '}Accepting it puts the number on the report and takes the customer and site contact from the job.
+                </Txt>
+                <Button title={`Use job ${offered.jobNumber}`} variant="secondary" compact onPress={() => void acceptJob()} />
+              </Card>
+            ) : null}
+            <Field
+              label="Customer job number"
+              value={report.jobNumber ?? ''}
+              onChangeText={(v) => patchReport({ jobNumber: v })}
+              autoCapitalize="characters"
+              hint={offer.reason ?? 'What the office files the report by.'}
+            />
+            <Field
+              label="Customer"
+              value={report.customerName ?? ''}
+              onChangeText={(v) => patchReport({ customerName: v })}
+              autoCapitalize="words"
+            />
+            <Rowed gap={2} align="flex-start">
+              <View style={{ flex: 3 }}>
+                <Field
+                  label="Site contact"
+                  value={report.siteContactName ?? ''}
+                  onChangeText={(v) => patchReport({ siteContactName: v })}
+                  autoCapitalize="words"
+                />
+              </View>
+              <View style={{ flex: 2 }}>
+                <Field
+                  label="Phone"
+                  value={report.siteContactPhone ?? ''}
+                  onChangeText={(v) => patchReport({ siteContactPhone: v })}
+                  keyboardType="default"
+                />
+              </View>
+            </Rowed>
+
+            <H2>Technician</H2>
             <Field
               label="Technician"
               value={report.technicianName ?? ''}
-              onChangeText={(v) => { setReport({ ...report, technicianName: v }); void updateReport(report.id, { technicianName: v }); }}
+              onChangeText={(v) => patchReport({ technicianName: v })}
               autoCapitalize="words"
             />
             <Field
               label="Licence number"
               value={report.technicianLicence ?? ''}
-              onChangeText={(v) => { setReport({ ...report, technicianLicence: v }); void updateReport(report.id, { technicianLicence: v }); }}
+              onChangeText={(v) => patchReport({ technicianLicence: v })}
               autoCapitalize="characters"
+            />
+            <Field
+              label="Company"
+              value={report.companyName ?? ''}
+              onChangeText={(v) => patchReport({ companyName: v })}
+              autoCapitalize="words"
             />
             <Field
               label="Site representative"
               value={report.witnessName ?? ''}
-              onChangeText={(v) => { setReport({ ...report, witnessName: v }); void updateReport(report.id, { witnessName: v }); }}
+              onChangeText={(v) => patchReport({ witnessName: v })}
               autoCapitalize="words"
+              hint="Who witnessed the work and signs below. Often the site contact, not always."
             />
             <Field
               label="Notes"
               value={report.notes ?? ''}
-              onChangeText={(v) => { setReport({ ...report, notes: v }); void updateReport(report.id, { notes: v }); }}
+              onChangeText={(v) => patchReport({ notes: v })}
               multiline
             />
 
@@ -394,12 +607,12 @@ export default function ReportScreen() {
             <SignaturePad
               label="Technician signature"
               value={report.signatureTechnician}
-              onChange={(v) => { setReport({ ...report, signatureTechnician: v }); void updateReport(report.id, { signatureTechnician: v }); }}
+              onChange={(v) => patchReport({ signatureTechnician: v })}
             />
             <SignaturePad
               label="Site representative signature"
               value={report.signatureWitness}
-              onChange={(v) => { setReport({ ...report, signatureWitness: v }); void updateReport(report.id, { signatureWitness: v }); }}
+              onChange={(v) => patchReport({ signatureWitness: v })}
             />
 
             <Rowed gap={2}>
@@ -412,10 +625,7 @@ export default function ReportScreen() {
               variant="secondary"
               onPress={() => {
                 const next = report.status === 'complete' ? 'draft' : 'complete';
-                const commit = () => {
-                  setReport({ ...report, status: next });
-                  void updateReport(report.id, { status: next });
-                };
+                const commit = () => patchReport({ status: next });
                 // Complete is what the office reads as "ready to send", so it
                 // is not flipped over the top of the list of things that are
                 // not. The list is repeated here because the banner is a
@@ -441,8 +651,21 @@ export default function ReportScreen() {
   );
 }
 
-/** One device row. The three result buttons are the whole interaction. */
-function TestRowItem({ row, index, onMark }: { row: TestRow; index: number; onMark: (row: TestRow, r: TestResult) => void }) {
+/**
+ * One device row. The three result buttons are the whole interaction.
+ *
+ * A failure asks what failed, on the row, because the readiness check refuses
+ * a failure with no comment and there was nowhere on this screen to write
+ * one — the sheet asked for something it gave no way to supply.
+ */
+function TestRowItem({
+  row, index, onMark, onComment,
+}: {
+  row: TestRow;
+  index: number;
+  onMark: (row: TestRow, r: TestResult) => void;
+  onComment: (row: TestRow, text: string) => void;
+}) {
   const t = useTheme();
   const address =
     row.loopNumber !== undefined && row.loopNumber !== null && row.address !== undefined && row.address !== null
@@ -455,6 +678,11 @@ function TestRowItem({ row, index, onMark }: { row: TestRow; index: number; onMa
     : row.result === 'na' ? t.color.warnBg
     : 'transparent';
 
+  // A register row's zone text is its system heading; a panel row's is the
+  // zone it reports to. Either reads as "where this belongs".
+  const type = row.assetType ?? DEVICE_TYPE_LABEL[row.deviceType];
+  const method = row.method ?? DEFAULT_TEST_METHOD[row.deviceType];
+
   return (
     <View style={{ backgroundColor: bg, borderRadius: t.radius.md, marginBottom: t.space(1.5), padding: t.space(2.5) }}>
       <Rowed gap={2} align="flex-start">
@@ -465,14 +693,11 @@ function TestRowItem({ row, index, onMark }: { row: TestRow; index: number; onMa
             <Txt weight="600" style={{ flex: 1 }} numberOfLines={1}>{row.deviceText || '(no text)'}</Txt>
           </Rowed>
           <Txt size="xs" tone="muted" numberOfLines={1}>
-            {DEVICE_TYPE_LABEL[row.deviceType]}
+            {type}
             {row.zoneNumber !== undefined && row.zoneNumber !== null ? ` · Zone ${row.zoneNumber}` : ''}
             {row.zoneText ? ` — ${row.zoneText}` : ''}
           </Txt>
-          {row.method || DEFAULT_TEST_METHOD[row.deviceType] ? (
-            <Txt size="xs" tone="faint">{row.method ?? DEFAULT_TEST_METHOD[row.deviceType]}</Txt>
-          ) : null}
-          {row.comment ? <Txt size="xs" tone="warn" style={{ marginTop: 2 }}>{row.comment}</Txt> : null}
+          {method ? <Txt size="xs" tone="faint">{method}</Txt> : null}
         </View>
       </Rowed>
 
@@ -481,6 +706,17 @@ function TestRowItem({ row, index, onMark }: { row: TestRow; index: number; onMa
         <ResultButton label="Fail" active={row.result === 'fail'} tone="fail" onPress={() => onMark(row, 'fail')} />
         <ResultButton label="N/A" active={row.result === 'na'} tone="warn" onPress={() => onMark(row, 'na')} />
       </Rowed>
+
+      {row.result === 'fail' || row.result === 'na' || row.comment ? (
+        <View style={{ marginTop: t.space(2) }}>
+          <Field
+            label={row.result === 'fail' ? 'What failed' : 'Comment'}
+            value={row.comment ?? ''}
+            onChangeText={(v) => onComment(row, v)}
+            placeholder={row.result === 'na' ? 'Why it does not apply' : undefined}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }

@@ -187,6 +187,12 @@ export async function createForm72(input: {
   licenseeName?: string;
   licenceNumber?: string;
   testDate?: string;
+  /**
+   * Parts the site's asset register can fill before anybody types: the
+   * hydrants for Part D, the valve sets for Part G, the system descriptor.
+   * Laid over the blank form, so a part not given starts empty as before.
+   */
+  parts?: Form72Patch;
 }): Promise<StoredForm72> {
   const at = nowIso();
   const base = emptyForm72({
@@ -204,6 +210,7 @@ export async function createForm72(input: {
     licenceNumber: input.licenceNumber ?? '',
     systemLabel: input.systemLabel ?? '',
     status: 'draft',
+    ...(input.parts ?? {}),
   };
 
   const db = await getDb();
@@ -223,7 +230,7 @@ export async function createForm72(input: {
       JSON.stringify(record.flowDeviceKinds), JSON.stringify(record.devices),
       JSON.stringify(record.flowTest), JSON.stringify(record.booster),
       JSON.stringify(record.sprinklerHydrostatic), JSON.stringify(record.sprinklerFlow),
-      null, null,
+      record.overload?.flowLps ?? null, record.overload?.pressureKpa ?? null,
       writeTriState(record.criticalDefectsIdentified), writeTriState(record.repairsRequired),
       record.systemResult, record.systemNotes ?? '',
       record.licenseeName, record.licenceNumber, record.licenseeReportNumber ?? '',

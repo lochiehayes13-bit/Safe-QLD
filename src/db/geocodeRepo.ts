@@ -45,6 +45,23 @@ export async function readPositions(keys: readonly string[]): Promise<Map<string
   return out;
 }
 
+/**
+ * Every cached position, keyed by address key.
+ *
+ * One statement for the whole table rather than eight chunked ones: the map
+ * wants every site's position at once, and the table is the size of the site
+ * list, so reading all of it costs the same as asking about all of it.
+ */
+export async function readAllPositions(): Promise<Map<string, LatLng>> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<PositionRow>(
+    'SELECT key, latitude, longitude FROM geocode WHERE failed = 0 AND latitude IS NOT NULL AND longitude IS NOT NULL',
+  );
+  const out = new Map<string, LatLng>();
+  for (const row of rows) out.set(row.key, { latitude: row.latitude, longitude: row.longitude });
+  return out;
+}
+
 export async function writePosition(key: string, latitude: number, longitude: number, source: string): Promise<void> {
   const db = await getDb();
   await db.runAsync(

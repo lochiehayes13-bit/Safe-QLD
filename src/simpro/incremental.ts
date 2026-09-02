@@ -127,7 +127,11 @@ export function newestChange(
  * here anyway so "how current is this device" covers the figures a quote is
  * built from, which are the ones it is most costly to have stale.
  */
-export type SyncResource = 'sites' | 'jobs' | 'assets' | 'employees' | 'schedules' | 'rates';
+export type SyncResource =
+  | 'sites' | 'jobs' | 'assets' | 'employees' | 'schedules' | 'rates'
+  /* The mirror's own stages: customers, quotes and invoices come down by
+     DateModified like jobs do; tasks are a handful of rows read whole. */
+  | 'customers' | 'quotes' | 'invoices' | 'tasks';
 
 export interface SyncState {
   resource: SyncResource;

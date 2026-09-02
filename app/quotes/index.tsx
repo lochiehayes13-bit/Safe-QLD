@@ -11,7 +11,7 @@ import { formatAuDate } from '@/export/sheets';
 import { nowIso } from '@/db';
 import { useTheme } from '@/theme';
 import {
-  Banner, Button, Card, Chip, EmptyState, Rowed, Screen, StatTile, Txt,
+  Banner, Button, Card, Chip, EmptyState, Rowed, Screen, Segmented, StatTile, Txt,
 } from '@/components/ui';
 
 /**
@@ -116,6 +116,19 @@ export default function QuotesScreen() {
   return (
     <Screen>
       <Stack.Screen options={{ title: 'Quotes' }} />
+
+      {/*
+        * Two sources, one switch. These are priced on this phone off the rate
+        * card; the office's own quotes, priced in Simpro, sit behind the other
+        * half, and the same switch is at the top of that screen. Replace rather
+        * than push, so the pair reads as one screen with two faces and back
+        * leaves the quotes altogether instead of flicking between them.
+        */}
+      <Segmented
+        value="ours"
+        onChange={(v) => { if (v === 'simpro') router.replace('/quotes/simpro'); }}
+        options={[{ value: 'ours', label: 'Ours on this phone' }, { value: 'simpro', label: 'Simpro' }]}
+      />
 
       <Txt tone="muted" size="sm" style={{ lineHeight: 20 }}>
         Every quote raised on this device. A quote is raised from a site, off its own defect list

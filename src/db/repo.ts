@@ -1,5 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { getDb, newId, nowIso } from './index';
+import { addAssetEvent, updateAsset, type AssetEventKind } from './assetRepo';
+import type { AssetTestRow } from '@/domain/formsFromAssets';
 import type {
   CauseEffect,
   CauseEffectRule,
@@ -365,12 +367,14 @@ export async function createReport(input: Omit<ServiceReport, 'id' | 'createdAt'
   const r: ServiceReport = { ...input, id: input.id ?? newId(), createdAt: nowIso(), updatedAt: nowIso() };
   await db.runAsync(
     `INSERT INTO report (id,siteId,panelId,title,frequency,serviceDate,technicianName,technicianLicence,
-       companyName,witnessName,signatureTechnician,signatureWitness,status,notes,createdAt,updatedAt)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       companyName,witnessName,signatureTechnician,signatureWitness,status,notes,createdAt,updatedAt,
+       jobNumber,customerName,siteContactName,siteContactPhone)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     r.id, r.siteId, r.panelId ?? null, r.title, r.frequency, r.serviceDate,
     r.technicianName ?? null, r.technicianLicence ?? null, r.companyName ?? null,
     r.witnessName ?? null, r.signatureTechnician ?? null, r.signatureWitness ?? null,
     r.status, r.notes ?? null, r.createdAt, r.updatedAt,
+    r.jobNumber ?? null, r.customerName ?? null, r.siteContactName ?? null, r.siteContactPhone ?? null,
   );
   return r;
 }
@@ -378,7 +382,8 @@ export async function createReport(input: Omit<ServiceReport, 'id' | 'createdAt'
 export async function updateReport(id: string, patch: Partial<ServiceReport>): Promise<void> {
   const db = await getDb();
   const fields = ['title', 'frequency', 'serviceDate', 'technicianName', 'technicianLicence', 'companyName',
-    'witnessName', 'signatureTechnician', 'signatureWitness', 'status', 'notes'] as const;
+    'witnessName', 'signatureTechnician', 'signatureWitness', 'status', 'notes',
+    'jobNumber', 'customerName', 'siteContactName', 'siteContactPhone'] as const;
   const sets: string[] = [];
   const vals: SqlValue[] = [];
   for (const f of fields) {
@@ -422,6 +427,83 @@ export async function addPointsToReport(reportId: string, points: Point[]): Prom
       rows);
   });
   return rows.length;
+}
+
+/**
+ * "Add every device" on a site whose equipment is the asset register.
+ *
+ * The office's sites carry no panel configuration — their equipment is the
+ * asset register the Simpro sync fills — so the rows come from there. An
+ * asset already on the sheet is skipped rather than added twice, which is
+ * what lets the button be pressed again after a sync brought new equipment.
+ * Returns how many rows were added.
+ */
+export async function addAssetRowsToReport(reportId: string, rows: readonly AssetTestRow[]): Promise<number> {
+  const db = await getDb();
+  const existing = await db.getAllAsync<{ assetId: string | null }>(
+    'SELECT assetId FROM test_row WHERE reportId = ? AND assetId IS NOT NULL', reportId,
+  );
+  const held = new Set(existing.map((r) => r.assetId).filter((id): id is string => Boolean(id)));
+  const count = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM test_row WHERE reportId = ?', reportId);
+  let idx = count?.n ?? 0;
+
+  const values: SqlValue[][] = rows
+    .filter((r) => !held.has(r.assetId))
+    .map((r) => [
+      newId(), reportId, r.assetId, r.assetType ?? null, r.pointRef ?? null,
+      r.zoneNumber ?? null, r.zoneText ?? null, r.deviceText, r.deviceType,
+      r.result, r.method ?? null, r.comment ?? null, null, idx++,
+    ]);
+
+  await db.withTransactionAsync(async () => {
+    await insertMany(db, 'test_row',
+      ['id', 'reportId', 'assetId', 'assetType', 'pointRef', 'zoneNumber', 'zoneText',
+        'deviceText', 'deviceType', 'result', 'method', 'comment', 'testedAt', 'sortIndex'],
+      values);
+  });
+  return values.length;
+}
+
+/** The asset ids already on a sheet, so a second add skips them. */
+export async function assetIdsOnReport(reportId: string): Promise<Set<string>> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ assetId: string }>(
+    'SELECT assetId FROM test_row WHERE reportId = ? AND assetId IS NOT NULL', reportId,
+  );
+  return new Set(rows.map((r) => r.assetId));
+}
+
+/**
+ * Writes a result marked on the sheet back onto the asset it tested.
+ *
+ * The same record a routine run writes: a passed or failed event on the
+ * asset's timeline, stamped with the report it came from, and the asset's own
+ * last-serviced date and result brought up to date so the register stays
+ * true. An N/A is written as a plain tested event and leaves the last result
+ * alone — nothing was serviced. Putting a row back to untested writes
+ * nothing: history is not unmade, and the sheet is what says the row is open.
+ */
+export async function recordTestRowOnAsset(
+  row: Pick<TestRow, 'assetId' | 'reportId' | 'deviceText' | 'comment'>,
+  result: TestRow['result'],
+  technician?: string,
+  at: string = nowIso(),
+): Promise<void> {
+  if (!row.assetId || result === 'untested') return;
+  const kind: AssetEventKind = result === 'pass' ? 'passed' : result === 'fail' ? 'failed' : 'tested';
+  const said = result === 'pass' ? 'passed' : result === 'fail' ? 'failed' : 'not applicable';
+  await addAssetEvent({
+    assetId: row.assetId,
+    kind,
+    occurredAt: at,
+    technician: technician?.trim() || undefined,
+    reportId: row.reportId,
+    summary: `Test sheet — ${said}`,
+    detail: row.comment?.trim() || undefined,
+  });
+  if (result === 'pass' || result === 'fail') {
+    await updateAsset(row.assetId, { lastServicedAt: at, lastResult: result });
+  }
 }
 
 export async function setTestResult(rowId: string, result: TestRow['result'], comment?: string): Promise<void> {

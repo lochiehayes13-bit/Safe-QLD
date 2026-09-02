@@ -1,5 +1,7 @@
 import { getDb, newId, nowIso } from './index';
 import { queueKey } from '@/domain/queueKey';
+import { workCompletedNote, type WorkCompletedRun } from '@/domain/outboundWork';
+import { flushSoon } from '@/simpro/flushSoon';
 import { defectByCode, type Severity } from '@/seed/defectLibrary';
 
 /**
@@ -44,6 +46,41 @@ export interface JobRecord {
   notes?: string;
   createdAt: string;
   updatedAt: string;
+
+  // ---- The Simpro mirror (v18). Every field below is the office's to set;
+  // ---- the sync writes them whole and nothing on the phone edits them.
+  orderNo?: string;
+  requestNo?: string;
+  statusName?: string;
+  /** Simpro's status colour, a hex string like "#f5a623", for the pill. */
+  statusColor?: string;
+  stageRaw?: string;
+  jobTypeRaw?: string;
+  customerExternalId?: string;
+  /** The office's site id, kept even where no local site matched. */
+  siteExternalId?: string;
+  /** JSON of a SimproContact, or null. See readJobJson in mirrorRepo. */
+  siteContactJson?: string;
+  /** JSON of SimproPerson[]. */
+  techniciansJson?: string;
+  /** JSON of string[]. */
+  tagsJson?: string;
+  projectManager?: string;
+  /** The office's description, HTML stripped. */
+  descriptionText?: string;
+  /** The office's notes field on the job, HTML stripped. Detail-level: only a detail sync fills it. */
+  notesText?: string;
+  /** The office's completion date, yyyy-mm-dd. A day, not an instant, unlike completedAt. */
+  completedDate?: string;
+  totalExTaxCents?: number;
+  totalIncTaxCents?: number;
+  convertedFromQuoteId?: string;
+  /** JSON of a SimproContract, or null. Detail-level. */
+  customerContractJson?: string;
+  /** Simpro's own DateModified on the job. */
+  dateModified?: string;
+  /** When the job's children were last read. Null until somebody opens it or is booked to it. */
+  detailSyncedAt?: string;
 }
 
 export async function listJobs(filter: { status?: JobRecord['status']; onDate?: string; limit?: number } = {}): Promise<JobRecord[]> {
@@ -53,10 +90,23 @@ export async function listJobs(filter: { status?: JobRecord['status']; onDate?: 
   if (filter.status) { where.push('status = ?'); args.push(filter.status); }
   if (filter.onDate) { where.push('substr(scheduledFor,1,10) = ?'); args.push(filter.onDate); }
   args.push(filter.limit ?? 200);
+  /*
+   * Open work first, soonest first; finished work after it, newest first.
+   *
+   * The order used to be priority then date, ascending, which was fine while
+   * the phone held the five hundred most recently changed jobs. It holds
+   * every job on the books now, and ascending by date under a cap of five
+   * hundred is the five hundred oldest — 2019's jobs on every screen and
+   * this week's on none. Finished work is turned the other way so a picker
+   * looking for last week's job finds it inside the cap.
+   */
   return db.getAllAsync<JobRecord>(
     `SELECT * FROM job ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-     ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
-              scheduledFor LIMIT ?`,
+     ORDER BY CASE WHEN status = 'complete' THEN 1 ELSE 0 END,
+              CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
+              CASE WHEN status = 'complete' THEN '' ELSE COALESCE(scheduledFor, '') END,
+              COALESCE(scheduledFor, '') DESC
+     LIMIT ?`,
     ...args,
   );
 }
@@ -87,10 +137,19 @@ export async function upsertJob(input: Partial<JobRecord> & { siteName: string; 
     ...input,
   } as JobRecord;
 
+  /*
+   * The mirror columns are the office's, written whole on every list-level
+   * pull — except the three only a detail read fills (notesText,
+   * customerContractJson, detailSyncedAt), which a list-level pull must not
+   * blank: it did not ask for them, so it has nothing to say about them.
+   */
   await db.runAsync(
     `INSERT INTO job (id,externalId,siteId,siteName,customerName,title,jobType,stage,priority,
-       scheduledFor,dueAt,technician,address,latitude,longitude,status,startedAt,completedAt,notes,createdAt,updatedAt)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       scheduledFor,dueAt,technician,address,latitude,longitude,status,startedAt,completedAt,notes,createdAt,updatedAt,
+       orderNo,requestNo,statusName,statusColor,stageRaw,jobTypeRaw,customerExternalId,siteExternalId,
+       siteContactJson,techniciansJson,tagsJson,projectManager,descriptionText,notesText,completedDate,
+       totalExTaxCents,totalIncTaxCents,convertedFromQuoteId,customerContractJson,dateModified,detailSyncedAt)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET
        siteId=COALESCE(excluded.siteId, job.siteId),
        siteName=excluded.siteName, customerName=excluded.customerName, title=excluded.title,
@@ -99,24 +158,97 @@ export async function upsertJob(input: Partial<JobRecord> & { siteName: string; 
        address=excluded.address,
        status=CASE WHEN job.status IN ('in-progress','complete','blocked') THEN job.status ELSE excluded.status END,
        notes=COALESCE(job.notes, excluded.notes),
-       updatedAt=excluded.updatedAt`,
+       updatedAt=excluded.updatedAt,
+       orderNo=excluded.orderNo, requestNo=excluded.requestNo,
+       statusName=excluded.statusName, statusColor=excluded.statusColor,
+       stageRaw=excluded.stageRaw, jobTypeRaw=excluded.jobTypeRaw,
+       customerExternalId=excluded.customerExternalId,
+       siteExternalId=COALESCE(excluded.siteExternalId, job.siteExternalId),
+       siteContactJson=excluded.siteContactJson, techniciansJson=excluded.techniciansJson,
+       tagsJson=excluded.tagsJson, projectManager=excluded.projectManager,
+       descriptionText=excluded.descriptionText,
+       notesText=COALESCE(excluded.notesText, job.notesText),
+       completedDate=excluded.completedDate,
+       totalExTaxCents=excluded.totalExTaxCents, totalIncTaxCents=excluded.totalIncTaxCents,
+       convertedFromQuoteId=excluded.convertedFromQuoteId,
+       customerContractJson=COALESCE(excluded.customerContractJson, job.customerContractJson),
+       dateModified=COALESCE(excluded.dateModified, job.dateModified),
+       detailSyncedAt=COALESCE(excluded.detailSyncedAt, job.detailSyncedAt)`,
     job.id, job.externalId ?? null, job.siteId ?? null, job.siteName, job.customerName ?? null,
     job.title, job.jobType ?? null, job.stage ?? null, job.priority, job.scheduledFor ?? null,
     job.dueAt ?? null, job.technician ?? null, job.address ?? null, job.latitude ?? null,
     job.longitude ?? null, job.status, job.startedAt ?? null, job.completedAt ?? null,
     job.notes ?? null, job.createdAt, job.updatedAt,
+    job.orderNo ?? null, job.requestNo ?? null, job.statusName ?? null, job.statusColor ?? null,
+    job.stageRaw ?? null, job.jobTypeRaw ?? null, job.customerExternalId ?? null, job.siteExternalId ?? null,
+    job.siteContactJson ?? null, job.techniciansJson ?? null, job.tagsJson ?? null, job.projectManager ?? null,
+    job.descriptionText ?? null, job.notesText ?? null, job.completedDate ?? null,
+    job.totalExTaxCents ?? null, job.totalIncTaxCents ?? null, job.convertedFromQuoteId ?? null,
+    job.customerContractJson ?? null, job.dateModified ?? null, job.detailSyncedAt ?? null,
   );
   return job;
 }
 
 export async function setJobStatus(id: string, status: JobRecord['status']): Promise<void> {
   const db = await getDb();
+  const before = await getJob(id);
   const stamp = status === 'in-progress' ? 'startedAt' : status === 'complete' ? 'completedAt' : null;
   if (stamp) {
     await db.runAsync(`UPDATE job SET status = ?, ${stamp} = ?, updatedAt = ? WHERE id = ?`, status, nowIso(), nowIso(), id);
   } else {
     await db.runAsync('UPDATE job SET status = ?, updatedAt = ? WHERE id = ?', status, nowIso(), id);
   }
+  // Only on the way into complete. Setting a complete job complete again is a
+  // screen re-saving what it has, not a second completion.
+  if (status === 'complete' && before && before.status !== 'complete') {
+    const after = await getJob(id);
+    if (after) await queueWorkCompletedNote(after);
+  }
+}
+
+/**
+ * Tells the office a job was finished, the moment it was.
+ *
+ * A short appended note on the Simpro job — what, when, who — queued rather
+ * than sent, so a basement with no signal loses nothing. A job that did not
+ * come from the office has no job number to put it on and gets no note. The
+ * queue keys the note on its content, and the content is keyed on the job and
+ * the Queensland day, so a double tap or a re-open-and-close is one note.
+ *
+ * The routine run linked to this job, where there is one, is named in the
+ * note so the office can find the service record beside it. Read with one
+ * query here rather than through outboundRepo, which imports this module.
+ */
+export async function queueWorkCompletedNote(job: JobRecord): Promise<{ queued: boolean; key?: string }> {
+  const externalId = job.externalId?.trim();
+  if (!externalId) return { queued: false };
+  const db = await getDb();
+  const run = await db.getFirstAsync<WorkCompletedRun>(
+    `SELECT r.routineLabel, r.frequency, r.system, r.completedAt,
+            r.checksPassed, r.checksFailed, r.checksNotTested, r.defectsRaised
+       FROM outbound_job_link l JOIN routine_run r ON r.id = l.runId
+      WHERE l.jobId = ?
+      ORDER BY r.completedAt DESC LIMIT 1`,
+    externalId,
+  );
+  const note = workCompletedNote({
+    externalId,
+    title: job.title,
+    siteName: job.siteName,
+    completedAt: job.completedAt ?? nowIso(),
+    technician: job.technician,
+    notes: job.notes,
+    orderNo: job.orderNo,
+  }, run ?? undefined);
+  // The note's own key is the queue's key: the marker is already in the text,
+  // so the sender adds no second one, and the same completion cannot queue twice.
+  const { duplicate } = await enqueueSync(
+    'job-note',
+    { jobId: note.jobId, subject: note.subject, note: note.note },
+    { contentKey: note.key },
+  );
+  if (!duplicate) flushSoon();
+  return { queued: !duplicate, key: note.key };
 }
 
 // ---------------------------------------------------------------------------
@@ -466,10 +598,20 @@ export interface SyncEntry {
  * The same kind and content already pending, sent or in doubt is not queued
  * again: a double tap on "send", or a screen that re-queues its note on every
  * focus, used to become two notes on the job. Returns whether it was new.
+ *
+ * The key is derived from the whole payload unless the caller supplies one.
+ * A caller does that when part of the payload is not the work — a photo's
+ * local path differs between phones and moves on reinstall, and keying on it
+ * would let the same photograph upload twice — or when the work already
+ * carries a key of its own that the posted text will show.
  */
-export async function enqueueSync(kind: string, payload: unknown): Promise<{ id: string; duplicate: boolean }> {
+export async function enqueueSync(
+  kind: string,
+  payload: unknown,
+  options: { contentKey?: string } = {},
+): Promise<{ id: string; duplicate: boolean }> {
   const db = await getDb();
-  const key = queueKey(kind, payload);
+  const key = options.contentKey ?? queueKey(kind, payload);
   const existing = await db.getFirstAsync<{ id: string }>(
     "SELECT id FROM sync_queue WHERE contentKey = ? AND status IN ('pending', 'sent', 'unknown') LIMIT 1",
     key,
@@ -527,10 +669,59 @@ export async function markSyncFailed(id: string, error: string): Promise<void> {
   );
 }
 
+/**
+ * Gives up on an item now, whatever its attempt count.
+ *
+ * For the failure no retry can mend: a photograph whose file is gone from
+ * the phone. Left pending it would fail five times over five syncs and then
+ * arrive here anyway, with the reason buried under four "still missing"
+ * messages; failed at once, the reason is the first thing a person reads.
+ */
+export async function abandonSync(id: string, error: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    "UPDATE sync_queue SET status = 'failed', attempts = attempts + 1, lastError = ? WHERE id = ?",
+    error, id,
+  );
+}
+
 export async function pendingSyncCount(): Promise<number> {
   const db = await getDb();
   const row = await db.getFirstAsync<{ n: number }>("SELECT COUNT(*) AS n FROM sync_queue WHERE status = 'pending'");
   return row?.n ?? 0;
+}
+
+export interface AttachmentQueueSummary {
+  /** Waiting for signal, or for their turn. */
+  pending: number;
+  /** Went out and got no reply; a person decides these on the outbound screen. */
+  unknown: number;
+  /** Gave up after repeated refusals, or the file was gone. */
+  failed: number;
+  /** Uploaded to the job. */
+  sent: number;
+}
+
+/**
+ * Where the photographs bound for Simpro stand.
+ *
+ * Counted by status rather than folded into the one "waiting to sync" number,
+ * because a photograph is the only queued thing whose file can go missing
+ * underneath it, and "3 waiting" reads very differently from "3 failed".
+ */
+export async function attachmentQueueSummary(): Promise<AttachmentQueueSummary> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ status: string; n: number }>(
+    "SELECT status, COUNT(*) AS n FROM sync_queue WHERE kind = 'attachment' GROUP BY status",
+  );
+  const out: AttachmentQueueSummary = { pending: 0, unknown: 0, failed: 0, sent: 0 };
+  for (const row of rows) {
+    if (row.status === 'pending') out.pending = row.n;
+    else if (row.status === 'unknown') out.unknown = row.n;
+    else if (row.status === 'failed') out.failed = row.n;
+    else if (row.status === 'sent') out.sent = row.n;
+  }
+  return out;
 }
 
 /** Severity of a defect code, for sorting a mixed list. */

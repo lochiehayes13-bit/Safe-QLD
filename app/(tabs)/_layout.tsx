@@ -4,7 +4,7 @@ import { useTheme } from '@/theme';
 import { TabBar, type TabBarProps } from '@/components/TabBar';
 
 /**
- * Five tabs, ordered by how often a technician reaches for them.
+ * Six tabs, ordered by how often a technician reaches for them.
  *
  * Everything else is reachable from the home hub rather than being
  * crammed into the bar — a tab bar with nine items is a menu, not navigation.
@@ -27,6 +27,7 @@ export default function TabsLayout() {
     >
       <Tabs.Screen name="index" options={{ title: 'Home', headerShown: false }} />
       <Tabs.Screen name="sites" options={{ title: 'Sites' }} />
+      <Tabs.Screen name="map" options={{ title: 'Map' }} />
       <Tabs.Screen name="tools" options={{ title: 'Tools' }} />
       <Tabs.Screen name="work" options={{ title: 'Work' }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings' }} />

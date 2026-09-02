@@ -1,5 +1,12 @@
 import type { SimproClient } from './client';
 import { buildRateCard, type RateCardImport, type RawLabourRate, type RawServiceFee } from './rateCard';
+import { JOB_LIST_COLUMNS, SIMPRO_PATHS, mapJobRow, type RawJobRow, type SimproJob } from './mirrorResources';
+
+/**
+ * The job shape now lives with the rest of the mirror in ./mirrorResources;
+ * re-exported here so the sync and the asset mapper keep one import.
+ */
+export type { SimproJob } from './mirrorResources';
 
 /**
  * Typed views over the Simpro endpoints the app uses.
@@ -28,19 +35,6 @@ interface RawSite {
   PrimaryContact?: RawContact;
   Archived?: boolean;
   DateModified?: string;
-}
-interface RawJob {
-  ID?: number;
-  Type?: string;
-  Name?: string;
-  Description?: string;
-  Customer?: RawRef;
-  Site?: RawRef;
-  Stage?: string;
-  Status?: { ID?: number; Name?: string };
-  DateIssued?: string;
-  DueDate?: string;
-  Total?: { ExTax?: number };
 }
 interface RawSchedule {
   ID?: number;
@@ -93,22 +87,6 @@ export interface SimproSite {
   contactWorkPhone?: string;
   contactMobile?: string;
   archived?: boolean;
-}
-
-export interface SimproJob {
-  /** The source's own modification timestamp, where it provides one. */
-  DateModified?: string;
-  id: string;
-  title: string;
-  description?: string;
-  customerName?: string;
-  siteName?: string;
-  siteId?: string;
-  stage?: string;
-  status?: string;
-  issuedAt?: string;
-  dueAt?: string;
-  type?: string;
 }
 
 export interface SimproScheduleBlock {
@@ -261,7 +239,7 @@ export class SimproResources {
     };
   }
 
-  async jobs(query: Record<string, string | number> = {}, maxRecords = 1000): Promise<SimproJob[]> {
+  async jobs(query: Record<string, string | number> = {}, maxRecords = 6000): Promise<SimproJob[]> {
     return (await this.jobsPaged(query, maxRecords)).jobs;
   }
 
@@ -271,27 +249,20 @@ export class SimproResources {
    * somebody edited this morning. Simpro's default order is by ID ascending,
    * which on a build with a multi-year history means a capped read returns
    * the oldest jobs on the books.
+   *
+   * The column set is the full one the build was verified to honour — see
+   * JOB_LIST_COLUMNS — rather than the eight fields it used to ask for, so a
+   * job row carries its order number, its status and its technicians on the
+   * first read. The ceiling is above the 4,562 jobs on the books, with room:
+   * a mirror that holds the newest five hundred is not a mirror.
    */
-  async jobsPaged(query: Record<string, string | number> = {}, maxRecords = 1000): Promise<{ jobs: SimproJob[]; truncated: boolean }> {
-    const { items: raw, truncated } = await this.client.listAllPaged<RawJob>('jobs/', {
-      columns: 'ID,Type,Name,Description,Customer,Site,Stage,Status,DateIssued,DueDate,DateModified',
+  async jobsPaged(query: Record<string, string | number> = {}, maxRecords = 6000): Promise<{ jobs: SimproJob[]; truncated: boolean }> {
+    const { items: raw, truncated } = await this.client.listAllPaged<RawJobRow>(SIMPRO_PATHS.jobs(), {
+      columns: JOB_LIST_COLUMNS,
       orderby: '-DateModified',
       ...query,
     }, maxRecords);
-    return { truncated, jobs: raw.map((j) => ({
-      DateModified: str((j as { DateModified?: unknown }).DateModified),
-      id: String(j.ID ?? ''),
-      title: str(j.Name) ?? str(j.Description) ?? `Job ${j.ID ?? ''}`,
-      description: str(j.Description),
-      customerName: str(j.Customer?.Name),
-      siteName: str(j.Site?.Name),
-      siteId: j.Site?.ID !== undefined ? String(j.Site.ID) : undefined,
-      stage: str(j.Stage),
-      status: str(j.Status?.Name),
-      issuedAt: str(j.DateIssued),
-      dueAt: str(j.DueDate),
-      type: str(j.Type),
-    })) };
+    return { truncated, jobs: raw.map(mapJobRow) };
   }
 
   /** Open jobs only — the technician's actual work list. */
@@ -423,7 +394,9 @@ export class SimproResources {
    * 6 Monthly. Required: a result with no frequency does not say what was done.
    */
   async postAssetTest(assetId: string, result: 'Pass' | 'Fail', dateIso: string, serviceLevelId: string): Promise<void> {
-    await this.client.request('PATCH', `customerAssets/${assetId}/`, {
+    // No trailing slash: a single record's path with one is a 404 "Invalid
+    // route" on this build, so every test result posted was silently refused.
+    await this.client.request('PATCH', SIMPRO_PATHS.customerAsset(assetId), {
       body: {
         LastTest: {
           Result: result,

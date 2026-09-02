@@ -50,6 +50,26 @@ export interface SimproConfig {
   proxyUrl?: string;
 }
 
+/**
+ * The path of a single record, which on this build must not end in a slash.
+ *
+ * Verified against the live build: `jobs/{id}` answers and `jobs/{id}/` is a
+ * 404 "Invalid route", and the same holds for quotes, invoices, customers,
+ * sites, customer assets and every nested child record. Collections are the
+ * other way round — `jobs/`, `jobs/{id}/sections/` — so a path written from
+ * memory is wrong half the time in a way no type can catch. Every record
+ * path in the app goes through here, and the collection paths through
+ * `collectionPath`, so the rule is written once.
+ */
+export function recordPath(path: string): string {
+  return path.replace(/\/+$/, '');
+}
+
+/** The path of a collection, which takes exactly one trailing slash. */
+export function collectionPath(path: string): string {
+  return `${recordPath(path)}/`;
+}
+
 export class SimproError extends Error {
   constructor(
     message: string,

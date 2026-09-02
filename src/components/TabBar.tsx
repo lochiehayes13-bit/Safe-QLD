@@ -22,6 +22,7 @@ type Icon = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 const ICONS: Record<string, { on: Icon; off: Icon }> = {
   index: { on: 'home-variant', off: 'home-variant-outline' },
   sites: { on: 'office-building-marker', off: 'office-building-marker-outline' },
+  map: { on: 'map-marker-radius', off: 'map-marker-radius-outline' },
   tools: { on: 'calculator-variant', off: 'calculator-variant-outline' },
   work: { on: 'clipboard-check', off: 'clipboard-check-outline' },
   settings: { on: 'cog', off: 'cog-outline' },

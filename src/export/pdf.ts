@@ -205,7 +205,7 @@ ${testRows.length ? `<table>
     <td class="num">${esc(r.zoneNumber)}</td>
     <td>${esc(r.zoneText)}</td>
     <td>${esc(r.deviceText)}</td>
-    <td>${esc(DEVICE_TYPE_LABEL[r.deviceType])}</td>
+    <td>${esc(r.assetType ?? DEVICE_TYPE_LABEL[r.deviceType])}</td>
     <td class="${resultClass(r.result)}">${resultText(r.result)}</td>
     <td>${esc(r.comment)}</td>
   </tr>`).join('')}</tbody>

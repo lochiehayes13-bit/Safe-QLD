@@ -21,6 +21,8 @@ import {
 } from '@/export/form72';
 import { shareFile, writePdf } from '@/export/files';
 import { formatAuDate } from '@/export/sheets';
+import { queryAssets } from '@/db/assetRepo';
+import { applyForm72Prefill, form72FromAssets } from '@/domain/formsFromAssets';
 import { loadPrefs } from '@/app-prefs';
 import { nowIso } from '@/db';
 import { useTheme } from '@/theme';
@@ -167,6 +169,40 @@ export default function Form72Screen() {
     );
   }, [form, blockers]);
 
+  /*
+   * The register's lists, laid onto the form's blanks.
+   *
+   * A new form gets this when it is started; the button is for a form
+   * started before the site was synced, or one whose lists were cleared. It
+   * fills blanks only — a hydrant somebody typed stays — and says what the
+   * register did and did not hold, because a list left empty by "nothing in
+   * the register" and one left empty by "not done yet" look the same on the
+   * page.
+   */
+  const [filling, setFilling] = useState(false);
+  const onFillFromRegister = useCallback(async () => {
+    if (!form || locked) return;
+    setFilling(true);
+    try {
+      const assets = await queryAssets({ siteId: form.siteId, limit: 5000 });
+      const prefill = form72FromAssets(assets);
+      const change = applyForm72Prefill(form, prefill);
+      if (Object.keys(change).length) patch(change);
+      Alert.alert(
+        Object.keys(change).length ? 'Filled from the register' : 'Nothing to fill',
+        [
+          prefill.filled.length ? `Register holds: ${prefill.filled.join('; ')}.` : 'The register holds no water-based equipment for this site.',
+          Object.keys(change).length ? '' : 'Every list the register could fill already has something in it, so nothing was changed.',
+          `Not recorded: ${prefill.notRecorded.join('; ')}.`,
+        ].filter(Boolean).join('\n\n'),
+      );
+    } catch (e) {
+      Alert.alert('Could not read the register', e instanceof Error ? e.message : String(e));
+    } finally {
+      setFilling(false);
+    }
+  }, [form, locked, patch]);
+
   const onPdf = useCallback(async () => {
     if (!form) return;
     setBusy(true);
@@ -258,6 +294,16 @@ export default function Form72Screen() {
       ) : null}
 
       <PartStrip form={form} issues={issues} value={part} onChange={setPart} />
+
+      {!locked && part === 'A' ? (
+        <Button
+          title="Fill the lists from the site's register"
+          variant="secondary"
+          onPress={() => void onFillFromRegister()}
+          loading={filling}
+          icon={<MaterialCommunityIcons name="database-import-outline" size={18} color={t.color.text} />}
+        />
+      ) : null}
 
       <PartBody
         part={part}
@@ -684,7 +730,7 @@ function PartD({ form, locked, patch }: PartProps) {
           value={f.hydrantLocations.join(', ')}
           onChangeText={(v) => set({ hydrantLocations: v.split(',').map((s) => s.trim()).filter(Boolean) })}
           placeholder="Booster, Level 3 east, Roof"
-          hint="Comma separated"
+          hint="Comma separated. Filled from the register where it holds hydrants — take out any not used in this test."
           editable={!locked}
         />
         <Chip

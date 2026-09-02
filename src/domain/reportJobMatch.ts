@@ -80,3 +80,79 @@ export function jobNumberForReport(
   }
   return {};
 }
+
+/**
+ * The job to offer a test sheet being filled in today.
+ *
+ * The routine report above looks back over a window at work already done. A
+ * test sheet is being written now, on site, and the question is simpler: is
+ * there one open job here today? The office's job status is what says open —
+ * a job the office has completed, invoiced or archived is not the one being
+ * worked, however recently it was scheduled.
+ *
+ * Offered rather than applied. The number goes on the report only when the
+ * technician accepts it, because the same refusal applies as above: a wrong
+ * number files this service against somebody else's work.
+ */
+export interface OpenJobCandidate extends ReportJobCandidate {
+  /** The app's status: 'complete' is finished work, anything else is open. */
+  status?: string;
+  /** The office's customer id, so the customer can be looked up once the job is accepted. */
+  customerExternalId?: string;
+  /** The app's own id for the job, so the caller can read the rest of it. */
+  id?: string;
+}
+
+export interface JobOffer {
+  jobNumber?: string;
+  /** The job the number came from, for the caller to read its customer and contact. */
+  job?: OpenJobCandidate;
+  /**
+   * Why this one: scheduled here today, or the only open job at the site
+   * when nothing is scheduled today.
+   */
+  basis?: 'today' | 'only-open';
+  /** Why nothing is offered when there were jobs to choose from. */
+  reason?: string;
+}
+
+export function jobToOffer(
+  jobs: readonly OpenJobCandidate[],
+  where: { siteId: string; today: string },
+): JobOffer {
+  const today = qldIsoDay(where.today);
+  if (!today) return {};
+
+  const open = new Map<string, OpenJobCandidate>();
+  for (const job of jobs) {
+    if (job.siteId !== where.siteId || job.status === 'complete') continue;
+    const number = job.externalId?.trim();
+    if (!number || open.has(number)) continue;
+    open.set(number, job);
+  }
+
+  const scheduledToday = [...open.values()].filter((j) => qldIsoDay(j.scheduledFor) === today);
+  if (scheduledToday.length === 1) {
+    return { jobNumber: scheduledToday[0]!.externalId!.trim(), job: scheduledToday[0], basis: 'today' };
+  }
+  if (scheduledToday.length > 1) {
+    const numbers = scheduledToday.map((j) => j.externalId!.trim()).sort();
+    return {
+      reason: `${numbers.length} jobs are scheduled at this site today (${numbers.join(', ')}). Type the one this `
+        + 'sheet belongs to rather than have the app guess.',
+    };
+  }
+
+  if (open.size === 1) {
+    const [number, job] = [...open.entries()][0]!;
+    return { jobNumber: number, job, basis: 'only-open' };
+  }
+  if (open.size > 1) {
+    const numbers = [...open.keys()].sort();
+    return {
+      reason: `Nothing is scheduled here today and ${numbers.length} jobs are open at this site `
+        + `(${numbers.join(', ')}). Type the one this sheet belongs to.`,
+    };
+  }
+  return {};
+}

@@ -2039,6 +2039,14 @@ export interface StoredStatementRow {
   nominatedStandard?: string;
   criticalDefectNoticeGiven: boolean;
   rectifiedDate?: string;
+  /**
+   * What the asset register holds for this installation: the latest last-test
+   * date across its equipment, and the soonest date any of it falls due. Both
+   * Queensland calendar days. Filled by the prefill, never typed, and shown
+   * so the occupier is signing against a date rather than a memory.
+   */
+  lastMaintainedDate?: string;
+  nextDueDate?: string;
 }
 
 /**
@@ -2058,5 +2066,8 @@ export function toFilledRow(row: StoredStatementRow): FilledInstallationRow {
     nominatedStandard: row.nominatedStandard,
     criticalDefectNoticeIssued: row.present ? row.criticalDefectNoticeGiven : undefined,
     rectificationDate: row.rectifiedDate,
+    // The register's last-test date is the maintenance date the s 54(4)
+    // check wants, where the register holds one.
+    maintenanceDate: row.lastMaintainedDate,
   };
 }
