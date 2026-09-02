@@ -5,6 +5,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { listSiteSummaries, type SiteSummary } from '@/db/repo';
 import { useTheme } from '@/theme';
 import { Button, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
+import { Reveal, Skeleton } from '@/components/motion';
 import { ambiguousNames, disambiguator } from '@/domain/siteNames';
 
 /** Site list. A technician's mental model is "which job am I on", so sites lead. */
@@ -78,10 +79,19 @@ export default function SitesScreen() {
             </Rowed>
           </View>
         }
-        renderItem={({ item }) => <SiteCard site={item} apart={disambiguator(item, ambiguous)} />}
+        renderItem={({ item, index }) => (
+          index < 8
+            ? <Reveal index={index}><SiteCard site={item} apart={disambiguator(item, ambiguous)} /></Reveal>
+            : <SiteCard site={item} apart={disambiguator(item, ambiguous)} />
+        )}
         ListEmptyComponent={
-          loading ? null : (
+          loading ? (
+            <View style={{ gap: t.space(3) }}>
+              <Skeleton height={104} /><Skeleton height={104} /><Skeleton height={104} /><Skeleton height={104} />
+            </View>
+          ) : (
             <EmptyState
+              icon={search ? 'map-search-outline' : 'office-building-marker-outline'}
               title={search ? 'Nothing matched' : 'No sites yet'}
               body={search ? 'Try a shorter search.' : 'Add a site by hand, or import a device list exported from any panel programming tool. Both work offline.'}
               action={search ? undefined : <Button title="Add your first site" onPress={() => router.push('/site/new')} />}

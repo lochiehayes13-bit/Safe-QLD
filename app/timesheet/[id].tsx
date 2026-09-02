@@ -21,6 +21,7 @@ import { newId, nowIso } from '@/db';
 import { qldIsoDay } from '@/domain/qldTime';
 import { useTheme, type Theme } from '@/theme';
 import { Button, Card, Chip, Rowed, Screen, Txt } from '@/components/ui';
+import { ProgressRing, Reveal } from '@/components/motion';
 import { RecordGate } from '@/components/RecordGate';
 
 /**
@@ -146,9 +147,16 @@ export default function TimesheetScreen() {
     <>
       <Stack.Screen options={{ title: `Week of ${formatAuDate(sheet.weekStarting)}` }} />
       <Screen>
-        <View style={{ gap: t.space(1) }}>
-          <Rowed gap={2}>
-            <Txt size="display" weight="800" style={{ letterSpacing: -1, flex: 1 }}>{totals.grand}<Txt size="lg" tone="muted" weight="700"> h</Txt></Txt>
+        <Reveal index={0}>
+        <Card variant="raised" style={{ gap: t.space(1) }}>
+          <Rowed gap={3}>
+            <ProgressRing fraction={totals.grand / 38} size={72} stroke={8}>
+              <Txt size="xs" weight="800" mono>{Math.round((totals.grand / 38) * 100)}%</Txt>
+            </ProgressRing>
+            <View style={{ flex: 1 }}>
+              <Txt size="display" weight="800" style={{ letterSpacing: -1.4 }}>{totals.grand}<Txt size="lg" tone="muted" weight="700"> h</Txt></Txt>
+              <Txt size="xs" tone="faint">of a 38 hour week</Txt>
+            </View>
             <Chip label={sheet.status === 'submitted' ? 'Submitted' : 'Draft'} tone={sheet.status === 'submitted' ? 'pass' : 'warn'} />
           </Rowed>
           <Rowed gap={2} wrap>
@@ -158,11 +166,12 @@ export default function TimesheetScreen() {
             {totals.grand - totals.worked ? <Txt size="sm" tone="muted">· {Math.round((totals.grand - totals.worked) * 100) / 100} leave</Txt> : null}
             {!sheet.employeeName.trim() ? <Txt size="sm" tone="fail">· no name set</Txt> : null}
           </Rowed>
-        </View>
+        </Card>
+        </Reveal>
 
-        {days.map((date) => (
+        {days.map((date, i) => (
+          <Reveal key={date} index={1 + i}>
           <DayCard
-            key={date}
             date={date}
             entries={sheet.entries.filter((e) => e.date === date)}
             theme={t}
@@ -182,6 +191,7 @@ export default function TimesheetScreen() {
             onRemove={(entryId) => setEntries(sheet.entries.filter((e) => e.id !== entryId))}
             canDuplicate={previousDayWithEntries(sheet.entries, date) !== null}
           />
+          </Reveal>
         ))}
 
         <Card>

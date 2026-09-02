@@ -113,9 +113,64 @@ export interface Theme {
   font: {
     size: { xs: number; sm: number; md: number; lg: number; xl: number; xxl: number; display: number };
     mono: string;
+    /**
+     * The face for a weight, or undefined to fall back to the system font.
+     *
+     * Manrope, loaded at start-up, one file per weight. A file is a weight, so
+     * a component that sets a family must not also set fontWeight — Android
+     * would synthesise a second bold on top of the real one.
+     */
+    family: (weight: FontWeight) => string | undefined;
   };
   /** Minimum touch target. 48dp is the Android accessibility floor; gloves want more. */
   touch: number;
+  /** The brand ramps, for a hero, a plate behind an icon, or the active tab. */
+  gradient: {
+    flame: readonly [string, string];
+    /** The dark ground the flame sits on, for a hero that is not itself orange. */
+    ground: readonly [string, string];
+  };
+  /** Elevation presets. Soft on purpose: a field app in glare wants edges, not haze. */
+  shadow: {
+    card: ViewShadow;
+    float: ViewShadow;
+    glow: ViewShadow;
+  };
+}
+
+export type FontWeight = '400' | '500' | '600' | '700' | '800' | '900' | 'normal' | 'bold';
+
+export interface ViewShadow {
+  shadowColor: string;
+  shadowOpacity: number;
+  shadowRadius: number;
+  shadowOffset: { width: number; height: number };
+  elevation: number;
+}
+
+/**
+ * Manrope, by weight. The names are the ones expo-font registers from the
+ * @expo-google-fonts package, and the root layout loads exactly these.
+ */
+export const FONT_FAMILIES: Record<Exclude<FontWeight, 'normal' | 'bold'>, string> = {
+  '400': 'Manrope_500Medium',
+  '500': 'Manrope_500Medium',
+  '600': 'Manrope_600SemiBold',
+  '700': 'Manrope_700Bold',
+  '800': 'Manrope_800ExtraBold',
+  '900': 'Manrope_800ExtraBold',
+};
+
+/** Whether the faces have been loaded. Flipped once by the root layout; text falls back to the system font until then. */
+let fontsReady = false;
+export function setFontsReady(ready: boolean): void {
+  fontsReady = ready;
+}
+
+export function familyFor(weight: FontWeight): string | undefined {
+  if (!fontsReady) return undefined;
+  const key = weight === 'normal' ? '400' : weight === 'bold' ? '700' : weight;
+  return FONT_FAMILIES[key];
 }
 
 const shared = {
@@ -124,12 +179,30 @@ const shared = {
   font: {
     size: { xs: 12, sm: 14, md: 17, lg: 20, xl: 24, xxl: 31, display: 42 },
     mono: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }) as string,
+    family: familyFor,
   },
   touch: 60,
+  gradient: {
+    flame: [palette.flame, palette.flameHot] as const,
+    ground: [palette.ink750, palette.ink900] as const,
+  },
+};
+
+const darkShadow = {
+  card: { shadowColor: '#000000', shadowOpacity: 0.35, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 3 },
+  float: { shadowColor: '#000000', shadowOpacity: 0.5, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 12 },
+  glow: { shadowColor: palette.flame, shadowOpacity: 0.45, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 8 },
+};
+
+const lightShadow = {
+  card: { shadowColor: '#1B2430', shadowOpacity: 0.08, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
+  float: { shadowColor: '#1B2430', shadowOpacity: 0.16, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 10 },
+  glow: { shadowColor: palette.flame, shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 8 },
 };
 
 export const darkTheme: Theme = {
   ...shared,
+  shadow: darkShadow,
   mode: 'dark',
   color: {
     bg: palette.ink900,
@@ -158,6 +231,8 @@ export const darkTheme: Theme = {
 
 export const lightTheme: Theme = {
   ...shared,
+  shadow: lightShadow,
+  gradient: { flame: shared.gradient.flame, ground: [palette.grey0, palette.grey100] as const },
   mode: 'light',
   color: {
     bg: palette.grey50,

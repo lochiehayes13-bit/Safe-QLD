@@ -12,7 +12,8 @@ import {
   type AppModule,
 } from '@/domain/modules';
 import { useTheme } from '@/theme';
-import { Card, H2, Label, Screen, Txt } from '@/components/ui';
+import { Card, H2, IconPlate, Label, Screen, Txt } from '@/components/ui';
+import { Reveal } from '@/components/motion';
 
 /**
  * Choosing what sits on the home screen.
@@ -126,11 +127,11 @@ export default function ShortcutsScreen() {
           />
         </View>
 
-        {MODULE_GROUPS.filter((g) => !onlyGroup || g === onlyGroup).map((group) => {
+        {MODULE_GROUPS.filter((g) => !onlyGroup || g === onlyGroup).map((group, gi) => {
           const inGroup = results.filter((m) => m.group === group);
           if (!inGroup.length) return null;
           return (
-            <View key={group} style={{ gap: t.space(2) }}>
+            <Reveal key={group} index={gi} style={{ gap: t.space(2) }}>
               <Label>{group}</Label>
               <Card>
                 {inGroup.map((m, i) => (
@@ -143,7 +144,7 @@ export default function ShortcutsScreen() {
                   />
                 ))}
               </Card>
-            </View>
+            </Reveal>
           );
         })}
 
@@ -208,12 +209,11 @@ function ModuleRow({
         onPress={() => router.push(m.href as never)}
         style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: t.space(2.5), paddingVertical: t.space(2) }}
       >
-        <MaterialCommunityIcons
-          name={m.icon as never}
-          size={22}
-          color={pinned ? t.color.accentText : t.color.textMuted}
-        />
-        <Txt style={{ flex: 1 }} numberOfLines={1}>{m.label}</Txt>
+        <IconPlate icon={m.icon as never} size={36} muted={!pinned} />
+        <View style={{ flex: 1 }}>
+          <Txt weight="700" numberOfLines={1}>{m.label}</Txt>
+          <Txt size="xs" tone="muted" numberOfLines={1}>{m.blurb}</Txt>
+        </View>
       </Pressable>
       <Pressable
         onPress={onToggle}

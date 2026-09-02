@@ -3,7 +3,8 @@ import { View } from 'react-native';
 import { router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '@/theme';
-import { Card, H2, Rowed, Screen, Txt } from '@/components/ui';
+import { Card, H2, IconPlate, Rowed, Screen, Txt } from '@/components/ui';
+import { Reveal } from '@/components/motion';
 
 /**
  * Tools hub.
@@ -168,21 +169,11 @@ export default function ToolsScreen() {
 
       <H2>Calculators</H2>
       <View style={{ gap: t.space(2.5) }}>
-        {CALCULATORS.map((tool) => (
-          <Card key={tool.href} onPress={() => router.push(tool.href as never)}>
+        {CALCULATORS.map((tool, i) => (
+          <Reveal key={tool.href} index={i}>
+          <Card onPress={() => router.push(tool.href as never)}>
             <Rowed gap={3} align="flex-start">
-              <View
-                style={{
-                  width: 42,
-                  height: 42,
-                  borderRadius: t.radius.md,
-                  backgroundColor: t.color.surfaceAlt,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <MaterialCommunityIcons name={tool.icon} size={22} color={t.color.accentText} />
-              </View>
+              <IconPlate icon={tool.icon} size={44} />
               <View style={{ flex: 1, gap: 3 }}>
                 <Txt weight="700" size="md">{tool.title}</Txt>
                 <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{tool.body}</Txt>
@@ -190,26 +181,17 @@ export default function ToolsScreen() {
               <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
             </Rowed>
           </Card>
+          </Reveal>
         ))}
       </View>
 
       <H2>Reference</H2>
       <View style={{ gap: t.space(2.5) }}>
-        {REFERENCE.map((tool) => (
-          <Card key={tool.href} onPress={() => router.push(tool.href as never)}>
+        {REFERENCE.map((tool, i) => (
+          <Reveal key={tool.href} index={i}>
+          <Card onPress={() => router.push(tool.href as never)}>
             <Rowed gap={3} align="flex-start">
-              <View
-                style={{
-                  width: 42,
-                  height: 42,
-                  borderRadius: t.radius.md,
-                  backgroundColor: t.color.surfaceAlt,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <MaterialCommunityIcons name={tool.icon} size={22} color={t.color.accentText} />
-              </View>
+              <IconPlate icon={tool.icon} size={44} />
               <View style={{ flex: 1, gap: 3 }}>
                 <Txt weight="700" size="md">{tool.title}</Txt>
                 <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{tool.body}</Txt>
@@ -217,6 +199,7 @@ export default function ToolsScreen() {
               <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
             </Rowed>
           </Card>
+          </Reveal>
         ))}
       </View>
     </Screen>

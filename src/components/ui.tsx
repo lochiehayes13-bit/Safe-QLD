@@ -13,7 +13,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import { useTheme, type Theme } from '@/theme';
+import { LinearGradient } from 'expo-linear-gradient';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useTheme, type FontWeight, type Theme } from '@/theme';
+import { Bounce } from './motion';
 
 /**
  * Shared UI primitives.
@@ -42,7 +45,7 @@ export function Screen({
       {scroll ? (
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={[inner, { paddingBottom: t.space(12) }]}
+          contentContainerStyle={[inner, { paddingBottom: t.space(28) }]}
           keyboardShouldPersistTaps="handled"
         >
           {children}
@@ -54,14 +57,24 @@ export function Screen({
   );
 }
 
+/**
+ * The surface most things sit on.
+ *
+ * `raised` lifts it off the page with a soft shadow, for the cards that are
+ * the point of a screen; the default is flat with a hairline, for lists of
+ * many. A pressable card gives under the thumb (see motion.Bounce) rather
+ * than only changing colour, so a press is felt before it is seen.
+ */
 export function Card({
   children,
   style,
   onPress,
+  variant = 'flat',
 }: {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
   onPress?: () => void;
+  variant?: 'flat' | 'raised';
 }) {
   const t = useTheme();
   const base: ViewStyle = {
@@ -70,16 +83,13 @@ export function Card({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: t.color.border,
     padding: t.space(4),
+    ...(variant === 'raised' ? t.shadow.card : null),
   };
   if (!onPress) return <View style={[base, style]}>{children}</View>;
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [base, pressed && { backgroundColor: t.color.surfaceAlt }, style]}
-      android_ripple={{ color: t.color.borderStrong }}
-    >
-      {children}
-    </Pressable>
+    <Bounce onPress={onPress} haptic="light" scaleTo={0.98}>
+      <View style={[base, style]}>{children}</View>
+    </Bounce>
   );
 }
 
@@ -118,14 +128,27 @@ export function Txt({
     <Text
       numberOfLines={numberOfLines}
       style={[
-        { color: toneColor(t, tone), fontSize: t.font.size[size], fontWeight: weight },
-        mono && { fontFamily: t.font.mono },
+        { color: toneColor(t, tone), fontSize: t.font.size[size] },
+        typeFor(t, weight, mono),
         style,
       ]}
     >
       {children}
     </Text>
   );
+}
+
+/**
+ * The face and weight for a run of text.
+ *
+ * With Manrope loaded the weight picks a file and fontWeight is left unset,
+ * because Android lays a synthetic bold over a real one. Monospace readouts
+ * stay in the platform mono face, which has its own weights.
+ */
+export function typeFor(t: Theme, weight: TextStyle['fontWeight'] = '400', mono?: boolean): TextStyle {
+  if (mono) return { fontFamily: t.font.mono, fontWeight: weight };
+  const family = t.font.family((weight ?? '400') as FontWeight);
+  return family ? { fontFamily: family } : { fontWeight: weight };
 }
 
 export function H1({ children }: { children: React.ReactNode }) {
@@ -204,64 +227,68 @@ export function Button({
   };
 
   const isDisabled = disabled || loading;
-
-  return (
-    <Pressable
-      onPress={() => {
-        if (isDisabled) return;
-        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        onPress();
-      }}
-      disabled={isDisabled}
-      accessibilityRole="button"
-      accessibilityState={{ disabled: !!isDisabled }}
-      style={({ pressed }) => [
-        {
-          // 44 rather than 40 even when compact: 40 was under the 44dp floor,
-          // and these are pressed with gloves on.
-          minHeight: compact ? 44 : t.touch,
-          paddingHorizontal: t.space(compact ? 3.5 : 5),
-          borderRadius: t.radius.md,
-          backgroundColor: bg[variant],
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexDirection: 'row',
-          gap: t.space(2),
-          borderWidth: variant === 'ghost' ? StyleSheet.hairlineWidth : 0,
-          borderColor: t.color.border,
-          opacity: isDisabled ? 0.45 : pressed ? 0.9 : 1,
-          // The primary action throws a little of its own colour onto the
-          // surface under it, so the one button that matters is findable in
-          // peripheral vision without reading anything. Dropped while pressed
-          // and while disabled, so the glow always means "this is live".
-          ...(variant === 'primary' && !isDisabled
-            ? {
-                shadowColor: t.color.accent,
-                shadowOpacity: pressed ? 0.25 : 0.55,
-                shadowRadius: pressed ? 6 : 14,
-                shadowOffset: { width: 0, height: pressed ? 2 : 5 },
-                // Android draws the tinted shadow from elevation, API 28+.
-                elevation: pressed ? 3 : 8,
-              }
-            : null),
-        },
-        style,
-      ]}
-    >
+  const inner = (
+    <>
       {loading ? <ActivityIndicator color={fg[variant]} size="small" /> : icon}
       <Text
-        style={{
-          color: fg[variant],
-          fontWeight: '800',
-          // Tracking opens the label up at these weights; without it a bold
-          // short word on a saturated fill reads as a solid block.
-          letterSpacing: 0.3,
-          fontSize: compact ? t.font.size.sm : t.font.size.md,
-        }}
+        style={[
+          {
+            color: fg[variant],
+            // Tracking opens the label up at these weights; without it a bold
+            // short word on a saturated fill reads as a solid block.
+            letterSpacing: 0.3,
+            fontSize: compact ? t.font.size.sm : t.font.size.md,
+          },
+          typeFor(t, '800'),
+        ]}
       >
         {title}
       </Text>
-    </Pressable>
+    </>
+  );
+  const shape: ViewStyle = {
+    // 44 rather than 40 even when compact: 40 was under the 44dp floor,
+    // and these are pressed with gloves on.
+    minHeight: compact ? 44 : t.touch,
+    paddingHorizontal: t.space(compact ? 3.5 : 5),
+    borderRadius: t.radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: t.space(2),
+    overflow: 'hidden',
+  };
+
+  return (
+    <Bounce onPress={onPress} disabled={isDisabled} haptic="light" scaleTo={0.96} style={[{ opacity: isDisabled ? 0.45 : 1 }, style]}>
+      {variant === 'primary' ? (
+        // The primary action is the flame ramp, and it throws a little of its
+        // own colour onto the surface under it, so the one button that
+        // matters is findable in peripheral vision without reading anything.
+        // The glow goes while disabled, so it always means "this is live".
+        <LinearGradient
+          colors={t.gradient.flame}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[shape, !isDisabled ? t.shadow.glow : null]}
+        >
+          {inner}
+        </LinearGradient>
+      ) : (
+        <View
+          style={[
+            shape,
+            {
+              backgroundColor: bg[variant],
+              borderWidth: variant === 'ghost' ? StyleSheet.hairlineWidth : 0,
+              borderColor: t.color.border,
+            },
+          ]}
+        >
+          {inner}
+        </View>
+      )}
+    </Bounce>
   );
 }
 
@@ -375,11 +402,10 @@ export function Segmented<T extends string>({
           >
             <Text
               numberOfLines={1}
-              style={{
-                color: active ? t.color.onAccent : t.color.textMuted,
-                fontWeight: active ? '700' : '500',
-                fontSize: t.font.size.sm,
-              }}
+              style={[
+                { color: active ? t.color.onAccent : t.color.textMuted, fontSize: t.font.size.sm },
+                typeFor(t, active ? '700' : '500'),
+              ]}
             >
               {o.label}
             </Text>
@@ -420,11 +446,10 @@ export function Chip({
       }}
     >
       <Text
-        style={{
-          color: selected ? t.color.onAccent : toneColor(t, tone),
-          fontSize: t.font.size.xs,
-          fontWeight: '700',
-        }}
+        style={[
+          { color: selected ? t.color.onAccent : toneColor(t, tone), fontSize: t.font.size.xs },
+          typeFor(t, '700'),
+        ]}
       >
         {label}
       </Text>
@@ -485,15 +510,18 @@ export function EmptyState({
   title,
   body,
   action,
+  icon,
 }: {
   title: string;
   body?: string;
   action?: React.ReactNode;
+  icon?: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 }) {
   const t = useTheme();
   return (
-    <View style={{ alignItems: 'center', paddingVertical: t.space(12), paddingHorizontal: t.space(6), gap: t.space(2) }}>
-      <Txt size="lg" weight="700">{title}</Txt>
+    <View style={{ alignItems: 'center', paddingVertical: t.space(10), paddingHorizontal: t.space(6), gap: t.space(2) }}>
+      <IconPlate icon={icon ?? 'weather-sunny'} size={64} muted />
+      <Txt size="lg" weight="800" style={{ marginTop: t.space(2), textAlign: 'center', letterSpacing: -0.3 }}>{title}</Txt>
       {body ? <Txt tone="muted" style={{ textAlign: 'center', lineHeight: 21 }}>{body}</Txt> : null}
       {action ? <View style={{ marginTop: t.space(2) }}>{action}</View> : null}
     </View>
@@ -573,8 +601,89 @@ export function Banner({
   const fg = { info: t.color.info, warn: t.color.warn, fail: t.color.fail, pass: t.color.pass }[tone];
   return (
     <View style={{ backgroundColor: bg, borderRadius: t.radius.md, padding: t.space(3), gap: 3, borderLeftWidth: 3, borderLeftColor: fg }}>
-      <Text style={{ color: fg, fontWeight: '700', fontSize: t.font.size.sm }}>{title}</Text>
-      {body ? <Text style={{ color: t.color.text, fontSize: t.font.size.sm, lineHeight: 19 }}>{body}</Text> : null}
+      <Text style={[{ color: fg, fontSize: t.font.size.sm }, typeFor(t, '700')]}>{title}</Text>
+      {body ? <Text style={[{ color: t.color.text, fontSize: t.font.size.sm, lineHeight: 19 }, typeFor(t, '500')]}>{body}</Text> : null}
+    </View>
+  );
+}
+
+/**
+ * A plate behind an icon, in the flame ramp.
+ *
+ * The brand colour appears here as identity rather than as something to
+ * press: a grid of tiles with flame plates reads as one product. `muted`
+ * gives a quiet wash instead, for empty states and secondary rows.
+ */
+export function IconPlate({
+  icon, size = 48, muted, tone,
+}: {
+  icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+  size?: number;
+  muted?: boolean;
+  tone?: 'fail' | 'warn' | 'pass';
+}) {
+  const t = useTheme();
+  const radius = Math.round(size * 0.3);
+  const glyph = Math.round(size * 0.52);
+  if (tone) {
+    const bg = { fail: t.color.failBg, warn: t.color.warnBg, pass: t.color.passBg }[tone];
+    const fg = { fail: t.color.fail, warn: t.color.warn, pass: t.color.pass }[tone];
+    return (
+      <View style={{ width: size, height: size, borderRadius: radius, backgroundColor: bg, alignItems: 'center', justifyContent: 'center' }}>
+        <MaterialCommunityIcons name={icon} size={glyph} color={fg} />
+      </View>
+    );
+  }
+  if (muted) {
+    return (
+      <View style={{ width: size, height: size, borderRadius: radius, backgroundColor: t.color.accentBg, alignItems: 'center', justifyContent: 'center' }}>
+        <MaterialCommunityIcons name={icon} size={glyph} color={t.color.accentText} />
+      </View>
+    );
+  }
+  return (
+    <LinearGradient
+      colors={t.gradient.flame}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={{ width: size, height: size, borderRadius: radius, alignItems: 'center', justifyContent: 'center' }}
+    >
+      <MaterialCommunityIcons name={icon} size={glyph} color={t.color.onAccent} />
+    </LinearGradient>
+  );
+}
+
+/** A section title with a flame rule and an optional action on the right. */
+export function SectionHeader({
+  title, action, onAction, icon,
+}: { title: string; action?: string; onAction?: () => void; icon?: React.ComponentProps<typeof MaterialCommunityIcons>['name'] }) {
+  const t = useTheme();
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.space(2.5), marginTop: t.space(3) }}>
+      <View style={{ width: 4, height: t.font.size.lg, borderRadius: 2, backgroundColor: t.color.accent }} />
+      <Txt size="lg" weight="800" style={{ letterSpacing: -0.2, flex: 1 }}>{title}</Txt>
+      {action && onAction ? (
+        <Button
+          title={action}
+          variant="ghost"
+          compact
+          onPress={onAction}
+          icon={icon ? <MaterialCommunityIcons name={icon} size={18} color={t.color.accentText} /> : undefined}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+/** A dot and a word: the state of a thing, readable in glare and by a colour-blind eye. */
+export function StatusPill({ label, tone }: { label: string; tone: 'pass' | 'fail' | 'warn' | 'info' | 'muted' }) {
+  const t = useTheme();
+  const fg = { pass: t.color.pass, fail: t.color.fail, warn: t.color.warn, info: t.color.info, muted: t.color.textMuted }[tone];
+  const bg = { pass: t.color.passBg, fail: t.color.failBg, warn: t.color.warnBg, info: t.color.infoBg, muted: t.color.surfaceAlt }[tone];
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: t.space(2.5), paddingVertical: t.space(1.5), borderRadius: t.radius.pill, backgroundColor: bg }}>
+      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: fg }} />
+      <Text style={[{ color: fg, fontSize: t.font.size.xs }, typeFor(t, '800')]}>{label}</Text>
     </View>
   );
 }

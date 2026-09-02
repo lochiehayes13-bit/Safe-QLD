@@ -7,7 +7,8 @@ import { listTimesheets } from '@/db/timesheetRepo';
 import { listBaselines } from '@/db/baselineRepo';
 import { listJobs, listPurchaseRequests, listImpairments, restockNeeded, listPromises } from '@/db/opsRepo';
 import { useTheme } from '@/theme';
-import { Card, Chip, H2, Rowed, Screen, Txt } from '@/components/ui';
+import { Card, Chip, H2, IconPlate, Rowed, Screen, Txt } from '@/components/ui';
+import { Reveal } from '@/components/motion';
 
 /** Work hub — everything that produces a record the office needs. */
 export default function WorkScreen() {
@@ -79,14 +80,11 @@ export default function WorkScreen() {
       {groups.map((g) => (
         <View key={g.title} style={{ gap: t.space(2.5) }}>
           <H2>{g.title}</H2>
-          {g.rows.map((row) => (
-            <Card key={row.href} onPress={() => router.push(row.href as never)}>
+          {g.rows.map((row, i) => (
+            <Reveal key={row.href} index={i}>
+            <Card onPress={() => router.push(row.href as never)}>
               <Rowed gap={3}>
-                <MaterialCommunityIcons
-                  name={row.icon}
-                  size={22}
-                  color={row.tone === 'fail' ? t.color.fail : row.tone === 'warn' ? t.color.warn : t.color.accentText}
-                />
+                <IconPlate icon={row.icon} size={40} tone={row.tone} muted={!row.tone} />
                 <View style={{ flex: 1 }}>
                   <Txt weight="600">{row.label}</Txt>
                   <Txt size="sm" tone="muted">{row.sub}</Txt>
@@ -95,6 +93,7 @@ export default function WorkScreen() {
                 <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
               </Rowed>
             </Card>
+            </Reveal>
           ))}
         </View>
       ))}

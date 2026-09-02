@@ -1,71 +1,35 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '@/theme';
+import { TabBar, type TabBarProps } from '@/components/TabBar';
 
 /**
  * Five tabs, ordered by how often a technician reaches for them.
  *
  * Everything else is reachable from the home hub rather than being
  * crammed into the bar — a tab bar with nine items is a menu, not navigation.
+ * The bar itself floats over the page; see components/TabBar.
  */
 export default function TabsLayout() {
   const t = useTheme();
   return (
     <Tabs
+      tabBar={(props) => <TabBar {...(props as unknown as TabBarProps)} />}
       screenOptions={{
         headerStyle: { backgroundColor: t.color.bgElevated },
         headerTintColor: t.color.text,
-        headerTitleStyle: { fontWeight: '700' },
+        headerTitleStyle: { fontWeight: '700', fontFamily: t.font.family('700') },
         headerShadowVisible: false,
-        tabBarStyle: {
-          backgroundColor: t.color.bgElevated,
-          borderTopColor: t.color.border,
-          height: 64,
-          paddingBottom: 9,
-          paddingTop: 7,
-        },
-        tabBarActiveTintColor: t.color.accentText,
-        tabBarInactiveTintColor: t.color.textFaint,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        // The floating bar covers the last few rows otherwise; every scrolling
+        // screen pads its own bottom, but the page ground has to reach under it.
+        sceneStyle: { backgroundColor: t.color.bg },
       }}
     >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          headerShown: false,
-          tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name="home-variant-outline" color={color} size={size} />,
-        }}
-      />
-      <Tabs.Screen
-        name="sites"
-        options={{
-          title: 'Sites',
-          tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name="office-building-marker-outline" color={color} size={size} />,
-        }}
-      />
-      <Tabs.Screen
-        name="tools"
-        options={{
-          title: 'Tools',
-          tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name="calculator-variant-outline" color={color} size={size} />,
-        }}
-      />
-      <Tabs.Screen
-        name="work"
-        options={{
-          title: 'Work',
-          tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name="clipboard-check-outline" color={color} size={size} />,
-        }}
-      />
-      <Tabs.Screen
-        name="settings"
-        options={{
-          title: 'Settings',
-          tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name="cog-outline" color={color} size={size} />,
-        }}
-      />
+      <Tabs.Screen name="index" options={{ title: 'Home', headerShown: false }} />
+      <Tabs.Screen name="sites" options={{ title: 'Sites' }} />
+      <Tabs.Screen name="tools" options={{ title: 'Tools' }} />
+      <Tabs.Screen name="work" options={{ title: 'Work' }} />
+      <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
     </Tabs>
   );
 }
