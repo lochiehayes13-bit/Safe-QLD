@@ -1,8 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Linking, View } from 'react-native';
+import { Alert, Linking, Switch, View } from 'react-native';
 import { router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { SimproClient, type SimproConfig } from '@/simpro/client';
+import { SimproClient } from '@/simpro/client';
+import { simproConfigFromPrefs } from '@/simpro/config';
+import { holdAutoSync, runAutoSync, useAutoSync } from '@/simpro/autoSync';
+import { describeAutoSync } from '@/simpro/autoSyncPolicy';
+import { registerAutoSyncTask, unregisterAutoSyncTask } from '@/simpro/autoSyncTask';
 import { clearKey as clearAiKey, hasKey as hasAiKey, storeKey as storeAiKey } from '@/ai/client';
 import { PRIVACY_NOTE } from '@/ai/grounding';
 import { loadPrefs, savePrefs, DEFAULT_PREFS, type Prefs } from '@/app-prefs';
@@ -61,6 +65,8 @@ export default function SettingsScreen() {
   const [pulling, setPulling] = useState(false);
   const [pullReport, setPullReport] = useState<RateCardImport & { unreadable: { what: string; error: string }[] } | null>(null);
   const bundled = bundledCatalogueSize();
+  /** What the automatic sync last did, and whether one is running now. */
+  const auto = useAutoSync();
 
   useEffect(() => {
     void loadPrefs().then(setPrefs);
@@ -80,6 +86,13 @@ export default function SettingsScreen() {
       setStorage(0);
     }
   }, []);
+
+  // An automatic run changes what "how current" and "waiting to sync" say, and
+  // this screen may well be open while one finishes.
+  useEffect(() => {
+    void readAllSyncState().then(setSyncState);
+    void pendingSyncCount().then(setPending);
+  }, [auto.record.lastRunAt]);
 
   const update = useCallback((patch: Partial<Prefs>) => {
     setPrefs((prev) => {
@@ -118,12 +131,7 @@ export default function SettingsScreen() {
     setPulling(true);
     setPullReport(null);
     try {
-      const client = new SimproClient({
-        buildDomain: prefs.simproDomain,
-        companyId: prefs.simproCompanyId,
-        clientId: prefs.simproClientId,
-        proxyUrl: prefs.simproProxyUrl || undefined,
-      });
+      const client = new SimproClient(simproConfigFromPrefs(prefs));
       const report = await new SimproResources(client).rateCard();
       setPullReport(report);
       if (!report.rates.length && !report.fees.length) {
@@ -163,12 +171,7 @@ export default function SettingsScreen() {
     setResult(null);
     setVerdict(null);
     try {
-      const config: SimproConfig = {
-        buildDomain: prefs.simproDomain,
-        companyId: prefs.simproCompanyId,
-        clientId: prefs.simproClientId,
-        proxyUrl: prefs.simproProxyUrl || undefined,
-      };
+      const config = simproConfigFromPrefs(prefs);
       const report = await new SimproClient(config).connect();
       setResult(report.endpoints.length ? report.endpoints : null);
 
@@ -191,14 +194,13 @@ export default function SettingsScreen() {
     }
   };
 
-  const configFor = (): SimproConfig => ({
-    buildDomain: prefs.simproDomain,
-    companyId: prefs.simproCompanyId,
-    clientId: prefs.simproClientId,
-    proxyUrl: prefs.simproProxyUrl || undefined,
-  });
+  const configFor = () => simproConfigFromPrefs(prefs);
 
   const runPull = async () => {
+    // Held so an automatic run cannot start alongside this one. Two pulls at
+    // once each read the site list before the other has written to it, and a
+    // site new to both is created twice.
+    const release = holdAutoSync();
     setSyncing(true);
     setProgress(null);
     try {
@@ -227,12 +229,14 @@ export default function SettingsScreen() {
     } catch (e) {
       Alert.alert('Sync failed', e instanceof Error ? e.message : String(e));
     } finally {
+      release();
       setSyncing(false);
       setProgress(null);
     }
   };
 
   const runFlush = async () => {
+    const release = holdAutoSync();
     setSyncing(true);
     try {
       const r = await flushQueue(configFor());
@@ -244,7 +248,28 @@ export default function SettingsScreen() {
     } catch (e) {
       Alert.alert('Could not send', e instanceof Error ? e.message : String(e));
     } finally {
+      release();
       setSyncing(false);
+    }
+  };
+
+  /**
+   * Turning the automatic sync on or off.
+   *
+   * Saved before anything runs: the run reads the preference back from
+   * storage, and `update` queues its write rather than finishing it, so a run
+   * kicked off in the same breath would read the old value and report the
+   * sync as switched off.
+   */
+  const setAutoSync = async (on: boolean) => {
+    const next = { ...prefs, autoSync: on };
+    setPrefs(next);
+    await savePrefs(next);
+    if (on) {
+      void registerAutoSyncTask();
+      void runAutoSync('foreground');
+    } else {
+      await unregisterAutoSyncTask();
     }
   };
 
@@ -543,6 +568,32 @@ export default function SettingsScreen() {
           />
         </Rowed>
 
+        <Divider />
+        <Label>Sync automatically</Label>
+        <Txt size="xs" tone="faint" style={{ marginTop: 4, marginBottom: t.space(2), lineHeight: 17 }}>
+          Changes come down every half hour and everything is re-read once a day, whenever there is
+          signal. Anything queued for the office goes the moment it can. No popups: this line says
+          what happened last.
+        </Txt>
+        <Rowed gap={2}>
+          <Txt
+            size="sm"
+            tone={!prefs.autoSync ? 'faint' : auto.record.lastError ? 'warn' : 'muted'}
+            style={{ flex: 1, lineHeight: 19 }}
+          >
+            {!prefs.autoSync
+              ? 'Off. Sync now still works.'
+              : auto.inFlight
+                ? 'Syncing now.'
+                : describeAutoSync(auto.record, new Date())}
+          </Txt>
+          <Switch
+            value={prefs.autoSync}
+            onValueChange={(on) => { void setAutoSync(on); }}
+            trackColor={{ true: t.color.accent, false: t.color.border }}
+          />
+        </Rowed>
+
         <View style={{ height: t.space(3) }} />
         <Button title="Connect to Simpro" onPress={test} loading={testing} />
         {verdict ? (
@@ -560,14 +611,20 @@ export default function SettingsScreen() {
         ) : null}
         <View style={{ height: t.space(2) }} />
         <Rowed gap={2}>
-          <Button title="Pull sites and jobs" style={{ flex: 1 }} onPress={runPull} loading={syncing} />
+          <Button
+            title="Sync now"
+            style={{ flex: 1 }}
+            onPress={runPull}
+            loading={syncing}
+            disabled={auto.inFlight && !syncing}
+          />
           <Button
             title={pending ? `Send ${pending}` : 'Send queue'}
             variant="secondary"
             style={{ flex: 1 }}
             onPress={runFlush}
             loading={syncing}
-            disabled={!pending}
+            disabled={!pending || (auto.inFlight && !syncing)}
           />
         </Rowed>
         {progress ? (
@@ -576,8 +633,9 @@ export default function SettingsScreen() {
           </Txt>
         ) : null}
         <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
-          A pull fills in blanks and adds records. It never overwrites something you typed on site — the person standing
-          in the building knows better than the office record.
+          Sync now re-reads everything, which takes a few minutes; the automatic sync fetches only what
+          changed. Either way a pull fills in blanks and adds records. It never overwrites something you
+          typed on site — the person standing in the building knows better than the office record.
         </Txt>
       </Card>
 

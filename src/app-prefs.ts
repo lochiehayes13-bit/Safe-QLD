@@ -40,6 +40,14 @@ export interface Prefs {
    */
   simproWriteAssetTests: boolean;
   /**
+   * Whether the office copy is kept current without anybody pressing anything.
+   *
+   * On by default, because "I'm sick of syncing" was the whole brief: changes
+   * come down every half hour and everything once a day, and queued work goes
+   * up the moment there is signal. Sync now in Settings works either way.
+   */
+  autoSync: boolean;
+  /**
    * The technician's own home screen, as a list of routes.
    *
    * Routes rather than labels, because a route is the stable identity — a
@@ -99,6 +107,7 @@ export const DEFAULT_PREFS: Prefs = {
   simproClientId: '6564738df3bba3cd587e3dacb58a1d',
   simproProxyUrl: '',
   simproWriteAssetTests: false,
+  autoSync: true,
   shortcuts: DEFAULT_SHORTCUTS,
   supervisorEmail: company.email,
   suggestionsEmail: company.email,

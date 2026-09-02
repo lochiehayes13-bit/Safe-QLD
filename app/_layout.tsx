@@ -9,6 +9,7 @@ import { seedReferenceData } from '@/db/assetRepo';
 import { startCatalogueSeed } from '@/seed/catalogueSeed';
 import { useTheme } from '@/theme';
 import { Banner, Txt } from '@/components/ui';
+import { AutoSyncDriver } from '@/components/AutoSyncDriver';
 
 /**
  * Root layout.
@@ -68,6 +69,8 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <StatusBar style={t.mode === 'dark' ? 'light' : 'dark'} />
+        {/* Only once the database is open: the first thing it does is read sync state. */}
+        <AutoSyncDriver />
         <Stack
           screenOptions={{
             headerStyle: { backgroundColor: t.color.bgElevated },

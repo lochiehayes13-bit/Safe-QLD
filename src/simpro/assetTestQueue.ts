@@ -1,4 +1,5 @@
 import { enqueueSync } from '@/db/opsRepo';
+import { flushSoon } from './flushSoon';
 import {
   decideAssetTest,
   type AssetTestDecision,
@@ -17,6 +18,9 @@ export async function queueAssetTest(
   writingEnabled: boolean,
 ): Promise<AssetTestDecision> {
   const decision = decideAssetTest(test, writingEnabled);
-  if (decision.send) await enqueueSync('asset-test', decision.payload);
+  if (decision.send) {
+    await enqueueSync('asset-test', decision.payload);
+    flushSoon();
+  }
   return decision;
 }

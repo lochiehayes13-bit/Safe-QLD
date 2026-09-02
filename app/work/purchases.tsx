@@ -20,7 +20,7 @@ export default function PurchasesScreen() {
    *
    * Queued rather than sent: a technician in a basement has no signal, and a
    * parts order lost to that is the failure this app exists to avoid. It leaves
-   * with the next sync from Settings.
+   * the moment there is signal, and otherwise with the next automatic sync.
    *
    * The status only moves once the queue has actually accepted it. Marking a
    * request submitted and then failing to queue it would leave a request nobody
@@ -41,7 +41,7 @@ export default function PurchasesScreen() {
       void load();
       Alert.alert(
         'Queued for the office',
-        'It goes out with the next Simpro sync. Nothing is lost if you are out of signal.',
+        'It goes to the office as soon as there is signal. Nothing is lost if you are out of it now.',
       );
     } catch (e) {
       Alert.alert('Could not queue it', e instanceof Error ? e.message : String(e));

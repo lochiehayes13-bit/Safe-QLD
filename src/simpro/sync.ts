@@ -2,6 +2,7 @@ import { SimproClient, SimproError, type SimproConfig } from './client';
 import { SimproResources } from './resources';
 import { assessIncremental, nextWatermark, planIncremental, type SyncResource } from './incremental';
 import { readSyncState, writeSyncState } from './watermark';
+import { flushSoon } from './flushSoon';
 import { createSite, listSites, updateSite } from '@/db/repo';
 import { saveRateCard } from '@/db/rateCardRepo';
 import { upsertJob, enqueueSync, pendingSync, markSynced, markSyncFailed, type JobRecord } from '@/db/opsRepo';
@@ -466,14 +467,17 @@ export interface PurchaseOrderPayload {
  *
  * Queued rather than sent, always — a technician in a basement has no signal,
  * and losing a defect note because of that is exactly the failure this app
- * exists to avoid.
+ * exists to avoid. The queue is then sent a moment later if there is signal,
+ * so queued and sent are usually two seconds apart; see ./flushSoon.
  */
 export async function queueJobNote(payload: JobNotePayload): Promise<void> {
   await enqueueSync('job-note', payload);
+  flushSoon();
 }
 
 export async function queuePurchaseOrder(payload: PurchaseOrderPayload): Promise<void> {
   await enqueueSync('purchase-order', payload);
+  flushSoon();
 }
 
 export interface FlushResult {

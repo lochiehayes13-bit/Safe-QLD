@@ -10,6 +10,7 @@ import {
 import { WITHHELD_FROM_SIMPRO, type OutboundItem } from '@/domain/outboundWork';
 import { sendOutboundPlan, type SendReport } from '@/simpro/testResults';
 import { SimproClient } from '@/simpro/client';
+import { simproConfigFromPrefs } from '@/simpro/config';
 import { loadPrefs } from '@/app-prefs';
 import type { Site } from '@/domain/types';
 import { useTheme } from '@/theme';
@@ -96,12 +97,7 @@ export default function OutboundScreen() {
         );
         return;
       }
-      const client = new SimproClient({
-        buildDomain: prefs.simproDomain,
-        companyId: prefs.simproCompanyId,
-        clientId: prefs.simproClientId,
-        proxyUrl: prefs.simproProxyUrl || undefined,
-      });
+      const client = new SimproClient(simproConfigFromPrefs(prefs));
       const result = await sendOutboundPlan(client, plan.plan, { alreadySent: sent });
       setReport(result);
 

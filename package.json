@@ -1,7 +1,7 @@
 {
   "name": "safe-qld",
   "version": "0.1.0",
-  "main": "expo-router/entry",
+  "main": "index.js",
   "private": true,
   "scripts": {
     "start": "expo start",
