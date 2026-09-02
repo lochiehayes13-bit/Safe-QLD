@@ -159,7 +159,7 @@ describe('nothing is ever unreachable', () => {
     const po = reach('/work/purchases', 'technician')!;
     expect(po.channel).toBe('opened');
     expect(po.proven).toBe(true);
-    expect(po.chain).toEqual(['/', '/work/stock', '/work/purchases']);
+    expect(po.chain).toEqual(['/work', '/work/stock', '/work/purchases']);
     expect(po.sentence).toContain('Van stock still opens it');
   });
 });
@@ -256,7 +256,7 @@ describe('the grouping', () => {
     const today = navFor('technician')[0]!;
     expect(today.sections[0]!.title).toBe('The day');
     expect(today.sections[0]!.destinations.slice(0, 3).map((d) => d.label))
-      .toEqual(['Today', 'Jobs', "Today's run"]);
+      .toEqual(['Home', 'Jobs', "Today's run"]);
   });
 
   it('puts the calculators before the reference, because that is the order they get reached for', () => {

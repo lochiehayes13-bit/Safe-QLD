@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, TextInput, View } from 'react-native';
-import { Stack, router, useFocusEffect } from 'expo-router';
+import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { loadPrefs, savePrefs, type Prefs } from '@/app-prefs';
 import {
@@ -28,6 +28,7 @@ import { Card, H2, Label, Screen, Txt } from '@/components/ui';
  */
 export default function ShortcutsScreen() {
   const t = useTheme();
+  const { group: onlyGroup } = useLocalSearchParams<{ group?: string }>();
   const [prefs, setPrefs] = useState<Prefs | null>(null);
   const [query, setQuery] = useState('');
 
@@ -47,7 +48,7 @@ export default function ShortcutsScreen() {
   if (!prefs) {
     return (
       <>
-        <Stack.Screen options={{ title: 'Home screen' }} />
+        <Stack.Screen options={{ title: onlyGroup ?? 'All modules' }} />
         <Screen><Txt tone="muted">Reading your settings…</Txt></Screen>
       </>
     );
@@ -55,11 +56,11 @@ export default function ShortcutsScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Home screen' }} />
+      <Stack.Screen options={{ title: onlyGroup ?? 'All modules' }} />
       <Screen>
         <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-          Pick what you actually use. What you choose here is what shows on the home screen, in this
-          order. Nobody else's phone changes.
+          Tap a row to open it. Tap the circle to put it on your home screen. What you choose is
+          yours; nobody else's phone changes.
         </Txt>
 
         <H2>On your home screen</H2>
@@ -101,7 +102,7 @@ export default function ShortcutsScreen() {
           </Card>
         )}
 
-        <H2>Everything else</H2>
+        <H2>{onlyGroup ?? 'Everything'}</H2>
         <View
           style={{
             flexDirection: 'row',
@@ -125,7 +126,7 @@ export default function ShortcutsScreen() {
           />
         </View>
 
-        {MODULE_GROUPS.map((group) => {
+        {MODULE_GROUPS.filter((g) => !onlyGroup || g === onlyGroup).map((group) => {
           const inGroup = results.filter((m) => m.group === group);
           if (!inGroup.length) return null;
           return (

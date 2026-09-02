@@ -111,17 +111,37 @@ testers by email. Requires a Google Play developer account.
 
 ---
 
-## First run — the app starts empty
+## First run — one name, one paste
 
-A fresh install has no sites and no assets, which is correct and briefly
-confusing. Two things get it to look like your round:
+A fresh install opens on the **home hub**: the question bar over everything the
+app holds, a grid of modules the technician arranges themselves, and the rest
+of the app one tap down under **Everything**. It carries nothing about anyone's
+jobs unless they pin the Jobs module, because the app does not know who is
+holding the phone and the projects crew, the apprentices and the office all
+use it.
 
-1. **Settings → You.** Your name, licence number and company prefill every
-   report, Form 72 and timesheet. Two minutes here saves retyping on every job.
-2. **Import your register.** Sites tab → a site → **Import**, or the Import
-   screen for a whole register export. The column-mapping step shows what it
-   read before anything is written, and it reports rows it could not read
-   rather than dropping them.
+Two things make it theirs:
+
+1. **Settings → You → Name.** Timesheets, questions to the office, leave
+   requests and suggestions all go out under it. Home reminds you until it is
+   set.
+2. **Settings → Simpro → paste the client secret.** Everything else about the
+   Safe QLD build is already filled in. From then on the office data comes down
+   on its own — a partial pull every half hour while the app is open, a full
+   pull once a day, and a background pull when it is closed — and anything the
+   phone queues for the office goes up the moment there is signal. **Sync now**
+   is still there for when you want a full pull immediately.
+
+**Arrange** on the home screen moves tiles earlier or later and takes them off;
+**Add a module** opens the full list by group, where every module can be opened
+or pinned. Each phone keeps its own layout.
+
+**Suggest a change** on the home screen emails an idea, a fault or missing
+information under the subject tag `[Safe QLD app]` to the suggestions address
+in Settings (the company service inbox by default). Those emails are the
+backlog: a change made from one lands in a later build at the same download
+link. The app cannot rewrite itself on the phone, and should not — a change
+nobody has read is how a fire app ends up wrong.
 
 The app opens in **technician mode**, which keeps the office half — planning,
 quoting, ordering, portfolio — out of the lists. Nothing is deleted: Settings →

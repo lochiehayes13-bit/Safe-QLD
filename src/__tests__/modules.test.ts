@@ -1,8 +1,8 @@
 import { existsSync } from 'fs';
 import { join } from 'path';
 import {
-  DEFAULT_SHORTCUTS, MODULES, MODULE_GROUPS,
-  moduleFor, moveShortcut, resolveShortcuts, searchModules, toggleShortcut,
+  DEFAULT_SHORTCUTS, LEGACY_DEFAULT_SHORTCUTS, MODULES, MODULE_GROUPS,
+  migrateShortcuts, moduleFor, moveShortcut, resolveShortcuts, searchModules, toggleShortcut,
 } from '@/domain/modules';
 
 /**
@@ -54,6 +54,42 @@ describe('the catalogue', () => {
 
   it('ships defaults that all resolve', () => {
     expect(resolveShortcuts(DEFAULT_SHORTCUTS)).toHaveLength(DEFAULT_SHORTCUTS.length);
+  });
+
+  it('starts nobody on a job list', () => {
+    // The front page is for the projects crew and the apprentices as much as
+    // the service technician, and the app does not know which one is holding
+    // the phone. Jobs are one tap away for whoever wants them pinned.
+    const groups = resolveShortcuts(DEFAULT_SHORTCUTS).map((m) => m.group);
+    expect(groups).not.toContain('Jobs and planning');
+  });
+
+  it('says on every tile what the thing is for, briefly enough to fit on two lines', () => {
+    for (const m of MODULES) {
+      expect({ label: m.label, blurb: m.blurb, ok: m.blurb.trim().length > 0 && m.blurb.length <= 96 })
+        .toEqual({ label: m.label, blurb: m.blurb, ok: true });
+    }
+  });
+});
+
+describe('a saved home screen from the previous build', () => {
+  it('is replaced when it is exactly the old default, which nobody chose', () => {
+    expect(migrateShortcuts([...LEGACY_DEFAULT_SHORTCUTS])).toEqual(DEFAULT_SHORTCUTS);
+  });
+
+  it('is kept when anybody has touched it, even slightly', () => {
+    const edited = [...LEGACY_DEFAULT_SHORTCUTS.slice(1)];
+    expect(migrateShortcuts(edited)).toEqual(edited);
+    const reordered = [...LEGACY_DEFAULT_SHORTCUTS].reverse();
+    expect(migrateShortcuts(reordered)).toEqual(reordered);
+  });
+
+  it('is kept when it is empty, because an empty home screen is a choice', () => {
+    expect(migrateShortcuts([])).toEqual([]);
+  });
+
+  it('is the default when nothing was ever saved', () => {
+    expect(migrateShortcuts(undefined)).toEqual(DEFAULT_SHORTCUTS);
   });
 });
 

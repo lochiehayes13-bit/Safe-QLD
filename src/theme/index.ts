@@ -105,6 +105,8 @@ export interface Theme {
     failBg: string;
     warnBg: string;
     infoBg: string;
+    /** A wash of the brand colour, for a plate behind an icon rather than a surface to read on. */
+    accentBg: string;
   };
   space: (n: number) => number;
   radius: { sm: number; md: number; lg: number; xl: number; pill: number };
@@ -150,6 +152,7 @@ export const darkTheme: Theme = {
     failBg: 'rgba(255,107,107,0.16)',
     warnBg: 'rgba(255,201,60,0.14)',
     infoBg: 'rgba(77,171,247,0.14)',
+    accentBg: 'rgba(255,107,26,0.16)',
   },
 };
 
@@ -177,6 +180,7 @@ export const lightTheme: Theme = {
     failBg: 'rgba(224,49,49,0.10)',
     warnBg: 'rgba(245,159,0,0.14)',
     infoBg: 'rgba(28,126,214,0.10)',
+    accentBg: 'rgba(255,107,26,0.12)',
   },
 };
 

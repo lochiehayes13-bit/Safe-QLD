@@ -281,6 +281,13 @@ export default function SettingsScreen() {
         </Txt>
       </Card>
 
+      <H2>Where things go</H2>
+      <Card>
+        <Field label="Supervisor" value={prefs.supervisorEmail} onChangeText={(v) => update({ supervisorEmail: v })} keyboardType="email-address" autoCapitalize="none" hint="Questions from Ask the office and leave requests go here. Leave requests copy accounts as well." />
+        <View style={{ height: t.space(2.5) }} />
+        <Field label="Suggestions about the app" value={prefs.suggestionsEmail} onChangeText={(v) => update({ suggestionsEmail: v })} keyboardType="email-address" autoCapitalize="none" hint="Every suggestion goes out with the subject tag [Safe QLD app], so an inbox rule can file them." />
+      </Card>
+
       <H2>Reading the standards for you</H2>
       <Card>
         <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>

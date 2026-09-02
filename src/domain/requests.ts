@@ -137,3 +137,35 @@ export function leaveNotReady(r: LeaveRequest): string | null {
   }
   return null;
 }
+
+// ------------------------------------------------------------------- dates
+
+/**
+ * Reads a date the way people here write one: 7/9/2026, 07/09/26, 7.9.2026.
+ *
+ * Returns ISO or null. Two-digit years are this century. There is no date
+ * picker in the app, deliberately — a picker is three taps per date with a
+ * glove on, and everyone on the crew can type a date faster than they can
+ * scroll to it. The cost is that a typed date can be nonsense, and that is why
+ * the parse is strict about the day and the month actually existing.
+ */
+export function parseAuDate(text: string): string | null {
+  const m = text.trim().match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2}|\d{4})$/);
+  if (!m) return null;
+  const d = Number(m[1]);
+  const mo = Number(m[2]);
+  const y = m[3]!.length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+  if (mo < 1 || mo > 12 || d < 1) return null;
+  const daysInMonth = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  if (d > daysInMonth) return null;
+  return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+/** The named leave types, in the order they get asked for. */
+export const LEAVE_TYPES: readonly { value: string; label: string }[] = [
+  { value: 'Annual', label: 'Annual' },
+  { value: 'Sick', label: 'Sick' },
+  { value: 'RDO', label: 'RDO' },
+  { value: 'Unpaid', label: 'Unpaid' },
+  { value: 'Other', label: 'Other' },
+];

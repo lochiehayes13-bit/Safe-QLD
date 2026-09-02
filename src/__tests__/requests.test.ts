@@ -1,6 +1,6 @@
 import {
   informationBody, informationNotReady, informationSubject,
-  leaveBody, leaveNotReady, leaveSubject, workingDays,
+  leaveBody, leaveNotReady, leaveSubject, parseAuDate, workingDays,
   type InformationRequest, type LeaveRequest,
 } from '@/domain/requests';
 import { copyForNextWeek, type Timesheet, type TimesheetEntry } from '@/domain/timesheet';
@@ -171,5 +171,34 @@ describe('copying last week', () => {
   it('gives every copied day a new id', () => {
     const copied = copyForNextWeek(previous, '2026-09-07', ids);
     expect(copied[0]!.id).not.toBe('old');
+  });
+});
+
+describe('reading a typed date', () => {
+  // There is no date picker, so this is the only way a date gets in.
+  it.each([
+    ['7/9/2026', '2026-09-07'],
+    ['07/09/2026', '2026-09-07'],
+    ['7/9/26', '2026-09-07'],
+    ['7.9.2026', '2026-09-07'],
+    ['7-9-2026', '2026-09-07'],
+    [' 31/12/2026 ', '2026-12-31'],
+  ])('reads %s as %s', (text, iso) => {
+    expect(parseAuDate(text)).toBe(iso);
+  });
+
+  it.each([
+    ['a month that does not exist', '7/13/2026'],
+    ['a day February has not got', '30/2/2026'],
+    ['an American date', '2026-09-07'],
+    ['words', 'next monday'],
+    ['nothing', ''],
+  ])('refuses %s', (_what, text) => {
+    expect(parseAuDate(text)).toBeNull();
+  });
+
+  it('knows a leap year', () => {
+    expect(parseAuDate('29/2/2028')).toBe('2028-02-29');
+    expect(parseAuDate('29/2/2027')).toBeNull();
   });
 });

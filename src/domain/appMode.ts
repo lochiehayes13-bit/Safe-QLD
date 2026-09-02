@@ -117,7 +117,7 @@ export type TabKey = 'today' | 'sites' | 'tools' | 'work' | 'settings';
 export const TAB_ORDER: readonly TabKey[] = ['today', 'sites', 'tools', 'work', 'settings'];
 
 export const TAB_LABEL: Record<TabKey, string> = {
-  today: 'Today',
+  today: 'Home',
   sites: 'Sites',
   tools: 'Tools',
   work: 'Work',
@@ -125,7 +125,7 @@ export const TAB_LABEL: Record<TabKey, string> = {
 };
 
 export const TAB_BLURB: Record<TabKey, string> = {
-  today: 'What is on today, and anything running against a clock.',
+  today: 'The question bar, the modules you chose, and anything running against a clock.',
   sites: 'The site in front of you, and everything recorded against it.',
   tools: 'The calculations and the reference, all of it offline.',
   work: 'The records the office needs, and the stock to do the work.',
@@ -211,13 +211,16 @@ export const DESTINATIONS: readonly Destination[] = [
   // -- Today -----------------------------------------------------------------
   {
     route: '/', file: 'app/(tabs)/index.tsx', tab: 'today', section: 'The day',
-    label: 'Today', root: true, modes: BOTH, openedFrom: [],
-    blurb: 'The job you are on, what is urgent, and the question bar over everything the app holds.',
-    terms: ['today', 'home', 'start', 'dashboard'],
+    label: 'Home', root: true, modes: BOTH, openedFrom: [],
+    // A hub, not a dashboard. It renders whichever modules the technician
+    // pinned, so it is not credited here with opening any of them — the
+    // picker at /shortcuts is, because that one always does.
+    blurb: 'The question bar over everything the app holds, and the modules you chose, in your order.',
+    terms: ['home', 'today', 'start', 'hub', 'front page'],
   },
   {
     route: '/work/jobs', file: 'app/work/jobs.tsx', tab: 'today', section: 'The day',
-    label: 'Jobs', modes: BOTH, openedFrom: ['/', '/work'],
+    label: 'Jobs', modes: BOTH, openedFrom: ['/work', '/shortcuts'],
     blurb: 'Scheduled and outstanding work, urgent first.',
     terms: ['job', 'jobs', 'work order', 'scheduled', 'urgent'],
   },
@@ -229,28 +232,29 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/work/due', file: 'app/work/due.tsx', tab: 'today', section: 'The day',
-    label: 'Overdue and due', modes: BOTH, openedFrom: ['/', '/work'],
+    label: 'Overdue and due', modes: BOTH, openedFrom: ['/work', '/shortcuts'],
     blurb: 'Routines past their tolerance window, across every site.',
     terms: ['due', 'overdue', 'lapsed', 'tolerance', 'schedule'],
     keptBecause:
-      'It reads as an office list and it is one, but the Overdue count on Today opens it. A '
-      + 'number a technician can tap that lands nowhere is worse than the list being there.',
+      'It reads as an office list and it is one, but the Work tab lists it and it can be pinned '
+      + 'to the home screen. A row a technician can tap that lands nowhere is worse than the list '
+      + 'being there.',
   },
   {
     route: '/work/promises', file: 'app/work/promises.tsx', tab: 'today', section: 'The day',
-    label: 'Promises', modes: BOTH, openedFrom: ['/', '/work'],
+    label: 'Promises', modes: BOTH, openedFrom: ['/work', '/shortcuts'],
     blurb: 'What you said you would come back for, so it survives the drive home.',
     terms: ['promise', 'come back', 'follow up', 'owe'],
   },
   {
     route: '/work/recurring', file: 'app/work/recurring.tsx', tab: 'today', section: 'The day',
-    label: 'Recurring failures', modes: BOTH, openedFrom: ['/'],
+    label: 'Recurring failures', modes: BOTH, openedFrom: ['/shortcuts'],
     blurb: 'Assets that keep failing, where replacing it a fourth time will not fix it.',
     terms: ['recurring', 'repeat', 'keeps failing', 'again'],
   },
   {
     route: '/work/job/[id]', file: 'app/work/job/[id].tsx', tab: 'today', section: 'The day',
-    label: 'Job', needsContext: true, modes: BOTH, openedFrom: ['/', '/work/jobs'],
+    label: 'Job', needsContext: true, modes: BOTH, openedFrom: ['/work/jobs'],
     blurb: 'The site briefing: what is already broken, and what the last person found.',
     terms: ['job', 'briefing', 'attendance'],
   },
@@ -262,7 +266,7 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/impairment/new', file: 'app/impairment/new.tsx', tab: 'today', section: 'Against a clock',
-    label: 'Declare an impairment', modes: BOTH, openedFrom: ['/', '/work/impairments'],
+    label: 'Declare an impairment', modes: BOTH, openedFrom: ['/work/impairments', '/shortcuts'],
     blurb: 'Takes a system out of service, and starts the clock and the obligations with it.',
     terms: ['impairment', 'declare', 'isolate', 'shut down', 'out of service'],
   },
@@ -276,8 +280,10 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/work/notice/[id]', file: 'app/work/notice/[id].tsx', tab: 'today', section: 'Against a clock',
     label: 'Critical defect notice', needsContext: true, modes: BOTH,
-    // Today only. The defects list raises a defect but does not open the
-    // notice — `auditLinks` is what caught this claim being written down.
+    // Home only, as a banner that shows while a notice this phone owes is
+    // unissued — the same rule as a live impairment. The defects list raises a
+    // defect but does not open the notice; `auditLinks` is what caught that
+    // claim being written down.
     openedFrom: ['/'],
     blurb: 'The written notice the occupier is owed within 24 hours, counting down.',
     terms: ['notice', 'critical', 'occupier', '24 hours', 'commissioner'],
@@ -285,11 +291,47 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/shortcuts', file: 'app/shortcuts.tsx', opensVia: 'src/domain/modules.ts',
     tab: 'today', section: 'Setup',
-    label: 'Home screen', modes: BOTH, openedFrom: ['/'],
+    label: 'All modules', modes: BOTH, openedFrom: ['/'],
     blurb:
-      'Which of the app\'s screens sit on this technician\'s home grid, and in what order. '
+      'Every module in the app by group, to open or to pin to this technician\'s home screen. '
       + 'Their phone only — nobody else\'s changes.',
-    terms: ['shortcuts', 'home', 'tiles', 'favourites', 'customise', 'pin', 'modules'],
+    terms: ['shortcuts', 'home', 'tiles', 'favourites', 'customise', 'pin', 'modules', 'everything'],
+  },
+
+  // -- Ask the office --------------------------------------------------------
+  {
+    route: '/work/rfi', file: 'app/work/rfi.tsx', tab: 'today', section: 'Ask the office',
+    label: 'Ask the office', modes: BOTH, openedFrom: ['/shortcuts'],
+    blurb:
+      'A question to your supervisor by email, with the job and site in the subject, and noted '
+      + 'on the job in Simpro when there is one.',
+    terms: ['rfi', 'request for information', 'question', 'ask', 'supervisor', 'held up'],
+  },
+  {
+    route: '/work/leave', file: 'app/work/leave.tsx', tab: 'today', section: 'Ask the office',
+    label: 'Leave request', modes: BOTH, openedFrom: ['/shortcuts'],
+    blurb:
+      'Annual, sick, RDO or unpaid, working days counted, emailed to the supervisor with '
+      + 'accounts copied in.',
+    terms: ['leave', 'annual', 'sick', 'rdo', 'holiday', 'day off', 'unpaid'],
+  },
+  {
+    route: '/suggest', file: 'app/suggest.tsx', tab: 'today', section: 'Ask the office',
+    label: 'Suggest a change', modes: BOTH, openedFrom: ['/shortcuts'],
+    blurb:
+      'An idea, a fault or missing information about this app, emailed under a fixed subject '
+      + 'tag to whoever builds it.',
+    terms: ['suggest', 'suggestion', 'feedback', 'idea', 'bug', 'improve', 'wrong'],
+  },
+
+  // -- Where the work is -----------------------------------------------------
+  {
+    route: '/map', file: 'app/map.tsx', tab: 'today', section: 'Where the work is',
+    label: 'Service map', modes: BOTH, openedFrom: ['/sites', '/shortcuts'],
+    blurb:
+      'Every site on a map, jobs coloured by state, with Waze and Google Maps one tap from '
+      + 'a pin.',
+    terms: ['map', 'waze', 'navigate', 'directions', 'sites map', 'where', 'google maps'],
   },
 
   // -- Sites -----------------------------------------------------------------
@@ -307,10 +349,7 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/import', file: 'app/import.tsx', tab: 'sites', section: 'Your sites',
-    // Also opened straight from Today while the device has no sites on it: the
-    // first thing a fresh install needs is this screen, and making somebody find
-    // it through the sites tab is how a phone stays empty.
-    label: 'Import', modes: BOTH, openedFrom: ['/', '/sites', '/site/[id]'],
+    label: 'Import', modes: BOTH, openedFrom: ['/sites', '/site/[id]', '/shortcuts'],
     blurb: 'Reads a panel configuration or an asset register, and describes what it cannot parse rather than dismissing it.',
     terms: ['import', 'config', 'csv', 'panel file', 'register'],
   },
@@ -366,7 +405,7 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/work/defect/new', file: 'app/work/defect/new.tsx', tab: 'sites', section: 'In front of you',
     label: 'Raise a defect', modes: BOTH,
-    openedFrom: ['/', '/work/defects', '/site/defects', '/assets/[id]'],
+    openedFrom: ['/shortcuts', '/work/defects', '/site/defects', '/assets/[id]'],
     blurb: 'System, component, defect — the library supplies the severity, the wording and the work to clear it.',
     terms: ['defect', 'fault', 'raise', 'report a fault', 'broken'],
   },
@@ -597,7 +636,7 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/library', file: 'app/library/index.tsx', tab: 'tools', section: 'Reference',
-    label: 'Standards', modes: BOTH, openedFrom: ['/', '/tools'],
+    label: 'Standards', modes: BOTH, openedFrom: ['/', '/tools', '/shortcuts'],
     blurb: 'The clause index and your own imported documents, searched the way the question gets asked, offline.',
     terms: ['standard', 'standards', 'clause', 'as 1851', 'as 1670', 'library'],
   },
@@ -641,7 +680,7 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/work/defects', file: 'app/work/defects.tsx', tab: 'work', section: 'Records',
-    label: 'Defects', modes: BOTH, openedFrom: ['/', '/work'],
+    label: 'Defects', modes: BOTH, openedFrom: ['/work'],
     blurb: 'Raised, quoted and outstanding, aged in days so a list feels as urgent as it is.',
     terms: ['defects', 'outstanding', 'open', 'faults'],
   },
@@ -714,7 +753,7 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/work/stock', file: 'app/work/stock.tsx', tab: 'work', section: 'Parts and stock',
-    label: 'Van stock', modes: BOTH, openedFrom: ['/', '/work'],
+    label: 'Van stock', modes: BOTH, openedFrom: ['/work', '/shortcuts'],
     blurb: 'What you carry, and what tomorrow will leave you short of.',
     terms: ['stock', 'van', 'restock', 'inventory', 'spares'],
   },

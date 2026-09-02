@@ -13,6 +13,7 @@ import { MIGRATION_V11 } from './schemaLibrary';
 import { MIGRATION_V12 } from './schemaForm72';
 import { MIGRATION_V13 } from './schemaOutbound';
 import { MIGRATION_V14 } from './schemaSimpro';
+import { MIGRATION_V15 } from './schemaGeocode';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -291,6 +292,10 @@ export const MIGRATIONS: string[] = [
   // v14 — the site contact the office already holds, so reports stop printing
   // Contact, Mobile and Email as three permanently blank rows
   MIGRATION_V14,
+
+  // v15 — where each address is, so the service map does not ask the phone's
+  // geocoder the same three thousand questions every time it opens
+  MIGRATION_V15,
 ];
 
 /**

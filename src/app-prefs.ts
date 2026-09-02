@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { DEFAULT_SHORTCUTS } from '@/domain/modules';
+import { DEFAULT_SHORTCUTS, migrateShortcuts } from '@/domain/modules';
+import { company } from '@/theme/brand';
 
 /**
  * Technician preferences.
@@ -45,8 +46,17 @@ export interface Prefs {
    * screen gets renamed far more often than it gets moved.
    */
   shortcuts: string[];
-  /** Where a request for information goes. Set per company, not per phone. */
+  /**
+   * Where a request for information and a leave request go.
+   *
+   * Starts as the company's service inbox rather than blank, because a blank
+   * default would leave the Ask the office button dead on every phone until
+   * somebody typed an address into each one. The office changes it once here
+   * if a supervisor would rather have it direct.
+   */
   supervisorEmail: string;
+  /** Where a suggestion about the app itself goes. Same reasoning. */
+  suggestionsEmail: string;
   /**
    * Charge-out rates, in whole cents excluding GST.
    *
@@ -90,7 +100,8 @@ export const DEFAULT_PREFS: Prefs = {
   simproProxyUrl: '',
   simproWriteAssetTests: false,
   shortcuts: DEFAULT_SHORTCUTS,
-  supervisorEmail: '',
+  supervisorEmail: company.email,
+  suggestionsEmail: company.email,
   normalHoursSellCents: 0,
   afterHoursSellCents: 0,
   attendanceNormalCents: 0,
@@ -102,7 +113,11 @@ export const DEFAULT_PREFS: Prefs = {
 export async function loadPrefs(): Promise<Prefs> {
   try {
     const raw = await AsyncStorage.getItem(PREFS_KEY);
-    return raw ? { ...DEFAULT_PREFS, ...(JSON.parse(raw) as Partial<Prefs>) } : DEFAULT_PREFS;
+    if (!raw) return DEFAULT_PREFS;
+    const saved = JSON.parse(raw) as Partial<Prefs>;
+    // A home screen nobody chose gets the current defaults; one somebody
+    // edited is theirs and stays. See migrateShortcuts.
+    return { ...DEFAULT_PREFS, ...saved, shortcuts: migrateShortcuts(saved.shortcuts) };
   } catch {
     return DEFAULT_PREFS;
   }

@@ -84,7 +84,8 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Safe QLD uses your location only to order a day's jobs by how close they are. It is never recorded or sent anywhere."
         }
-      ]
+      ],
+      "expo-background-task"
     ],
     "experiments": {
       "typedRoutes": true

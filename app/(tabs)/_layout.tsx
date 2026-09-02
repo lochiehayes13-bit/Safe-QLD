@@ -6,7 +6,7 @@ import { useTheme } from '@/theme';
 /**
  * Five tabs, ordered by how often a technician reaches for them.
  *
- * Everything else is reachable from Today's action grid rather than being
+ * Everything else is reachable from the home hub rather than being
  * crammed into the bar — a tab bar with nine items is a menu, not navigation.
  */
 export default function TabsLayout() {
@@ -33,7 +33,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Today',
+          title: 'Home',
           headerShown: false,
           tabBarIcon: ({ color, size }) => <MaterialCommunityIcons name="home-variant-outline" color={color} size={size} />,
         }}

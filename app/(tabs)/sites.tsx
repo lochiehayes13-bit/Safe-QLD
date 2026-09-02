@@ -65,6 +65,13 @@ export default function SitesScreen() {
               />
             </View>
             <Rowed gap={2}>
+              <Button
+                title="Map"
+                variant="secondary"
+                onPress={() => router.push('/map')}
+                style={{ flex: 1 }}
+                icon={<MaterialCommunityIcons name="map-marker-radius-outline" size={20} color={t.color.text} />}
+              />
               <Button title="New site" onPress={() => router.push('/site/new')} style={{ flex: 1 }} />
               <Button title="Import" variant="secondary" onPress={() => router.push('/import')} style={{ flex: 1 }} />
             </Rowed>
