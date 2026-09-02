@@ -10,6 +10,8 @@ import { queryAssets, recurringFailures, type RecurringFailure } from '@/db/asse
 import { lapsedEverywhere } from '@/db/routineRunRepo';
 import type { Defect } from '@/domain/types';
 import { formatAuDate } from '@/export/sheets';
+import { loadPrefs } from '@/app-prefs';
+import { resolveShortcuts, type AppModule } from '@/domain/modules';
 import { readAllSyncState } from '@/simpro/watermark';
 import { describeStaleness } from '@/simpro/incremental';
 import { useTheme, type Theme } from '@/theme';
@@ -94,13 +96,14 @@ export default function TodayScreen() {
   const [notices, setNotices] = useState<Defect[]>([]);
   const [lapsed, setLapsed] = useState(0);
   const [assetCount, setAssetCount] = useState(0);
+  const [shortcuts, setShortcuts] = useState<AppModule[]>([]);
   const [staleness, setStaleness] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     // The Queensland calendar day. Between midnight and 10am a UTC day is
     // yesterday's, and this company starts at seven.
     const today = qldIsoDay(nowIso()) ?? '';
-    const [j, s, d, imp, pr, rs, pc, due, rec, nt, lap, allAssets, syncState] = await Promise.all([
+    const [j, s, d, imp, pr, rs, pc, due, rec, nt, lap, allAssets, syncState, prefs] = await Promise.all([
       listJobs({ limit: 50 }),
       listSiteSummaries(),
       listDefects(),
@@ -114,12 +117,14 @@ export default function TodayScreen() {
       lapsedEverywhere(new Date().toISOString()),
       queryAssets({ limit: 100000 }),
       readAllSyncState(),
+      loadPrefs(),
     ]);
     setJobs(j); setSites(s); setDefects(d); setImpairments(imp); setLoaded(true);
     setPromises(pr); setRestock(rs.length); setPending(pc);
     setDueAssets(due.length); setRecurring(rec); setNotices(nt);
     setLapsed(lap.filter((x) => x.state === 'overdue').length);
     setAssetCount(allAssets.length);
+    setShortcuts(resolveShortcuts(prefs.shortcuts));
     /*
      * The oldest thing on the device decides how current it is.
      *
@@ -211,7 +216,7 @@ export default function TodayScreen() {
         </Card>
       ) : null}
 
-      <ActionGrid restock={restock} pending={pending} siteCount={sites.length} />
+      <ActionGrid shortcuts={shortcuts} restock={restock} pending={pending} siteCount={sites.length} />
 
       {pending > 0 ? (
         <Rowed gap={2}>
@@ -417,28 +422,47 @@ interface Action {
   tone?: 'fail' | 'warn';
 }
 
-function ActionGrid({ restock, pending, siteCount }: { restock: number; pending: number; siteCount: number }) {
+/**
+ * The technician's own grid.
+ *
+ * This used to be a fixed twelve, which is somebody else's guess at what
+ * matters and wrong for almost everyone: the detection tech wants the resistor
+ * table, the extinguisher tech wants none of that, and both want their
+ * timesheet. The list now comes from their own preferences, and the last tile
+ * is always the way to change it — a grid you cannot obviously edit is a grid
+ * nobody edits.
+ *
+ * Badges stay here rather than in the module catalogue, because a count is
+ * live state and the catalogue is static data.
+ */
+function ActionGrid({ shortcuts, restock, pending, siteCount }: {
+  shortcuts: AppModule[]; restock: number; pending: number; siteCount: number;
+}) {
   const t = useTheme();
-  const actions: Action[] = [
-    { label: 'My jobs', icon: 'clipboard-list-outline', href: '/work/jobs' },
-    { label: 'Sites', icon: 'office-building-marker-outline', href: '/sites', badge: siteCount },
-    { label: 'Find asset', icon: 'magnify-scan', href: '/assets/find' },
-    { label: 'Raise defect', icon: 'alert-plus-outline', href: '/work/defect/new' },
-    { label: 'Impairment', icon: 'alert-octagon-outline', href: '/impairment/new', tone: 'fail' },
-    { label: 'Calculators', icon: 'calculator-variant-outline', href: '/tools' },
-    { label: 'Parts', icon: 'package-variant-closed', href: '/catalogue' },
-    { label: 'Van stock', icon: 'van-utility', href: '/work/stock', badge: restock, tone: restock ? 'warn' : undefined },
-    { label: 'Timesheet', icon: 'calendar-clock-outline', href: '/work/timesheets' },
-    { label: 'Reports', icon: 'file-document-outline', href: '/work/reports' },
-    { label: 'Knowledge', icon: 'lightbulb-on-outline', href: '/work/knowledge' },
-    { label: 'Settings', icon: 'cog-outline', href: '/settings' },
-  ];
+  const badges: Record<string, { badge?: number; tone?: 'fail' | 'warn' }> = {
+    '/sites': { badge: siteCount },
+    '/work/stock': { badge: restock, tone: restock ? 'warn' : undefined },
+    '/work/outbound': { badge: pending, tone: pending ? 'warn' : undefined },
+    '/impairment/new': { tone: 'fail' },
+    '/work/defect/new': { tone: 'fail' },
+  };
+
+  const actions: Action[] = shortcuts.map((m) => ({
+    label: m.label,
+    icon: m.icon as Action['icon'],
+    href: m.href,
+    ...badges[m.href],
+  }));
 
   return (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.space(2.5) }}>
       {actions.map((a) => (
         <ActionTile key={a.href} action={a} theme={t} />
       ))}
+      <ActionTile
+        action={{ label: 'Edit home', icon: 'view-grid-plus-outline', href: '/shortcuts' }}
+        theme={t}
+      />
     </View>
   );
 }

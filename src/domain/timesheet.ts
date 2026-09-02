@@ -213,3 +213,52 @@ export function validateTimesheet(sheet: Timesheet): TimesheetIssue[] {
 
   return issues;
 }
+
+/**
+ * Last week's shape, ready to be this week's sheet.
+ *
+ * Most weeks are the same shape: the same run of sites on the same days at
+ * roughly the same hours. Retyping that from scratch every Monday is how
+ * timesheets end up reconstructed on Friday from memory, which is when the
+ * hours stop being accurate.
+ *
+ * What carries over is the SHAPE — days, jobs, sites, usual start and finish.
+ * What never carries over is anything that asserts something happened:
+ *
+ *  - leave, sick, RDO, public holiday. Copying last week's annual leave into
+ *    this week claims a day off nobody took.
+ *  - the service report number, which belongs to one visit and one only.
+ *  - comments, which described last week's work.
+ *
+ * Dates are advanced by exactly seven days so a Tuesday stays a Tuesday.
+ */
+export function copyForNextWeek(previous: Timesheet, weekStarting: string, newId: () => string): TimesheetEntry[] {
+  const shift = Date.parse(`${weekStarting}T00:00:00Z`) - Date.parse(`${previous.weekStarting}T00:00:00Z`);
+  if (!Number.isFinite(shift)) return [];
+
+  return previous.entries.map((e) => {
+    const then = Date.parse(`${e.date}T00:00:00Z`);
+    const date = Number.isFinite(then)
+      ? new Date(then + shift).toISOString().slice(0, 10)
+      : e.date;
+    return {
+      id: newId(),
+      date,
+      jobNumber: e.jobNumber,
+      siteName: e.siteName,
+      siteId: e.siteId,
+      startTime: e.startTime,
+      finishTime: e.finishTime,
+      hourKind: e.hourKind,
+      // Everything below asserts something happened. None of it did, yet.
+      serviceReportNumber: '',
+      hoursOverride: undefined,
+      sick: '',
+      rdo: '',
+      annual: '',
+      lwop: '',
+      publicHoliday: '',
+      comments: '',
+    };
+  });
+}

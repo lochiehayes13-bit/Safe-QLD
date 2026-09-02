@@ -157,6 +157,18 @@ export interface Destination {
   needsContext?: boolean;
   /** True for the five tab roots, which are on screen in every mode. */
   root?: boolean;
+  /**
+   * A second file that carries this screen's navigation.
+   *
+   * `auditLinks` proves a link by finding the route written out in the parent's
+   * own source. That works while every screen names its destinations directly,
+   * and stops working the moment one renders a list from a registry: the home
+   * screen picker pushes `m.href`, and the literals live in the registry it
+   * maps over. Naming that file here keeps the proof — the route still has to
+   * appear verbatim somewhere real — rather than loosening the check to accept
+   * a screen that might navigate anywhere.
+   */
+  opensVia?: string;
   /** Screens this is opened from. Empty only on a root. */
   openedFrom: readonly string[];
   /**
@@ -270,6 +282,15 @@ export const DESTINATIONS: readonly Destination[] = [
     blurb: 'The written notice the occupier is owed within 24 hours, counting down.',
     terms: ['notice', 'critical', 'occupier', '24 hours', 'commissioner'],
   },
+  {
+    route: '/shortcuts', file: 'app/shortcuts.tsx', opensVia: 'src/domain/modules.ts',
+    tab: 'today', section: 'Setup',
+    label: 'Home screen', modes: BOTH, openedFrom: ['/'],
+    blurb:
+      'Which of the app\'s screens sit on this technician\'s home grid, and in what order. '
+      + 'Their phone only — nobody else\'s changes.',
+    terms: ['shortcuts', 'home', 'tiles', 'favourites', 'customise', 'pin', 'modules'],
+  },
 
   // -- Sites -----------------------------------------------------------------
   {
@@ -307,7 +328,7 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/assets/find', file: 'app/assets/find.tsx', tab: 'sites', section: 'In front of you',
-    label: 'Find an asset', modes: BOTH, openedFrom: ['/'],
+    label: 'Find an asset', modes: BOTH, openedFrom: ['/shortcuts'],
     blurb: 'One box across assets, imported points and the parts catalogue, because you only ever know one identifier.',
     terms: ['find', 'search asset', 'serial', 'part number', 'code'],
   },
@@ -600,7 +621,7 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/catalogue', file: 'app/catalogue/index.tsx', tab: 'tools', section: 'Reference',
-    label: 'Parts', modes: BOTH, openedFrom: ['/', '/tools'],
+    label: 'Parts', modes: BOTH, openedFrom: ['/shortcuts', '/tools'],
     blurb: 'Part numbers, brands and descriptions, searched all at once because you only know one of them.',
     terms: ['part', 'catalogue', 'part number', 'brand', 'spares'],
   },
@@ -657,7 +678,7 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/work/reports', file: 'app/work/reports.tsx', tab: 'work', section: 'Records',
-    label: 'Test sheets', modes: BOTH, openedFrom: ['/', '/work'],
+    label: 'Test sheets', modes: BOTH, openedFrom: ['/shortcuts', '/work'],
     blurb: 'Every service report on this device, newest first.',
     terms: ['test sheets', 'reports', 'service reports'],
     keptBecause:
@@ -667,7 +688,7 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/work/timesheets', file: 'app/work/timesheets.tsx', tab: 'work', section: 'Records',
-    label: 'Timesheets', modes: BOTH, openedFrom: ['/', '/work'],
+    label: 'Timesheets', modes: BOTH, openedFrom: ['/shortcuts', '/work'],
     blurb: 'Your week, the attendances in it, and the sign-off that ends it.',
     terms: ['timesheet', 'hours', 'week', 'pay', 'attendance'],
     keptBecause:
@@ -712,7 +733,7 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/work/knowledge', file: 'app/work/knowledge.tsx', tab: 'work', section: 'Parts and stock',
-    label: 'Company knowledge', modes: BOTH, openedFrom: ['/', '/work'],
+    label: 'Company knowledge', modes: BOTH, openedFrom: ['/shortcuts', '/work'],
     blurb: 'Tricks of the trade, marked verified or not wherever they are used.',
     terms: ['knowledge', 'tips', 'notes', 'how we do it'],
   },
@@ -1132,13 +1153,20 @@ export function auditLinks(read: (file: string) => string | undefined): string[]
         problems.push(`${parent.file} could not be read, so the link to ${d.route} is unverified.`);
         continue;
       }
+      // A screen that navigates from a registry keeps its routes in that file.
+      const viaSrc = parent.opensVia ? read(parent.opensVia) : undefined;
+      if (parent.opensVia && viaSrc === undefined) {
+        problems.push(`${parent.opensVia} could not be read, so the link to ${d.route} is unverified.`);
+        continue;
+      }
+      const haystack = viaSrc === undefined ? src : `${src}\n${viaSrc}`;
       // Two forms appear in this app: the object form, which carries the route
       // verbatim including `[id]`, and a template literal, which carries
       // everything up to the segment and then interpolates it.
       const dynamicAt = d.route.indexOf('[');
       const found = dynamicAt < 0
-        ? [`'${d.route}'`, `"${d.route}"`, `\`${d.route}\``].some((form) => src.includes(form))
-        : src.includes(d.route) || src.includes(`${d.route.slice(0, dynamicAt)}\${`);
+        ? [`'${d.route}'`, `"${d.route}"`, `\`${d.route}\``].some((form) => haystack.includes(form))
+        : haystack.includes(d.route) || haystack.includes(`${d.route.slice(0, dynamicAt)}\${`);
       if (!found) {
         problems.push(`${parent.file} does not open ${d.route}, but the manifest says it does.`);
       }

@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DEFAULT_SHORTCUTS } from '@/domain/modules';
 
 /**
  * Technician preferences.
@@ -37,6 +38,15 @@ export interface Prefs {
    * without writing to that live register. Prove it on one asset first.
    */
   simproWriteAssetTests: boolean;
+  /**
+   * The technician's own home screen, as a list of routes.
+   *
+   * Routes rather than labels, because a route is the stable identity — a
+   * screen gets renamed far more often than it gets moved.
+   */
+  shortcuts: string[];
+  /** Where a request for information goes. Set per company, not per phone. */
+  supervisorEmail: string;
   /**
    * Charge-out rates, in whole cents excluding GST.
    *
@@ -79,6 +89,8 @@ export const DEFAULT_PREFS: Prefs = {
   simproClientId: '6564738df3bba3cd587e3dacb58a1d',
   simproProxyUrl: '',
   simproWriteAssetTests: false,
+  shortcuts: DEFAULT_SHORTCUTS,
+  supervisorEmail: '',
   normalHoursSellCents: 0,
   afterHoursSellCents: 0,
   attendanceNormalCents: 0,
