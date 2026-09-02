@@ -140,3 +140,26 @@ jobs:
           # the product, and updated in place so the download link never moves.
           prerelease: true
           make_latest: false
+
+      # The step above only writes the body the first time the release is
+      # created; on every later run it replaces the file and leaves the text
+      # alone, so "Built from" was pointing at the first build for good. The
+      # commit line is the only way to tell which build the link serves, so it
+      # is rewritten here on every run.
+      - name: Say which commit the download now serves
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'NOTES'
+          Sideload build of the Safe QLD field app, rebuilt on every push.
+
+          **[Download safe-qld.apk](https://github.com/${{ github.repository }}/releases/download/android-latest/safe-qld.apk)** —
+          open this on the phone, tap the file when it finishes, and allow
+          installing from that source when asked. It appears as **Safe QLD**.
+
+          Built from `${{ github.sha }}` on ${{ github.ref_name }}.
+
+          Signed with the standard Android debug key: fine to sideload, not
+          accepted by the Play Store.
+          NOTES
+          gh release edit android-latest --repo "${{ github.repository }}" --notes-file notes.md
