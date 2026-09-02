@@ -98,6 +98,30 @@ export class SimproClient {
     return (await SecureStore.getItemAsync(SECRET_KEY)) !== null;
   }
 
+  /**
+   * Why this configuration cannot talk to Simpro yet, or null if it can.
+   *
+   * Checked once before a sync starts rather than discovered separately by each
+   * stage. Without it, a device with no secret runs the whole pull and reports
+   * the same sentence five times over — once for sites, jobs, assets, rates and
+   * fees — which reads like five faults instead of one unticked box, and buries
+   * the one instruction that would fix it.
+   */
+  static async missingCredentials(config: SimproConfig): Promise<string | null> {
+    if (config.proxyUrl) return null;
+    if (!config.buildDomain.trim()) {
+      return 'No Simpro build domain is set. Add it in Settings.';
+    }
+    if (!config.clientId.trim()) {
+      return 'No Simpro client ID is set. Add it in Settings.';
+    }
+    if (!(await SimproClient.hasSecret())) {
+      return 'Paste the Simpro client secret in Settings and save it to the keystore. '
+        + 'Everything else is already filled in.';
+    }
+    return null;
+  }
+
   static async clearSecret(): Promise<void> {
     await SecureStore.deleteItemAsync(SECRET_KEY);
     await SecureStore.deleteItemAsync(TOKEN_KEY);
@@ -339,6 +363,10 @@ export class SimproClient {
     problem?: string;
   }> {
     const empty = { authenticated: false, company: null, endpoints: [], ready: false };
+
+    // Say what is missing rather than letting the token request fail with it.
+    const notConfigured = await SimproClient.missingCredentials(this.config);
+    if (notConfigured) return { ...empty, problem: notConfigured };
 
     let companies: { ID: number; Name: string }[];
     try {

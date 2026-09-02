@@ -91,6 +91,16 @@ export async function pullFromSimpro(
   };
   const startedAt = new Date().toISOString();
 
+  // One check, before any stage runs. Each stage would otherwise fail on its
+  // own and report the same missing-secret sentence five times, which reads as
+  // five separate faults and hides the single thing that fixes all of them.
+  const missing = await SimproClient.missingCredentials(config);
+  if (missing) {
+    result.errors.push(missing);
+    onProgress?.({ stage: 'Not connected', done: 0, total: 4 });
+    return result;
+  }
+
   onProgress?.({ stage: 'Reading sites', done: 0, total: 4 });
 
   // Ask only for what changed since the last successful sync. At nine hundred
