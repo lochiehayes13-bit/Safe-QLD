@@ -132,6 +132,19 @@ Two things make it theirs:
    phone queues for the office goes up the moment there is signal. **Sync now**
    is still there for when you want a full pull immediately.
 
+**Who you are.** Settings → **You in Simpro** → *Pick who I am* lists the
+office's staff (it comes down with the sync); tapping your name seeds the name
+on reports and tells **My day** whose schedule to show. **Sign in with Simpro**
+is the same login as Simpro Mobile: after that, notes you write from the app
+are yours in Simpro. The browser sign-in needs the Redirect URI on the API
+application in Simpro's setup to be exactly `safeqld://oauth`.
+
+**Newer builds.** Every build knows which commit it is (Settings → About).
+When a newer APK has been published, a card appears on the home screen with a
+download button. The download page is on a private repository, so until the
+releases are mirrored to a public one (see the last step in
+`.github/workflows/ci.yml`), that button lands on a GitHub login page.
+
 **Arrange** on the home screen moves tiles earlier or later and takes them off;
 **Add a module** opens the full list by group, where every module can be opened
 or pinned. Each phone keeps its own layout.

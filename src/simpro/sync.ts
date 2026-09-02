@@ -8,11 +8,14 @@ import { saveRateCard } from '@/db/rateCardRepo';
 import { replaceEmployees } from '@/db/employeeRepo';
 import { replaceScheduleWindow } from '@/db/scheduleRepo';
 import { scheduleWindow } from '@/domain/myDay';
-import { upsertJob, enqueueSync, pendingSync, markSynced, markSyncFailed, type JobRecord } from '@/db/opsRepo';
+import {
+  upsertJob, enqueueSync, pendingSync, markSynced, markSyncFailed, markSyncUnknown, setPurchaseStatus, type JobRecord,
+} from '@/db/opsRepo';
+import { withMarker } from '@/domain/queueKey';
 import { matchSiteByRefOrName } from '@/domain/siteNames';
 import type { OutboundAssetTest } from '@/domain/outboundWork';
 import { createAsset, findByExternalIds, updateAsset, type AssetRecord } from '@/db/assetRepo';
-import { mapSimproAsset, SIMPRO_ASSET_SOURCE } from './assetSync';
+import { mapSimproAsset, SIMPRO_ASSET_SOURCE, statusFor } from './assetSync';
 import type { Site } from '@/domain/types';
 
 /**
@@ -234,19 +237,41 @@ export async function pullFromSimpro(
 
   onProgress?.({ stage: 'Reading jobs', done: 1, total: 6 });
 
+  /*
+   * Every site held locally, keyed by the office's id, for the jobs and the
+   * assets. Seeded from the whole local table rather than from the sites this
+   * run happened to read: on an incremental pull a handful of sites come down,
+   * and an index built from those alone left every new job for any other
+   * site with no site at all — and the upsert never revisited siteId, so they
+   * stayed unlinked through every later pull.
+   */
+  const siteIdByRemote = new Map(siteIdByExternal);
+  for (const site of existing) {
+    const remoteId = site.externalSource === SIMPRO_SOURCE ? site.externalId : undefined;
+    const fromRef = site.siteRef?.startsWith('SIMPRO:') ? site.siteRef.slice('SIMPRO:'.length) : undefined;
+    const key = remoteId ?? fromRef;
+    if (key && !siteIdByRemote.has(key)) siteIdByRemote.set(key, site.id);
+  }
+
   const jobState = await readSyncState('jobs');
   const jobPlan = planIncremental('jobs', jobState.lastChangeSeenAt, { force });
   const errorsBeforeJobs = result.errors.length;
 
   try {
-    const remoteJobs = await api.jobs(jobPlan.query, 500);
+    const { jobs: remoteJobs, truncated: jobsTruncated } = await api.jobsPaged(jobPlan.query, 500);
     const outcome = assessIncremental(remoteJobs, jobPlan, jobState.lastRecordCount);
     result.modes.jobs = outcome.mode;
     if (outcome.note) result.notes.push(outcome.note);
+    if (jobsTruncated) {
+      result.notes.push(
+        'More than 500 jobs matched, so only the 500 most recently changed were read. '
+        + 'The watermark was not moved, so the rest are still asked for next time.',
+      );
+    }
     for (const [i, job] of remoteJobs.entries()) {
       if (i % 25 === 0) onProgress?.({ stage: 'Jobs', done: i, total: remoteJobs.length });
       try {
-        const before = await upsertJobFromSimpro(job, siteIdByExternal);
+        const before = await upsertJobFromSimpro(job, siteIdByRemote);
         if (before) result.jobsAdded++;
         else result.jobsUpdated++;
       } catch (e) {
@@ -262,6 +287,7 @@ export async function pullFromSimpro(
           outcome.mode,
           startedAt,
           jobState,
+          jobsTruncated,
         ),
         mode: outcome.mode,
       }, startedAt);
@@ -284,13 +310,6 @@ export async function pullFromSimpro(
    * come down and the rest of the index would be empty, so all but a few
    * thousand assets would be filed as having no site and skipped.
    */
-  const siteIdByRemote = new Map(siteIdByExternal);
-  for (const site of existing) {
-    const remoteId = site.externalSource === SIMPRO_SOURCE ? site.externalId : undefined;
-    const fromRef = site.siteRef?.startsWith('SIMPRO:') ? site.siteRef.slice('SIMPRO:'.length) : undefined;
-    const key = remoteId ?? fromRef;
-    if (key && !siteIdByRemote.has(key)) siteIdByRemote.set(key, site.id);
-  }
 
   const assetState = await readSyncState('assets');
   const assetPlan = planIncremental('assets', assetState.lastChangeSeenAt, { force });
@@ -335,6 +354,11 @@ export async function pullFromSimpro(
           if (!match.installedDate && mapped.input.installedDate) patch.installedDate = mapped.input.installedDate;
           if (!match.lastServicedAt && mapped.input.lastServicedAt) patch.lastServicedAt = mapped.input.lastServicedAt;
           if (!match.lastResult && mapped.input.lastResult) patch.lastResult = mapped.input.lastResult;
+          if (statusFor(remote) === 'decommissioned' && match.status !== 'decommissioned') {
+            // Not a blank either. An asset the office has archived is gone,
+            // and it stayed in service on every phone for good.
+            patch.status = 'decommissioned';
+          }
           if (mapped.input.nextDueAt && match.nextDueAt !== mapped.input.nextDueAt) {
             // The exception to blanks-only: when the next service falls due is
             // the office's to set, and a stale date sends nobody or sends them
@@ -540,6 +564,8 @@ export type OutboundKind = 'job-note' | 'purchase-order';
 
 export interface JobNotePayload { jobId: string; subject: string; note: string }
 export interface PurchaseOrderPayload {
+  /** The local purchase request, so the order id Simpro returns can be written back onto it. */
+  requestId?: string;
   jobId?: string;
   vendorId?: number;
   notes?: string;
@@ -584,14 +610,18 @@ export async function flushQueue(config: SimproConfig): Promise<FlushResult> {
   let failed = 0;
 
   for (const item of items) {
+    const key = item.contentKey ?? undefined;
     try {
       const payload: unknown = JSON.parse(item.payload);
       if (item.kind === 'job-note') {
         const p = payload as JobNotePayload;
-        await api.addJobNote(p.jobId, p.subject, p.note);
+        // The marker rides in the note itself, so the job carries the proof
+        // that this was sent even if the phone that sent it is gone.
+        await api.addJobNote(p.jobId, p.subject, key ? withMarker(p.note, key) : p.note);
       } else if (item.kind === 'purchase-order') {
         const p = payload as PurchaseOrderPayload;
-        await api.createPurchaseOrder(p);
+        const order = await api.createPurchaseOrder({ ...p, notes: key ? withMarker(p.notes, key) : p.notes });
+        if (p.requestId) await setPurchaseStatus(p.requestId, 'ordered', order.id);
       } else if (item.kind === 'asset-test') {
         const p = payload as OutboundAssetTest;
         await api.postAssetTest(p.externalAssetId, p.result, p.testedAt, p.serviceLevelId);
@@ -604,11 +634,30 @@ export async function flushQueue(config: SimproConfig): Promise<FlushResult> {
       sent++;
     } catch (e) {
       failed++;
-      await markSyncFailed(item.id, e instanceof Error ? e.message : String(e));
-      if (e instanceof SimproError && (e.status === 401 || e.status === 403)) break;
+      const message = e instanceof Error ? e.message : String(e);
+      if (e instanceof SimproError && (e.status === 401 || e.status === 403)) {
+        // Nothing after this will go either, and five failed attempts each
+        // would only spend the retries against a problem the office fixes.
+        await markSyncFailed(item.id, message);
+        break;
+      }
+      if (e instanceof SimproError && e.status !== undefined) {
+        // The server answered, so it did not act: safe to try again.
+        await markSyncFailed(item.id, message);
+        continue;
+      }
+      /*
+       * No answer at all: the request may have arrived and been acted on
+       * before the connection died. A vendor order raised twice is real
+       * money and a note posted twice is a real duplicate, so this is not
+       * retried by the app. It waits for a person on Waiting to send, who
+       * can check Simpro for the marker and either send it again or let it
+       * go.
+       */
+      await markSyncUnknown(item.id, message);
     }
   }
 
-  const remaining = (await pendingSync(1)).length;
+  const remaining = (await pendingSync(1000)).length;
   return { sent, failed, remaining };
 }

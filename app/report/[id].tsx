@@ -58,6 +58,11 @@ export default function ReportScreen() {
     setReport(r);
     setMissing(!r);
     if (!r) return;
+    // The record-of-maintenance answers live on the report now, not on the
+    // screen: they used to vanish when the screen was left.
+    setQdcAffirmed(r.qdcCompliance === true);
+    setWorkingOrder(r.inProperWorkingOrder ?? null);
+    setHardcopyLeft(r.hardcopyLeftOnSite === true);
     const [s, p, tr, cr, df] = await Promise.all([
       getSite(r.siteId),
       r.panelId ? getPanel(r.panelId) : Promise.resolve(null),
@@ -362,19 +367,19 @@ export default function ReportScreen() {
               <YesNoRow
                 label="Maintenance was carried out in compliance with QDC MP 6.1"
                 value={qdcAffirmed}
-                onChange={setQdcAffirmed}
+                onChange={(v) => { setQdcAffirmed(v); void updateReport(report.id, { qdcCompliance: v }); }}
               />
               <Divider />
               <TriRow
                 label="Installation considered to be in proper working order"
                 value={workingOrder}
-                onChange={setWorkingOrder}
+                onChange={(v) => { setWorkingOrder(v); void updateReport(report.id, { inProperWorkingOrder: v ?? undefined }); }}
               />
               <Divider />
               <YesNoRow
                 label="Hardcopy record left on site"
                 value={hardcopyLeft}
-                onChange={setHardcopyLeft}
+                onChange={(v) => { setHardcopyLeft(v); void updateReport(report.id, { hardcopyLeftOnSite: v }); }}
               />
             </Card>
 

@@ -13,6 +13,9 @@ import { SimproClient } from '@/simpro/client';
 import { simproConfigFromPrefs } from '@/simpro/config';
 import { formatAuDate } from '@/export/sheets';
 import { loadPrefs } from '@/app-prefs';
+import { dismissSync, retrySync, unknownSync, type SyncEntry } from '@/db/opsRepo';
+import { flushSoon } from '@/simpro/flushSoon';
+import { markerFor } from '@/domain/queueKey';
 import type { Site } from '@/domain/types';
 import { useTheme } from '@/theme';
 import {
@@ -76,6 +79,9 @@ export default function OutboundScreen() {
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+  /** Sends that went out and got no reply. A person decides these; see flushQueue. */
+  const [unknown, setUnknown] = useState<SyncEntry[]>([]);
+  useFocusEffect(useCallback(() => { void unknownSync().then(setUnknown); }, []));
 
   const openRun = useCallback(async (run: RoutineRun) => {
     if (open === run.id) { setOpen(null); setPlan(null); setReport(null); return; }
@@ -237,6 +243,55 @@ export default function OutboundScreen() {
           </Card>
         );
       })}
+
+      {unknown.length ? (
+        <>
+          <Divider />
+          <H2>Sent, but no reply came</H2>
+          <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+            The request went out and the connection dropped before Simpro answered. It may have
+            landed. Sending again could post it twice, so the app will not; search Simpro for the
+            reference below and decide.
+          </Txt>
+          {unknown.map((u) => {
+            let what = u.kind;
+            try {
+              const p = JSON.parse(u.payload) as { jobId?: string; subject?: string; lines?: unknown[] };
+              what = u.kind === 'job-note'
+                ? `Note on job ${p.jobId ?? '?'}: ${p.subject ?? ''}`
+                : u.kind === 'purchase-order'
+                  ? `Parts order${p.jobId ? ` for job ${p.jobId}` : ''}, ${Array.isArray(p.lines) ? p.lines.length : 0} lines`
+                  : u.kind;
+            } catch { /* a payload that will not parse still shows its kind */ }
+            return (
+              <Card key={u.id}>
+                <Txt weight="700">{what}</Txt>
+                <Txt size="xs" tone="muted">{formatAuDate(u.createdAt)}{u.lastError ? ` · ${u.lastError}` : ''}</Txt>
+                {u.contentKey ? (
+                  <Txt size="xs" tone="faint" style={{ marginTop: 4 }} mono>Reference {markerFor(u.contentKey)}</Txt>
+                ) : null}
+                <Rowed gap={2} style={{ marginTop: t.space(2.5) }}>
+                  <Button
+                    title="It is in Simpro"
+                    variant="secondary"
+                    compact
+                    style={{ flex: 1 }}
+                    onPress={() => { void dismissSync(u.id).then(() => unknownSync().then(setUnknown)); }}
+                  />
+                  <Button
+                    title="Send again"
+                    compact
+                    style={{ flex: 1 }}
+                    onPress={() => {
+                      void retrySync(u.id).then(() => { flushSoon(); return unknownSync().then(setUnknown); });
+                    }}
+                  />
+                </Rowed>
+              </Card>
+            );
+          })}
+        </>
+      ) : null}
 
       <Divider />
       <H2>Never sent, on purpose</H2>

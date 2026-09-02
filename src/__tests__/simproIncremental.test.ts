@@ -190,3 +190,17 @@ describe('saying how old the local copy is', () => {
     expect(describeStaleness(state('2027-01-01T00:00:00Z'), now).state).toBe('never');
   });
 });
+
+describe('a read the ceiling cut short', () => {
+  it('leaves the watermark where it was, in either mode', () => {
+    /*
+     * The mark is where the next window starts. Moving it to the newest of
+     * the records that were read would skip every record past the ceiling
+     * that is older than that one, silently and for good.
+     */
+    const previous = { lastChangeSeenAt: '2026-08-20T00:00:00.000Z', lastRecordCount: 12 };
+    const records = [{ DateModified: '2026-08-21T09:45:00Z' }];
+    expect(nextWatermark(records, 'incremental', '2026-08-22T00:00:00.000Z', previous, true)).toEqual(previous);
+    expect(nextWatermark(records, 'full', '2026-08-22T00:00:00.000Z', previous, true)).toEqual(previous);
+  });
+});

@@ -29,6 +29,7 @@ export default function PurchasesScreen() {
   const submit = async (item: PurchaseRequest) => {
     try {
       await queuePurchaseOrder({
+        requestId: item.id,
         jobId: item.jobId,
         notes: item.notes,
         lines: item.lines.map((l) => ({

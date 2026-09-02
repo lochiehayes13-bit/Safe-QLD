@@ -262,11 +262,23 @@ export class SimproResources {
   }
 
   async jobs(query: Record<string, string | number> = {}, maxRecords = 1000): Promise<SimproJob[]> {
-    const raw = await this.client.listAll<RawJob>('jobs/', {
+    return (await this.jobsPaged(query, maxRecords)).jobs;
+  }
+
+  /**
+   * The same read, saying whether the ceiling cut it short, and newest
+   * change first so that what a cut read drops is the oldest, not the job
+   * somebody edited this morning. Simpro's default order is by ID ascending,
+   * which on a build with a multi-year history means a capped read returns
+   * the oldest jobs on the books.
+   */
+  async jobsPaged(query: Record<string, string | number> = {}, maxRecords = 1000): Promise<{ jobs: SimproJob[]; truncated: boolean }> {
+    const { items: raw, truncated } = await this.client.listAllPaged<RawJob>('jobs/', {
       columns: 'ID,Type,Name,Description,Customer,Site,Stage,Status,DateIssued,DueDate,DateModified',
+      orderby: '-DateModified',
       ...query,
     }, maxRecords);
-    return raw.map((j) => ({
+    return { truncated, jobs: raw.map((j) => ({
       DateModified: str((j as { DateModified?: unknown }).DateModified),
       id: String(j.ID ?? ''),
       title: str(j.Name) ?? str(j.Description) ?? `Job ${j.ID ?? ''}`,
@@ -279,7 +291,7 @@ export class SimproResources {
       issuedAt: str(j.DateIssued),
       dueAt: str(j.DueDate),
       type: str(j.Type),
-    }));
+    })) };
   }
 
   /** Open jobs only — the technician's actual work list. */

@@ -75,3 +75,33 @@ describe('a job the office re-sends during the day', () => {
     expect((await getJob('job-1'))?.siteId).toBe('site-10');
   });
 });
+
+describe('the outbound queue', () => {
+  const { enqueueSync, pendingSync, markSyncUnknown, retrySync, dismissSync, unknownSync } = jest.requireActual('@/db/opsRepo') as typeof import('@/db/opsRepo');
+
+  it('stores the same note once, however many times it is queued', async () => {
+    // A double tap, or a screen that re-queues on focus, used to become two
+    // notes on the job.
+    const first = await enqueueSync('job-note', { jobId: '1', subject: 'S', note: 'N' });
+    const second = await enqueueSync('job-note', { subject: 'S', note: 'N', jobId: '1' });
+    expect({ dup1: first.duplicate, dup2: second.duplicate, sameRow: first.id === second.id }).toEqual({ dup1: false, dup2: true, sameRow: true });
+    expect(await pendingSync()).toHaveLength(1);
+  });
+
+  it('keeps a send with no reply out of the retry loop until a person decides', async () => {
+    const { id } = await enqueueSync('purchase-order', { jobId: '1', lines: [] });
+    await markSyncUnknown(id, 'Network request failed');
+    expect(await pendingSync()).toHaveLength(0);
+    expect((await unknownSync()).map((u) => u.id)).toEqual([id]);
+    await retrySync(id);
+    expect((await pendingSync()).map((u) => u.id)).toEqual([id]);
+  });
+
+  it('lets a person close one they found in Simpro, and will not queue its twin again', async () => {
+    const { id } = await enqueueSync('job-note', { jobId: '2', subject: 'T', note: 'U' });
+    await markSyncUnknown(id, 'timeout');
+    await dismissSync(id);
+    expect(await unknownSync()).toHaveLength(0);
+    expect((await enqueueSync('job-note', { jobId: '2', subject: 'T', note: 'U' })).duplicate).toBe(true);
+  });
+});

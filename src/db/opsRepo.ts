@@ -1,4 +1,5 @@
 import { getDb, newId, nowIso } from './index';
+import { queueKey } from '@/domain/queueKey';
 import { defectByCode, type Severity } from '@/seed/defectLibrary';
 
 /**
@@ -448,20 +449,67 @@ export interface SyncEntry {
   payload: string;
   attempts: number;
   lastError?: string;
-  status: 'pending' | 'sent' | 'failed';
+  /**
+   * `unknown` is a send the phone cannot vouch for either way: the request
+   * went out and the reply never came. It is not retried on its own, because
+   * a vendor order that did arrive would be raised twice; a person looks at
+   * Simpro and either retries it or lets it go.
+   */
+  status: 'pending' | 'sent' | 'failed' | 'unknown';
+  /** What the item is, derived from its content. See domain/queueKey. */
+  contentKey?: string | null;
 }
 
-export async function enqueueSync(kind: string, payload: unknown): Promise<void> {
+/**
+ * Queues an item once.
+ *
+ * The same kind and content already pending, sent or in doubt is not queued
+ * again: a double tap on "send", or a screen that re-queues its note on every
+ * focus, used to become two notes on the job. Returns whether it was new.
+ */
+export async function enqueueSync(kind: string, payload: unknown): Promise<{ id: string; duplicate: boolean }> {
   const db = await getDb();
-  await db.runAsync(
-    'INSERT INTO sync_queue (id,createdAt,kind,payload,attempts,status) VALUES (?,?,?,?,0,?)',
-    newId(), nowIso(), kind, JSON.stringify(payload), 'pending',
+  const key = queueKey(kind, payload);
+  const existing = await db.getFirstAsync<{ id: string }>(
+    "SELECT id FROM sync_queue WHERE contentKey = ? AND status IN ('pending', 'sent', 'unknown') LIMIT 1",
+    key,
   );
+  if (existing) return { id: existing.id, duplicate: true };
+  const id = newId();
+  await db.runAsync(
+    'INSERT INTO sync_queue (id,createdAt,kind,payload,attempts,status,contentKey) VALUES (?,?,?,?,0,?,?)',
+    id, nowIso(), kind, JSON.stringify(payload), 'pending', key,
+  );
+  return { id, duplicate: false };
 }
 
 export async function pendingSync(limit = 100): Promise<SyncEntry[]> {
   const db = await getDb();
   return db.getAllAsync<SyncEntry>("SELECT * FROM sync_queue WHERE status = 'pending' ORDER BY createdAt LIMIT ?", limit);
+}
+
+/** Sends nobody can vouch for, oldest first, for a person to look at. */
+export async function unknownSync(): Promise<SyncEntry[]> {
+  const db = await getDb();
+  return db.getAllAsync<SyncEntry>("SELECT * FROM sync_queue WHERE status = 'unknown' ORDER BY createdAt");
+}
+
+/** A send that went out and got no reply. Kept out of the retry loop; see SyncEntry.status. */
+export async function markSyncUnknown(id: string, error: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync("UPDATE sync_queue SET status = 'unknown', attempts = attempts + 1, lastError = ? WHERE id = ?", error, id);
+}
+
+/** A person has looked and wants it sent again, or a failed item given another go. */
+export async function retrySync(id: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync("UPDATE sync_queue SET status = 'pending', attempts = 0, lastError = NULL WHERE id = ?", id);
+}
+
+/** A person has looked, found it in Simpro, and is done with it. */
+export async function dismissSync(id: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync("UPDATE sync_queue SET status = 'sent' WHERE id = ?", id);
 }
 
 export async function markSynced(id: string): Promise<void> {

@@ -15,6 +15,7 @@ import { MIGRATION_V13 } from './schemaOutbound';
 import { MIGRATION_V14 } from './schemaSimpro';
 import { MIGRATION_V15 } from './schemaGeocode';
 import { MIGRATION_V16 } from './schemaEmployees';
+import { MIGRATION_V17 } from './schemaV17';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -301,6 +302,10 @@ export const MIGRATIONS: string[] = [
   // v16 — who works here and where the office has put them, so a phone can
   // know whose it is and show that person their own day
   MIGRATION_V16,
+
+  // v17 — a content key on queued sends so nothing posts twice, and the three
+  // record-of-maintenance answers the report screen asked and never kept
+  MIGRATION_V17,
 ];
 
 /**

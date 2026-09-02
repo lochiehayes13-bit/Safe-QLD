@@ -276,6 +276,14 @@ export interface ServiceReport {
   signatureWitness?: string;
   status: 'draft' | 'complete';
   notes?: string;
+  /**
+   * The Queensland record-of-maintenance answers, which an inspector reads.
+   * Absent means not answered; for working order that is a real third state,
+   * and it must never default to a yes.
+   */
+  qdcCompliance?: boolean;
+  inProperWorkingOrder?: boolean;
+  hardcopyLeftOnSite?: boolean;
   createdAt: string;
   updatedAt: string;
 }

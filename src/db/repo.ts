@@ -334,16 +334,30 @@ async function insertMany(db: SQLiteDatabase, table: string, cols: string[], row
 // Reports
 // ---------------------------------------------------------------------------
 
+/** The three record-of-maintenance answers are 1/0/NULL in the row and boolean-or-absent in the record. */
+const REPORT_FLAGS = ['qdcCompliance', 'inProperWorkingOrder', 'hardcopyLeftOnSite'] as const;
+
+function hydrateReport(row: Record<string, unknown>): ServiceReport {
+  const out = { ...row } as Record<string, unknown>;
+  for (const f of REPORT_FLAGS) {
+    const v = row[f];
+    out[f] = v === 1 || v === true ? true : v === 0 || v === false ? false : undefined;
+  }
+  return out as unknown as ServiceReport;
+}
+
 export async function listReports(siteId?: string): Promise<ServiceReport[]> {
   const db = await getDb();
-  return siteId
-    ? db.getAllAsync<ServiceReport>('SELECT * FROM report WHERE siteId = ? ORDER BY serviceDate DESC, createdAt DESC', siteId)
-    : db.getAllAsync<ServiceReport>('SELECT * FROM report ORDER BY serviceDate DESC, createdAt DESC');
+  const rows = siteId
+    ? await db.getAllAsync<Record<string, unknown>>('SELECT * FROM report WHERE siteId = ? ORDER BY serviceDate DESC, createdAt DESC', siteId)
+    : await db.getAllAsync<Record<string, unknown>>('SELECT * FROM report ORDER BY serviceDate DESC, createdAt DESC');
+  return rows.map(hydrateReport);
 }
 
 export async function getReport(id: string): Promise<ServiceReport | null> {
   const db = await getDb();
-  return (await db.getFirstAsync<ServiceReport>('SELECT * FROM report WHERE id = ?', id)) ?? null;
+  const row = await db.getFirstAsync<Record<string, unknown>>('SELECT * FROM report WHERE id = ?', id);
+  return row ? hydrateReport(row) : null;
 }
 
 export async function createReport(input: Omit<ServiceReport, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }): Promise<ServiceReport> {
@@ -369,6 +383,10 @@ export async function updateReport(id: string, patch: Partial<ServiceReport>): P
   const vals: SqlValue[] = [];
   for (const f of fields) {
     if (patch[f] !== undefined) { sets.push(`${f} = ?`); vals.push((patch[f] as string | undefined) ?? null); }
+  }
+  for (const f of REPORT_FLAGS) {
+    // A key present with undefined clears the answer; a key absent leaves it alone.
+    if (f in patch) { sets.push(`${f} = ?`); vals.push(patch[f] === true ? 1 : patch[f] === false ? 0 : null); }
   }
   if (!sets.length) return;
   sets.push('updatedAt = ?');

@@ -234,7 +234,13 @@ export function nextWatermark(
   mode: 'full' | 'incremental',
   startedAt: string,
   previous: Pick<SyncState, 'lastChangeSeenAt' | 'lastRecordCount'>,
+  truncated = false,
 ): Pick<SyncState, 'lastChangeSeenAt' | 'lastRecordCount'> {
+  // A read cut off at the ceiling has not seen what lies past it. Moving the
+  // mark to the newest record it did see would skip, for good, every record
+  // past the ceiling that is older than that one — and nothing would ever
+  // say so. The mark stays where it was and the caller says the read was cut.
+  if (truncated) return { ...previous };
   return {
     lastChangeSeenAt:
       newestChange(records) ?? (mode === 'full' ? startedAt : previous.lastChangeSeenAt),
