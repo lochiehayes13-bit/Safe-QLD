@@ -153,14 +153,20 @@ export default function NewDefectScreen() {
     setSaving(true);
     try {
       const description = [selected.reportWording, extra.trim()].filter(Boolean).join(' ');
+      const critical = (severity ?? selected.severity) === 'critical';
       const defect = await createDefect({
         siteId,
         pointId: params.assetId,
         location: location.trim() || 'Location not recorded',
         description,
-        severity: (severity ?? selected.severity) === 'critical' ? 'critical' : 'non-critical',
+        severity: critical ? 'critical' : 'non-critical',
         status: 'open',
         photos,
+        // The library code and the AS 1851 class go on the record itself, not
+        // only into the notes: the notice screen and the outbound report read
+        // them from the row, and a row without them reads as non-critical.
+        defectCode: selected.code,
+        as1851Class: critical ? 'critical' : 'non-critical',
         notes: `${selected.code}${extra.trim() ? `\n\nTechnician note: ${extra.trim()}` : ''}`,
       });
 

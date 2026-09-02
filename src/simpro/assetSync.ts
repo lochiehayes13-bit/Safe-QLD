@@ -83,6 +83,18 @@ export function lastResult(simproResult: string | undefined): string | undefined
   }
 }
 
+/**
+ * The status a Simpro asset should carry locally.
+ *
+ * Exposed on its own so the sync can apply it on an update as well as on
+ * creation: the update path patches blanks only, which is right for what a
+ * technician recorded on site, but an asset the office has archived is not a
+ * blank — it is gone, and it stayed in service on every phone for good.
+ */
+export function statusFor(remote: Pick<SimproAsset, 'archived'>): 'decommissioned' | 'in-service' {
+  return remote.archived ? 'decommissioned' : 'in-service';
+}
+
 export interface MappedAsset {
   /** Ready to hand to createAsset, less the site which the caller resolves. */
   input: Partial<AssetRecord> & { assetTypeId: string };
@@ -141,11 +153,14 @@ export function mapSimproAsset(asset: SimproAsset): MappedAsset {
       name: location ?? (tag ? `${def.label} ${tag}` : def.label),
       locationNote: location,
       installedDate: asset.installedDate,
-      status: asset.archived ? 'decommissioned' : 'in-service',
+      status: statusFor(asset),
       lastServicedAt: asset.lastTestAt,
       lastResult: lastResult(asset.lastTestResult),
       nextDueAt: nextDue(asset),
-      attributes: tag ? { ...attributes, tag } : attributes,
+      // Filed under assetNumber, which is where the register importer puts
+      // it and the only key the routine service report reads; kept under tag
+      // as well because that is where every earlier sync wrote it.
+      attributes: tag ? { ...attributes, tag, assetNumber: tag } : attributes,
     },
   };
 }

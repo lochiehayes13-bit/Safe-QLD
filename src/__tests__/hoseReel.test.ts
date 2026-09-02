@@ -587,6 +587,17 @@ describe('when the next one falls due', () => {
     expect(d.state).toBe('upcoming');
   });
 
+  it('reads today as the Queensland day when it is handed an instant', () => {
+    // 22:30 UTC on 2 July is the morning of 3 July in Brisbane, and the
+    // days-until figures have to agree with a caller who passed the day.
+    const asDay = nextDue({ activity: 'six-monthly', commissioned: '01/01/2020', today: '2026-07-03' });
+    const asInstant = nextDue({
+      activity: 'six-monthly', commissioned: '01/01/2020', today: '2026-07-02T22:30:00.000Z',
+    });
+    expect(isRefused(asDay)).toBe(false);
+    expect(asInstant).toEqual(asDay);
+  });
+
   it('reports every occurrence still outstanding, not just the most recent one', () => {
     // Last done January 2024 on a 2020 anchor: five six-monthlies have fallen
     // due since, and the date shown is the oldest one still owed.
@@ -810,6 +821,10 @@ describe('the site rollup', () => {
     const five = r.byActivity.find((b) => b.activity === 'five-yearly')!;
     expect(five.neverRecorded).toBe(1);
     expect(five.overdue).toBeGreaterThanOrEqual(1);
+  });
+
+  it('reads today as the Queensland day when it is handed an instant', () => {
+    expect(rollupSite(entries, '2026-07-02T22:30:00.000Z')).toEqual(rollupSite(entries, '2026-07-03'));
   });
 
   it('keeps every activity in its own bucket instead of adding them into one number', () => {

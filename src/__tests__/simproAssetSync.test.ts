@@ -4,6 +4,7 @@ import {
   mapSimproAsset,
   nextDue,
   SIMPRO_ASSET_SOURCE,
+  statusFor,
   tagNumber,
 } from '@/simpro/assetSync';
 import type { SimproAsset } from '@/simpro/resources';
@@ -226,5 +227,31 @@ describe('a whole asset, in the shape the live build returns', () => {
     const gone = mapSimproAsset(asset({ archived: true }));
     expect(gone.input.status).toBe('decommissioned');
     expect(mapped.input.status).toBe('in-service');
+  });
+
+  it('writes the office number where the report reads it', () => {
+    /*
+     * The register importer files the number under `assetNumber` and the
+     * routine service report reads only that, so every Simpro-synced asset
+     * printed with a blank number. It is kept under `tag` as well, because
+     * that is where the sync has written it until now.
+     */
+    expect(mapped.input.attributes).toMatchObject({ assetNumber: '1', tag: '1' });
+    const untagged = mapSimproAsset(asset({ custom: {} }));
+    expect(untagged.input.attributes).not.toHaveProperty('assetNumber');
+  });
+});
+
+describe('the status an update carries', () => {
+  it('maps archived to decommissioned so an update can retire an asset the office has', () => {
+    // The sync only patched blanks on an existing asset, so one archived in
+    // the office stayed in service on every phone for good.
+    expect(statusFor({ archived: true })).toBe('decommissioned');
+    expect(statusFor({ archived: false })).toBe('in-service');
+    expect(statusFor({})).toBe('in-service');
+  });
+
+  it('is the same answer mapSimproAsset gives', () => {
+    expect(mapSimproAsset(asset({ archived: true })).input.status).toBe(statusFor({ archived: true }));
   });
 });

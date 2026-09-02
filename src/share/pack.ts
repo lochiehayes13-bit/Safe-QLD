@@ -171,9 +171,22 @@ function fromWire(w: WirePayload): PackPayload {
       siteName: w.siteName,
       parser: w.parser,
       warnings: w.warnings ?? [],
-      panels: (w.panels ?? []).map((p) => {
+      panels: (w.panels ?? []).map((p, i) => {
         const { pts, ...rest } = p;
-        return { ...rest, zones: (rest.zones ?? []) as Zone[] as ParsedPanel['zones'], points: unpackPoints(pts) };
+        // The points table is the pack; a panel without one is a bad file,
+        // and it is told to the technician as one rather than as a crash
+        // from inside the unpacker. Loops and cause-and-effect are optional
+        // extras, and a screen that maps over them must not meet undefined.
+        if (!pts || typeof pts !== 'object' || !Array.isArray(pts.dict)) {
+          throw new PackError(`Pack panel ${i + 1}${rest.name ? ` (${rest.name})` : ''} has no points table.`);
+        }
+        return {
+          ...rest,
+          zones: (rest.zones ?? []) as Zone[] as ParsedPanel['zones'],
+          points: unpackPoints(pts),
+          loops: rest.loops ?? [],
+          causeEffect: rest.causeEffect ?? [],
+        };
       }),
     },
   };

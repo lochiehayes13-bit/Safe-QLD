@@ -940,6 +940,17 @@ describe('checking a filled statement against the Regulation', () => {
     expect(issue?.message).not.toContain('2026-04-30');
   });
 
+  it('reads today as the Queensland day when it is handed an instant', () => {
+    // 22:30 UTC on 30 April is half past eight the next morning in Brisbane:
+    // the 30 April deadline has passed. Sliced to its UTC day it is still the
+    // 30th, and the copy reads as not yet due.
+    const message = (issues: StatementIssue[]): string | undefined =>
+      about(issues, 'sentToCommissionerDate')[0]?.message;
+    const asDay = message(checkOccupierStatement(completeStatement(), '2026-05-01'));
+    expect(asDay).toMatch(/deadline has passed/);
+    expect(message(checkOccupierStatement(completeStatement(), '2026-04-30T22:30:00.000Z'))).toBe(asDay);
+  });
+
   it('says plainly when the copy went late', () => {
     const issues = checkOccupierStatement(completeStatement({
       sentToCommissionerDate: '2026-05-11',

@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import { MIGRATIONS } from './schema';
+import { applyMigrations } from './migrate';
 
 const DB_NAME = 'safeqld.db';
 
@@ -9,21 +10,15 @@ let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
  * Opens the database and brings it up to the current schema version.
  *
  * user_version tracks how many migrations have run, so an upgrade only applies
- * the ones the device has not seen.
+ * the ones the device has not seen. The loop itself lives in migrate.ts so the
+ * test suite runs the same one against Node's SQLite.
  */
 export function getDb(): Promise<SQLite.SQLiteDatabase> {
   if (!dbPromise) {
     dbPromise = (async () => {
       const db = await SQLite.openDatabaseAsync(DB_NAME);
       await db.execAsync('PRAGMA foreign_keys = ON;');
-      const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version;');
-      const applied = row?.user_version ?? 0;
-      for (let i = applied; i < MIGRATIONS.length; i++) {
-        await db.execAsync(MIGRATIONS[i]!);
-      }
-      if (applied < MIGRATIONS.length) {
-        await db.execAsync(`PRAGMA user_version = ${MIGRATIONS.length};`);
-      }
+      await applyMigrations(db, MIGRATIONS);
       return db;
     })();
   }

@@ -65,6 +65,15 @@ export async function getJob(id: string): Promise<JobRecord | null> {
   return (await db.getFirstAsync<JobRecord>('SELECT * FROM job WHERE id = ?', id)) ?? null;
 }
 
+/**
+ * Writes a job from the office, without overwriting what happened on site.
+ *
+ * The sync re-sends every job before and after each run. The office owns the
+ * booking — who, where, what stage — and takes those columns whole. The
+ * technician owns what they did with it: a status they set on site outranks
+ * the office's, notes already on the job are kept, and a site the job was
+ * matched to locally survives an office copy that has none.
+ */
 export async function upsertJob(input: Partial<JobRecord> & { siteName: string; title: string }): Promise<JobRecord> {
   const db = await getDb();
   const now = nowIso();
@@ -82,10 +91,14 @@ export async function upsertJob(input: Partial<JobRecord> & { siteName: string; 
        scheduledFor,dueAt,technician,address,latitude,longitude,status,startedAt,completedAt,notes,createdAt,updatedAt)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET
+       siteId=COALESCE(excluded.siteId, job.siteId),
        siteName=excluded.siteName, customerName=excluded.customerName, title=excluded.title,
        jobType=excluded.jobType, stage=excluded.stage, priority=excluded.priority,
        scheduledFor=excluded.scheduledFor, dueAt=excluded.dueAt, technician=excluded.technician,
-       address=excluded.address, status=excluded.status, notes=excluded.notes, updatedAt=excluded.updatedAt`,
+       address=excluded.address,
+       status=CASE WHEN job.status IN ('in-progress','complete','blocked') THEN job.status ELSE excluded.status END,
+       notes=COALESCE(job.notes, excluded.notes),
+       updatedAt=excluded.updatedAt`,
     job.id, job.externalId ?? null, job.siteId ?? null, job.siteName, job.customerName ?? null,
     job.title, job.jobType ?? null, job.stage ?? null, job.priority, job.scheduledFor ?? null,
     job.dueAt ?? null, job.technician ?? null, job.address ?? null, job.latitude ?? null,

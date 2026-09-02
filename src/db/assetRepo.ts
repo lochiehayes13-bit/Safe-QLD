@@ -238,14 +238,20 @@ export async function findBySerial(serial: string): Promise<AssetRecord[]> {
  *
  * Numbering is per prefix and derived from the highest existing code rather
  * than a counter table, so it stays correct after an import.
+ *
+ * The prefix is a range rather than a LIKE. LIKE cannot use the index on
+ * code, so every asset created walked every code on the phone — thirteen
+ * thousand rows on the real register, once per asset. `>= 'SQ-DET-'` and
+ * `< 'SQ-DET-~'` bound the same codes and seek straight to the last one:
+ * a tilde sorts after every character a code can contain.
  */
 export async function nextAssetCode(assetTypeId: string): Promise<string> {
   const db = await getDb();
   const type = ASSET_TYPES.find((t) => t.id === assetTypeId);
   const prefix = `SQ-${type?.codePrefix ?? 'AST'}-`;
   const row = await db.getFirstAsync<{ code: string }>(
-    'SELECT code FROM asset WHERE code LIKE ? ORDER BY code DESC LIMIT 1',
-    `${prefix}%`,
+    'SELECT code FROM asset WHERE code >= ? AND code < ? ORDER BY code DESC LIMIT 1',
+    prefix, `${prefix}~`,
   );
   const last = row?.code ? parseInt(row.code.slice(prefix.length), 10) : 0;
   const next = (Number.isFinite(last) ? last : 0) + 1;
@@ -314,7 +320,10 @@ export async function updateAsset(id: string, patch: Partial<AssetRecord>): Prom
   const sets: string[] = [];
   const vals: (string | number | null)[] = [];
 
-  const textFields = ['name', 'level', 'room', 'locationNote', 'manufacturer', 'model', 'partNumber',
+  // siteId is on the list because the register moves assets between sites,
+  // and a re-import that could not follow the move left the asset on the old
+  // building for as long as it was on the books.
+  const textFields = ['siteId', 'name', 'level', 'room', 'locationNote', 'manufacturer', 'model', 'partNumber',
     'serial', 'catalogueItemId', 'installedDate', 'status', 'lastServicedAt', 'lastResult',
     'nextDueAt', 'notes', 'code', 'parentAssetId', 'externalId', 'externalSource'] as const;
 

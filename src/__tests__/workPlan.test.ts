@@ -138,6 +138,19 @@ describe('working days', () => {
     expect(days[0]).toBe('2026-10-20');
     expect(days).not.toContain('2026-10-19');
   });
+
+  it('reads a window handed over as instants by the Queensland days it names', () => {
+    // 22:00 UTC on 1 October is the morning of 2 October in Brisbane. Sliced
+    // to their UTC days, the bounds plan a day early at both ends.
+    const asDays = workingDaysIn({ from: '2026-10-02', to: '2026-10-06', label: 'x' }, ['2026-10-05'], '2026-10-05');
+    const asInstants = workingDaysIn(
+      { from: '2026-10-01T22:00:00.000Z', to: '2026-10-05T22:00:00.000Z', label: 'x' },
+      ['2026-10-04T22:00:00.000Z'],
+      '2026-10-04T22:00:00.000Z',
+    );
+    expect(asDays).toEqual(['2026-10-06']);
+    expect(asInstants).toEqual(asDays);
+  });
 });
 
 describe('estimating how long a visit takes', () => {

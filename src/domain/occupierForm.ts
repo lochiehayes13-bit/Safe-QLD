@@ -61,6 +61,8 @@
 // Sources
 // ---------------------------------------------------------------------------
 
+import { qldIsoDay } from '@/domain/qldTime';
+
 export type Confidence = 'high' | 'medium' | 'low';
 
 export type SourceId =
@@ -1745,7 +1747,11 @@ export function checkOccupierStatement(
       });
     }
   } else {
-    const late = todayIso && parseIsoDate(todayIso) && todayIso.slice(0, 10) > deadline.due;
+    // Today as the Queensland day, whether the caller passed a day or an
+    // instant: half past eight on the morning after the deadline is still the
+    // deadline's date in UTC.
+    const today = qldIsoDay(todayIso);
+    const late = !!today && today > deadline.due;
     add({
       field: 'sentToCommissionerDate',
       formRef: 'Not a Schedule 2 field',

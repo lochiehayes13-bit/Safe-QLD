@@ -76,8 +76,13 @@ const SLICED = /\bformat[A-Za-z]*\([^)]*\.slice\(0,\s*10\)/;
  * one here: `...At` is this codebase's name for a stamped instant, and it holds
  * across the schema, the domain and the screens. A rule that listed the field
  * names instead would be a list of the ones that existed tonight.
+ *
+ * A window's bounds are the exception to the convention: `from`, `to` and
+ * `until` are instants that do not end in At, and the routine service report
+ * dated itself by the UTC day of `to`. They are matched as whole names, so a
+ * photo or a total is not read as one.
  */
-const SLICED_INSTANT = /[A-Za-z_]+[Aa]t[!?]?\.slice\(0,\s*10\)/;
+const SLICED_INSTANT = /(?:[A-Za-z_]+[Aa]t|\b(?:from|to|until))[!?]?\.slice\(0,\s*10\)/;
 
 /**
  * Today, taken as the UTC day.
@@ -149,6 +154,14 @@ describe('dates handed to a formatter', () => {
     expect(SLICED_INSTANT.test('daysBetween(today, clocks.noticeDueAt.slice(0, 10))')).toBe(true);
     expect(SLICED_INSTANT.test('signedDate: s.signedAt ? s.signedAt.slice(0, 10) : undefined,')).toBe(true);
     expect(SLICED_INSTANT.test('const rectified = d.rectifiedAt?.slice(0, 10);')).toBe(true);
+
+    // A window's bounds are instants too, and they are not named with At: the
+    // report's date performed was the UTC day of the window's end.
+    expect(SLICED_INSTANT.test('datePerformed: q.to.slice(0, 10),')).toBe(true);
+    expect(SLICED_INSTANT.test('const day = from.slice(0, 10);')).toBe(true);
+    expect(SLICED_INSTANT.test('until?.slice(0, 10)')).toBe(true);
+    // Only as whole names: a photo is not a to.
+    expect(SLICED_INSTANT.test('const stamp = photo.slice(0, 10);')).toBe(false);
 
     // And says nothing about the slices that are not an instant's UTC day:
     // reading a day out of a date-only string, or out of an ISO date inside

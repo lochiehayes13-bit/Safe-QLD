@@ -8,6 +8,8 @@
  * filled in automatically, and stays editable.
  */
 
+import { qldIsoDay } from '@/domain/qldTime';
+
 export type YesNo = 'YES' | 'NO' | 'N/A' | '';
 
 export type InstallType = 'New install' | 'Alteration' | '';
@@ -129,7 +131,9 @@ export function emptyBaseline(siteId: string, id: string, now: string): Baseline
       deviceTypes: '',
     })),
     testerNames: '',
-    testDate: now.slice(0, 10),
+    // The Queensland day, not the UTC one: a form started at half past eight
+    // in the morning is still stamped the previous day in UTC.
+    testDate: qldIsoDay(now) ?? '',
     createdAt: now,
     updatedAt: now,
   };

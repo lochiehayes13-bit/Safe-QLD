@@ -92,7 +92,9 @@ export async function buildRoutineReport(q: RoutineReportQuery): Promise<Routine
     if (!technician && row.technician) technician = row.technician;
 
     const asset: RoutineReportAsset = {
-      assetNumber: attribute(row.attributes, 'assetNumber'),
+      // The register importer files the office number as assetNumber and the
+      // Simpro sync filed it as tag; either is the number on the equipment.
+      assetNumber: attribute(row.attributes, 'assetNumber') ?? attribute(row.attributes, 'tag'),
       location: row.locationNote ?? undefined,
       descriptor: attribute(row.attributes, 'descriptor'),
       overhaul: attribute(row.attributes, 'lastOverhaul'),
@@ -149,7 +151,10 @@ export async function buildRoutineReport(q: RoutineReportQuery): Promise<Routine
       email: site.contactEmail,
     },
     workRequested: q.workRequested,
-    datePerformed: q.to.slice(0, 10),
+    // The Queensland day the window closed, not the UTC one: a run finishing
+    // at four in the afternoon is stamped early morning of the same day in
+    // UTC, but one finishing at nine in the morning is stamped the day before.
+    datePerformed: qldIsoDay(q.to) ?? q.to,
     technicianName: technician,
     sections,
   };

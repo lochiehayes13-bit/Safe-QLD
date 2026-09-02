@@ -171,11 +171,15 @@ export function defaultPlanWindow(todayIso: string): PlanWindow | undefined {
  * https://www.qld.gov.au/recreation/travel/holidays/public
  */
 export function workingDaysIn(window: PlanWindow, holidays: string[] = [], notBefore?: string): string[] {
-  const excluded = new Set(holidays.map((h) => h.slice(0, 10)));
+  // Each bound resolved as a Queensland day, so a window handed over as
+  // instants plans the days it names rather than the UTC days before them.
+  const excluded = new Set(holidays.map((h) => qldIsoDay(h)).filter((h): h is string => !!h));
   const out: string[] = [];
-  let cursor = window.from.slice(0, 10);
-  const end = window.to.slice(0, 10);
-  if (!parseIsoDate(cursor) || !parseIsoDate(end)) return out;
+  const start = qldIsoDay(window.from);
+  const end = qldIsoDay(window.to);
+  if (!start || !end || !parseIsoDate(start) || !parseIsoDate(end)) return out;
+  const earliest = notBefore ? qldIsoDay(notBefore) : undefined;
+  let cursor = start;
   // The loop is bounded by the window's own length rather than by a round
   // number. A fixed cap silently returns half a window when somebody plans a
   // quarter, and a plan that is quietly short of days is a plan that quietly
@@ -185,7 +189,7 @@ export function workingDaysIn(window: PlanWindow, holidays: string[] = [], notBe
     if (
       !isWeekend(cursor) &&
       !excluded.has(cursor) &&
-      (!notBefore || cursor >= notBefore.slice(0, 10))
+      (!earliest || cursor >= earliest)
     ) {
       out.push(cursor);
     }

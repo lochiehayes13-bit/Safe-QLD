@@ -134,6 +134,12 @@ export interface SiteMatch<T> {
  * hand. Two buildings folded into one cannot be taken apart afterwards —
  * nothing records which service belonged to which.
  */
+/** The importer a reference came from: "SIMPRO:3370" is from SIMPRO. */
+function refSource(ref: string): string {
+  const colon = ref.indexOf(':');
+  return (colon >= 0 ? ref.slice(0, colon) : ref).trim().toLowerCase();
+}
+
 export function matchSiteByRefOrName<T extends NamedSite>(
   existing: readonly T[],
   ref: string | undefined,
@@ -149,7 +155,19 @@ export function matchSiteByRefOrName<T extends NamedSite>(
   // unnamed site into one.
   if (!wanted) return {};
 
-  const byName = existing.filter((s) => s.name.trim().toLowerCase() === wanted);
+  /*
+   * A namesake that already carries a different reference from the same
+   * source is a different building, and the name must not join them. Three
+   * Luggage Directs arriving from the sync one after another: the first has
+   * no namesake and is created; the second finds exactly one site by name, but
+   * that site is SIMPRO:3370 and this one is SIMPRO:3371, and the office does
+   * not give one building two numbers. A site with no reference, or one from
+   * the other importer, is still a candidate — that is the case the fallback
+   * exists for.
+   */
+  const source = ref ? refSource(ref) : undefined;
+  const byName = existing.filter((s) => s.name.trim().toLowerCase() === wanted
+    && !(source && s.siteRef && s.siteRef !== ref && refSource(s.siteRef) === source));
   if (byName.length === 1) return { match: byName[0] };
   if (byName.length > 1) return { ambiguous: byName };
   return {};

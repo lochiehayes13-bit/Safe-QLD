@@ -49,6 +49,12 @@ describe('emptyBaseline', () => {
     for (const k of EQUIPMENT_ITEMS) expect(b.equipment[k]).toBe('');
     for (const k of CONFIRMATION_ITEMS) expect(b.confirmations[k]).toBe('');
   });
+
+  it('dates the form by the Queensland day, not the UTC one', () => {
+    // 22:30 UTC on 2 July is half past eight the next morning in Brisbane,
+    // which is when a form like this gets started.
+    expect(emptyBaseline('site-1', 'b1', '2026-07-02T22:30:00.000Z').testDate).toBe('2026-07-03');
+  });
 });
 
 describe('zoneQtyTotal', () => {

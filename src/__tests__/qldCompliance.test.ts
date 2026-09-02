@@ -227,8 +227,16 @@ describe('statutory clocks', () => {
     expect(rectificationDueAt('2026-01-31')).toBe('2026-02-28');
   });
 
-  it('gives ten working days for the Commissioner copy', () => {
-    // 2026-08-31 is a Monday; ten working days later is Monday 2026-09-14.
+  it('gives ten business days for the Commissioner copy, and Easter is not business days', () => {
+    /*
+     * 30 March 2026 is a Monday. Ten weekdays on is Monday 13 April, but Good
+     * Friday and Easter Monday fall inside the count and the Regulation counts
+     * business days, so the copy is due Wednesday 15 April. Counting weekends
+     * only put the deadline two days early, and a copy sent on the 14th was
+     * reported late when it was not.
+     */
+    expect(commissionerCopyDueAt('2026-03-30')).toBe('2026-04-15');
+    // And a run with no holiday in it still lands where it always did.
     expect(commissionerCopyDueAt('2026-08-31')).toBe('2026-09-14');
   });
 
@@ -253,6 +261,9 @@ describe('statutory clocks', () => {
 
   it('handles an unparseable date without throwing', () => {
     expect(criticalNoticeDueAt('nope')).toBeNull();
+    // 1/9/2026 is a date Date.parse is happy to read as 9 January, and a
+    // notice clock started from January is not a clock.
+    expect(criticalNoticeDueAt('1/9/2026')).toBeNull();
     expect(rectificationDueAt('nope')).toBeNull();
     // An Australian date is the one that gets through a lenient reader, so it
     // is named here rather than left to "nope".
@@ -432,5 +443,12 @@ describe('time left to copy the Commissioner', () => {
   it('goes negative once the statement is late, rather than clamping at zero', () => {
     // The deadline is 14 Sep; a week past it is five working days late.
     expect(commissionerDaysRemaining('2026-08-31', '2026-09-21')).toBe(-5);
+  });
+
+  it('does not count Easter down, because the deadline it counts to does not either', () => {
+    // Signed Monday 30 March 2026, due Wednesday 15 April. On the 14th there is
+    // a day in hand; a weekends-only count had the deadline on the 13th and
+    // called the same statement a day late.
+    expect(commissionerDaysRemaining('2026-03-30', '2026-04-14')).toBe(1);
   });
 });

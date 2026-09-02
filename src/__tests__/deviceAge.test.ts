@@ -153,6 +153,16 @@ describe('readDateCode — Apollo', () => {
     expect(readings.find((r) => r.format === 'apollo-yymmdd' && r.year === 2002))
       .toMatchObject({ month: 4, day: 1, precision: 'day', manufactured: '2002-04-01' });
   });
+
+  it('refuses a day the month does not have', () => {
+    // 020431 would be 31 April 2002. Written into a date it becomes 1 May and
+    // reads as a confident day-precise date; a code that fits nothing is the
+    // honest answer.
+    const bad = readDateCode('020431', { brand: 'Apollo', today: AUG_2026 });
+    expect(bad.some((r) => r.format === 'apollo-yymmdd')).toBe(false);
+    const good = readDateCode('020430', { brand: 'Apollo', today: AUG_2026 });
+    expect(good.some((r) => r.format === 'apollo-yymmdd' && r.day === 30)).toBe(true);
+  });
 });
 
 describe('readDateCode — nothing fits', () => {

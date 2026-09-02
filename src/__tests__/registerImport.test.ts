@@ -4,8 +4,14 @@ import { tmpdir } from 'os';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { MIGRATIONS } from '@/db/schema';
-import { assetName, parseAssetRegister, soonestDue, type RegisterAsset } from '@/parsers/assetRegister';
+import {
+  assetName, parseAssetRegister, soonestDue, type ParsedRegister, type RegisterAsset,
+} from '@/parsers/assetRegister';
 import { registerScheduleLines, type RegisterScheduleRow } from '@/domain/registerSchedule';
+import { importAssetRegister } from '@/db/registerRepo';
+import { attachDb, wrapNodeSqlite } from './support/nodeSqlite';
+
+jest.mock('@/db/index', () => jest.requireActual('./support/nodeSqlite'));
 
 /**
  * Loading a register into the database.
@@ -105,6 +111,47 @@ describe('the schema the import writes to', () => {
        ORDER BY CASE WHEN walkOrder IS NULL THEN 1 ELSE 0 END, walkOrder, name`,
     ).all().map((r) => (r as { id: string }).id);
     expect(walk).toEqual(['a3', 'a2', 'a1']);
+  });
+});
+
+describe('a register imported twice', () => {
+  const parsed = (siteId: string, siteName: string): ParsedRegister => ({
+    system: 'extinguisher',
+    systemLabel: 'Portable extinguishers',
+    parser: 'test/1',
+    warnings: [],
+    sites: [{ externalId: siteId, name: siteName, assetCount: 1 }],
+    assets: [{
+      externalId: 'A-14211',
+      siteExternalId: siteId,
+      siteName,
+      assetNumber: '7',
+      location: 'Loading dock',
+      schedule: [{ frequency: 'six-monthly', nextDueAt: '2027-03-01' }],
+      system: 'extinguisher',
+      assetTypeId: 'extinguisher',
+      extra: {},
+    }],
+  });
+
+  it('moves an asset to the site the register now puts it on', async () => {
+    /*
+     * The office moves an asset between two sites of the same customer, and
+     * the next export says so. The import found the asset by its id and
+     * updated everything the register owns except the site, so the asset
+     * stayed on the old building for as long as it was on the books.
+     */
+    attachDb(wrapNodeSqlite(db));
+    await importAssetRegister(parsed('S-1', 'Storage Choice - Sumner Park'));
+    await importAssetRegister(parsed('S-2', 'Storage Choice - Sumner Park 2'));
+
+    const sites = db.prepare("SELECT id, siteRef FROM site WHERE siteRef LIKE 'asset-register:S-%' ORDER BY siteRef").all() as
+      { id: string; siteRef: string }[];
+    expect(sites.map((s) => s.siteRef)).toEqual(['asset-register:S-1', 'asset-register:S-2']);
+
+    const assets = db.prepare("SELECT siteId FROM asset WHERE externalId = 'A-14211'").all() as { siteId: string }[];
+    expect(assets).toHaveLength(1);
+    expect(assets[0]!.siteId).toBe(sites[1]!.id);
   });
 });
 

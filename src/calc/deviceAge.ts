@@ -278,9 +278,13 @@ export function readDateCode(code: string, options: ReadOptions = {}): DateReadi
     const month = monthAt(digits, 2);
     const yy = Number(digits.slice(0, 2));
     const day = Number(digits.slice(4, 6));
-    if (month !== undefined && day >= 1 && day <= 31) {
+    if (month !== undefined && day >= 1) {
       const spec = FORMATS['apollo-yymmdd'];
       for (const century of [2000, 1900]) {
+        // Checked against the month in that year, not against 31: a 31 April
+        // written into a date string rolls to 1 May and reads as a confident
+        // day-precise reading of a code that fits nothing.
+        if (day > daysInMonth(century + yy, month)) continue;
         push(spec, century + yy, month, { day, precision: 'day', manufactured: iso(century + yy, month, day) });
       }
     }

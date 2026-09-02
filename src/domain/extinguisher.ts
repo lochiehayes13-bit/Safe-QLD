@@ -1,5 +1,6 @@
 import { frequencySpec, scheduledDate, type Frequency } from '@/domain/qldCompliance';
 import { parseImpreciseDate, type ImpreciseDate } from '@/parsers/assetRegister';
+import { qldIsoDay } from '@/domain/qldTime';
 
 /**
  * Portable and wheeled fire extinguishers — the largest single slice of the book.
@@ -1381,7 +1382,9 @@ export interface DueInput {
 export function nextDue(input: DueInput): DueAssessment | Refused {
   const frequency = ACTIVITY_FREQUENCY[input.activity];
   const spec = intervalsFor(input.type).find((i) => i.activity === input.activity)!;
-  const today = input.today.slice(0, 10);
+  // The Queensland day, should a caller hand over an instant by mistake: at
+  // half past eight in the morning the UTC day is still yesterday.
+  const today = qldIsoDay(input.today) ?? input.today;
   const notes: string[] = [];
   const sourceIds: SourceId[] = [...spec.sourceIds];
 
@@ -2332,7 +2335,7 @@ function addMonthsIso(isoDate: string, months: number): string {
  *    whatever screen renders it, so the numbers cannot travel without them.
  */
 export function rollupSite(entries: RegisterEntry[], todayIso: string, horizonMonths = 12): SiteRollup {
-  const today = todayIso.slice(0, 10);
+  const today = qldIsoDay(todayIso) ?? todayIso;
   const horizonEnds = addMonthsIso(today, horizonMonths);
 
   const buckets = new Map<ExtinguisherType | 'unclassified', TypeRollup>();

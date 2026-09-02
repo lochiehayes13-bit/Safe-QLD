@@ -211,7 +211,12 @@ export function calculateBattery(input: BatteryInput): BatteryResult {
   const alarmHours = input.alarmHours > 0 ? input.alarmHours : TA_DEFAULT;
 
   // Design sizing is always against a new battery; 1.1 is a service-only allowance.
-  const L = input.mode === 'design' ? L_DESIGN : input.deteriorationFactor;
+  // A service factor comes off a text field, and the whole requirement is
+  // multiplied by it: NaN makes every figure on the page NaN, and anything
+  // below one makes a battery of any size pass. Either falls back to the
+  // design factor, which is the safe direction, and is reported.
+  const factorUsable = Number.isFinite(input.deteriorationFactor) && input.deteriorationFactor >= 1;
+  const L = input.mode === 'design' || !factorUsable ? L_DESIGN : input.deteriorationFactor;
   const Fc = input.capacityDerating > 0 ? input.capacityDerating : FC_DEFAULT;
 
   const standbyAh = quiescentA * standbyHours;
@@ -219,6 +224,15 @@ export function calculateBattery(input: BatteryInput): BatteryResult {
   const subtotalAh = standbyAh + alarmAh;
   const requiredAh = L * subtotalAh;
   const recommendedAh = nextStandardSize(requiredAh);
+
+  if (input.mode === 'service' && !factorUsable) {
+    issues.push({
+      level: 'error',
+      title: 'Deterioration factor is not usable',
+      detail:
+        `The deterioration factor must be a number of at least 1; "${String(input.deteriorationFactor)}" is not. The design factor of ${L_DESIGN} has been applied instead.`,
+    });
+  }
 
   if (input.mode === 'service' && input.deteriorationFactor === L_IN_SERVICE) {
     issues.push({

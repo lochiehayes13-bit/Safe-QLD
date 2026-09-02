@@ -216,7 +216,16 @@ export function detectorCurrents(sel: VesdaDetectorSelection): VesdaCurrents {
 
   for (const accId of sel.accessoryIds ?? []) {
     const acc = VESDA_ACCESSORIES.find((x) => x.id === accId);
-    if (!acc) continue;
+    if (!acc) {
+      // Skipped silently, the accessory draws nothing on paper and the supply
+      // is sized without it.
+      issues.push({
+        level: 'error',
+        title: 'Unknown accessory',
+        detail: `No catalogue entry for accessory "${accId}", so its current has not been included.`,
+      });
+      continue;
+    }
     if (model.displayIncluded && accId.startsWith('display')) {
       issues.push({
         level: 'warning',

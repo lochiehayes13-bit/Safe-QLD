@@ -243,6 +243,33 @@ describe('the gauge nobody reading the paper can check', () => {
   });
 });
 
+describe('dates written the Australian way', () => {
+  it('refuses to read 1/9/2025 as a January calibration', () => {
+    /*
+     * Date.parse reads a slashed date month-first, so a gauge calibrated on
+     * 1 September 2025 was dated 9 January and judged from there. The date is
+     * unreadable to this form, and saying so is the only answer that does not
+     * put a calibration finding on a date nobody wrote.
+     */
+    const out = deviceCalibration(
+      { slot: 'Gauge 1', serialNumber: 'BFS-02', dateCalibrated: '1/9/2025' },
+      '2026-07-03',
+    );
+    expect(out.state).not.toBe('in-calibration');
+    expect(out.state).toBe('unreadable-date');
+    expect(out.issue?.message).toMatch(/unreadable calibration date/);
+  });
+
+  it('blocks a form whose test date it cannot read, rather than dating it by guesswork', () => {
+    // 3/7/2026 read month-first is 7 March, and every calibration on the form
+    // is judged against it.
+    const issues = validateForm72(issuable({ testDate: '3/7/2026' }));
+    const partA = issues.filter((i) => i.part === 'A' && i.blocking);
+    expect(partA.length).toBeGreaterThan(0);
+    expect(partA.map((i) => i.message).join(' ')).toMatch(/test date/i);
+  });
+});
+
 describe('a form that cannot be issued says why, on its face', () => {
   const blank = form72Html(doc({
     form: emptyForm72({ id: 'f2', siteId: 's1', siteName: 'Baldwin Living', now: NOW }),

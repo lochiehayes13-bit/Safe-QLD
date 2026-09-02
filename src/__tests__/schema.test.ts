@@ -2,6 +2,12 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { MIGRATIONS, SCHEMA_VERSION } from '@/db/schema';
+import { applyMigrations } from '@/db/migrate';
+import { nextAssetCode } from '@/db/assetRepo';
+import { createDefect, createSite, listDefects } from '@/db/repo';
+import { openMigrated, wrapNodeSqlite } from './support/nodeSqlite';
+
+jest.mock('@/db/index', () => jest.requireActual('./support/nodeSqlite'));
 
 /**
  * The migrations, actually run.
@@ -81,6 +87,38 @@ describe('migrations', () => {
       expect(() => db.exec(m)).not.toThrow();
     }
     db.close();
+  });
+
+  const userVersion = (db: DatabaseSync): number =>
+    (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version;
+
+  it('replays from any recorded version without throwing, through the runner the app uses', async () => {
+    // A phone can be on any version that ever shipped. The runner itself is
+    // what brings it forward, so it is the runner that has to be run.
+    for (let from = 0; from <= MIGRATIONS.length; from++) {
+      const raw = new DatabaseSync(':memory:');
+      for (const m of MIGRATIONS.slice(0, from)) raw.exec(m);
+      raw.exec(`PRAGMA user_version = ${from}`);
+      await expect(applyMigrations(wrapNodeSqlite(raw), MIGRATIONS)).resolves.toEqual({ from, to: MIGRATIONS.length });
+      expect({ from, userVersion: userVersion(raw) }).toEqual({ from, userVersion: MIGRATIONS.length });
+      raw.close();
+    }
+  });
+
+  it('records each migration as it lands, so a failure part-way is not replayed from the start', async () => {
+    /*
+     * user_version was written once, after the whole loop. A migration that
+     * failed on a phone left every earlier one applied and the version at
+     * what it was, so the next launch replayed them all — and a CREATE TABLE
+     * without IF NOT EXISTS threw on the second attempt, for good.
+     */
+    const raw = new DatabaseSync(':memory:');
+    const broken = [...MIGRATIONS, 'CREATE TABLE half (id TEXT); CREATE TABLE broken (;'];
+    await expect(applyMigrations(wrapNodeSqlite(raw), broken)).rejects.toThrow();
+    expect(userVersion(raw)).toBe(MIGRATIONS.length);
+    // And the failed one left nothing behind: it ran in a transaction.
+    expect(tables(raw).has('half')).toBe(false);
+    raw.close();
   });
 });
 
@@ -189,6 +227,81 @@ describe('repositories against the schema', () => {
   });
 
   afterAll(() => db.close());
+});
+
+/**
+ * Repositories run against the schema, on Node's SQLite.
+ *
+ * Reading the SQL as text catches a column that does not exist. It does not
+ * catch an INSERT that leaves half the record's columns out, or a query that
+ * walks the whole index instead of searching it — those only show when the
+ * statement runs against a real database.
+ */
+describe('repositories, run', () => {
+  it('finds the next asset code by searching the code index rather than scanning it', async () => {
+    /*
+     * `code LIKE 'SQ-DET-%'` cannot use the index on code, so every new asset
+     * walked every code on the phone — thirteen thousand rows on the real
+     * register, once per asset created. A range on the same prefix is a seek.
+     */
+    const db = openMigrated();
+    const site = await createSite({ name: 'Baldwin Living' });
+    await db.runAsync(
+      `INSERT INTO asset (id,siteId,assetTypeId,code,name,status,attributes,openDefects,createdAt,updatedAt)
+       VALUES ('a1',?,'detector','SQ-DET-0000041','X','in-service','{}',0,'','')`,
+      site.id,
+    );
+    await expect(nextAssetCode('detector')).resolves.toBe('SQ-DET-0000042');
+
+    const lookup = db.statements.find((s) => /SELECT code FROM asset/i.test(s.sql))!;
+    expect(lookup).toBeDefined();
+    const plan = db.raw.prepare(`EXPLAIN QUERY PLAN ${lookup.sql}`).all(...lookup.params) as { detail: string }[];
+    const detail = plan.map((p) => p.detail).join(' | ');
+    expect(detail).toMatch(/SEARCH/);
+    expect(detail).not.toMatch(/SCAN/);
+    await db.closeAsync();
+  });
+
+  it('stores the statutory fields a defect is created with, not only the ones v1 had', async () => {
+    /*
+     * createDefect returned the code, the AS 1851 class and the two Queensland
+     * limbs it was given, and inserted none of them. The screen showed a
+     * critical defect with both limbs ticked; the row said non-critical with
+     * neither, and that row is what the notice is built from.
+     */
+    const db = openMigrated();
+    const site = await createSite({ name: 'Baldwin Living' });
+    const made = await createDefect({
+      siteId: site.id,
+      location: 'Level 2 riser',
+      description: 'Zone 4 in fault',
+      severity: 'critical',
+      status: 'open',
+      photos: [],
+      defectCode: 'DET-SMK-004',
+      as1851Class: 'critical',
+      qldLimbInoperable: true,
+      qldLimbAdverseImpact: true,
+      noticeRecipient: 'Site manager',
+      rectificationDueAt: '2026-08-03',
+      extentOfImpairment: 'Level 2 east wing',
+    });
+
+    const row = await db.getFirstAsync<Record<string, unknown>>('SELECT * FROM defect WHERE id = ?', made.id);
+    expect(row).toMatchObject({
+      defectCode: 'DET-SMK-004',
+      as1851Class: 'critical',
+      qldLimbInoperable: 1,
+      qldLimbAdverseImpact: 1,
+      noticeRecipient: 'Site manager',
+      rectificationDueAt: '2026-08-03',
+      extentOfImpairment: 'Level 2 east wing',
+    });
+    // And it reads back through the repository the same way it went in.
+    const [read] = await listDefects(site.id);
+    expect(read).toMatchObject({ defectCode: 'DET-SMK-004', as1851Class: 'critical', qldLimbInoperable: true });
+    await db.closeAsync();
+  });
 });
 
 /**

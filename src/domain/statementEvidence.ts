@@ -202,15 +202,19 @@ export interface EvidenceProblem {
 // The check
 // ---------------------------------------------------------------------------
 
-const iso = (s: string | undefined): string | undefined => {
-  const t = s?.trim().slice(0, 10);
-  return t || undefined;
-};
+/*
+ * The Queensland day a value names, whether it arrived as a day or as an
+ * instant. A notice given at eight on the first morning of the period is
+ * stamped 22:00 the previous evening in UTC, and read as its UTC day it falls
+ * the day before the period starts — so a notice we hold and the occupier
+ * received was dropped from the check.
+ */
+const iso = (s: string | undefined): string | undefined => qldIsoDay(s);
 
 /** Whether a date falls inside the statement's period, both ends included. */
 function inPeriod(dateIso: string, start: string, end: string): boolean {
-  const d = dateIso.slice(0, 10);
-  return d >= start && d <= end;
+  const d = qldIsoDay(dateIso);
+  return !!d && d >= start && d <= end;
 }
 
 function describe(n: RecordedNotice): string {

@@ -437,6 +437,19 @@ describe('nextDue — the anchor rule', () => {
   });
 });
 
+describe('nextDue — today handed over as an instant', () => {
+  it('reads the Queensland day, so half past eight in the morning is not yesterday', () => {
+    // 22:30 UTC on 2 July is the morning of 3 July in Brisbane. The days-until
+    // figures and the due state have to come out the same either way.
+    const asDay = nextDue({ activity: 'six-monthly', type: 'water', lastDone: '1/6/2026', today: '2026-07-03' });
+    const asInstant = nextDue({
+      activity: 'six-monthly', type: 'water', lastDone: '1/6/2026', today: '2026-07-02T22:30:00.000Z',
+    });
+    expect(isRefused(asDay)).toBe(false);
+    expect(asInstant).toEqual(asDay);
+  });
+});
+
 describe('nextDue — dates recorded to a month, and no further', () => {
   it('turns a "Jun-25" pressure test into a due month rather than a due day', () => {
     // The real register value. Read as 1 June it moves the next test by up to a
@@ -873,6 +886,12 @@ describe('rollupSite — what this site is going to need', () => {
     const abe = r.byType.find((b) => b.type === 'dry-chemical-abe')!;
     expect(abe.activities.find((a) => a.activity === 'five-yearly')!.overdue).toBe(2);
     expect(r.overdue).toBe(3);
+  });
+
+  it('reads today as the Queensland day when it is handed an instant', () => {
+    const asDay = rollupSite([entry('E1'), entry('E2', { typeText: '3.5kg CO2' })], '2026-07-03');
+    const asInstant = rollupSite([entry('E1'), entry('E2', { typeText: '3.5kg CO2' })], '2026-07-02T22:30:00.000Z');
+    expect(asInstant).toEqual(asDay);
   });
 
   it('keeps assets it could not classify in their own bucket rather than spreading them over the others', () => {

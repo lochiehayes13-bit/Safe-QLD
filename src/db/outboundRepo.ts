@@ -141,9 +141,15 @@ export async function resultsForRun(run: RoutineRun): Promise<OutboundResult[]> 
       .map((p) => p?.trim())
       .filter((p): p is string => !!p)
       .join(' ');
+    const attr = (key: string): string | undefined => {
+      const v = asset?.attributes[key];
+      return typeof v === 'string' && v.trim() ? v.trim() : undefined;
+    };
     out.push({
       assetId,
-      assetNumber: asset?.code,
+      // The register importer files the office's number as assetNumber, the
+      // Simpro sync filed it as tag; the app's own code is the fallback.
+      assetNumber: attr('assetNumber') ?? attr('tag') ?? asset?.code,
       name: asset?.name,
       location: location || undefined,
       system: asset ? assetTypeById(asset.assetTypeId)?.system : undefined,

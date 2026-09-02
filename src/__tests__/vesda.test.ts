@@ -60,6 +60,13 @@ describe('detectorCurrents', () => {
     const r = detectorCurrents({ modelId: 'nope', setting: 1, quantity: 1 });
     expect(r.issues[0]?.level).toBe('error');
   });
+
+  it('reports an accessory it has no figures for rather than leaving it out of the load', () => {
+    // Skipped silently, the accessory draws nothing on paper and the battery
+    // is sized without it.
+    const r = detectorCurrents({ modelId: 'veu-a00', setting: 1, quantity: 1, accessoryIds: ['nope'] });
+    expect(r.issues.some((i) => i.level === 'error' && i.detail.includes('nope'))).toBe(true);
+  });
 });
 
 describe('calculateVesda', () => {

@@ -1,5 +1,6 @@
 import { scheduledDate, type Frequency } from '@/domain/qldCompliance';
 import { parseImpreciseDate, type ImpreciseDate } from '@/parsers/assetRegister';
+import { qldIsoDay } from '@/domain/qldTime';
 
 /**
  * Fire hose reels — about a thousand assets, three routines, and no logic at all.
@@ -1528,7 +1529,9 @@ function advance(span: DateSpan, frequency: Frequency, occurrence: number): Date
 export function nextDue(input: DueInput): DueAssessment | Refused {
   const spec = ACTIVITY_SPECS[input.activity];
   const frequency = ACTIVITY_FREQUENCY[input.activity];
-  const today = input.today.slice(0, 10);
+  // The Queensland day, should a caller hand over an instant by mistake: at
+  // half past eight in the morning the UTC day is still yesterday.
+  const today = qldIsoDay(input.today) ?? input.today;
   const notes: string[] = [];
 
   const commissioned = toSpan(input.commissioned);
@@ -1785,7 +1788,7 @@ const ROLLUP_ACTIVITIES: HoseReelActivity[] = (Object.keys(ACTIVITY_SPECS) as Ho
  *    numbers cannot travel without them.
  */
 export function rollupSite(entries: RegisterEntry[], todayIso: string, horizonMonths = 12): SiteRollup {
-  const today = todayIso.slice(0, 10);
+  const today = qldIsoDay(todayIso) ?? todayIso;
   const horizonEnds = addMonthsIso(today, horizonMonths);
 
   const byActivity: ActivityRollup[] = ROLLUP_ACTIVITIES.map((activity) => ({

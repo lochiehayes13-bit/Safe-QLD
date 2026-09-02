@@ -196,6 +196,30 @@ describe('matching an incoming site to one already held', () => {
     }
   });
 
+  it('will not fold a site onto a namesake already carrying a different reference from the same source', () => {
+    /*
+     * Three Luggage Directs arriving from the sync one after another, into an
+     * app that has never seen them. The first creates a site. The second finds
+     * no reference match and exactly one site by name — but that site is
+     * SIMPRO:3370 and this one is SIMPRO:3371, and the office does not give
+     * one building two numbers. Matched by name, all three become one site.
+     */
+    const sites: NamedSite[] = [];
+    for (const id of ['3370', '3371', '3372']) {
+      const ref = `SIMPRO:${id}`;
+      const out = matchSiteByRefOrName(sites, ref, 'Luggage Direct');
+      if (!out.match) sites.push({ id, name: 'Luggage Direct', siteRef: ref });
+    }
+    expect(sites.map((s) => s.siteRef)).toEqual(['SIMPRO:3370', 'SIMPRO:3371', 'SIMPRO:3372']);
+  });
+
+  it('still lets a name match a site with no reference, or one from the other importer', () => {
+    // These are the cases the fallback exists for, and the refusal above must
+    // not take them with it.
+    expect(matchSiteByRefOrName(held, 'SIMPRO:412', 'Carina Bus Depot').match?.id).toBe('e');
+    expect(matchSiteByRefOrName(held, 'SIMPRO:9000', 'Sandgate Hall').match?.id).toBe('d');
+  });
+
   it('says nothing matched rather than matching a blank name to a blank name', () => {
     // Otherwise every unnamed site joins into one.
     const blanks: NamedSite[] = [{ id: 'x', name: '' }, { id: 'y', name: '  ' }];

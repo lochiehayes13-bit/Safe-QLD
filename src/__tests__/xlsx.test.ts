@@ -144,6 +144,17 @@ describe('workbook generation', () => {
     expect(xml).toContain('<c r="A1" t="inlineStr"><is><t xml:space="preserve">Pressure</t></is></c>');
   });
 
+  it('writes a formula as a formula, not as text that happens to start with =', () => {
+    /*
+     * The timesheet totals were written as the string "=SUM(G7:G12)". A string
+     * cell is text whatever it says, so the totals row on a form that goes to
+     * payroll showed the formula's letters and added nothing up.
+     */
+    const xml = sheetXml([{ name: 'S', rows: [[1, 2, { f: 'SUM(A1:B1)' }]] }]);
+    expect(xml).toContain('<c r="C1"><f>SUM(A1:B1)</f></c>');
+    expect(xml).not.toContain('=SUM');
+  });
+
   it('leaves an empty cell out rather than writing an empty one', () => {
     // An empty cell and a cell holding an empty string read differently to
     // anything that filters or counts.

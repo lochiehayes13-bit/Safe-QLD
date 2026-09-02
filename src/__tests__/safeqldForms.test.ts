@@ -1,6 +1,6 @@
 import { baselineSheet, timesheetSheet } from '@/export/safeqldForms';
 import { emptyBaseline } from '@/domain/baseline';
-import type { Cell, CellValue, Row } from '@/export/xlsx';
+import type { Cell, CellValue, FormulaCell, Row } from '@/export/xlsx';
 import type { Timesheet, TimesheetEntry } from '@/domain/timesheet';
 
 /**
@@ -14,8 +14,11 @@ import type { Timesheet, TimesheetEntry } from '@/domain/timesheet';
  * One of them decides what a person is paid.
  */
 
-const value = (c: Cell | CellValue): unknown =>
-  (c !== null && typeof c === 'object' && 'v' in c ? c.v : c);
+// A formula cell reads back as "=…", which is how a person would see it.
+const value = (c: Cell | FormulaCell | CellValue): unknown => {
+  if (c !== null && typeof c === 'object' && 'f' in c) return `=${c.f}`;
+  return c !== null && typeof c === 'object' && 'v' in c ? c.v : c;
+};
 
 const flat = (rows: Row[]): unknown[][] => rows.map((r) => r.map(value));
 
@@ -98,6 +101,45 @@ describe('the hours on a timesheet', () => {
       .find((r) => r[2] === 'TOTAL HOURS' && r[0] === '')!;
     expect(HOURS.map((c) => totals[c])).toEqual([0, 0, 0]);
     expect(JSON.stringify(totals)).not.toContain('SUM');
+  });
+
+  it('puts every data cell under a header, with the public holiday under OTHER LEAVE', () => {
+    /*
+     * The data rows carried fifteen cells against fourteen headers, so the
+     * public holiday hours sat under COMMENTS and the comments sat under
+     * nothing. On a form payroll reads by column, that is a day's leave that
+     * looks like a remark.
+     */
+    const rows = timesheetSheet(timesheet([entry({ publicHoliday: '7.6', comments: 'Show day' })])).rows;
+    const h1 = rows.findIndex((r) => value(r[0]) === 'Date');
+    const top = rows[h1]!;
+    const under = rows[h1 + 1]!;
+    const data = rows.find((r) => value(r[1]) === '43747')!;
+
+    expect(top).toHaveLength(data.length);
+    expect(under).toHaveLength(data.length);
+    expect(value(under[13])).toBe('PUB HOL');
+    expect(value(data[13])).toBe('7.6');
+    expect(value(top[14])).toBe('COMMENTS');
+    expect(value(data[14])).toBe('Show day');
+  });
+
+  it('totals the public holiday column along with the others, as a live formula', () => {
+    const sheet = timesheetSheet(timesheet(worked));
+    const rows = flat(sheet.rows);
+    const dataRows = rows
+      .map((r, i) => (HOURS.some((c) => typeof r[c] === 'number') ? i + 1 : 0))
+      .filter(Boolean);
+    const totals = sheet.rows.find((r) => {
+      const g = r[HOURS[0]];
+      return g !== null && typeof g === 'object' && 'f' in g;
+    })!;
+    const first = dataRows[0];
+    const last = dataRows[dataRows.length - 1];
+    // Written as formula cells rather than strings, so the sheet adds up.
+    expect(totals[HOURS[0]]).toEqual({ f: `SUM(G${first}:G${last})`, style: 'header' });
+    expect(totals[13]).toEqual({ f: `SUM(N${first}:N${last})`, style: 'header' });
+    expect(sheet.colWidths).toHaveLength(totals.length);
   });
 
   it('dates the first shift of a day and not the ones after it', () => {

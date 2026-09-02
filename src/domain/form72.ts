@@ -25,6 +25,8 @@
  * calculator, and duplicating it would give two answers to one question.
  */
 
+import { qldIsoDay } from '@/domain/qldTime';
+
 export type PartResult = 'na' | 'pass' | 'fail';
 
 /** Which maintenance test this form covers. Both boxes can be ticked. */
@@ -263,10 +265,17 @@ export interface FormIssue {
   blocking: boolean;
 }
 
+/*
+ * The day a form date names, as UTC midnight for the calibration arithmetic.
+ *
+ * Read through qldIsoDay rather than Date.parse, which takes a slashed date
+ * month-first: a gauge calibrated 1/9/2025 was being dated 9 January and
+ * judged against the test from there. A date that is not an ISO day or an
+ * instant is unreadable here, and the form says so rather than guessing.
+ */
 const isoDate = (s?: string): number | undefined => {
-  if (!s) return undefined;
-  const t = Date.parse(s);
-  return Number.isFinite(t) ? t : undefined;
+  const day = qldIsoDay(s);
+  return day ? Date.parse(`${day}T00:00:00Z`) : undefined;
 };
 
 /** Twelve months is the usual calibration interval for a test gauge. */
@@ -373,6 +382,15 @@ export function validateForm72(form: Form72): FormIssue[] {
   const testAt = isoDate(form.testDate);
 
   if (!form.testDate) issues.push({ part: 'A', message: 'No test date.', blocking: true });
+  else if (testAt === undefined) {
+    // Every calibration on the form is judged against this date, so one that
+    // cannot be read cannot be issued against.
+    issues.push({
+      part: 'A',
+      message: `The test date "${form.testDate}" cannot be read. Enter it as a calendar date.`,
+      blocking: true,
+    });
+  }
   if (!form.contractor.trim()) issues.push({ part: 'A', message: 'No contractor named.', blocking: true });
   if (!form.licenseeName.trim()) issues.push({ part: 'I', message: 'No licensee name.', blocking: true });
   if (!form.licenceNumber.trim()) {

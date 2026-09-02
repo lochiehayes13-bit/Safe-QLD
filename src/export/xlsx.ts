@@ -4,9 +4,9 @@ import { createZip, toBase64, utf8Bytes, type ZipEntry } from './zip';
  * Minimal XLSX (SpreadsheetML) writer.
  *
  * Supports what a fire service report actually needs: multiple sheets, a bold
- * frozen header row, column widths, text/number/date cells and coloured
- * pass/fail cells. Strings are written inline, which skips the shared-string
- * table at a small size cost and a large simplicity win.
+ * frozen header row, column widths, text/number/date cells, live formulas and
+ * coloured pass/fail cells. Strings are written inline, which skips the
+ * shared-string table at a small size cost and a large simplicity win.
  */
 
 export type CellValue = string | number | boolean | null | undefined;
@@ -27,7 +27,20 @@ export interface Cell {
   style?: CellStyle;
 }
 
-export type Row = (CellValue | Cell)[];
+/**
+ * A live formula, written without the leading "=".
+ *
+ * A formula handed over as the string "=SUM(G7:G12)" is text whatever it
+ * says: the totals row on the timesheet showed the formula's letters and added
+ * nothing up. No cached value is written, and the workbook is marked for a
+ * full calculation on load so a reader works the figure out itself.
+ */
+export interface FormulaCell {
+  f: string;
+  style?: CellStyle;
+}
+
+export type Row = (CellValue | Cell | FormulaCell)[];
 
 export interface Sheet {
   name: string;
@@ -82,8 +95,8 @@ export function colName(i: number): string {
   return s;
 }
 
-function normaliseCell(c: CellValue | Cell): Cell {
-  if (c !== null && typeof c === 'object' && 'v' in c) return c;
+function normaliseCell(c: CellValue | Cell | FormulaCell): Cell | FormulaCell {
+  if (c !== null && typeof c === 'object' && ('v' in c || 'f' in c)) return c;
   return { v: c as CellValue };
 }
 
@@ -113,11 +126,16 @@ function buildSheetXml(sheet: Sheet): string {
     const cells: string[] = [];
     row.forEach((raw, c) => {
       const cell = normaliseCell(raw);
-      const v = cell.v;
-      if (v === null || v === undefined || v === '') return;
       const ref = `${colName(c)}${r + 1}`;
       const s = cell.style ? STYLE_INDEX[cell.style] : 0;
       const sAttr = s ? ` s="${s}"` : '';
+      if ('f' in cell) {
+        if (!cell.f.trim()) return;
+        cells.push(`<c r="${ref}"${sAttr}><f>${esc(cell.f)}</f></c>`);
+        return;
+      }
+      const v = cell.v;
+      if (v === null || v === undefined || v === '') return;
       if (typeof v === 'number' && Number.isFinite(v)) {
         cells.push(`<c r="${ref}"${sAttr}><v>${v}</v></c>`);
       } else if (typeof v === 'boolean') {
@@ -241,6 +259,7 @@ ${sheetEntries
 <sheets>${sheetEntries
     .map((s) => `<sheet name="${esc(s.name)}" sheetId="${s.id}" r:id="${s.rid}"/>`)
     .join('')}</sheets>
+<calcPr fullCalcOnLoad="1"/>
 </workbook>`;
 
   const workbookRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>

@@ -11,7 +11,7 @@ import {
   timesheetTotals,
   type Timesheet,
 } from '@/domain/timesheet';
-import type { Cell, Row, Sheet } from './xlsx';
+import type { Cell, FormulaCell, Row, Sheet } from './xlsx';
 import { formatAuDate } from './sheets';
 
 /**
@@ -141,8 +141,11 @@ export function baselineSheet(b: BaselineData): Sheet {
  * Builds the weekly timesheet sheet.
  *
  * Column order matches the company template: Date, Job #, Job/Site name,
- * Service report #, Start, Finish, ORD, O/T, D/T, then the leave columns and
- * comments.
+ * Service report #, Start, Finish, ORD, O/T, D/T, then the leave columns —
+ * sick, RDO, annual, LWOP, public holiday — and comments. Fifteen columns, A
+ * to O, and every row here is written to that width so a value cannot drift
+ * under the wrong heading: the public holiday hours once sat under COMMENTS
+ * because the header row was a column short.
  */
 export function timesheetSheet(sheet: Timesheet): Sheet {
   const rows: Row[] = [];
@@ -154,18 +157,18 @@ export function timesheetSheet(sheet: Timesheet): Sheet {
     return rows.length;
   };
 
-  const banner = push([{ v: COMPANY, style: 'banner' }, '', '', '', '', '', '', '', '', '', '', '', '', '']);
+  const banner = push([{ v: COMPANY, style: 'banner' }, '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
   merges.push(`A${banner}:E${banner}`);
 
   const header = push([
     '', '', '',
     field('VEHICLE REGO.:'), input(sheet.vehicleRego), '',
     '', field('KILOMETER READING:'), input(sheet.kilometerReading),
-    '', '', '', '', '',
+    '', '', '', '', '', '',
   ]);
   merges.push(`H${header}:I${header}`);
 
-  const nameRow = push(['', '', '', field('EMPLOYEE:'), input(sheet.employeeName), '', '', '', '', '', '', '', '', '']);
+  const nameRow = push(['', '', '', field('EMPLOYEE:'), input(sheet.employeeName), '', '', '', '', '', '', '', '', '', '']);
   merges.push(`E${nameRow}:G${nameRow}`);
 
   push([]);
@@ -185,9 +188,10 @@ export function timesheetSheet(sheet: Timesheet): Sheet {
     { v: '', style: 'header' },
     { v: '', style: 'header' },
     { v: '', style: 'header' },
+    { v: '', style: 'header' },
     { v: 'COMMENTS', style: 'header' },
   ]);
-  merges.push(`G${h1}:I${h1}`, `J${h1}:M${h1}`);
+  merges.push(`G${h1}:I${h1}`, `J${h1}:N${h1}`);
 
   push([
     { v: '', style: 'header' },
@@ -203,6 +207,7 @@ export function timesheetSheet(sheet: Timesheet): Sheet {
     { v: 'RDO', style: 'header' },
     { v: 'ANNUAL', style: 'header' },
     { v: 'LWOP', style: 'header' },
+    { v: 'PUB HOL', style: 'header' },
     { v: '', style: 'header' },
   ]);
 
@@ -246,9 +251,9 @@ export function timesheetSheet(sheet: Timesheet): Sheet {
     '',
     // Live formulas rather than baked values, so the sheet still adds up if
     // someone edits a cell after export.
-    ...(['G', 'H', 'I', 'J', 'K', 'L', 'M'] as const).map((col) =>
+    ...(['G', 'H', 'I', 'J', 'K', 'L', 'M', 'N'] as const).map((col) =>
       lastDataRow >= firstDataRow
-        ? ({ v: `=SUM(${col}${firstDataRow}:${col}${lastDataRow})`, style: 'header' } as Cell)
+        ? ({ f: `SUM(${col}${firstDataRow}:${col}${lastDataRow})`, style: 'header' } as FormulaCell)
         : ({ v: 0, style: 'header' } as Cell),
     ),
     '',
@@ -259,16 +264,16 @@ export function timesheetSheet(sheet: Timesheet): Sheet {
   push([field('SIGN OFF:')]);
   const signRow = push([
     '', field('EMPLOYEE:'), input(sheet.employeeName), '', '', '',
-    field('CHECKED BY:'), input(sheet.checkedBy), '', '', '', '', '', '',
+    field('CHECKED BY:'), input(sheet.checkedBy), '', '', '', '', '', '', '',
   ]);
   void signRow;
-  push(['', '', field('MANAGER:'), input(sheet.managerName), '', '', '', '', '', '', '', '', '', '']);
+  push(['', '', field('MANAGER:'), input(sheet.managerName), '', '', '', '', '', '', '', '', '', '', '']);
 
   return {
     name: 'Timesheet',
     rows,
     merges,
-    colWidths: [18, 12, 40, 14, 10, 10, 8, 8, 8, 8, 8, 9, 8, 46],
+    colWidths: [18, 12, 40, 14, 10, 10, 8, 8, 8, 8, 8, 9, 8, 8, 46],
     rowHeights: { [h1]: 18 },
   };
 }

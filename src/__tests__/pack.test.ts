@@ -1,7 +1,10 @@
 import { existsSync, readFileSync } from 'fs';
+import { deflate } from 'pako';
 import {
-  PACK_MAGIC, PACK_VERSION, decodePack, decodePackBase64, encodePack, encodePackBase64, formatBytes,
+  PACK_MAGIC, PACK_VERSION, PackError, decodePack, decodePackBase64, encodePack, encodePackBase64,
+  formatBytes,
 } from '@/share/pack';
+import { crc32, utf8Bytes } from '@/export/zip';
 import { parseFfp } from '@/parsers/ampacFfp';
 import type { ParsedConfig } from '@/domain/types';
 
@@ -151,6 +154,47 @@ describe('refusing a bad pack', () => {
     const bytes = good();
     expect(String.fromCharCode(...bytes.slice(0, 4))).toBe(PACK_MAGIC);
     expect(bytes[4]).toBe(PACK_VERSION);
+  });
+});
+
+describe('a pack that does not carry everything the reader expects', () => {
+  /**
+   * A wire payload written by hand, the way an older or foreign writer would
+   * produce one: the header is real, the JSON is whatever was given.
+   */
+  function handWritten(wire: unknown): Uint8Array {
+    const raw = utf8Bytes(JSON.stringify(wire));
+    const crc = crc32(raw);
+    const body = deflate(raw, { level: 9 });
+    const out = new Uint8Array(10 + body.length);
+    out.set([0x53, 0x51, 0x4c, 0x44, PACK_VERSION, 0x01, crc & 0xff, (crc >>> 8) & 0xff, (crc >>> 16) & 0xff, (crc >>> 24) & 0xff]);
+    out.set(body, 10);
+    return out;
+  }
+
+  const emptyPoints = {
+    n: 0, dict: [], loop: [], addr: [], sub: [], ref: [], text: [], text2: [],
+    typeRaw: [], type: [], zone: [], zoneText: [], unused: [],
+  };
+
+  it('gives a panel with no loops or cause-and-effect empty lists rather than nothing', () => {
+    // A screen that maps over panel.loops falls over on undefined, and the
+    // site imports as far as that screen and no further.
+    const out = decodePack(handWritten({
+      meta: META, brand: 'ampac', parser: 'test/1', warnings: [],
+      panels: [{ name: 'MAIN FIP', brand: 'ampac', zones: [], pts: emptyPoints }],
+    }));
+    expect(out.config.panels[0]?.loops).toEqual([]);
+    expect(out.config.panels[0]?.causeEffect).toEqual([]);
+  });
+
+  it('refuses a panel with no points table as a bad pack, not as a crash in the unpacker', () => {
+    const bytes = handWritten({
+      meta: META, brand: 'ampac', parser: 'test/1', warnings: [],
+      panels: [{ name: 'MAIN FIP', brand: 'ampac', zones: [] }],
+    });
+    expect(() => decodePack(bytes)).toThrow(PackError);
+    expect(() => decodePack(bytes)).toThrow(/points/);
   });
 });
 

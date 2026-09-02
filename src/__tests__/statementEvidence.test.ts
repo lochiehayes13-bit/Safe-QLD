@@ -390,3 +390,31 @@ describe('what a screen says about it', () => {
     expect(evidenceSummary(out)).toBe("2 answers contradict Safe QLD's own records.");
   });
 });
+
+describe('the Queensland day a notice was given', () => {
+  it('files a notice given at eight on the first morning of the period inside it', () => {
+    /*
+     * 2025-06-30T22:00Z is eight in the morning on 1 July in Brisbane — the
+     * first day of the period. Read as its UTC day it is 30 June, the day
+     * before the period starts, and a notice we hold and the occupier received
+     * is quietly dropped from the check.
+     */
+    const out = checkStatementAgainstRecords(statement({
+      rows: [{ installation: 'Fire detection and alarm systems', installed: true, criticalDefectNoticeIssued: false }],
+    }), [notice({ noticeIssuedAt: '2025-06-30T22:00:00.000Z' })]);
+    expect(out.map((p) => p.kind)).toEqual(['notice-not-declared']);
+  });
+
+  it('compares a claimed rectification date with the Queensland day the defect was rectified', () => {
+    // Rectified at eight on the morning of 3 November, stamped 22:00 on the
+    // 2nd in UTC. A statement claiming the 2nd is claiming a day before the
+    // work was done.
+    const out = checkStatementAgainstRecords(statement({
+      rows: [{
+        installation: 'Fire detection and alarm systems', installed: true,
+        criticalDefectNoticeIssued: true, rectificationDate: '2025-11-02',
+      }],
+    }), [notice({ noticeIssuedAt: '2025-10-28', rectifiedAt: '2025-11-02T22:00:00.000Z' })]);
+    expect(out.map((p) => p.kind)).toEqual(['rectification-before-record']);
+  });
+});

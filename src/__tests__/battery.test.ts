@@ -121,6 +121,24 @@ describe('calculateBattery — in-service assessment', () => {
 });
 
 describe('calculateBattery — validation', () => {
+  it('refuses a deterioration factor that is not a number, or below one', () => {
+    /*
+     * The factor multiplies the whole requirement. NaN turns every figure on
+     * the page into NaN, and zero makes a battery of any size pass its
+     * assessment. Both come straight off a text field.
+     */
+    for (const bad of [Number.NaN, 0]) {
+      const r = calculateBattery({
+        ...base, mode: 'service', monitored: true, deteriorationFactor: bad, installedBatteryAh: 1,
+      });
+      expect(Number.isFinite(r.requiredAh)).toBe(true);
+      // Sized against the design factor instead, which is the safe direction.
+      expect(r.requiredAh).toBeCloseTo(16, 6);
+      expect(r.issues.some((i) => i.level === 'error' && /deterioration factor/i.test(i.title))).toBe(true);
+      expect(r.installedPasses).toBe(false);
+    }
+  });
+
   it('flags a battery that will not fit the panel', () => {
     const r = calculateBattery({ ...base, mode: 'design', monitored: false, panelMaxBatteryAh: 26 });
     expect(r.issues.some((i) => i.level === 'error' && i.title.includes('will not fit'))).toBe(true);

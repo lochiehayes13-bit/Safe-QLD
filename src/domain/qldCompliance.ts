@@ -18,6 +18,9 @@
  */
 
 import { qldIsoDay } from '@/domain/qldTime';
+import {
+  addQldBusinessDays, COMMISSIONER_COPY_BUSINESS_DAYS, qldBusinessDaysBetween,
+} from '@/domain/occupierForm';
 
 export type Frequency = 'monthly' | 'six-monthly' | 'yearly' | 'five-yearly' | 'ten-yearly';
 
@@ -292,6 +295,9 @@ export function isQldCriticalDefect(rendersInoperable: boolean, significantAdver
 
 /** When the written critical defect notice is due to the occupier. */
 export function criticalNoticeDueAt(maintenanceIso: string): string | null {
+  // Refused unless the value is a day or an instant this app can read. The
+  // Date constructor takes "1/9/2026" as 9 January and starts the clock there.
+  if (!qldIsoDay(maintenanceIso)) return null;
   const d = new Date(maintenanceIso);
   if (Number.isNaN(d.getTime())) return null;
   return new Date(d.getTime() + 24 * 3_600_000).toISOString();
@@ -303,9 +309,20 @@ export function rectificationDueAt(maintenanceIso: string): string | null {
   return d ? toIso(addMonths(d, 1)) : null;
 }
 
-/** When a copy of the occupier statement is due to the Commissioner. */
+/**
+ * When a copy of the occupier statement is due to the Commissioner.
+ *
+ * Counted in business days under the Acts Interpretation Act, which is what
+ * section 55A(3) means by them, so Queensland public holidays are skipped.
+ * Counted on weekends alone the deadline fell two days early across Easter,
+ * and a copy sent on time was reported late. Null where the day cannot be
+ * read or the holiday table does not reach it — a deadline against holidays
+ * nobody has appointed yet is a guess.
+ */
 export function commissionerCopyDueAt(statementIso: string): string | null {
-  return addWorkingDays(statementIso, 10);
+  const day = qldIsoDay(statementIso);
+  if (!day) return null;
+  return addQldBusinessDays(day, COMMISSIONER_COPY_BUSINESS_DAYS).date ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -496,6 +513,9 @@ export { SYSTEM_TO_INSTALLATION } from '@/domain/statementEvidence';
  */
 export function commissionerDaysRemaining(signedIso: string, todayIso: string): number | null {
   const due = commissionerCopyDueAt(signedIso);
-  if (!due) return null;
-  return workingDaysBetween(todayIso, due);
+  const today = qldIsoDay(todayIso);
+  if (!due || !today) return null;
+  // The same business day definition the deadline was counted under, or the
+  // two disagree by a holiday and a statement reads late that is not.
+  return qldBusinessDaysBetween(today, due).days ?? null;
 }
