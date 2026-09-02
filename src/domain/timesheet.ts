@@ -9,7 +9,12 @@
  * the part people get wrong and the part the office queries.
  */
 
-export type LeaveKind = 'sick' | 'rdo' | 'annual' | 'lwop';
+/**
+ * `publicHoliday` is paid time not worked, like the others, but it is not leave
+ * the employee elected to take and it is not deducted from any balance. It sits
+ * here because the timesheet totals it the same way, not because it is leave.
+ */
+export type LeaveKind = 'sick' | 'rdo' | 'annual' | 'lwop' | 'publicHoliday';
 
 export type HourKind = 'ord' | 'ot' | 'dt';
 
@@ -33,6 +38,8 @@ export interface TimesheetEntry {
   rdo: string;
   annual: string;
   lwop: string;
+  /** Hours paid for a public holiday not worked. */
+  publicHoliday: string;
   comments: string;
 }
 
@@ -97,6 +104,7 @@ export interface TimesheetTotals {
   rdo: number;
   annual: number;
   lwop: number;
+  publicHoliday: number;
   /** Worked hours only — ordinary plus overtime plus double time. */
   worked: number;
   /** Worked hours plus every leave category. */
@@ -109,7 +117,7 @@ function num(s: string): number {
 }
 
 export function timesheetTotals(sheet: Timesheet): TimesheetTotals {
-  const t: TimesheetTotals = { ord: 0, ot: 0, dt: 0, sick: 0, rdo: 0, annual: 0, lwop: 0, worked: 0, grand: 0 };
+  const t: TimesheetTotals = { ord: 0, ot: 0, dt: 0, sick: 0, rdo: 0, annual: 0, lwop: 0, publicHoliday: 0, worked: 0, grand: 0 };
   for (const e of sheet.entries) {
     const h = entryHours(e);
     t[e.hourKind] += h;
@@ -117,9 +125,10 @@ export function timesheetTotals(sheet: Timesheet): TimesheetTotals {
     t.rdo += num(e.rdo);
     t.annual += num(e.annual);
     t.lwop += num(e.lwop);
+    t.publicHoliday += num(e.publicHoliday);
   }
   t.worked = t.ord + t.ot + t.dt;
-  t.grand = t.worked + t.sick + t.rdo + t.annual + t.lwop;
+  t.grand = t.worked + t.sick + t.rdo + t.annual + t.lwop + t.publicHoliday;
   for (const k of Object.keys(t) as (keyof TimesheetTotals)[]) {
     t[k] = Math.round(t[k] * 100) / 100;
   }
@@ -176,7 +185,7 @@ export function validateTimesheet(sheet: Timesheet): TimesheetIssue[] {
 
   for (const e of sheet.entries) {
     const hasTimes = !!e.startTime.trim() && !!e.finishTime.trim();
-    const hasLeave = [e.sick, e.rdo, e.annual, e.lwop].some((v) => num(v) > 0);
+    const hasLeave = [e.sick, e.rdo, e.annual, e.lwop, e.publicHoliday].some((v) => num(v) > 0);
 
     if (!hasTimes && !hasLeave && !e.hoursOverride?.trim()) {
       issues.push({ entryId: e.id, message: `${e.date}: no times, hours or leave recorded.` });

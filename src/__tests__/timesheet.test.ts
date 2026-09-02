@@ -25,6 +25,7 @@ function entry(p: Partial<TimesheetEntry> = {}): TimesheetEntry {
     rdo: p.rdo ?? '',
     annual: p.annual ?? '',
     lwop: p.lwop ?? '',
+    publicHoliday: p.publicHoliday ?? '',
     comments: p.comments ?? '',
   };
 }

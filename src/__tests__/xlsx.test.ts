@@ -180,12 +180,12 @@ describe('workbook generation', () => {
         {
           id: 'a', date: '2026-08-12', jobNumber: '43747', siteName: 'BRIC Housing Emsworth St',
           serviceReportNumber: '', startTime: '06:30', finishTime: '14:30', hourKind: 'ord',
-          sick: '', rdo: '', annual: '', lwop: '', comments: '',
+          sick: '', rdo: '', annual: '', lwop: '', publicHoliday: '', comments: '',
         },
         {
           id: 'b', date: '2026-08-12', jobNumber: '43747', siteName: 'BRIC Housing Emsworth St',
           serviceReportNumber: '', startTime: '17:30', finishTime: '20:45', hourKind: 'ot',
-          sick: '', rdo: '', annual: '', lwop: '', comments: 'Shutdown MAINS & FIP Cutover',
+          sick: '', rdo: '', annual: '', lwop: '', publicHoliday: '', comments: 'Shutdown MAINS & FIP Cutover',
         },
       ],
       managerName: '',

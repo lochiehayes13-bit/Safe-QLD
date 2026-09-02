@@ -22,7 +22,7 @@ const flat = (rows: Row[]): unknown[][] => rows.map((r) => r.map(value));
 const entry = (over: Partial<TimesheetEntry> = {}): TimesheetEntry => ({
   id: 'a', date: '2026-08-12', jobNumber: '43747', siteName: 'BRIC Housing Emsworth St',
   serviceReportNumber: '', startTime: '06:30', finishTime: '14:30', hourKind: 'ord',
-  sick: '', rdo: '', annual: '', lwop: '', comments: '', ...over,
+  sick: '', rdo: '', annual: '', lwop: '', publicHoliday: '', comments: '', ...over,
 });
 
 const timesheet = (entries: TimesheetEntry[]): Timesheet => ({

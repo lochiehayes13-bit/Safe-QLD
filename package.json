@@ -32,6 +32,7 @@
     "expo-image-picker": "~57.0.14",
     "expo-linking": "~57.0.8",
     "expo-location": "~57.0.14",
+    "expo-mail-composer": "~57.0.1",
     "expo-network": "~57.0.1",
     "expo-print": "~57.0.1",
     "expo-router": "~57.0.17",

@@ -79,8 +79,25 @@ function matchSite(existing: Site[], externalId: string, name: string) {
 export async function pullFromSimpro(
   config: SimproConfig,
   onProgress?: (p: SyncProgress) => void,
-  options?: { force?: boolean },
+  options?: { incremental?: boolean },
 ): Promise<SyncResult> {
+  /*
+   * A pull reads everything, every time.
+   *
+   * The incremental machinery below is kept and still works — it asks only for
+   * what changed since the last successful sync — but it is no longer what a
+   * press of the button does. Incremental sync is only ever as good as its
+   * watermark, and a watermark can be wrong in ways nobody sees: a record
+   * edited without its modified date moving, a filter the server quietly
+   * ignored, a sync that half-failed and left the mark further forward than the
+   * data it actually stored. Each of those leaves the phone confidently stale,
+   * and stale in this app means a technician standing in front of equipment the
+   * office has since changed.
+   *
+   * A full read of 3,059 sites and 12,546 assets is about six minutes on a
+   * decent signal. That is the price of never wondering.
+   */
+  const force = !options?.incremental;
   const client = new SimproClient(config);
   const api = new SimproResources(client);
   const result: SyncResult = {
@@ -103,11 +120,10 @@ export async function pullFromSimpro(
 
   onProgress?.({ stage: 'Reading sites', done: 0, total: 4 });
 
-  // Ask only for what changed since the last successful sync. At nine hundred
-  // sites a full pull every time is slow enough that it stops being done, which
-  // is how a local copy quietly becomes weeks old.
+  // Read against the watermark even on a full pull: the mark is still recorded,
+  // so switching back to incremental later has somewhere to start from.
   const siteState = await readSyncState('sites');
-  const sitePlan = planIncremental('sites', siteState.lastChangeSeenAt, { force: options?.force });
+  const sitePlan = planIncremental('sites', siteState.lastChangeSeenAt, { force });
 
   let remoteSites: Awaited<ReturnType<SimproResources['sites']>> = [];
   let siteMode: 'incremental' | 'full' = 'full';
@@ -211,7 +227,7 @@ export async function pullFromSimpro(
   onProgress?.({ stage: 'Reading jobs', done: 1, total: 4 });
 
   const jobState = await readSyncState('jobs');
-  const jobPlan = planIncremental('jobs', jobState.lastChangeSeenAt, { force: options?.force });
+  const jobPlan = planIncremental('jobs', jobState.lastChangeSeenAt, { force });
   const errorsBeforeJobs = result.errors.length;
 
   try {
@@ -269,7 +285,7 @@ export async function pullFromSimpro(
   }
 
   const assetState = await readSyncState('assets');
-  const assetPlan = planIncremental('assets', assetState.lastChangeSeenAt, { force: options?.force });
+  const assetPlan = planIncremental('assets', assetState.lastChangeSeenAt, { force });
   const errorsBeforeAssets = result.errors.length;
   const unmappedTypes = new Set<string>();
 

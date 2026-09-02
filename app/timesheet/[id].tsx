@@ -16,6 +16,13 @@ import type { Site } from '@/domain/types';
 import { timesheetSheet, timesheetSummarySheet } from '@/export/safeqldForms';
 import { formatAuDate } from '@/export/sheets';
 import { shareFile, writeXlsx } from '@/export/files';
+import * as MailComposer from 'expo-mail-composer';
+import {
+  TIMESHEET_INBOX,
+  timesheetBody,
+  timesheetNotReady,
+  timesheetSubject,
+} from '@/domain/timesheetEmail';
 import { newId } from '@/db';
 import { useTheme } from '@/theme';
 import {
@@ -107,6 +114,7 @@ export default function TimesheetScreen() {
       rdo: '',
       annual: '',
       lwop: '',
+      publicHoliday: '',
       comments: '',
     };
     update({ entries: [...sheet.entries, entry] });
@@ -119,6 +127,66 @@ export default function TimesheetScreen() {
       const name = `Timesheet ${sheet.employeeName || ''} ${formatAuDate(sheet.weekStarting)}`.trim();
       const file = writeXlsx(name, [timesheetSheet(sheet), timesheetSummarySheet(sheet)]);
       await shareFile(file, 'Timesheet');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Sends the week to accounts.
+   *
+   * Opens the technician's own mail app with everything filled in rather than
+   * posting it from somewhere in the background. That means the email genuinely
+   * comes from them — payroll can reply to the person who worked the hours —
+   * and they see what is being sent before it goes, which matters when the
+   * thing being sent is their own pay.
+   *
+   * The sheet is marked submitted only once the mail app reports it sent. A
+   * cancelled email leaving a sheet marked submitted is how a week goes
+   * missing: the technician believes it is gone and the office never had it.
+   */
+  const emailSheet = async () => {
+    if (!sheet) return;
+
+    const blocked = timesheetNotReady(sheet);
+    if (blocked) {
+      Alert.alert('Not ready to send', blocked);
+      return;
+    }
+
+    setBusy(true);
+    try {
+      if (!(await MailComposer.isAvailableAsync())) {
+        Alert.alert(
+          'No mail app set up',
+          'This phone has no email account configured, so the timesheet cannot be sent from here. '
+          + 'Use Export instead and attach the file yourself.',
+        );
+        return;
+      }
+
+      const name = `Timesheet ${sheet.employeeName || ''} ${formatAuDate(sheet.weekStarting)}`.trim();
+      const file = writeXlsx(name, [timesheetSheet(sheet), timesheetSummarySheet(sheet)]);
+
+      const { status } = await MailComposer.composeAsync({
+        recipients: [TIMESHEET_INBOX],
+        subject: timesheetSubject(sheet),
+        body: timesheetBody(sheet),
+        attachments: [file.uri],
+      });
+
+      if (status === MailComposer.MailComposerStatus.SENT) {
+        update({ status: 'submitted' });
+        Alert.alert('Sent', `Your timesheet has gone to ${TIMESHEET_INBOX} and is marked submitted.`);
+      } else {
+        // Covers cancelled and saved-as-draft alike. Neither reached anyone.
+        Alert.alert(
+          'Not sent',
+          'The email was not sent, so this sheet is still a draft. Nothing has gone to the office.',
+        );
+      }
+    } catch (e) {
+      Alert.alert('Could not send', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -288,8 +356,15 @@ export default function TimesheetScreen() {
             style={{ flex: 1 }}
             onPress={() => update({ status: sheet.status === 'submitted' ? 'draft' : 'submitted' })}
           />
-          <Button title="Export" onPress={exportSheet} loading={busy} style={{ flex: 1 }} />
+          <Button title="Export" variant="secondary" onPress={exportSheet} loading={busy} style={{ flex: 1 }} />
         </Rowed>
+
+        <Button title="Email to accounts" onPress={emailSheet} loading={busy} />
+        <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
+          Opens your own mail app with the week filled in and the sheet attached, addressed to{' '}
+          {TIMESHEET_INBOX}. It sends from you, so payroll can reply to you, and nothing is marked
+          submitted until the mail app says it went.
+        </Txt>
 
         <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
           Hours come from the start and finish times. Enter an override only when the times do not tell the whole story.
@@ -396,6 +471,7 @@ function EntryEditor({
             <View style={{ flex: 1 }}><Field label="RDO" value={entry.rdo} onChangeText={(v) => onChange({ rdo: v })} keyboardType="decimal-pad" /></View>
             <View style={{ flex: 1 }}><Field label="Annual" value={entry.annual} onChangeText={(v) => onChange({ annual: v })} keyboardType="decimal-pad" /></View>
             <View style={{ flex: 1 }}><Field label="LWOP" value={entry.lwop} onChangeText={(v) => onChange({ lwop: v })} keyboardType="decimal-pad" /></View>
+            <View style={{ flex: 1 }}><Field label="Pub hol" value={entry.publicHoliday} onChangeText={(v) => onChange({ publicHoliday: v })} keyboardType="decimal-pad" /></View>
           </Rowed>
           <Field
             label="Hours override"

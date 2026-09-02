@@ -227,6 +227,7 @@ export function timesheetSheet(sheet: Timesheet): Sheet {
         input(e.rdo),
         input(e.annual),
         input(e.lwop),
+        input(e.publicHoliday),
         input(e.comments),
       ]);
     });
@@ -290,6 +291,7 @@ export function timesheetSummarySheet(sheet: Timesheet): Sheet {
     [{ v: 'RDO', style: 'header' }, t.rdo],
     [{ v: 'Annual', style: 'header' }, t.annual],
     [{ v: 'LWOP', style: 'header' }, t.lwop],
+    [{ v: 'Public holiday', style: 'header' }, t.publicHoliday],
     [],
     [{ v: 'Grand total', style: 'header' }, { v: t.grand, style: 'header' }],
   ];

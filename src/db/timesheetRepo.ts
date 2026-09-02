@@ -7,11 +7,39 @@ interface TimesheetRow extends Omit<Timesheet, 'entries'> {
   entries: string;
 }
 
+/**
+ * Every text field on an entry, so a sheet written by an older build still
+ * loads with all of them present.
+ *
+ * The entries column is JSON and is read back with a cast, which asserts a
+ * shape rather than checking one. A field added to `TimesheetEntry` later is
+ * simply absent from every row already saved, and `undefined` bound into a text
+ * input turns a controlled field uncontrolled — the box silently stops
+ * accepting what is typed into it. Totalling survives it, because a
+ * non-numeric value reads as zero; the editor does not.
+ */
+const ENTRY_TEXT_FIELDS = [
+  'date', 'jobNumber', 'siteName', 'serviceReportNumber', 'startTime', 'finishTime',
+  'sick', 'rdo', 'annual', 'lwop', 'publicHoliday', 'comments',
+] as const;
+
+function hydrateEntry(raw: Partial<TimesheetEntry>): TimesheetEntry {
+  const entry = { ...raw } as Record<string, unknown>;
+  for (const field of ENTRY_TEXT_FIELDS) {
+    if (typeof entry[field] !== 'string') entry[field] = '';
+  }
+  if (entry.hourKind !== 'ord' && entry.hourKind !== 'ot' && entry.hourKind !== 'dt') {
+    entry.hourKind = 'ord';
+  }
+  if (typeof entry.id !== 'string' || !entry.id) entry.id = newId();
+  return entry as unknown as TimesheetEntry;
+}
+
 function hydrate(row: TimesheetRow): Timesheet {
   let entries: TimesheetEntry[] = [];
   try {
     const v: unknown = JSON.parse(row.entries);
-    if (Array.isArray(v)) entries = v as TimesheetEntry[];
+    if (Array.isArray(v)) entries = v.map((e) => hydrateEntry(e as Partial<TimesheetEntry>));
   } catch {
     entries = [];
   }
