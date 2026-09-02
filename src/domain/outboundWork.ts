@@ -289,13 +289,32 @@ export interface PlanOptions {
 /**
  * The transport kind.
  *
- * A job note, and only a job note. The queue dispatches 'job-note' and
- * 'purchase-order' today and silently marks anything else as sent, so inventing
- * a kind here would drop a technician's service record on the floor without a
- * word. If a dedicated kind is ever registered in the queue, this union is where
- * it goes.
+ * The queue dispatches 'job-note', 'purchase-order' and 'asset-test', and
+ * silently marks anything else as sent — so a kind invented here without a
+ * matching branch in flushQueue drops a technician's service record on the
+ * floor without a word. Add both together or neither.
  */
-export type OutboundWorkKind = 'job-note';
+export type OutboundWorkKind = 'job-note' | 'asset-test';
+
+/**
+ * A test result going back onto the asset in the office system.
+ *
+ * Held as its own kind rather than folded into the note, because a note is
+ * prose a person reads and this is a field the office schedules from. It is
+ * also the only outbound kind that changes an existing record rather than
+ * appending to one, which is why it is off unless explicitly switched on.
+ */
+export interface OutboundAssetTest {
+  /** Simpro's own id for the asset. Local ids mean nothing to the office. */
+  externalAssetId: string;
+  result: 'Pass' | 'Fail';
+  /** ISO date the test was carried out, not the date it is being sent. */
+  testedAt: string;
+  /** Which frequency was serviced — a result with no frequency says nothing. */
+  serviceLevelId: string;
+  /** What the technician saw, for the queue screen. Never sent to Simpro. */
+  description: string;
+}
 
 export interface OutboundJobNote {
   jobId: string;
@@ -313,7 +332,12 @@ export interface OutboundJobNote {
 }
 
 export interface OutboundItem {
-  kind: OutboundWorkKind;
+  /**
+   * Always a job note. This type is the composed note plan, not the queue row —
+   * the queue stores `kind` and arbitrary JSON, and an asset test is enqueued
+   * directly rather than composed here.
+   */
+  kind: 'job-note';
   key: string;
   payload: OutboundJobNote;
   /** One line a person can read in a queue screen and know what it is. */

@@ -28,6 +28,16 @@ export interface Prefs {
   simproClientId: string;
   simproProxyUrl: string;
   /**
+   * Whether a completed test is written back onto the asset in Simpro.
+   *
+   * Off until someone turns it on, and deliberately so. Every other outbound
+   * kind appends — a note, an order — and the worst a bad one does is add
+   * something to delete. This one edits a record the office schedules from,
+   * across 12,546 live assets, and the endpoint it uses could not be verified
+   * without writing to that live register. Prove it on one asset first.
+   */
+  simproWriteAssetTests: boolean;
+  /**
    * Charge-out rates, in whole cents excluding GST.
    *
    * Held here rather than shipped in the repository: these are commercial terms
@@ -68,6 +78,7 @@ export const DEFAULT_PREFS: Prefs = {
   simproCompanyId: '0',
   simproClientId: '6564738df3bba3cd587e3dacb58a1d',
   simproProxyUrl: '',
+  simproWriteAssetTests: false,
   normalHoursSellCents: 0,
   afterHoursSellCents: 0,
   attendanceNormalCents: 0,

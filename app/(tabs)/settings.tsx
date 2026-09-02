@@ -509,6 +509,33 @@ export default function SettingsScreen() {
           </>
         ) : null}
 
+        <Divider />
+        <Label>Write test results back</Label>
+        <Txt size="xs" tone="faint" style={{ marginTop: 4, marginBottom: t.space(2), lineHeight: 17 }}>
+          Off by default. Everything else this app sends is appended — a note, an order — and can be
+          deleted if it is wrong. This changes the last test result on the asset itself, which is what
+          the office schedules from. Turn it on and check one asset in Simpro before trusting it with a
+          full site. A result that is not a plain pass or fail stays in the job note, in words.
+        </Txt>
+        <Rowed gap={2}>
+          <MaterialCommunityIcons
+            name={prefs.simproWriteAssetTests ? 'database-edit' : 'database-lock'}
+            size={18}
+            color={prefs.simproWriteAssetTests ? t.color.warn : t.color.textFaint}
+          />
+          <Txt size="sm" tone={prefs.simproWriteAssetTests ? 'warn' : 'faint'} style={{ flex: 1 }}>
+            {prefs.simproWriteAssetTests
+              ? 'Completed tests are written onto the asset in Simpro.'
+              : 'Results stay on this device and in the job note.'}
+          </Txt>
+          <Button
+            title={prefs.simproWriteAssetTests ? 'Turn off' : 'Turn on'}
+            variant={prefs.simproWriteAssetTests ? 'danger' : 'secondary'}
+            compact
+            onPress={() => update({ simproWriteAssetTests: !prefs.simproWriteAssetTests })}
+          />
+        </Rowed>
+
         <View style={{ height: t.space(3) }} />
         <Button title="Connect to Simpro" onPress={test} loading={testing} />
         {verdict ? (

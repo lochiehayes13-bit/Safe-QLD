@@ -6,6 +6,7 @@ import { createSite, listSites, updateSite } from '@/db/repo';
 import { saveRateCard } from '@/db/rateCardRepo';
 import { upsertJob, enqueueSync, pendingSync, markSynced, markSyncFailed, type JobRecord } from '@/db/opsRepo';
 import { matchSiteByRefOrName } from '@/domain/siteNames';
+import type { OutboundAssetTest } from '@/domain/outboundWork';
 import { createAsset, findByExternalIds, updateAsset, type AssetRecord } from '@/db/assetRepo';
 import { mapSimproAsset, SIMPRO_ASSET_SOURCE } from './assetSync';
 import type { Site } from '@/domain/types';
@@ -477,6 +478,9 @@ export async function flushQueue(config: SimproConfig): Promise<FlushResult> {
       } else if (item.kind === 'purchase-order') {
         const p = payload as PurchaseOrderPayload;
         await api.createPurchaseOrder(p);
+      } else if (item.kind === 'asset-test') {
+        const p = payload as OutboundAssetTest;
+        await api.postAssetTest(p.externalAssetId, p.result, p.testedAt, p.serviceLevelId);
       } else {
         // Unknown kinds are marked done rather than retried forever.
         await markSynced(item.id);

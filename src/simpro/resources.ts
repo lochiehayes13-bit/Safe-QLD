@@ -342,6 +342,38 @@ export class SimproResources {
     return { assets, truncated };
   }
 
+  /**
+   * Records a test result against a customer asset.
+   *
+   * Simpro has no endpoint for a test as a thing in its own right — there is no
+   * `customerAssets/{id}/tests/`, and the asset attached to a job's cost centre
+   * is only a link, `{Asset: {ID, AssetType}}`, with nowhere to put a result.
+   * What the asset does carry is `LastTest {Result, Date, ServiceLevel}`, so
+   * that is what this sets.
+   *
+   * `ServiceLevels` is deliberately NOT sent. An asset is usually on several
+   * frequencies at once — a 6 Monthly and a Yearly, sometimes a 5 Yearly — and
+   * a PATCH carrying an array of one would very plausibly be read as the whole
+   * new set, silently deleting the others and with them the dates the office
+   * schedules from. Advancing the next service date is Simpro's own job once a
+   * test is recorded; it is not worth risking a customer's schedule to save it
+   * a calculation.
+   *
+   * @param serviceLevelId which frequency this test was against, e.g. the
+   * 6 Monthly. Required: a result with no frequency does not say what was done.
+   */
+  async postAssetTest(assetId: string, result: 'Pass' | 'Fail', dateIso: string, serviceLevelId: string): Promise<void> {
+    await this.client.request('PATCH', `customerAssets/${assetId}/`, {
+      body: {
+        LastTest: {
+          Result: result,
+          Date: dateIso.slice(0, 10),
+          ServiceLevel: { ID: Number(serviceLevelId) },
+        },
+      },
+    });
+  }
+
   /** Adds a note to a job — how a technician's field finding reaches the office. */
   async addJobNote(jobId: string, subject: string, note: string): Promise<void> {
     await this.client.request('POST', `jobs/${jobId}/notes/`, {
