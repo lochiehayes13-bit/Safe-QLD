@@ -82,6 +82,14 @@ export default function LibraryScreen() {
   // survives the navigation rather than making them type it twice.
   const { q: initial } = useLocalSearchParams<{ q?: string }>();
   const [query, setQuery] = useState(initial ?? '');
+  // Searched a beat after the last keystroke rather than on every one. The
+  // clause search runs over the whole index and the document search is a
+  // database query, and doing both per character made typing stutter.
+  const [debounced, setDebounced] = useState(initial ?? '');
+  useEffect(() => {
+    const h = setTimeout(() => setDebounced(query), 180);
+    return () => clearTimeout(h);
+  }, [query]);
   const [system, setSystem] = useState<string | null>(null);
   const [mine, setMine] = useState<LibraryDoc[]>([]);
   const [pageHits, setPageHits] = useState<PageHit[]>([]);
@@ -90,7 +98,7 @@ export default function LibraryScreen() {
   const [answer, setAnswer] = useState<GroundedAnswer | null>(null);
   const [thinking, setThinking] = useState(false);
 
-  const q = query.trim();
+  const q = debounced.trim();
   const searching = q.length >= 2;
 
   const results = useMemo(() => (searching ? ask(q, 25) : []), [q, searching]);
@@ -98,10 +106,6 @@ export default function LibraryScreen() {
 
   const load = useCallback(async () => { setMine(await listLibraryDocs()); }, []);
   useEffect(() => { void load(); void hasKey().then(setAiOn); }, [load]);
-
-  // A new question invalidates the last answer immediately. Leaving it on
-  // screen under a different question is how a wrong answer gets acted on.
-  useEffect(() => { setAnswer(null); }, [q]);
 
   /**
    * The passages behind an answer are whatever the search already found, and
@@ -132,6 +136,10 @@ export default function LibraryScreen() {
   // The imported documents are searched from the database, so this cannot be a
   // memo — it lands a moment after the clause results and that is fine.
   useEffect(() => {
+    // A new search invalidates the last answer: leaving it on screen under a
+    // different question is how a wrong answer gets acted on. It is cleared
+    // here, when a search actually runs, and not on every keystroke.
+    setAnswer(null);
     if (!searching) { setPageHits([]); return; }
     let live = true;
     void searchLibrary(q, 15).then((h) => { if (live) setPageHits(h); });

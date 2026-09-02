@@ -54,6 +54,12 @@ export default function OccupierStatementScreen() {
   const [saving, setSaving] = useState(false);
   const [prefilled, setPrefilled] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  // The Commissioner date as it is being typed. Saved only once it reads as a
+  // date: saving every keystroke pushed a half-written one through qldIsoDay,
+  // which returned nothing, which the box then showed as empty — so it could
+  // not be typed into at all.
+  const [sentDraft, setSentDraft] = useState<string | null>(null);
+  const sentBad = sentDraft !== null && sentDraft.trim() !== '' && !qldIsoDay(sentDraft);
 
   const load = useCallback(async () => {
     if (id) {
@@ -103,8 +109,10 @@ export default function OccupierStatementScreen() {
       }
 
       const inPeriod = (iso?: string | null) => {
-        if (!iso) return false;
-        const d = iso.slice(0, 10);
+        // The Queensland day, not the UTC one: a notice given at eight on a
+        // Brisbane morning is still the day before in UTC.
+        const d = qldIsoDay(iso ?? undefined);
+        if (!d) return false;
         if (rec.periodStart && d < rec.periodStart) return false;
         if (rec.periodEnd && d > rec.periodEnd) return false;
         return true;
@@ -213,6 +221,10 @@ export default function OccupierStatementScreen() {
    * button.
    */
   const [evidence, setEvidence] = useState<EvidenceProblem[]>([]);
+  // Keyed on what the check reads, not on the record. `patch` replaces the
+  // record on every keystroke, so keyed on the record this re-read two
+  // thousand assets for each character typed into the occupier's phone number.
+  const rowsKey = JSON.stringify(rec?.rows ?? []);
   useEffect(() => {
     if (!rec) return;
     let live = true;
@@ -250,7 +262,7 @@ export default function OccupierStatementScreen() {
       }
     })();
     return () => { live = false; };
-  }, [rec]);
+  }, [rec?.siteId, rec?.periodStart, rec?.periodEnd, rowsKey]);
   const presentCount = rec?.rows.filter((r) => r.present).length ?? 0;
 
   /*
@@ -363,13 +375,24 @@ export default function OccupierStatementScreen() {
         <Card>
           <Field
             label="Copy sent to the Commissioner on"
-            value={qldIsoDay(rec.sentToCommissionerAt ?? undefined) ?? ''}
-            onChangeText={(v) => void patch({ sentToCommissionerAt: v || null })}
+            value={sentDraft ?? qldIsoDay(rec.sentToCommissionerAt ?? undefined) ?? ''}
+            onChangeText={(v) => {
+              setSentDraft(v);
+              if (v.trim() === '') { void patch({ sentToCommissionerAt: null }); return; }
+              if (qldIsoDay(v)) void patch({ sentToCommissionerAt: v.trim() });
+            }}
+            onBlur={() => {
+              // A date that reads has been saved, so the draft can go. One that
+              // does not stays on screen with the hint, rather than vanishing.
+              if (sentDraft === null || sentDraft.trim() === '' || qldIsoDay(sentDraft)) setSentDraft(null);
+            }}
             placeholder="YYYY-MM-DD"
-            hint={deadline.due
-              ? `Due ${deadline.due} — ${COMMISSIONER_COPY_BUSINESS_DAYS} business days from when the statement `
-                + 'was required to be prepared, not from when it was signed.'
-              : `${COMMISSIONER_COPY_BUSINESS_DAYS} business days from when the statement was required to be prepared.`}
+            hint={sentBad
+              ? 'Not a date — write it as YYYY-MM-DD.'
+              : deadline.due
+                ? `Due ${deadline.due} — ${COMMISSIONER_COPY_BUSINESS_DAYS} business days from when the statement `
+                  + 'was required to be prepared, not from when it was signed.'
+                : `${COMMISSIONER_COPY_BUSINESS_DAYS} business days from when the statement was required to be prepared.`}
           />
         </Card>
       </Screen>

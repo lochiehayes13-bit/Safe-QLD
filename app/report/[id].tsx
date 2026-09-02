@@ -407,8 +407,26 @@ export default function ReportScreen() {
               variant="secondary"
               onPress={() => {
                 const next = report.status === 'complete' ? 'draft' : 'complete';
-                setReport({ ...report, status: next });
-                void updateReport(report.id, { status: next });
+                const commit = () => {
+                  setReport({ ...report, status: next });
+                  void updateReport(report.id, { status: next });
+                };
+                // Complete is what the office reads as "ready to send", so it
+                // is not flipped over the top of the list of things that are
+                // not. The list is repeated here because the banner is a
+                // screen's length above the button.
+                if (next === 'complete' && readiness.length) {
+                  Alert.alert(
+                    `${readiness.length} thing${readiness.length === 1 ? '' : 's'} before this goes out`,
+                    readiness.join('\n'),
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Complete anyway', style: 'destructive', onPress: commit },
+                    ],
+                  );
+                  return;
+                }
+                commit();
               }}
             />
           </ScrollView>
@@ -479,7 +497,7 @@ function ResultButton({ label, active, tone, onPress }: { label: string; active:
         borderColor: active ? colour : t.color.border,
       }}
     >
-      <Txt size="sm" weight="700" style={{ color: active ? '#fff' : t.color.textMuted }}>{label}</Txt>
+      <Txt size="sm" weight="700" style={{ color: active ? t.color.onAccent : t.color.textMuted }}>{label}</Txt>
     </Pressable>
   );
 }

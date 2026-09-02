@@ -126,6 +126,7 @@ export default function CatalogueScreen() {
         <FlatList
           data={items}
           keyExtractor={(i) => i.id}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ paddingHorizontal: t.space(4), paddingBottom: t.space(20), gap: t.space(2) }}
           initialNumToRender={15}
           maxToRenderPerBatch={20}

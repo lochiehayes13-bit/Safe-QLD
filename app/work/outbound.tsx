@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Alert, View } from 'react-native';
 import { Stack, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -11,6 +11,7 @@ import { WITHHELD_FROM_SIMPRO, type OutboundItem } from '@/domain/outboundWork';
 import { sendOutboundPlan, type SendReport } from '@/simpro/testResults';
 import { SimproClient } from '@/simpro/client';
 import { simproConfigFromPrefs } from '@/simpro/config';
+import { formatAuDate } from '@/export/sheets';
 import { loadPrefs } from '@/app-prefs';
 import type { Site } from '@/domain/types';
 import { useTheme } from '@/theme';
@@ -47,6 +48,23 @@ export default function OutboundScreen() {
   const [plan, setPlan] = useState<RunPlan | null>(null);
   const [report, setReport] = useState<SendReport | null>(null);
   const [sending, setSending] = useState(false);
+  // The job number as it is being typed. It links when the box is left, not
+  // per keystroke: every character used to write the link and rebuild the plan.
+  const [jobDraft, setJobDraft] = useState('');
+
+  /*
+   * Plans are read in the background, and only the last one asked for may
+   * land. Opening a second run while the first is still being read, or
+   * relinking twice in quick succession, otherwise left whichever plan
+   * finished last on screen rather than whichever was asked for last.
+   */
+  const planRequest = useRef(0);
+  const loadPlan = useCallback(async (run: RoutineRun) => {
+    const request = ++planRequest.current;
+    const site = sites.get(run.siteId);
+    const next = await planForRun(run, site?.name ?? 'Unknown site');
+    if (planRequest.current === request) setPlan(next);
+  }, [sites]);
 
   const load = useCallback(async () => {
     const [r, s, keys] = await Promise.all([listRoutineRuns(undefined, 60), listSites(), acceptedKeys()]);
@@ -63,20 +81,23 @@ export default function OutboundScreen() {
     if (open === run.id) { setOpen(null); setPlan(null); setReport(null); return; }
     setOpen(run.id);
     setReport(null);
-    const site = sites.get(run.siteId);
-    setPlan(await planForRun(run, site?.name ?? 'Unknown site'));
-  }, [open, sites]);
+    setPlan(null);
+    setJobDraft(jobs.get(run.id) ?? '');
+    await loadPlan(run);
+  }, [open, jobs, loadPlan]);
 
-  const setJob = useCallback(async (run: RoutineRun, value: string) => {
+  /** Writes the typed job number against the run and rebuilds the plan on it. */
+  const linkJob = useCallback(async (run: RoutineRun) => {
+    const value = jobDraft.trim();
+    if (value === (jobs.get(run.id) ?? '')) return;
     setJobs((prev) => {
       const next = new Map(prev);
-      if (value.trim()) next.set(run.id, value.trim()); else next.delete(run.id);
+      if (value) next.set(run.id, value); else next.delete(run.id);
       return next;
     });
     await linkRunToJob(run.id, value);
-    const site = sites.get(run.siteId);
-    setPlan(await planForRun(run, site?.name ?? 'Unknown site'));
-  }, [sites]);
+    await loadPlan(run);
+  }, [jobDraft, jobs, loadPlan]);
 
   const send = useCallback(async (run: RoutineRun) => {
     /*
@@ -113,14 +134,13 @@ export default function OutboundScreen() {
         }
       }
       await load();
-      const site = sites.get(run.siteId);
-      setPlan(await planForRun(run, site?.name ?? 'Unknown site'));
+      await loadPlan(run);
     } catch (e) {
       Alert.alert('Could not send', e instanceof Error ? e.message : String(e));
     } finally {
       setSending(false);
     }
-  }, [plan, sent, jobs, load, sites]);
+  }, [plan, sent, jobs, load, loadPlan]);
 
   /*
    * Runs with no job linked. They are the ones that cannot go anywhere, and a
@@ -163,7 +183,7 @@ export default function OutboundScreen() {
               <View style={{ flex: 1 }}>
                 <Txt weight="700">{run.routineLabel}</Txt>
                 <Txt size="sm" tone="muted">
-                  {site?.name ?? 'Unknown site'} · {auDate(run.completedAt)}
+                  {site?.name ?? 'Unknown site'} · {formatAuDate(run.completedAt)}
                 </Txt>
               </View>
               <Chip
@@ -191,12 +211,16 @@ export default function OutboundScreen() {
                 <Divider />
                 <Field
                   label="Simpro job"
-                  value={jobId}
-                  onChangeText={(v) => void setJob(run, v)}
+                  value={jobDraft}
+                  onChangeText={setJobDraft}
+                  onBlur={() => void linkJob(run)}
                   placeholder="12345"
                   hint="Nothing sends without this. A guessed job number posts against somebody else's work."
                   keyboardType="numeric"
                 />
+                {jobDraft.trim() !== jobId ? (
+                  <Button title="Link this job" variant="secondary" compact onPress={() => void linkJob(run)} />
+                ) : null}
 
                 {plan && plan.run.runId === run.id ? (
                   <PlanReview
@@ -362,9 +386,3 @@ function SendResult({ report }: { report: SendReport }) {
     </View>
   );
 }
-
-const auDate = (iso?: string): string => {
-  if (!iso) return '';
-  const [y, m, d] = iso.slice(0, 10).split('-');
-  return y && m && d ? `${d}/${m}/${y}` : iso;
-};

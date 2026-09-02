@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { nowIso } from '@/db';
-import { qldIsoDay } from '@/domain/qldTime';
+import { qldIsoDay, qldMoment } from '@/domain/qldTime';
 import { Alert, Linking, Platform, View } from 'react-native';
 import { Stack, router } from 'expo-router';
 import * as Location from 'expo-location';
@@ -31,6 +31,17 @@ import {
  * and distrusted after that.
  */
 type Start = 'here' | 'first';
+
+/**
+ * The Queensland clock time of an instant, as HH:MM.
+ *
+ * Read off qldMoment rather than off the string: the eleventh to sixteenth
+ * characters of an ISO instant are its UTC clock, ten hours behind the one
+ * the job was booked in.
+ */
+function qldClock(iso: string): string | undefined {
+  return qldMoment(iso)?.match(/ (\d{2}:\d{2}) /)?.[1];
+}
 
 export default function RouteScreen() {
   const t = useTheme();
@@ -198,7 +209,7 @@ export default function RouteScreen() {
                   <Rowed gap={2} wrap style={{ marginTop: t.space(1.5) }}>
                     {job.priority === 'urgent' ? <Chip label="Urgent" tone="fail" /> : null}
                     <Chip label={i === 0 && stop.legKm === 0 ? 'Start' : formatKm(stop.legKm)} />
-                    {job.scheduledFor ? <Chip label={job.scheduledFor.slice(11, 16) || 'Scheduled'} /> : null}
+                    {job.scheduledFor ? <Chip label={qldClock(job.scheduledFor) ?? 'Scheduled'} /> : null}
                   </Rowed>
                 </View>
               </Rowed>

@@ -1,7 +1,8 @@
 import React, { useCallback, useState } from 'react';
-import { FlatList, View } from 'react-native';
+import { Alert, FlatList, View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
-import { listDefects, listSites, updateDefect } from '@/db/repo';
+import { listDefects, listSites, reopenDefect, updateDefect } from '@/db/repo';
+import { nowIso } from '@/db';
 import type { Defect, Site } from '@/domain/types';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
@@ -23,6 +24,47 @@ export default function DefectsScreen() {
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const shown = defects.filter((d) => (status === 'open' ? d.status === 'open' : true));
+
+  /*
+   * Rectified is a statutory fact, not a tidy-up. The date it stamps is what
+   * the occupier statement and a critical defect notice read back, so one tap
+   * on the wrong row used to put a rectification date on a defect nobody had
+   * touched, with no way back. It asks now, and a slip can be reopened.
+   */
+  const markRectified = (d: Defect) => {
+    Alert.alert(
+      'Mark this defect rectified?',
+      `${sites.get(d.siteId)?.name ?? 'Unknown site'} — ${d.location}\n\nThis records today as the rectification date, which the occupier statement and any critical defect notice read back.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Rectified',
+          onPress: () => {
+            void (async () => {
+              await updateDefect(d.id, { status: 'rectified', rectifiedAt: nowIso() });
+              void load();
+            })();
+          },
+        },
+      ],
+    );
+  };
+
+  const reopen = (d: Defect) => {
+    Alert.alert('Reopen this defect?', 'It goes back to open and the rectification date is cleared.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Reopen',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            await reopenDefect(d.id);
+            void load();
+          })();
+        },
+      },
+    ]);
+  };
 
   /** Age in days, which is what makes an outstanding list feel urgent. */
   const ageDays = (iso: string): number => {
@@ -73,10 +115,7 @@ export default function DefectsScreen() {
                       variant="secondary"
                       compact
                       style={{ flex: 1 }}
-                      onPress={async () => {
-                        await updateDefect(item.id, { status: 'rectified', rectifiedAt: new Date().toISOString() });
-                        void load();
-                      }}
+                      onPress={() => markRectified(item)}
                     />
                     <Button
                       title="Quoted"
@@ -86,6 +125,14 @@ export default function DefectsScreen() {
                       onPress={async () => { await updateDefect(item.id, { status: 'quoted' }); void load(); }}
                     />
                   </Rowed>
+                ) : item.status === 'rectified' ? (
+                  <Button
+                    title="Reopen"
+                    variant="ghost"
+                    compact
+                    style={{ marginTop: t.space(2.5) }}
+                    onPress={() => reopen(item)}
+                  />
                 ) : null}
               </Card>
             );

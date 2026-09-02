@@ -9,6 +9,7 @@ import {
   COMMISSIONER_COPY_BUSINESS_DAYS, STATEMENT_INTERVAL_YEARS, STATEMENT_RETENTION_YEARS,
   commissionerCopyDeadline, nextStatementDue, qldBusinessDaysBetween,
 } from '@/domain/occupierForm';
+import { formatAuDate } from '@/export/sheets';
 import { nowIso } from '@/db';
 import type { Site } from '@/domain/types';
 import { useTheme } from '@/theme';
@@ -44,11 +45,6 @@ type Row = {
   state: 'sent' | 'overdue' | 'due' | 'unsigned';
 };
 
-const auDate = (iso?: string | null): string => {
-  if (!iso) return '';
-  const [y, m, d] = iso.slice(0, 10).split('-');
-  return y && m && d ? `${d}/${m}/${y}` : iso;
-};
 
 export default function OccupierIndexScreen() {
   const t = useTheme();
@@ -150,8 +146,8 @@ export default function OccupierIndexScreen() {
             <View style={{ flex: 1 }}>
               <Txt weight="700">{row.site?.name ?? (row.statement.premisesName || 'Unnamed premises')}</Txt>
               <Txt size="sm" tone="muted">
-                {row.statement.periodStart ? `${auDate(row.statement.periodStart)} – ` : ''}
-                {auDate(row.statement.periodEnd) || 'period not set'}
+                {row.statement.periodStart ? `${formatAuDate(row.statement.periodStart)} – ` : ''}
+                {formatAuDate(row.statement.periodEnd) || 'period not set'}
               </Txt>
             </View>
             <StateChip row={row} />
@@ -160,13 +156,13 @@ export default function OccupierIndexScreen() {
           {row.state === 'overdue' && row.daysLeft !== undefined ? (
             <Txt size="sm" tone="fail">
               {Math.abs(row.daysLeft)} business day{Math.abs(row.daysLeft) === 1 ? '' : 's'} late
-              {row.due ? ` — was due ${auDate(row.due)}` : ''}
+              {row.due ? ` — was due ${formatAuDate(row.due)}` : ''}
             </Txt>
           ) : null}
 
           {row.state === 'due' && row.due ? (
             <Txt size="sm" tone={row.daysLeft !== undefined && row.daysLeft <= 3 ? 'warn' : 'muted'}>
-              Copy to the commissioner due {auDate(row.due)}
+              Copy to the commissioner due {formatAuDate(row.due)}
               {row.daysLeft !== undefined ? ` — ${row.daysLeft} business day${row.daysLeft === 1 ? '' : 's'} left` : ''}
             </Txt>
           ) : null}
@@ -213,8 +209,8 @@ function SentLine({ statement }: { statement: OccupierStatement }) {
     <Rowed gap={2}>
       <MaterialCommunityIcons name="check-circle-outline" size={16} color="#2E9E5B" />
       <Txt size="sm" tone="muted" style={{ flex: 1 }}>
-        Sent {auDate(statement.sentToCommissionerAt)}
-        {next?.date ? ` · next due ${auDate(next.date)}` : ''}
+        Sent {formatAuDate(statement.sentToCommissionerAt ?? undefined)}
+        {next?.date ? ` · next due ${formatAuDate(next.date)}` : ''}
       </Txt>
     </Rowed>
   );

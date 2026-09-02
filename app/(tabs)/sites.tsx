@@ -42,6 +42,7 @@ export default function SitesScreen() {
       <FlatList
         data={filtered}
         keyExtractor={(s) => s.id}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ padding: t.space(4), gap: t.space(3), paddingBottom: t.space(24) }}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={t.color.accent} />}
         ListHeaderComponent={

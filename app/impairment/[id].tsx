@@ -7,6 +7,7 @@ import {
   type ImpairmentRecord,
 } from '@/db/opsRepo';
 import { nowIso } from '@/db';
+import { qldMoment } from '@/domain/qldTime';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
@@ -159,7 +160,7 @@ export default function ImpairmentScreen() {
         {!restored ? (
           <Button title="System restored — close impairment" onPress={close} />
         ) : (
-          <Txt size="sm" tone="pass">Closed {rec.restoredAt}</Txt>
+          <Txt size="sm" tone="pass">Closed {qldMoment(rec.restoredAt) ?? rec.restoredAt}</Txt>
         )}
       </Screen>
     </>

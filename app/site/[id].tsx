@@ -4,7 +4,7 @@ import { Alert, View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
-  createReport, deleteSite, getSite, listDefects, listPanels, listReports, queryPoints,
+  countPoints, createReport, deleteSite, getSite, listDefects, listPanels, listReports,
 } from '@/db/repo';
 import { createBaseline, listBaselines } from '@/db/baselineRepo';
 import { createOccupierStatement, listOccupierStatements } from '@/db/occupierRepo';
@@ -42,19 +42,21 @@ export default function SiteScreen() {
 
   const load = useCallback(async () => {
     if (!id) return;
-    const [s, p, r, d, pts] = await Promise.all([
+    const [s, p, r, d, n] = await Promise.all([
       getSite(id),
       listPanels(id),
       listReports(id),
       listDefects(id),
-      queryPoints({ siteId: id, limit: 100000 }),
+      // Counted in SQL. Reading every point row on a large site only to take
+      // its length was the slowest thing on this screen.
+      countPoints(id),
     ]);
     setSite(s);
     setMissing(!s);
     setPanels(p);
     setReports(r);
     setDefects(d);
-    setPointCount(pts.length);
+    setPointCount(n);
   }, [id]);
 
   useFocusEffect(

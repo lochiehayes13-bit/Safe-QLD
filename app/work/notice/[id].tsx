@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Alert, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { getSite, listDefects, updateDefect } from '@/db/repo';
+import { getDefect, getSite, updateDefect } from '@/db/repo';
 import type { Defect, Site } from '@/domain/types';
 import {
   AS1851_CLASS_LABEL, AS1851_CLASS_OBLIGATION, criticalNoticeDueAt, isQldCriticalDefect,
@@ -11,6 +11,7 @@ import {
 import { criticalDefectNoticeHtml } from '@/export/criticalDefectNotice';
 import { shareFile, writePdf } from '@/export/files';
 import { formatAuDate } from '@/export/sheets';
+import { qldMoment } from '@/domain/qldTime';
 import { loadPrefs } from '@/app-prefs';
 import { nowIso } from '@/db';
 import { useTheme } from '@/theme';
@@ -40,8 +41,7 @@ export default function NoticeScreen() {
   useEffect(() => {
     if (!id) return;
     void (async () => {
-      const all = await listDefects();
-      const d = all.find((x) => x.id === id) ?? null;
+      const d = await getDefect(id);
       setDefect(d);
       setMissing(!d);
       setOccupier(d?.noticeRecipient ?? '');
@@ -97,10 +97,21 @@ export default function NoticeScreen() {
 
       // Only record it as issued once it has actually been handed over.
       if (shared) {
+        const recipient = occupier.trim() || undefined;
+        /*
+         * The first hand-over is the statutory event, and whether the notice
+         * was given inside the 24 hours is judged against it — so a reissue
+         * does not write over that date. It is still a fact worth keeping, so
+         * it goes in the notes.
+         */
+        const reissue = defect.noticeIssuedAt
+          ? `Notice reissued ${qldMoment(now) ?? now}${recipient ? ` to ${recipient}` : ''}.`
+          : undefined;
         update({
-          noticeIssuedAt: now,
-          noticeRecipient: occupier.trim() || undefined,
+          noticeIssuedAt: defect.noticeIssuedAt ?? now,
+          noticeRecipient: recipient,
           rectificationDueAt: rectifyBy,
+          ...(reissue ? { notes: [defect.notes?.trim(), reissue].filter(Boolean).join('\n') } : {}),
         });
       }
     } catch (e) {

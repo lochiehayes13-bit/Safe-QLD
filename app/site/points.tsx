@@ -183,6 +183,7 @@ export default function PointsScreen() {
           <FlatList
             data={points}
             keyExtractor={(p) => p.id}
+            keyboardShouldPersistTaps="handled"
             contentContainerStyle={{ paddingHorizontal: t.space(4), paddingBottom: t.space(20) }}
             // Long lists are the norm here; these keep scrolling smooth.
             initialNumToRender={20}

@@ -77,6 +77,7 @@ export function DevicePicker({
         <FlatList
           data={items}
           keyExtractor={(i) => i.id}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ paddingHorizontal: t.space(4), paddingBottom: t.space(10), gap: t.space(2) }}
           initialNumToRender={12}
           removeClippedSubviews

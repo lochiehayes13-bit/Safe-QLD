@@ -35,10 +35,30 @@ export function SignaturePad({
   const [size, setSize] = useState({ w: 0, h: height });
 
   const responder = useMemo(
-    () =>
-      PanResponder.create({
+    () => {
+      /** Keeps the stroke in progress, however the gesture ended. */
+      const commit = () => {
+        if (!current.current) return;
+        const done = current.current;
+        current.current = '';
+        setStrokes((prev) => {
+          const next = [...prev, done];
+          onChange(toDataUri(next, size.w, size.h));
+          return next;
+        });
+      };
+      return PanResponder.create({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
+        /*
+         * The pad sits inside a scrolling form, and the ScrollView asks for
+         * the gesture the moment a stroke drifts vertically. Yielding used to
+         * drop the stroke in progress — half a signature, with the page
+         * scrolled away underneath it. A finger that started on the pad is
+         * signing, so the answer is no; and if the responder is taken anyway,
+         * what was drawn so far is kept rather than thrown away.
+         */
+        onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: (e) => {
           const { locationX, locationY } = e.nativeEvent;
           current.current = `M${round(locationX)},${round(locationY)}`;
@@ -49,18 +69,10 @@ export function SignaturePad({
           current.current += ` L${round(locationX)},${round(locationY)}`;
           force((n) => n + 1);
         },
-        onPanResponderRelease: () => {
-          if (current.current) {
-            const done = current.current;
-            current.current = '';
-            setStrokes((prev) => {
-              const next = [...prev, done];
-              onChange(toDataUri(next, size.w, size.h));
-              return next;
-            });
-          }
-        },
-      }),
+        onPanResponderRelease: commit,
+        onPanResponderTerminate: commit,
+      });
+    },
     [onChange, size.w, size.h],
   );
 

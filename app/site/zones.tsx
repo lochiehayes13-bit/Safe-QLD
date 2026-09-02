@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { FlatList, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
-import { getSite, listPanels, listZones, queryPoints } from '@/db/repo';
+import { countPointsByZone, getSite, listPanels, listZones, queryPoints } from '@/db/repo';
 import type { Panel, Site, Zone } from '@/domain/types';
 import { zoneSheet } from '@/export/sheets';
 import { shareFile, writePdf, writeXlsx } from '@/export/files';
@@ -39,15 +39,12 @@ export default function ZonesScreen() {
 
   const load = useCallback(async () => {
     if (!activePanel) return;
-    const [z, pts] = await Promise.all([
+    // Counted per zone in SQL, rather than by reading every point on the
+    // panel into memory to tally it here.
+    const [z, counts] = await Promise.all([
       listZones(activePanel, includeUnused),
-      queryPoints({ panelId: activePanel, includeUnused: true, limit: 100000 }),
+      countPointsByZone(activePanel),
     ]);
-    const counts = new Map<number, number>();
-    for (const p of pts) {
-      if (p.zoneNumber === undefined || p.zoneNumber === null) continue;
-      counts.set(p.zoneNumber, (counts.get(p.zoneNumber) ?? 0) + 1);
-    }
     setZones(z.map((x) => ({ ...x, deviceCount: counts.get(x.number) ?? 0 })));
   }, [activePanel, includeUnused]);
 

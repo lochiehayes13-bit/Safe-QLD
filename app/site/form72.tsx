@@ -8,6 +8,7 @@ import { validateForm72 } from '@/domain/form72';
 import {
   FORM_TITLE, OCCUPIER_COPY_BUSINESS_DAYS, occupierCopyDue,
 } from '@/export/form72';
+import { formatAuDate } from '@/export/sheets';
 import { loadPrefs } from '@/app-prefs';
 import type { Site } from '@/domain/types';
 import { useTheme } from '@/theme';
@@ -113,7 +114,7 @@ export default function SiteForm72ListScreen() {
         title="Start a Form 72"
         onPress={onNew}
         loading={creating}
-        icon={<MaterialCommunityIcons name="plus" size={18} color="#fff" />}
+        icon={<MaterialCommunityIcons name="plus" size={18} color={t.color.onAccent} />}
       />
 
       {!forms.length ? (
@@ -136,7 +137,7 @@ export default function SiteForm72ListScreen() {
               <View style={{ flex: 1 }}>
                 <Txt weight="700">{f.systemLabel || 'System not named'}</Txt>
                 <Txt size="sm" tone="muted">
-                  {f.testDate ? auDate(f.testDate) : 'No test date'}
+                  {f.testDate ? formatAuDate(f.testDate) : 'No test date'}
                   {f.licenceNumber ? ` · ${f.licenceNumber}` : ''}
                 </Txt>
               </View>
@@ -152,7 +153,7 @@ export default function SiteForm72ListScreen() {
               ) : null}
               {f.status === 'draft' && !blockers ? <Chip label="Ready to issue" tone="pass" /> : null}
               {f.status === 'issued' && f.copyGivenAt ? (
-                <Chip label={`Occupier copy ${auDate(f.copyGivenAt)}`} tone="pass" />
+                <Chip label={`Occupier copy ${formatAuDate(f.copyGivenAt)}`} tone="pass" />
               ) : null}
               {f.status === 'issued' && !f.copyGivenAt ? (
                 <Chip
@@ -160,7 +161,7 @@ export default function SiteForm72ListScreen() {
                   // test dated beyond the holidays Queensland has appointed, or
                   // no test date at all — is still ten business days somebody
                   // has to count by hand.
-                  label={due.date ? `Copy due ${auDate(due.date)}` : 'Copy due — count it by hand'}
+                  label={due.date ? `Copy due ${formatAuDate(due.date)}` : 'Copy due — count it by hand'}
                   tone="fail"
                 />
               ) : null}
@@ -191,9 +192,3 @@ export default function SiteForm72ListScreen() {
     </Screen>
   );
 }
-
-const auDate = (iso?: string): string => {
-  if (!iso) return '';
-  const [y, m, d] = iso.slice(0, 10).split('-');
-  return y && m && d ? `${d}/${m}/${y}` : iso;
-};

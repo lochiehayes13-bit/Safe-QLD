@@ -116,7 +116,7 @@ export default function AssessmentScreen() {
     await updateFinding(finding.id, next);
   };
 
-  const issue = async () => {
+  const produce = async () => {
     if (!assessment || !site) return;
     setBusy(true);
     try {
@@ -179,6 +179,31 @@ export default function AssessmentScreen() {
     } finally {
       setBusy(false);
     }
+  };
+
+  /**
+   * Produces the report, after the register has been checked.
+   *
+   * The findings renumber as part of producing it and the register keeps that
+   * numbering, so this is not a preview: a report produced over a list of
+   * unresolved issues has already changed the record. The issues are put in
+   * front of the technician here, at the button, rather than only in a banner
+   * a screen's length above it, and nothing is renumbered until they say so.
+   */
+  const issue = () => {
+    if (!assessment || !site) return;
+    if (issues.length) {
+      Alert.alert(
+        `${issues.length} thing${issues.length === 1 ? '' : 's'} to fix before issuing`,
+        `${issues.map((i) => i.message).join('\n')}\n\nProducing it anyway renumbers the findings as they stand.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Produce anyway', style: 'destructive', onPress: () => void produce() },
+        ],
+      );
+      return;
+    }
+    void produce();
   };
 
   if (!assessment) return <RecordGate missing={missing} what="assessment" />;

@@ -85,6 +85,7 @@ export default function KnowledgeScreen() {
         <FlatList
           data={notes}
           keyExtractor={(n) => n.id}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: t.space(4), paddingTop: 0, gap: t.space(3), paddingBottom: t.space(20) }}
           ListEmptyComponent={
             <EmptyState

@@ -276,6 +276,7 @@ export function Field({
   autoCapitalize,
   hint,
   editable = true,
+  onBlur,
 }: {
   label?: string;
   value: string;
@@ -287,6 +288,8 @@ export function Field({
   autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
   hint?: string;
   editable?: boolean;
+  /** Fires when the box loses focus, for a field that saves a draft only once it is finished with. */
+  onBlur?: () => void;
 }) {
   const t = useTheme();
   return (
@@ -314,6 +317,7 @@ export function Field({
           multiline={multiline}
           editable={editable}
           autoCapitalize={autoCapitalize}
+          onBlur={onBlur}
           style={{
             flex: 1,
             color: t.color.text,
@@ -432,7 +436,12 @@ export function Chip({
         void Haptics.selectionAsync();
         onPress();
       }}
-      hitSlop={6}
+      // The pill stays compact so a row of chips still reads as one, but the
+      // thing being pressed is the 44dp floor a gloved thumb needs. hitSlop
+      // alone was not enough: Android clips a touch to the parent's bounds,
+      // and a wrapped row of chips is exactly as tall as the chips in it.
+      style={{ minHeight: 44, justifyContent: 'center' }}
+      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
     >
       {body}
     </Pressable>

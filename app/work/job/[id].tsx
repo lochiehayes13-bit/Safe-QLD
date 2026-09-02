@@ -4,7 +4,7 @@ import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getJob, setJobStatus, listPromises, type JobRecord } from '@/db/opsRepo';
 import { getSite, listDefects } from '@/db/repo';
-import { queryAssets } from '@/db/assetRepo';
+import { assetCountsBySystem } from '@/db/assetRepo';
 import { listKnowledge, type KnowledgeNote } from '@/db/opsRepo';
 import type { Defect, Site } from '@/domain/types';
 import { formatAuDate } from '@/export/sheets';
@@ -40,10 +40,11 @@ export default function JobScreen() {
         const [s, d, a, k] = await Promise.all([
           getSite(j.siteId),
           listDefects(j.siteId, 'open'),
-          queryAssets({ siteId: j.siteId, limit: 10000 }),
+          // A count, not the rows: the briefing wants a number.
+          assetCountsBySystem(j.siteId),
           listKnowledge({ siteId: j.siteId }),
         ]);
-        setSite(s); setDefects(d); setAssetCount(a.length); setKnowledge(k);
+        setSite(s); setDefects(d); setAssetCount(a.reduce((n, x) => n + x.count, 0)); setKnowledge(k);
       }
     })();
   }, [id]);

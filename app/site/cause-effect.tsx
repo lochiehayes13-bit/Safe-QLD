@@ -20,9 +20,12 @@ import {
  *
  * The matrix is the deliverable, but the grid is unreadable on a phone, so the
  * screen edits by cause and exports the grid. Testing works the other way
- * round: pick a cause, the app tells you what should happen, and you confirm
- * what actually did — which is what makes it commissioning evidence rather
- * than a drawing.
+ * round: pick a cause, the app tells you what should happen, and you tick off
+ * what actually did as you go.
+ *
+ * The ticks are a checklist for the visit, not a record. Nothing stores them,
+ * so the screen must not describe them as evidence — the outcome of the test
+ * belongs on the service report, where it is kept.
  */
 const CAUSE_KINDS: { value: CauseKind; label: string }[] = [
   { value: 'zone-alarm', label: 'Zone alarm' },
@@ -119,8 +122,8 @@ export default function CauseEffectScreen() {
         {mode === 'test' ? (
           <Banner
             tone="info"
-            title="Expected versus actual"
-            body="Pick a cause and the app lists what should happen. Confirming each effect as you see it is what turns a drawing into commissioning evidence."
+            title="Expected versus actual — a checklist for this visit"
+            body="Pick a cause and the app lists what should happen, so you can tick each effect off as you see it. The ticks are not saved and do not go on the matrix: record the outcome on the service report."
           />
         ) : null}
 
@@ -202,6 +205,9 @@ function RuleCard({ rule, mode, onDelete }: { rule: CauseEffectRule; mode: Mode;
 
       <Divider />
       <Label>{mode === 'test' ? 'Should happen' : 'Effects'}</Label>
+      {mode === 'test' ? (
+        <Txt size="xs" tone="faint" style={{ marginTop: 2 }}>Ticks are for this visit only and are not saved.</Txt>
+      ) : null}
 
       <View style={{ marginTop: t.space(2), gap: t.space(1.5) }}>
         {rule.effects.map((e) => {

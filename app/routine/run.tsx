@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, ScrollView, View } from 'react-native';
+import { Alert, FlatList, Pressable, View } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -8,7 +8,7 @@ import { createDefect, getSite } from '@/db/repo';
 import { recordRoutineRun } from '@/db/routineRunRepo';
 import { defectByCode } from '@/seed/defectLibrary';
 import {
-  FREQUENCY_LABEL, SERVICE_ROUTINES, SOURCE_LABEL, routineById, testsForAssetType,
+  FREQUENCY_LABEL, SERVICE_ROUTINES, SOURCE_LABEL, routineById,
   type ServiceRoutine, type TestDef,
 } from '@/seed/serviceRoutines';
 import { SYSTEM_LABELS, assetTypeById } from '@/seed/assetTypes';
@@ -18,7 +18,7 @@ import { nowIso } from '@/db';
 import { useDraft } from '@/hooks/useDraft';
 import { useTheme } from '@/theme';
 import {
-  Banner, Button, Card, Chip, Divider, EmptyState, Field, H2, Label, Rowed, Screen, Txt,
+  Banner, Button, Card, Chip, EmptyState, Field, H2, Label, Rowed, Screen, Txt,
 } from '@/components/ui';
 
 /**
@@ -33,6 +33,12 @@ import {
  * dominant real-world outcome on an annual, and treating them as a pass hides a
  * coverage gap while treating them as a failure invents a defect that is not
  * there.
+ *
+ * The assets are a list that narrows as you type, and the whole screen is that
+ * list. A site with three hundred extinguishers is the normal case, not the
+ * edge, and a horizontal strip of three hundred chips is a strip nobody can
+ * find anything on. Tapping an asset opens its checks underneath it, so the
+ * thing being answered stays on screen next to the thing it is about.
  */
 type Verdict = 'pass' | 'fail' | 'na' | 'not-tested';
 
@@ -53,6 +59,14 @@ const NOT_TESTED_REASONS = [
   'Unsafe to test',
 ];
 
+/** The words a technician might type to find an asset. */
+function searchText(a: AssetRecord): string {
+  return [a.name, a.code, a.level, a.room, a.locationNote, a.serial, assetTypeById(a.assetTypeId)?.label]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+}
+
 export default function RunRoutineScreen() {
   const t = useTheme();
   const params = useLocalSearchParams<{ siteId?: string; routineId?: string }>();
@@ -62,6 +76,7 @@ export default function RunRoutineScreen() {
   );
   const [assets, setAssets] = useState<AssetRecord[]>([]);
   const [activeAsset, setActiveAsset] = useState<string>();
+  const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
 
   const draft = useDraft<Record<string, Answer>>(
@@ -83,31 +98,70 @@ export default function RunRoutineScreen() {
   const answer = (key: string, patch: Partial<Answer>) =>
     draft.setValue((p) => ({ ...p, [key]: { verdict: 'not-tested', ...p[key], ...patch } }));
 
+  const systemChecks = useMemo(() => routine?.tests.filter((x) => !x.assetTypeId) ?? [], [routine]);
+  const assetChecks = useMemo(() => routine?.tests.filter((x) => x.assetTypeId) ?? [], [routine]);
+
+  /*
+   * The assets this routine has checks for. A site's extinguishers and its
+   * hose reels share a system, and a routine written for one has nothing to
+   * ask about the other — listing it would be a row that can never be answered.
+   */
+  const applicable = useMemo(
+    () => assets.filter((a) => assetChecks.some((c) => c.assetTypeId === a.assetTypeId)),
+    [assets, assetChecks],
+  );
+
   const progress = useMemo(() => {
-    if (!routine) return { done: 0, total: 0, failed: 0 };
+    if (!routine) return { done: 0, total: 0, failed: 0, gaps: 0 };
     let total = 0;
     let done = 0;
     let failed = 0;
+    // A check that could not be carried out, with the reason given. Not a
+    // result, but not nothing either: it is what makes the run recordable
+    // when every device was behind a locked door.
+    let gaps = 0;
+    const tally = (a: Answer | undefined) => {
+      total++;
+      if (a && a.verdict !== 'not-tested') done++;
+      else if (a?.verdict === 'not-tested' && a.reason) gaps++;
+      if (a?.verdict === 'fail') failed++;
+    };
     // System-level checks are answered once; asset checks once per asset.
     for (const test of routine.tests) {
       if (!test.assetTypeId) {
-        total++;
-        const a = draft.value[test.id];
-        if (a && a.verdict !== 'not-tested') done++;
-        if (a?.verdict === 'fail') failed++;
+        tally(draft.value[test.id]);
       } else {
         for (const asset of assets.filter((x) => x.assetTypeId === test.assetTypeId)) {
-          total++;
-          const a = draft.value[`${test.id}:${asset.id}`];
-          if (a && a.verdict !== 'not-tested') done++;
-          if (a?.verdict === 'fail') failed++;
+          tally(draft.value[`${test.id}:${asset.id}`]);
         }
       }
     }
-    return { done, total, failed };
+    return { done, total, failed, gaps };
   }, [routine, assets, draft.value]);
 
-  const finish = async () => {
+  /** Nothing answered and nothing explained: the run is empty. */
+  const nothingAnswered = progress.done + progress.gaps === 0;
+  /** Checks with no answer at all, which the record will show as a gap. */
+  const blank = progress.total - progress.done - progress.gaps;
+
+  /** Whether every check on an asset has an answer. */
+  const answered = useCallback((a: AssetRecord) => {
+    const checks = assetChecks.filter((c) => c.assetTypeId === a.assetTypeId);
+    return checks.length > 0 && checks.every((c) => {
+      const v = draft.value[`${c.id}:${a.id}`]?.verdict;
+      return v !== undefined && v !== 'not-tested';
+    });
+  }, [assetChecks, draft.value]);
+
+  const answeredCount = useMemo(() => applicable.filter(answered).length, [applicable, answered]);
+
+  const shownAssets = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return applicable;
+    return applicable.filter((a) => searchText(a).includes(q));
+  }, [applicable, search]);
+
+  const record = async () => {
     if (!routine || !site) return;
     setSaving(true);
     try {
@@ -184,6 +238,12 @@ export default function RunRoutineScreen() {
                 status: 'open',
                 photos: [],
                 notes: `${code.code} · raised from ${routine.label}, ${test.label}`,
+                // The code it was raised from, kept as a field rather than only
+                // in the note, so the quote and the parts list can find it. The
+                // library's rating stands in for the AS 1851 class until the
+                // notice screen asks the question properly.
+                defectCode: code.code,
+                as1851Class: code.severity === 'critical' ? 'critical' : 'non-critical',
               });
               defectsRaised++;
             }
@@ -228,6 +288,31 @@ export default function RunRoutineScreen() {
     }
   };
 
+  /**
+   * The gate in front of the record.
+   *
+   * Recording a run is what the schedule counts, so a run with nothing on it
+   * would stamp the routine as done and push its next due date out on the
+   * strength of a screen nobody touched. And a run with checks left blank is
+   * legitimate — a locked riser is a locked riser — but the number of blanks
+   * is put in front of the technician before it becomes the record.
+   */
+  const finish = () => {
+    if (!routine || !site || nothingAnswered) return;
+    if (blank > 0) {
+      Alert.alert(
+        `${blank} check${blank === 1 ? ' has' : 's have'} no answer`,
+        `${blank === 1 ? 'It' : 'They'} will be recorded as a coverage gap, not as a pass. Record the routine anyway?`,
+        [
+          { text: 'Go back', style: 'cancel' },
+          { text: 'Record', onPress: () => void record() },
+        ],
+      );
+      return;
+    }
+    void record();
+  };
+
   if (!routine) {
     return (
       <>
@@ -253,107 +338,174 @@ export default function RunRoutineScreen() {
     );
   }
 
-  const systemChecks = routine.tests.filter((x) => !x.assetTypeId);
-  const assetChecks = routine.tests.filter((x) => x.assetTypeId);
-  const shownAsset = assets.find((a) => a.id === activeAsset);
+  const header = (
+    <View style={{ gap: t.space(3) }}>
+      <Card>
+        <Rowed style={{ justifyContent: 'space-between' }}>
+          <View style={{ flex: 1 }}>
+            <Txt weight="700">{site?.name ?? 'Site'}</Txt>
+            <Txt size="sm" tone="muted">{SYSTEM_LABELS[routine.system]} · {FREQUENCY_LABEL[routine.frequency]}</Txt>
+          </View>
+          <Chip
+            label={`${progress.done}/${progress.total}`}
+            tone={progress.failed ? 'fail' : progress.done === progress.total && progress.total > 0 ? 'pass' : 'default'}
+          />
+        </Rowed>
+        <View style={{ height: 8, borderRadius: 4, backgroundColor: t.color.surfaceAlt, marginTop: t.space(2), overflow: 'hidden' }}>
+          <View
+            style={{
+              width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%`,
+              height: '100%',
+              backgroundColor: progress.failed ? t.color.warn : t.color.pass,
+            }}
+          />
+        </View>
+      </Card>
+
+      {draft.recovered ? (
+        <Banner tone="info" title="Picked up where you left off" body="Answers from your last session were still here." />
+      ) : null}
+
+      {systemChecks.length ? (
+        <>
+          <H2>System checks</H2>
+          {systemChecks.map((test) => (
+            <CheckCard
+              key={test.id}
+              test={test}
+              answer={draft.value[test.id]}
+              onAnswer={(patch) => answer(test.id, patch)}
+            />
+          ))}
+        </>
+      ) : null}
+
+      {assetChecks.length ? (
+        <>
+          <H2>Assets</H2>
+          {!applicable.length ? (
+            <EmptyState
+              title="No assets for this system yet"
+              body="Add them to the site's register first, or import a device list. System checks above can still be recorded."
+            />
+          ) : (
+            <>
+              <Rowed style={{ justifyContent: 'space-between' }}>
+                <Txt size="sm" tone="muted">{answeredCount} of {applicable.length} answered</Txt>
+                <Chip
+                  label={answeredCount === applicable.length ? 'All answered' : `${applicable.length - answeredCount} to go`}
+                  tone={answeredCount === applicable.length ? 'pass' : 'default'}
+                />
+              </Rowed>
+              <Field
+                label="Find an asset"
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Name, level, room, serial or type"
+                autoCapitalize="none"
+              />
+              <Txt tone="faint" size="sm">Tap an asset to record its checks; tap it again to close it.</Txt>
+            </>
+          )}
+        </>
+      ) : null}
+    </View>
+  );
+
+  const footer = (
+    <View style={{ gap: t.space(3), marginTop: t.space(2) }}>
+      <Button title="Record this routine" onPress={finish} loading={saving} disabled={nothingAnswered} />
+      <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
+        {nothingAnswered
+          ? 'Answer at least one check first. A run recorded with nothing on it would still count as the routine done, and push its next due date out.'
+          : 'Failures raise their coded defect automatically. Anything left untested is reported as a coverage gap, never as a pass.'}
+      </Txt>
+    </View>
+  );
 
   return (
     <>
       <Stack.Screen options={{ title: routine.label }} />
-      <Screen>
-        <Card>
-          <Rowed style={{ justifyContent: 'space-between' }}>
-            <View style={{ flex: 1 }}>
-              <Txt weight="700">{site?.name ?? 'Site'}</Txt>
-              <Txt size="sm" tone="muted">{SYSTEM_LABELS[routine.system]} · {FREQUENCY_LABEL[routine.frequency]}</Txt>
-            </View>
-            <Chip
-              label={`${progress.done}/${progress.total}`}
-              tone={progress.failed ? 'fail' : progress.done === progress.total && progress.total > 0 ? 'pass' : 'default'}
-            />
-          </Rowed>
-          <View style={{ height: 8, borderRadius: 4, backgroundColor: t.color.surfaceAlt, marginTop: t.space(2), overflow: 'hidden' }}>
-            <View
-              style={{
-                width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%`,
-                height: '100%',
-                backgroundColor: progress.failed ? t.color.warn : t.color.pass,
-              }}
-            />
-          </View>
-        </Card>
-
-        {draft.recovered ? (
-          <Banner tone="info" title="Picked up where you left off" body="Answers from your last session were still here." />
-        ) : null}
-
-        {systemChecks.length ? (
-          <>
-            <H2>System checks</H2>
-            {systemChecks.map((test) => (
-              <CheckCard
-                key={test.id}
-                test={test}
-                answer={draft.value[test.id]}
-                onAnswer={(patch) => answer(test.id, patch)}
-              />
-            ))}
-          </>
-        ) : null}
-
-        {assetChecks.length ? (
-          <>
-            <H2>Assets</H2>
-            {!assets.length ? (
-              <EmptyState
-                title="No assets for this system yet"
-                body="Add them to the site's register first, or import a device list. System checks above can still be recorded."
-              />
-            ) : (
-              <>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2) }}>
-                  {assets.map((a) => {
-                    const type = assetTypeById(a.assetTypeId);
-                    const answered = assetChecks
-                      .filter((c) => c.assetTypeId === a.assetTypeId)
-                      .every((c) => draft.value[`${c.id}:${a.id}`]?.verdict && draft.value[`${c.id}:${a.id}`]!.verdict !== 'not-tested');
-                    return (
-                      <Chip
-                        key={a.id}
-                        label={`${a.name || type?.label}${answered ? ' ✓' : ''}`}
-                        selected={activeAsset === a.id}
-                        onPress={() => setActiveAsset(activeAsset === a.id ? undefined : a.id)}
-                      />
-                    );
-                  })}
-                </ScrollView>
-
-                {shownAsset ? (
-                  assetChecks
-                    .filter((c) => c.assetTypeId === shownAsset.assetTypeId)
-                    .map((test) => (
-                      <CheckCard
-                        key={`${test.id}:${shownAsset.id}`}
-                        test={test}
-                        answer={draft.value[`${test.id}:${shownAsset.id}`]}
-                        onAnswer={(patch) => answer(`${test.id}:${shownAsset.id}`, patch)}
-                      />
-                    ))
-                ) : (
-                  <Txt tone="faint" size="sm">Pick an asset above to record its checks.</Txt>
-                )}
-              </>
-            )}
-          </>
-        ) : null}
-
-        <Button title="Record this routine" onPress={finish} loading={saving} />
-        <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-          Failures raise their coded defect automatically. Anything left untested is reported as a coverage gap, never as a
-          pass.
-        </Txt>
+      <Screen scroll={false} padded={false}>
+        <FlatList
+          data={shownAssets}
+          keyExtractor={(a) => a.id}
+          // The rows read the draft and the selection, neither of which is a
+          // prop of the list, so it has to be told when they change.
+          extraData={{ answers: draft.value, activeAsset }}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ padding: t.space(4), gap: t.space(3), paddingBottom: t.space(12) }}
+          initialNumToRender={12}
+          maxToRenderPerBatch={16}
+          windowSize={9}
+          ListHeaderComponent={header}
+          ListFooterComponent={footer}
+          ListEmptyComponent={
+            applicable.length ? (
+              <Txt tone="faint" size="sm" style={{ textAlign: 'center' }}>Nothing matches “{search.trim()}”.</Txt>
+            ) : null
+          }
+          renderItem={({ item }) => {
+            const active = activeAsset === item.id;
+            return (
+              <View style={{ gap: t.space(3) }}>
+                <AssetRow
+                  asset={item}
+                  answered={answered(item)}
+                  active={active}
+                  onPress={() => setActiveAsset(active ? undefined : item.id)}
+                />
+                {active ? (
+                  <View style={{ gap: t.space(3), paddingLeft: t.space(3) }}>
+                    {assetChecks
+                      .filter((c) => c.assetTypeId === item.assetTypeId)
+                      .map((test) => (
+                        <CheckCard
+                          key={`${test.id}:${item.id}`}
+                          test={test}
+                          answer={draft.value[`${test.id}:${item.id}`]}
+                          onAnswer={(patch) => answer(`${test.id}:${item.id}`, patch)}
+                        />
+                      ))}
+                  </View>
+                ) : null}
+              </View>
+            );
+          }}
+        />
       </Screen>
     </>
+  );
+}
+
+/** One asset in the list: what it is, where it is, and whether it is done. */
+function AssetRow({
+  asset, answered, active, onPress,
+}: {
+  asset: AssetRecord;
+  answered: boolean;
+  active: boolean;
+  onPress: () => void;
+}) {
+  const t = useTheme();
+  const type = assetTypeById(asset.assetTypeId);
+  const title = asset.name || type?.label || 'Asset';
+  const detail = [asset.name ? type?.label : undefined, asset.level, asset.room].filter(Boolean).join(' · ');
+  return (
+    <Card onPress={onPress} style={active ? { borderWidth: 1, borderColor: t.color.accent } : undefined}>
+      <Rowed gap={2.5}>
+        <MaterialCommunityIcons
+          name={answered ? 'check-circle' : 'checkbox-blank-circle-outline'}
+          size={22}
+          color={answered ? t.color.pass : t.color.textFaint}
+        />
+        <View style={{ flex: 1 }}>
+          <Txt weight="600" numberOfLines={1}>{title}</Txt>
+          {detail ? <Txt size="xs" tone="muted" numberOfLines={1}>{detail}</Txt> : null}
+        </View>
+        <MaterialCommunityIcons name={active ? 'chevron-up' : 'chevron-down'} size={20} color={t.color.textFaint} />
+      </Rowed>
+    </Card>
   );
 }
 
@@ -465,7 +617,7 @@ function Verdict({ label, active, tone, onPress }: { label: string; active: bool
         borderWidth: 1, borderColor: active ? colour : t.color.border,
       }}
     >
-      <Txt size="sm" weight="700" style={{ color: active ? '#fff' : t.color.textMuted }}>{label}</Txt>
+      <Txt size="sm" weight="700" style={{ color: active ? t.color.onAccent : t.color.textMuted }}>{label}</Txt>
     </Pressable>
   );
 }

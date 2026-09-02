@@ -7,6 +7,7 @@ import {
   type Quote, type QuoteStatus,
 } from '@/domain/quote';
 import { formatCents } from '@/domain/rates';
+import { formatAuDate } from '@/export/sheets';
 import { nowIso } from '@/db';
 import { useTheme } from '@/theme';
 import {
@@ -48,12 +49,6 @@ type Row = {
   incomplete: boolean;
   daysRemaining?: number;
   note: string;
-};
-
-const auDate = (iso?: string | null): string => {
-  if (!iso) return '';
-  const [y, m, d] = iso.slice(0, 10).split('-');
-  return y && m && d ? `${d}/${m}/${y}` : iso;
 };
 
 export default function QuotesScreen() {
@@ -187,7 +182,7 @@ export default function QuotesScreen() {
               size="sm"
               tone={(row.daysRemaining ?? Infinity) <= 7 ? 'warn' : 'muted'}
             >
-              Issued {auDate(row.quote.issuedAt)} · {row.note}
+              Issued {formatAuDate(row.quote.issuedAt)} · {row.note}
             </Txt>
           ) : null}
 
@@ -197,13 +192,13 @@ export default function QuotesScreen() {
 
           {row.quote.status === 'accepted' ? (
             <Txt size="sm" tone="muted">
-              Accepted {auDate(row.quote.acceptedAt)}
+              Accepted {formatAuDate(row.quote.acceptedAt)}
               {row.quote.acceptedBy ? ` by ${row.quote.acceptedBy}` : ''}
             </Txt>
           ) : null}
 
           {row.quote.status === 'declined' ? (
-            <Txt size="sm" tone="muted">Declined {auDate(row.quote.declinedAt)}</Txt>
+            <Txt size="sm" tone="muted">Declined {formatAuDate(row.quote.declinedAt)}</Txt>
           ) : null}
 
           {/*

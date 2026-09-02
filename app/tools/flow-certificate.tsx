@@ -7,6 +7,7 @@ import {
   type CombinedFlowInput, type FlowTestEquipment,
 } from '@/export/combinedFlowCertificate';
 import { shareFile, writePdf } from '@/export/files';
+import { formatAuDate } from '@/export/sheets';
 import { loadPrefs } from '@/app-prefs';
 import { useTheme } from '@/theme';
 import {
@@ -42,12 +43,6 @@ const num = (s: string): number | undefined => {
   if (!v) return undefined;
   const n = Number(v);
   return Number.isFinite(n) ? n : undefined;
-};
-
-const auDate = (iso?: string): string => {
-  if (!iso) return '';
-  const [y, m, d] = iso.slice(0, 10).split('-');
-  return y && m && d ? `${d}/${m}/${y}` : iso;
 };
 
 type Tab = 'duty' | 'test' | 'gear' | 'who';
@@ -161,7 +156,7 @@ export default function FlowCertificateScreen() {
         title="Produce certificate"
         onPress={onPdf}
         loading={busy}
-        icon={<MaterialCommunityIcons name="file-pdf-box" size={18} color="#fff" />}
+        icon={<MaterialCommunityIcons name="file-pdf-box" size={18} color={t.color.onAccent} />}
       />
       <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
         Nothing here is stored. The certificate is produced from what is on screen and shared
@@ -230,7 +225,6 @@ function DutyTab({
 }
 
 function TestTab({ input, set }: TabProps) {
-  const t = useTheme();
   return (
     <View style={{ gap: 12 }}>
       <Card>
@@ -322,9 +316,7 @@ function TestTab({ input, set }: TabProps) {
                 })}
               />
             </View>
-            <Pressable onPress={() => set({ testPoints: input.testPoints.filter((_, n) => n !== i) })}>
-              <MaterialCommunityIcons name="trash-can-outline" size={20} color={t.color.textFaint} />
-            </Pressable>
+            <RemoveButton what="test point" onRemove={() => set({ testPoints: input.testPoints.filter((_, n) => n !== i) })} />
           </Rowed>
         ))}
         <Button
@@ -367,9 +359,7 @@ function GearTab({ input, set, stale }: TabProps & { stale: string[] }) {
         <Card key={i}>
           <Rowed>
             <Txt weight="700" style={{ flex: 1 }}>{e.item || `Item ${i + 1}`}</Txt>
-            <Pressable onPress={() => set({ equipment: input.equipment.filter((_, n) => n !== i) })}>
-              <MaterialCommunityIcons name="trash-can-outline" size={20} color={t.color.textFaint} />
-            </Pressable>
+            <RemoveButton what="gauge" onRemove={() => set({ equipment: input.equipment.filter((_, n) => n !== i) })} />
           </Rowed>
           <Field label="Item" value={e.item} onChangeText={(v) => setItem(i, { item: v })} placeholder="Pressure gauge" />
           <Rowed gap={2}>
@@ -385,7 +375,7 @@ function GearTab({ input, set, stale }: TabProps & { stale: string[] }) {
             value={e.certificationDate ?? ''}
             onChangeText={(v) => setItem(i, { certificationDate: v })}
             placeholder="2026-01-15"
-            hint={e.certificationDate ? auDate(e.certificationDate) : undefined}
+            hint={e.certificationDate ? formatAuDate(e.certificationDate) : undefined}
           />
           <Field label="Certificate" value={e.certificationReference ?? ''} onChangeText={(v) => setItem(i, { certificationReference: v })} />
         </Card>
@@ -469,6 +459,29 @@ function DetailsTab({ input, set }: TabProps) {
         <Field label="Comments" value={input.comments ?? ''} onChangeText={(v) => set({ comments: v })} multiline />
       </Card>
     </View>
+  );
+}
+
+/**
+ * The bin beside a row. It asks first: nothing on this screen is stored, so a
+ * row taken out is simply gone, and a 20dp icon beside a text box is what a
+ * gloved thumb reaching for the box lands on.
+ */
+function RemoveButton({ what, onRemove }: { what: string; onRemove: () => void }) {
+  const t = useTheme();
+  return (
+    <Pressable
+      onPress={() => Alert.alert(`Remove this ${what}?`, 'It cannot be put back.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Remove', style: 'destructive', onPress: onRemove },
+      ])}
+      hitSlop={12}
+      accessibilityRole="button"
+      accessibilityLabel={`Remove this ${what}`}
+      style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
+    >
+      <MaterialCommunityIcons name="trash-can-outline" size={20} color={t.color.textFaint} />
+    </Pressable>
   );
 }
 

@@ -89,6 +89,7 @@ export default function SiteAssetsScreen() {
         <FlatList
           data={assets}
           keyExtractor={(a) => a.id}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ paddingHorizontal: t.space(4), paddingBottom: t.space(20), gap: t.space(2) }}
           initialNumToRender={15}
           removeClippedSubviews

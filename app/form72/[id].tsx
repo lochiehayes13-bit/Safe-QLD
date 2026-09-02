@@ -20,6 +20,7 @@ import {
   occupierCopyDueBy, testPointOutcome, testerCopyKeepUntil,
 } from '@/export/form72';
 import { shareFile, writePdf } from '@/export/files';
+import { formatAuDate } from '@/export/sheets';
 import { loadPrefs } from '@/app-prefs';
 import { nowIso } from '@/db';
 import { useTheme } from '@/theme';
@@ -92,12 +93,6 @@ const num = (s: string): number | undefined => {
 };
 
 const str = (n: number | undefined): string => (n === undefined ? '' : String(n));
-
-const auDate = (iso?: string): string => {
-  if (!iso) return '';
-  const [y, m, d] = iso.slice(0, 10).split('-');
-  return y && m && d ? `${d}/${m}/${y}` : iso;
-};
 
 export default function Form72Screen() {
   const t = useTheme();
@@ -337,6 +332,8 @@ function PartStrip({
             key={p.key}
             onPress={() => onChange(p.key)}
             style={{
+              // The 44dp floor: these are pressed with gloves on.
+              minHeight: 44,
               paddingVertical: t.space(1.5),
               paddingHorizontal: t.space(2.5),
               borderRadius: t.radius.md,
@@ -351,18 +348,18 @@ function PartStrip({
             <Txt
               size="sm"
               weight="700"
-              style={{ color: on ? '#fff' : t.color.text }}
+              style={{ color: on ? t.color.onAccent : t.color.text }}
             >
               {p.key}
             </Txt>
-            <Txt size="sm" style={{ color: on ? '#fff' : answered[p.key] ? t.color.text : t.color.textFaint }}>
+            <Txt size="sm" style={{ color: on ? t.color.onAccent : answered[p.key] ? t.color.text : t.color.textFaint }}>
               {p.title}
             </Txt>
             {blocked ? (
               <MaterialCommunityIcons
                 name="alert-circle"
                 size={13}
-                color={on ? '#fff' : t.color.warn}
+                color={on ? t.color.onAccent : t.color.warn}
               />
             ) : null}
           </Pressable>
@@ -548,7 +545,6 @@ function PartB({ form, locked, patch }: PartProps) {
  * cannot check, because the paper does not carry the test date beside it.
  */
 function PartC({ form, locked, patch }: PartProps) {
-  const t = useTheme();
   const devices = form.devices;
   const setDevice = (i: number, p: Partial<TestDevice>) => patch({
     devices: devices.map((d, n) => (n === i ? { ...d, ...p } : d)),
@@ -600,9 +596,7 @@ function PartC({ form, locked, patch }: PartProps) {
               />
             ) : null}
             {!locked ? (
-              <Pressable onPress={() => patch({ devices: devices.filter((_, n) => n !== i) })}>
-                <MaterialCommunityIcons name="trash-can-outline" size={20} color={t.color.textFaint} />
-              </Pressable>
+              <RemoveButton what="device" onRemove={() => patch({ devices: devices.filter((_, n) => n !== i) })} />
             ) : null}
           </Rowed>
           <Field label="Serial number" value={d.serialNumber} onChangeText={(v) => setDevice(i, { serialNumber: v })} editable={!locked} />
@@ -617,7 +611,7 @@ function PartC({ form, locked, patch }: PartProps) {
             <Banner
               tone={cal.issue.blocking ? 'fail' : 'warn'}
               title={cal.state === 'out-of-calibration'
-                ? `Calibrated ${auDate(d.dateCalibrated)}, more than ${CALIBRATION_MONTHS} months before this test`
+                ? `Calibrated ${formatAuDate(d.dateCalibrated)}, more than ${CALIBRATION_MONTHS} months before this test`
                 : 'This gauge cannot be relied on'}
               body={cal.issue.message}
             />
@@ -661,7 +655,6 @@ function PartC({ form, locked, patch }: PartProps) {
  * purpose once the form is printed.
  */
 function PartD({ form, locked, patch }: PartProps) {
-  const t = useTheme();
   const f = form.flowTest;
   const set = (p: Partial<typeof f>) => patch({ flowTest: { ...f, ...p } });
   const setRow = (i: number, p: Partial<FlowRow>) => set({
@@ -709,9 +702,7 @@ function PartD({ form, locked, patch }: PartProps) {
               <Txt weight="700" style={{ flex: 1 }}>{r.rateLps} L/s</Txt>
               {!standard ? <Chip label="Non-standard rate" tone="warn" /> : null}
               {!locked ? (
-                <Pressable onPress={() => set({ rows: f.rows.filter((_, n) => n !== i) })}>
-                  <MaterialCommunityIcons name="trash-can-outline" size={20} color={t.color.textFaint} />
-                </Pressable>
+                <RemoveButton what="flow row" onRemove={() => set({ rows: f.rows.filter((_, n) => n !== i) })} />
               ) : null}
             </Rowed>
             <NumField label="Rate" suffix="L/s" value={r.rateLps} onChange={(v) => setRow(i, { rateLps: v ?? 0 })} locked={locked} />
@@ -880,7 +871,6 @@ function PartF({ form, locked, patch }: PartProps) {
  * not its pressure is easy to miss in a table of four columns.
  */
 function PartG({ form, locked, patch }: PartProps) {
-  const t = useTheme();
   const g = form.sprinklerFlow;
   const set = (p: Partial<SprinklerFlowTest>) => patch({ sprinklerFlow: { ...g, ...p } });
   const setPoint = (i: number, p: Partial<SprinklerTestPoint>) => set({
@@ -906,9 +896,7 @@ function PartG({ form, locked, patch }: PartProps) {
               {flow ? <Chip label={`Flow ${flow}`} tone={flow === 'pass' ? 'pass' : 'fail'} /> : null}
               {press ? <Chip label={`Pressure ${press}`} tone={press === 'pass' ? 'pass' : 'fail'} /> : null}
               {!locked ? (
-                <Pressable onPress={() => set({ testPoints: g.testPoints.filter((_, n) => n !== i) })}>
-                  <MaterialCommunityIcons name="trash-can-outline" size={20} color={t.color.textFaint} />
-                </Pressable>
+                <RemoveButton what="test point" onRemove={() => set({ testPoints: g.testPoints.filter((_, n) => n !== i) })} />
               ) : null}
             </Rowed>
             <Field label="Location" value={p.location} onChangeText={(v) => setPoint(i, { location: v })} editable={!locked} />
@@ -1008,7 +996,7 @@ function PartI({ form, locked, patch }: PartProps) {
       <Card>
         <Label>Signature</Label>
         {locked ? (
-          <Txt size="sm" tone="muted">Signed and issued {auDate(form.issuedAt)}.</Txt>
+          <Txt size="sm" tone="muted">Signed and issued {formatAuDate(form.issuedAt)}.</Txt>
         ) : (
           <SignaturePad
             label="Sign here"
@@ -1075,8 +1063,8 @@ function OccupierCopyCard({ form, onPress }: { form: StoredForm72; onPress: () =
           <View style={{ flex: 1 }}>
             <Txt weight="600">Occupier has their copy</Txt>
             <Txt size="sm" tone="muted">
-              Given {auDate(form.copyGivenAt)}
-              {keep ? ` · keep yours until ${auDate(keep)}` : ''}
+              Given {formatAuDate(form.copyGivenAt)}
+              {keep ? ` · keep yours until ${formatAuDate(keep)}` : ''}
             </Txt>
           </View>
         </Rowed>
@@ -1089,11 +1077,36 @@ function OccupierCopyCard({ form, onPress }: { form: StoredForm72; onPress: () =
       <Txt weight="600">The occupier still needs their copy</Txt>
       <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
         {OCCUPIER_COPY_BUSINESS_DAYS} business days from the work
-        {due ? `, so by ${auDate(due)}` : ''}. You keep yours for {TESTER_RETENTION_YEARS} years
-        {keep ? `, until ${auDate(keep)}` : ''}.
+        {due ? `, so by ${formatAuDate(due)}` : ''}. You keep yours for {TESTER_RETENTION_YEARS} years
+        {keep ? `, until ${formatAuDate(keep)}` : ''}.
       </Txt>
       <Button title="They have their copy" variant="secondary" onPress={onPress} />
     </Card>
+  );
+}
+
+/**
+ * The bin beside a row.
+ *
+ * It asks first. The form saves as it is typed, so a row taken out is gone
+ * from the record the moment the icon is touched — and a 20dp icon beside a
+ * text box is exactly what a gloved thumb reaching for the box lands on.
+ */
+function RemoveButton({ what, onRemove }: { what: string; onRemove: () => void }) {
+  const t = useTheme();
+  return (
+    <Pressable
+      onPress={() => Alert.alert(`Remove this ${what}?`, 'The form saves as you go, so it cannot be put back.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Remove', style: 'destructive', onPress: onRemove },
+      ])}
+      hitSlop={12}
+      accessibilityRole="button"
+      accessibilityLabel={`Remove this ${what}`}
+      style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}
+    >
+      <MaterialCommunityIcons name="trash-can-outline" size={20} color={t.color.textFaint} />
+    </Pressable>
   );
 }
 

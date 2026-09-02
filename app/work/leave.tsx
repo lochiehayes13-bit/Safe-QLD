@@ -109,9 +109,10 @@ export default function LeaveRequestScreen() {
         </Card>
 
         <Card>
-          <Field label="First day" value={fromText} onChangeText={setFromText} keyboardType="numeric" placeholder="7/9/2026" />
+          {/* The default keyboard, not the numeric one: the date wants slashes, and the number pad has none. */}
+          <Field label="First day" value={fromText} onChangeText={setFromText} placeholder="7/9/2026" />
           <View style={{ height: t.space(2.5) }} />
-          <Field label="Last day" value={toText} onChangeText={setToText} keyboardType="numeric" placeholder="Leave blank for one day" />
+          <Field label="Last day" value={toText} onChangeText={setToText} placeholder="Leave blank for one day" />
           <View style={{ height: t.space(2.5) }} />
           <View
             style={{

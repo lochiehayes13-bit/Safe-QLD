@@ -193,6 +193,42 @@ export async function queryPoints(q: PointQuery): Promise<Point[]> {
   return rows.map((r) => ({ ...r, unused: toBool(r.unused) }));
 }
 
+/**
+ * How many points a site holds — the number, not the rows.
+ *
+ * The site screen used to read every point on the site to take its length,
+ * which on a large Simplex network is tens of thousands of rows for one tile.
+ * Unused points are left out by default, as queryPoints leaves them out.
+ */
+export async function countPoints(siteId: string, includeUnused = false): Promise<number> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM point pt
+     JOIN panel p ON pt.panelId = p.id
+     WHERE p.siteId = ? ${includeUnused ? '' : 'AND pt.unused = 0'}`,
+    siteId,
+  );
+  return row?.n ?? 0;
+}
+
+/**
+ * Points per zone on a panel, counted in SQL.
+ *
+ * Keyed by panel rather than by site because zone numbers are: zone 1 on the
+ * north panel and zone 1 on the south panel are different zones. Unused
+ * points are counted, as the zone chart counts them.
+ */
+export async function countPointsByZone(panelId: string): Promise<Map<number, number>> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ zoneNumber: number; n: number }>(
+    `SELECT zoneNumber, COUNT(*) AS n FROM point
+     WHERE panelId = ? AND zoneNumber IS NOT NULL
+     GROUP BY zoneNumber`,
+    panelId,
+  );
+  return new Map(rows.map((r) => [r.zoneNumber, r.n]));
+}
+
 export async function listZones(panelId: string, includeUnused = false): Promise<Zone[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<Omit<Zone, 'unused'> & { unused: number }>(
@@ -443,6 +479,30 @@ export async function listDefects(siteId?: string, status?: Defect['status']): P
   }));
 }
 
+/** One defect by id, read the same way listDefects reads them. */
+export async function getDefect(id: string): Promise<Defect | null> {
+  const db = await getDb();
+  const r = await db.getFirstAsync<Omit<Defect, 'photos'> & { photos: string }>('SELECT * FROM defect WHERE id = ?', id);
+  if (!r) return null;
+  return {
+    ...r,
+    photos: safeParseArray(r.photos),
+    qldLimbInoperable: (r as unknown as { qldLimbInoperable?: number }).qldLimbInoperable === 1,
+    qldLimbAdverseImpact: (r as unknown as { qldLimbAdverseImpact?: number }).qldLimbAdverseImpact === 1,
+  };
+}
+
+/**
+ * Puts a rectified defect back to open and clears the rectification date.
+ *
+ * Its own statement because updateDefect skips a field set to undefined, so
+ * there is otherwise no way to take a date off a defect once it is on.
+ */
+export async function reopenDefect(id: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync("UPDATE defect SET status = 'open', rectifiedAt = NULL WHERE id = ?", id);
+}
+
 /**
  * Critical defects whose statutory notice has not been issued.
  *
@@ -462,11 +522,20 @@ export async function defectsAwaitingNotice(): Promise<Defect[]> {
 export async function createDefect(input: Omit<Defect, 'id' | 'raisedAt'> & { id?: string; raisedAt?: string }): Promise<Defect> {
   const db = await getDb();
   const d: Defect = { ...input, id: input.id ?? newId(), raisedAt: input.raisedAt ?? nowIso() };
+  // The statutory columns go in with the row. They were returned on the record
+  // and never inserted, so a defect raised as critical with both Queensland
+  // limbs ticked was stored as non-critical with neither — and the notice is
+  // built from the row, not from what the screen returned.
   await db.runAsync(
-    `INSERT INTO defect (id,siteId,reportId,pointId,location,description,severity,status,raisedAt,rectifiedAt,photos,notes)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    `INSERT INTO defect (id,siteId,reportId,pointId,location,description,severity,status,raisedAt,rectifiedAt,photos,notes,
+       defectCode,as1851Class,qldLimbInoperable,qldLimbAdverseImpact,noticeIssuedAt,noticeRecipient,
+       verbalNotifiedAt,verbalNotifiedTo,rectificationDueAt,interimMeasures,extentOfImpairment)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     d.id, d.siteId, d.reportId ?? null, d.pointId ?? null, d.location, d.description,
     d.severity, d.status, d.raisedAt, d.rectifiedAt ?? null, JSON.stringify(d.photos ?? []), d.notes ?? null,
+    d.defectCode ?? null, d.as1851Class ?? 'non-critical', fromBool(d.qldLimbInoperable), fromBool(d.qldLimbAdverseImpact),
+    d.noticeIssuedAt ?? null, d.noticeRecipient ?? null, d.verbalNotifiedAt ?? null, d.verbalNotifiedTo ?? null,
+    d.rectificationDueAt ?? null, d.interimMeasures ?? null, d.extentOfImpairment ?? null,
   );
   return d;
 }

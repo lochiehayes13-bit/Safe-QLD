@@ -1,7 +1,8 @@
 import React, { useCallback, useState } from 'react';
-import { FlatList, View } from 'react-native';
+import { Alert, FlatList, View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { getSite, listDefects, updateDefect } from '@/db/repo';
+import { getSite, listDefects, reopenDefect, updateDefect } from '@/db/repo';
+import { nowIso } from '@/db';
 import type { Defect, Site } from '@/domain/types';
 import { formatAuDate } from '@/export/sheets';
 import { defectSheet } from '@/export/sheets';
@@ -28,6 +29,47 @@ export default function SiteDefectsScreen() {
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const shown = defects.filter((d) => (status === 'open' ? d.status === 'open' : true));
+
+  /*
+   * Rectified is a statutory fact, not a tidy-up. The date it stamps is what
+   * the occupier statement and a critical defect notice read back, so one tap
+   * on the wrong row used to put a rectification date on a defect nobody had
+   * touched, with no way back. It asks now, and a slip can be reopened.
+   */
+  const markRectified = (d: Defect) => {
+    Alert.alert(
+      'Mark this defect rectified?',
+      `${d.location}\n\nThis records today as the rectification date, which the occupier statement and any critical defect notice read back.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Rectified',
+          onPress: () => {
+            void (async () => {
+              await updateDefect(d.id, { status: 'rectified', rectifiedAt: nowIso() });
+              void load();
+            })();
+          },
+        },
+      ],
+    );
+  };
+
+  const reopen = (d: Defect) => {
+    Alert.alert('Reopen this defect?', 'It goes back to open and the rectification date is cleared.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Reopen',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            await reopenDefect(d.id);
+            void load();
+          })();
+        },
+      },
+    ]);
+  };
 
   const exportList = async () => {
     if (!shown.length) return;
@@ -82,10 +124,15 @@ export default function SiteDefectsScreen() {
                   variant="secondary"
                   compact
                   style={{ marginTop: t.space(2.5) }}
-                  onPress={async () => {
-                    await updateDefect(item.id, { status: 'rectified', rectifiedAt: new Date().toISOString() });
-                    void load();
-                  }}
+                  onPress={() => markRectified(item)}
+                />
+              ) : item.status === 'rectified' ? (
+                <Button
+                  title="Reopen"
+                  variant="ghost"
+                  compact
+                  style={{ marginTop: t.space(2.5) }}
+                  onPress={() => reopen(item)}
                 />
               ) : null}
             </Card>
