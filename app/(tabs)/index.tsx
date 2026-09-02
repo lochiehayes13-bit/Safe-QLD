@@ -10,6 +10,8 @@ import { queryAssets, recurringFailures, type RecurringFailure } from '@/db/asse
 import { lapsedEverywhere } from '@/db/routineRunRepo';
 import type { Defect } from '@/domain/types';
 import { formatAuDate } from '@/export/sheets';
+import { readAllSyncState } from '@/simpro/watermark';
+import { describeStaleness } from '@/simpro/incremental';
 import { useTheme, type Theme } from '@/theme';
 import { Card, Chip, Rowed, Screen, Txt } from '@/components/ui';
 import { TextInput } from 'react-native';
@@ -91,12 +93,14 @@ export default function TodayScreen() {
   const [recurring, setRecurring] = useState<RecurringFailure[]>([]);
   const [notices, setNotices] = useState<Defect[]>([]);
   const [lapsed, setLapsed] = useState(0);
+  const [assetCount, setAssetCount] = useState(0);
+  const [staleness, setStaleness] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     // The Queensland calendar day. Between midnight and 10am a UTC day is
     // yesterday's, and this company starts at seven.
     const today = qldIsoDay(nowIso()) ?? '';
-    const [j, s, d, imp, pr, rs, pc, due, rec, nt, lap] = await Promise.all([
+    const [j, s, d, imp, pr, rs, pc, due, rec, nt, lap, allAssets, syncState] = await Promise.all([
       listJobs({ limit: 50 }),
       listSiteSummaries(),
       listDefects(),
@@ -108,11 +112,28 @@ export default function TodayScreen() {
       recurringFailures(undefined, 3),
       defectsAwaitingNotice(),
       lapsedEverywhere(new Date().toISOString()),
+      queryAssets({ limit: 100000 }),
+      readAllSyncState(),
     ]);
     setJobs(j); setSites(s); setDefects(d); setImpairments(imp); setLoaded(true);
     setPromises(pr); setRestock(rs.length); setPending(pc);
     setDueAssets(due.length); setRecurring(rec); setNotices(nt);
     setLapsed(lap.filter((x) => x.state === 'overdue').length);
+    setAssetCount(allAssets.length);
+    /*
+     * The oldest thing on the device decides how current it is.
+     *
+     * Sites can be an hour old and the asset register a fortnight, and it is
+     * the fortnight that matters — a technician reading a due list does not
+     * know which resource it came from. So the worst state wins, and anything
+     * short of fresh is said out loud.
+     */
+    const now = new Date();
+    const RANK = { never: 3, stale: 2, ageing: 1, fresh: 0 } as const;
+    const worst = syncState
+      .map((st) => describeStaleness(st, now))
+      .sort((a, b) => RANK[b.state] - RANK[a.state])[0];
+    setStaleness(!worst || worst.state === 'fresh' ? null : worst.label);
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
@@ -129,6 +150,7 @@ export default function TodayScreen() {
   return (
     <Screen>
       <Greeting />
+      <SystemBar sites={sites.length} assets={assetCount} pending={pending} staleness={staleness} />
       <QuickAsk />
 
       {impairments.map((imp) => <ImpairmentBanner key={imp.id} impairment={imp} />)}
@@ -204,14 +226,77 @@ export default function TodayScreen() {
 function Greeting() {
   const hour = new Date().getHours();
   const part = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Evening';
+  const t = useTheme();
   return (
     <View style={{ gap: 2 }}>
-      <Txt size="xs" tone="faint" weight="700" style={{ letterSpacing: 1.2 }}>SAFE QLD</Txt>
-      <Txt size="display" weight="700" style={{ letterSpacing: -0.8 }}>{part}</Txt>
+      <Rowed gap={2}>
+        <View style={{ width: 3, height: t.font.size.xs + 2, borderRadius: 2, backgroundColor: t.color.accent }} />
+        <Txt size="xs" tone="accent" weight="800" style={{ letterSpacing: 2 }}>SAFE QLD</Txt>
+      </Rowed>
+      <Txt size="display" weight="800" style={{ letterSpacing: -1.2 }}>{part}</Txt>
       <Txt tone="muted" size="sm">
         {new Date().toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' })}
       </Txt>
     </View>
+  );
+}
+
+/**
+ * What the device is actually holding, in one line.
+ *
+ * The screen was full of things needing attention and said nothing about
+ * whether the copy underneath them was current. This app works offline, so
+ * every number on this page is a snapshot of whenever there was last a signal
+ * — and a technician trusting a stale register walks past equipment. The counts
+ * are set in the monospaced face on purpose: they are readouts, not prose, and
+ * they line up as they change.
+ */
+function SystemBar({
+  sites, assets, pending, staleness,
+}: { sites: number; assets: number; pending: number; staleness: string | null }) {
+  const t = useTheme();
+  const fresh = staleness === null;
+  const cell = (label: string, value: string, tone?: string) => (
+    <View key={label} style={{ flex: 1, gap: 2 }}>
+      <Txt size="xs" tone="faint" weight="700" style={{ letterSpacing: 1 }}>{label}</Txt>
+      <Txt weight="800" style={{ fontFamily: t.font.mono, color: tone ?? t.color.text, fontSize: t.font.size.md }}>
+        {value}
+      </Txt>
+    </View>
+  );
+  return (
+    <Pressable onPress={() => router.push('/settings' as never)}>
+      <View
+        style={{
+          backgroundColor: t.color.bgElevated,
+          borderRadius: t.radius.lg,
+          borderWidth: 1,
+          borderColor: t.color.border,
+          borderLeftWidth: 3,
+          borderLeftColor: fresh ? t.color.accent : t.color.warn,
+          padding: t.space(3.5),
+          gap: t.space(2.5),
+        }}
+      >
+        <Rowed gap={2}>
+          <View
+            style={{
+              width: 8, height: 8, borderRadius: 4,
+              backgroundColor: fresh ? t.color.pass : t.color.warn,
+            }}
+          />
+          <Txt size="xs" weight="700" tone={fresh ? 'pass' : 'warn'} style={{ letterSpacing: 0.8, flex: 1 }}>
+            {fresh ? 'OFFICE DATA CURRENT' : (staleness ?? '').toUpperCase()}
+          </Txt>
+          <MaterialCommunityIcons name="chevron-right" size={16} color={t.color.textFaint} />
+        </Rowed>
+        <Rowed gap={2}>
+          {cell('SITES', sites.toLocaleString('en-AU'))}
+          {cell('ASSETS', assets.toLocaleString('en-AU'))}
+          {cell('TO SEND', String(pending), pending ? t.color.warn : undefined)}
+        </Rowed>
+      </View>
+    </Pressable>
   );
 }
 
@@ -377,8 +462,18 @@ function ActionTile({ action, theme: t }: { action: Action; theme: Theme }) {
         padding: t.space(2),
       })}
     >
-      <View>
-        <MaterialCommunityIcons name={action.icon} size={26} color={tint} />
+      <View
+        style={{
+          width: 44, height: 44, borderRadius: t.radius.md,
+          alignItems: 'center', justifyContent: 'center',
+          // A tinted plate behind the glyph, so a grid of twelve reads as
+          // twelve controls rather than twelve pictures on a flat card.
+          backgroundColor: action.tone === 'fail' ? t.color.failBg
+            : action.tone === 'warn' ? t.color.warnBg
+            : t.color.surfaceAlt,
+        }}
+      >
+        <MaterialCommunityIcons name={action.icon} size={24} color={tint} />
         {action.badge ? (
           <View
             style={{
@@ -412,7 +507,9 @@ function Pill({ label, value, tone, onPress }: { label: string; value: number; t
       onPress={onPress}
       style={{
         flexGrow: 1,
-        minWidth: '22%',
+        // Three across, so the five of these wrap to 3 + 2 rather than 4 and a
+        // lone one stretched across a whole row looking like a mistake.
+        minWidth: '30%',
         backgroundColor: bg,
         borderRadius: t.radius.md,
         paddingVertical: t.space(2.5),
@@ -421,8 +518,8 @@ function Pill({ label, value, tone, onPress }: { label: string; value: number; t
         gap: 2,
       }}
     >
-      <Txt size="xxl" weight="700" style={{ color: colour }}>{value}</Txt>
-      <Txt size="xs" tone="muted" weight="600" numberOfLines={1}>{label}</Txt>
+      <Txt weight="800" style={{ color: colour, fontFamily: t.font.mono, fontSize: t.font.size.xxl }}>{value}</Txt>
+      <Txt size="xs" tone="muted" weight="700" numberOfLines={1} style={{ letterSpacing: 0.4 }}>{label}</Txt>
     </Pressable>
   );
 }
