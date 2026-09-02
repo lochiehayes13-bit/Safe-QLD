@@ -11,6 +11,7 @@ import {
 } from '@/domain/modules';
 import { useTheme, type Theme } from '@/theme';
 import { Button, Card, Rowed, Screen, Txt } from '@/components/ui';
+import { UpdateBanner } from '@/components/UpdateBanner';
 
 /**
  * Home — the company hub.
@@ -67,6 +68,7 @@ export default function HomeScreen() {
 
       {impairments.map((imp) => <ImpairmentBanner key={imp.id} impairment={imp} />)}
       {notices.length ? <NoticeBanner notices={notices} /> : null}
+      <UpdateBanner />
 
       {prefs && !prefs.technicianName.trim() ? <NamePrompt /> : null}
 

@@ -42,7 +42,18 @@ jobs:
       # conflict — this step passed for weeks on a tree Gradle refused to
       # build, because it produces JavaScript and never opens the Android
       # project. The apk job below is what checks that.
+      # The moment of this build, in the shape Settings prints. Its own step
+      # so it is one value for the whole job.
+      - name: Stamp the build
+        run: echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      # The same three variables the APK build sets, so what this bundles is
+      # what ships. The apk job explains each one.
       - name: Bundle for Android
+        env:
+          EXPO_PUBLIC_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPO_PUBLIC_BUILD_TIME: ${{ env.BUILD_TIME }}
+          EXPO_PUBLIC_UPDATES_REPO: ${{ vars.RELEASES_REPO || github.repository }}
         run: npx expo export --platform android --output-dir dist
 
   apk:
@@ -88,8 +99,24 @@ jobs:
       # arm64 only: it is every handset from roughly 2017 on, and it halves the
       # build. Drop the -P flag for a universal APK that also covers 32-bit and
       # emulator images.
+      - name: Stamp the build
+        run: echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      # The build's own identity, so a phone can say which build it is
+      # running and whether the release is newer. Metro inlines every
+      # `process.env.EXPO_PUBLIC_*` read at bundle time, and the release
+      # bundle is produced inside this Gradle run, so the variables are set on
+      # this step rather than on the prebuild above, which only generates the
+      # project. The head sha on a pull request, because that is the commit
+      # whose code this is; github.sha there is a merge commit that exists
+      # nowhere else. UPDATES_REPO is where the phone looks for releases: the
+      # public mirror when one is configured, otherwise this repository.
       - name: Build the release APK
         working-directory: android
+        env:
+          EXPO_PUBLIC_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPO_PUBLIC_BUILD_TIME: ${{ env.BUILD_TIME }}
+          EXPO_PUBLIC_UPDATES_REPO: ${{ vars.RELEASES_REPO || github.repository }}
         run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a
 
       # Signed with the standard Android debug key, which prebuild configures:
@@ -163,3 +190,37 @@ jobs:
           accepted by the Play Store.
           NOTES
           gh release edit android-latest --repo "${{ github.repository }}" --notes-file notes.md
+
+      # The release above sits on a private repository, so its download link
+      # lands on a GitHub login page, and the technicians who install the app
+      # do not have a GitHub login. The same file is copied to a public
+      # repository that holds nothing but releases, and the APK is built
+      # pointing at that one (EXPO_PUBLIC_UPDATES_REPO, above), so "Download
+      # and install" on the phone opens a plain file.
+      #
+      # Two things to do once, by hand:
+      #   1. Create a public repository for the mirror, e.g.
+      #      lochiehayes13-bit/safe-qld-releases, with a README so it has a
+      #      commit for the tag to sit on. No code goes in it.
+      #   2. On this repository (Settings → Secrets and variables → Actions),
+      #      add a variable RELEASES_REPO holding that name, and a secret
+      #      RELEASES_TOKEN: a fine-grained personal access token scoped to
+      #      the mirror repository only, with Contents: read and write.
+      #
+      # Until both are set the step says so and exits clean, and the release
+      # above is the only copy. The notes are rewritten to point at the
+      # mirror, since the download link in them names the repository.
+      - name: Mirror to the public releases repository
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          RELEASES_REPO: ${{ vars.RELEASES_REPO }}
+        run: |
+          if [ -z "$RELEASES_REPO" ] || [ -z "$GH_TOKEN" ]; then
+            echo "skipped: RELEASES_REPO and RELEASES_TOKEN are not both set"
+            exit 0
+          fi
+          sed "s#github.com/${{ github.repository }}/#github.com/$RELEASES_REPO/#g" notes.md > mirror-notes.md
+          gh release create android-latest --repo "$RELEASES_REPO" --prerelease \
+            --title "Safe QLD — latest Android build" --notes-file mirror-notes.md || true
+          gh release upload android-latest safe-qld.apk --repo "$RELEASES_REPO" --clobber
+          gh release edit android-latest --repo "$RELEASES_REPO" --notes-file mirror-notes.md
