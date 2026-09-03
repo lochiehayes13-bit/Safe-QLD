@@ -49,8 +49,18 @@ maybe('the sync against the real build', () => {
     );
     const seconds = Math.round((Date.now() - started) / 100) / 10;
 
+    // The counts and the errors, not the six hundred progress lines: a run
+    // whose output has to be paged through is a run nobody reads.
+    const { errors, notes, modes, ...counts } = result as unknown as Record<string, unknown>;
     // eslint-disable-next-line no-console
-    console.log(JSON.stringify({ seconds, result, stages }, null, 1));
+    console.log(JSON.stringify({
+      seconds,
+      stagesSeen: stages.length,
+      counts,
+      modes,
+      notes,
+      errors,
+    }, null, 1));
     expect(result.errors ?? []).toEqual([]);
   });
 });
