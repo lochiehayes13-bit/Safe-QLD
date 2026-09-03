@@ -8,11 +8,15 @@ import { SYSTEM_LABELS, assetTypeById, type SystemKind } from '@/seed/assetTypes
 import type { Site } from '@/domain/types';
 import { useTheme } from '@/theme';
 import { Button, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
+import { ContextGate } from '@/components/ContextGate';
+import { contextId } from '@/domain/screenContext';
 
 /** The site's asset register, grouped by system. */
 export default function SiteAssetsScreen() {
   const t = useTheme();
-  const { siteId } = useLocalSearchParams<{ siteId?: string }>();
+  // `contextId` rather than the raw parameter: several screens push
+  // `siteId: siteId ?? ''`, and an empty string is not a site.
+  const siteId = contextId(useLocalSearchParams<{ siteId?: string }>().siteId);
   const [site, setSite] = useState<Site | null>(null);
   const [assets, setAssets] = useState<AssetRecord[]>([]);
   const [counts, setCounts] = useState<{ system: string; count: number }[]>([]);
@@ -40,6 +44,11 @@ export default function SiteAssetsScreen() {
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const total = useMemo(() => counts.reduce((n, c) => n + c.count, 0), [counts]);
+
+  // Opened from search or a stale link there is no site, and the screen used
+  // to answer "No assets recorded" — a statement about a building nobody
+  // named, and one a technician believes.
+  if (!siteId) return <ContextGate kind="site" what="an asset register" title="Assets" />;
 
   return (
     <>

@@ -20,6 +20,7 @@ import {
   siteAddressLine, wazeUrl,
   type LatLng, type MapPin, type MapSelection, type MapView, type PinKind,
 } from '@/domain/mapPins';
+import { describeLoadFailure } from '@/domain/loadFailure';
 import { telHref } from '@/domain/jobPresentation';
 import { formatCents } from '@/domain/rates';
 import { formatAuDate } from '@/export/sheets';
@@ -143,25 +144,35 @@ export default function MapScreen() {
       let active = true;
       stopRef.current = false;
       void (async () => {
-        const loaded = await load();
-        if (!active || !loaded.sites.length) return;
-        setLocating(true);
-        setProgress(null);
-        setLocateFault(null);
-        // No budget: how many addresses one opening may look up is the
-        // platform's to say — two hundred on a phone, ten in a browser, and
-        // for reasons that belong next to each geocoder rather than here.
-        const result = await locateSites(loaded.sites, {
-          located: new Set(loaded.positions.keys()),
-          shouldStop: () => stopRef.current,
-          onProgress: (p) => { if (active) setProgress(p); },
-        });
-        if (!active) return;
-        setLocating(false);
-        if (result.fault) setLocateFault({ fault: result.fault, faultKind: result.faultKind });
-        // One rebuild for the whole run rather than one per hit, so the page
-        // reloads once at the end instead of two hundred times.
-        if (result.hits > 0) await load();
+        try {
+          const loaded = await load();
+          if (!active || !loaded.sites.length) return;
+          setLocating(true);
+          setProgress(null);
+          setLocateFault(null);
+          // No budget: how many addresses one opening may look up is the
+          // platform's to say — two hundred on a phone, ten in a browser, and
+          // for reasons that belong next to each geocoder rather than here.
+          const result = await locateSites(loaded.sites, {
+            located: new Set(loaded.positions.keys()),
+            shouldStop: () => stopRef.current,
+            onProgress: (p) => { if (active) setProgress(p); },
+          });
+          if (!active) return;
+          if (result.fault) setLocateFault({ fault: result.fault, faultKind: result.faultKind });
+          // One rebuild for the whole run rather than one per hit, so the page
+          // reloads once at the end instead of two hundred times.
+          if (result.hits > 0) await load();
+        } catch (error) {
+          // A geocoder that throws used to leave "Locating…" on the pill for
+          // the rest of the session, which reads as an app still working on
+          // it. The map itself is fine — the sites it already knows are
+          // drawn — so this says what failed and stops claiming to be busy.
+          if (active) setLocateFault({ fault: describeLoadFailure(error, 'the sites to place on the map'), faultKind: undefined });
+        } finally {
+          // Whatever happened, nothing is being looked up any more.
+          if (active) setLocating(false);
+        }
       })();
       // Where the phone last was, if it is already allowed to say. The
       // geocoder above asks for the permission on Android, once; this does

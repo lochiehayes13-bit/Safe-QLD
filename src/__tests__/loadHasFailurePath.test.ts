@@ -101,28 +101,9 @@ describe('a screen that shows a spinner', () => {
     expect(files.length).toBeGreaterThan(80);
   });
 
-  /**
-   * The one still outstanding, named rather than quietly skipped.
-   *
-   * The map tab's focus effect turns `locating` on before it asks the geocoder
-   * to place the sites it holds, and turns it off only where that call comes
-   * back — so a geocoder that throws leaves "Locating…" on the map for the rest
-   * of the session with no reason given. It is not fixed here because that file
-   * is being worked on elsewhere at the time of writing; it is listed so the
-   * check stays green without the fault becoming invisible.
-   */
-  const STILL_OUTSTANDING = ['app/(tabs)/map.tsx'];
-
   it('can always say what went wrong instead of just stopping', () => {
-    const violations = files
-      .flatMap(violationsIn)
-      .filter((v) => !STILL_OUTSTANDING.includes(v.file));
+    const violations = files.flatMap(violationsIn);
     expect(violations.map((v) => `${v.file}:${v.line} ${v.flag}`)).toEqual([]);
   });
 
-  it('still knows about the one it is letting through', () => {
-    // An exemption nobody checks is an exemption that outlives its reason.
-    const mapFaults = violationsIn(join(APP, '(tabs)', 'map.tsx'));
-    expect(mapFaults.map((v) => v.flag)).toContain('setLocating');
-  });
 });

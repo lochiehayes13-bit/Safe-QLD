@@ -95,7 +95,7 @@ describe('every screen that needs a record', () => {
      * at the time of writing, and it is written down rather than quietly
      * skipped so that the gap is visible.
      */
-    const answersItsOwnWay = new Set(['app/assets/new.tsx', 'app/site/assets.tsx']);
+    const answersItsOwnWay = new Set(['app/assets/new.tsx']);
     const missing = needsParam
       .filter((d) => !answersItsOwnWay.has(d.file))
       .filter((d) => !readFileSync(join(REPO, d.file), 'utf8').includes('<ContextGate'))
@@ -105,7 +105,7 @@ describe('every screen that needs a record', () => {
 
   it('reads the parameter through contextId, so an empty one is not a record', () => {
     const raw = needsParam
-      .filter((d) => d.file !== 'app/assets/new.tsx' && d.file !== 'app/site/assets.tsx')
+      .filter((d) => d.file !== 'app/assets/new.tsx')
       .filter((d) => !readFileSync(join(REPO, d.file), 'utf8').includes('contextId('))
       .map((d) => d.file);
     expect(raw).toEqual([]);

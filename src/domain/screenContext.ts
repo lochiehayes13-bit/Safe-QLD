@@ -55,7 +55,6 @@ const PICKER: Record<ContextKind, { route: string; label: string }> = {
  */
 export function missingContext(kind: ContextKind, what: string): MissingContext {
   const picker = PICKER[kind];
-  const subject = kind === 'site' ? 'a site' : 'an asset';
   return {
     title: kind === 'site' ? 'Which site?' : 'Which asset?',
     body:
