@@ -6,6 +6,7 @@ import {
   completeness,
   emptyBaseline,
   zoneQtyTotal,
+  addZoneRow, addSpeakerCircuit, canDropLastRow,
 } from '@/domain/baseline';
 import { autofillBaseline, describeZoneDevices } from '@/services/baselineAutofill';
 import type { Point, Site } from '@/domain/types';
@@ -188,5 +189,42 @@ describe('completeness', () => {
     expect(completeness(b).missing).toContain('Confirmations');
     for (const k of CONFIRMATION_ITEMS) b.confirmations[k] = 'YES';
     expect(completeness(b).missing).not.toContain('Confirmations');
+  });
+});
+
+describe('a building with more zones than the page has rows', () => {
+  it('adds a zone on the end and numbers it next', () => {
+    const rows = [
+      { zone: 1, qty: '24', deviceTypes: 'smoke' },
+      { zone: 2, qty: '3', deviceTypes: 'heat' },
+    ];
+    expect(addZoneRow(rows)).toEqual([...rows, { zone: 3, qty: '', deviceTypes: '' }]);
+  });
+
+  it('numbers from the highest zone, not the count, so a renumbered table does not repeat', () => {
+    const rows = [{ zone: 1, qty: '', deviceTypes: '' }, { zone: 17, qty: '', deviceTypes: '' }];
+    expect(addZoneRow(rows)[2]!.zone).toBe(18);
+  });
+
+  it('adds a speaker circuit the same way', () => {
+    const circuits = [{ zone: 1, impedanceOhms: '8', loadW: '20' }];
+    expect(addSpeakerCircuit(circuits)).toEqual([...circuits, { zone: 2, impedanceOhms: '', loadW: '' }]);
+  });
+
+  it('only offers to take back an empty row, and never below the printed form', () => {
+    const full = Array.from({ length: 32 }, (_, i) => ({ zone: i + 1, qty: '', deviceTypes: '' }));
+    // At the form's own length there is nothing to take back.
+    expect(canDropLastRow(full, 32)).toBe(false);
+    // One added and still empty: it can go.
+    expect(canDropLastRow(addZoneRow(full), 32)).toBe(true);
+    // One added and filled in: it stays, because a zone number is agreed with
+    // the block plan and the panel, and dropping it loses that.
+    const used = [...full, { zone: 33, qty: '6', deviceTypes: 'smoke' }];
+    expect(canDropLastRow(used, 32)).toBe(false);
+  });
+
+  it('keeps counting the total across the added rows', () => {
+    const rows = [{ zone: 1, qty: '10', deviceTypes: '' }, { zone: 2, qty: '5', deviceTypes: '' }];
+    expect(zoneQtyTotal(addZoneRow(rows))).toBe(15);
   });
 });

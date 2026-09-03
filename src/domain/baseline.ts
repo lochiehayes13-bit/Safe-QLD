@@ -98,6 +98,42 @@ export interface BaselineData {
   updatedAt: string;
 }
 
+/**
+ * Another row on the end of a numbered table.
+ *
+ * The printed form has eight speaker circuits and thirty-two zones because
+ * that is what fits on the page, not because a building cannot have more — and
+ * the ones that do are exactly the buildings where the baseline matters. The
+ * numbering carries on from the highest row rather than the count, so a table
+ * somebody has already renumbered does not suddenly repeat itself.
+ */
+export function addZoneRow(rows: readonly ZoneTestRow[]): ZoneTestRow[] {
+  return [...rows, { zone: nextNumber(rows), qty: '', deviceTypes: '' }];
+}
+
+export function addSpeakerCircuit(rows: readonly SpeakerCircuit[]): SpeakerCircuit[] {
+  return [...rows, { zone: nextNumber(rows), impedanceOhms: '', loadW: '' }];
+}
+
+/**
+ * Taking a row off the end.
+ *
+ * Only ever the last one, and only while it is empty: a row in the middle
+ * carries a zone number that the device list, the block plan and the panel all
+ * agree on, and renumbering the ones below it to close a gap would quietly
+ * make the form disagree with the building.
+ */
+export function canDropLastRow(rows: readonly { zone: number }[], minimum: number): boolean {
+  if (rows.length <= minimum) return false;
+  const last = rows[rows.length - 1] as ZoneTestRow & SpeakerCircuit;
+  return !(last.qty ?? '').trim() && !(last.deviceTypes ?? '').trim()
+    && !(last.impedanceOhms ?? '').trim() && !(last.loadW ?? '').trim();
+}
+
+function nextNumber(rows: readonly { zone: number }[]): number {
+  return rows.reduce((highest, row) => Math.max(highest, row.zone), 0) + 1;
+}
+
 /** A blank record with the tables pre-sized to the form's row counts. */
 export function emptyBaseline(siteId: string, id: string, now: string): BaselineData {
   return {

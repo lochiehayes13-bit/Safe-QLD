@@ -7,6 +7,7 @@ import { getSite, listPanels, listZones, queryPoints } from '@/db/repo';
 import {
   CONFIRMATION_ITEMS, EQUIPMENT_ITEMS, completeness, zoneQtyTotal,
   type BaselineData, type YesNo,
+  addZoneRow, addSpeakerCircuit, canDropLastRow, ZONE_TEST_ROW_COUNT, SPEAKER_CIRCUIT_COUNT,
 } from '@/domain/baseline';
 import { autofillBaseline } from '@/services/baselineAutofill';
 import type { Site } from '@/domain/types';
@@ -250,6 +251,22 @@ export default function BaselineScreen() {
                 </View>
               </Rowed>
             ))}
+            <Rowed gap={2} wrap>
+              <Button
+                title="Add a circuit"
+                variant="ghost"
+                icon="plus"
+                onPress={() => update({ speakerCircuits: addSpeakerCircuit(b.speakerCircuits) })}
+              />
+              {canDropLastRow(b.speakerCircuits, SPEAKER_CIRCUIT_COUNT) ? (
+                <Button
+                  title={`Remove zone ${b.speakerCircuits[b.speakerCircuits.length - 1]!.zone}`}
+                  variant="ghost"
+                  icon="minus"
+                  onPress={() => update({ speakerCircuits: b.speakerCircuits.slice(0, -1) })}
+                />
+              ) : null}
+            </Rowed>
           </>
         ))}
 
@@ -368,6 +385,25 @@ export default function BaselineScreen() {
                 </Rowed>
               </View>
             ))}
+            <Rowed gap={2} wrap>
+              <Button
+                title="Add a zone"
+                variant="ghost"
+                icon="plus"
+                onPress={() => update({ zoneResults: addZoneRow(b.zoneResults) })}
+              />
+              {canDropLastRow(b.zoneResults, ZONE_TEST_ROW_COUNT) ? (
+                <Button
+                  title={`Remove Z${b.zoneResults[b.zoneResults.length - 1]!.zone}`}
+                  variant="ghost"
+                  icon="minus"
+                  onPress={() => update({ zoneResults: b.zoneResults.slice(0, -1) })}
+                />
+              ) : null}
+            </Rowed>
+            <Txt size="xs" tone="faint">
+              The printed form stops at {ZONE_TEST_ROW_COUNT} zones because that is what fits the page. Add as many as the building has.
+            </Txt>
           </>
         ))}
 
