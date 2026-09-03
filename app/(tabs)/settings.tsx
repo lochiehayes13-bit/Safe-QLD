@@ -22,6 +22,7 @@ import { flushQueue, pullFromSimpro, type SyncProgress } from '@/simpro/sync';
 import { describeStaleness, type SyncState } from '@/simpro/incremental';
 import { readAllSyncState } from '@/simpro/watermark';
 import { SimproResources } from '@/simpro/resources';
+import { describePastedConnection, readPastedConnection } from '@/simpro/oauthDetails';
 import { clearRateCard, loadRateCard, saveRateCard } from '@/db/rateCardRepo';
 import { effectiveRateCard, formatCents, parseCents, type LabourRate, type ServiceFee } from '@/domain/rates';
 import type { RateCardImport } from '@/simpro/rateCard';
@@ -37,6 +38,7 @@ import {
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
 import { showAlert } from '@/components/alert';
+import { describeLoadFailure } from '@/domain/loadFailure';
 
 
 export default function SettingsScreen() {
@@ -44,6 +46,8 @@ export default function SettingsScreen() {
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
   const [secret, setSecret] = useState('');
   const [hasSecret, setHasSecret] = useState(false);
+  /** The whole oAuth2 details block off Simpro, pasted rather than picked apart by hand. */
+  const [pastedDetails, setPastedDetails] = useState('');
   const [aiKey, setAiKey] = useState('');
   const [hasAi, setHasAi] = useState(false);
   /** The optional Google Places key for the map's place search. Keystore only; see geo/placesKey. */
@@ -153,6 +157,38 @@ export default function SettingsScreen() {
     setSecret('');
     setHasSecret(true);
     showAlert('Saved', 'The client secret is held in this device’s secure keystore. It is never written to ordinary app storage and never leaves the device except to Simpro.');
+  };
+
+  /**
+   * Take the connection out of the block Simpro hands out with an API key.
+   *
+   * The four fields below are the four things in that block, and copying it
+   * across by eye is where a setup goes wrong — always on the secret, which
+   * is the longest and whose failure only ever says "the office rejected
+   * this device". Pasting it whole is one action and cannot mistype.
+   *
+   * A field the paste does not carry is left exactly as it is: a rotated
+   * secret arrives on its own, and blanking the client ID beside it would
+   * take a working phone off the air.
+   */
+  const applyPastedDetails = async () => {
+    const read = readPastedConnection(pastedDetails);
+    if (read.problem) {
+      showAlert('Nothing was read from that', read.problem);
+      return;
+    }
+    try {
+      if (read.found.clientSecret) await SimproClient.storeSecret(read.found.clientSecret);
+      const next: Partial<Prefs> = {};
+      if (read.found.domain) next.simproDomain = read.found.domain;
+      if (read.found.clientId) next.simproClientId = read.found.clientId;
+      if (Object.keys(next).length) update(next);
+      if (read.found.clientSecret) setHasSecret(true);
+      setPastedDetails('');
+      showAlert('Connection updated', describePastedConnection(read));
+    } catch (e) {
+      showAlert('That could not be saved', describeLoadFailure(e, 'the connection details'));
+    }
   };
 
   /**
@@ -641,6 +677,23 @@ export default function SettingsScreen() {
         body="A secret on every technician's phone is a genuine risk — anyone with the device and a way past the lock screen has your API access. It is kept in the hardware keystore, but the safer arrangement is a Safe QLD server holding the secret and this app talking to that. Set a proxy URL below and no secret is stored on the device at all."
       />
       <Card>
+        <Label>Paste the oAuth2 details from Simpro</Label>
+        <Txt size="xs" tone="faint" style={{ marginTop: 4, marginBottom: t.space(2), lineHeight: 17 }}>
+          System Setup → API keys in Simpro shows a block starting “Token URL”. Copy the whole
+          thing and paste it here — the build, the client ID and the secret are read out of it, and
+          the secret goes straight to the keystore. Anything the block does not carry is left alone.
+        </Txt>
+        <Field
+          label=""
+          value={pastedDetails}
+          onChangeText={setPastedDetails}
+          autoCapitalize="none"
+          multiline
+          placeholder={'Token URL: https://…/oauth2/token\nclient_id: …\nclient_secret: …'}
+        />
+        <View style={{ height: t.space(2) }} />
+        <Button title="Read it in" onPress={applyPastedDetails} disabled={!pastedDetails.trim()} />
+        <Divider />
         <Field label="Build domain" value={prefs.simproDomain} onChangeText={(v) => update({ simproDomain: v })} autoCapitalize="none" />
         <View style={{ height: t.space(2.5) }} />
         <Field label="Company ID" value={prefs.simproCompanyId} onChangeText={(v) => update({ simproCompanyId: v })} keyboardType="numeric" hint="Already set for this build. Clear it and connect to look it up again." />
