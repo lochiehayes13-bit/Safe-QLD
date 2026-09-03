@@ -32,7 +32,23 @@ function screens(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-const files = screens(APP).map((f) => ({ path: relative(REPO, f), text: readFileSync(f, 'utf8') }));
+/**
+ * A screen's source with its comments taken out.
+ *
+ * These checks are about what a screen renders, and this repository explains
+ * every fixed fault in a comment beside the fix — so the comment on the
+ * timesheet describing the endless "Loading…" it used to show would fail the
+ * very check that records it was fixed. Stripping comments first keeps the
+ * check about the code and lets the code keep its history.
+ */
+function code(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+}
+
+const files = screens(APP).map((f) => {
+  const text = readFileSync(f, 'utf8');
+  return { path: relative(REPO, f), text, code: code(text) };
+});
 
 describe('record screens', () => {
   it('found the screens it meant to check', () => {
@@ -47,16 +63,78 @@ describe('record screens', () => {
      * the week — but not as the answer to "is this record here".
      */
     const spinners = files
-      .filter((f) => f.text.includes('Loading…'))
+      .filter((f) => f.code.includes('Loading…'))
       .map((f) => f.path);
     expect(spinners).toEqual([]);
   });
 
   it('makes every screen that shows the gate able to tell the two states apart', () => {
     const broken = files
-      .filter((f) => f.text.includes('<RecordGate') && !f.text.includes('setMissing('))
+      .filter((f) => f.code.includes('<RecordGate') && !f.code.includes('setMissing('))
       .map((f) => f.path);
     expect(broken).toEqual([]);
+  });
+
+  it('can say that the read itself failed, not only that the record is absent', () => {
+    /*
+     * The half of the fault the gate did not cover. A load written as
+     * `void load()` throws into nothing: the record is never set and neither is
+     * `missing`, so the screen falls back to "Loading…" for the rest of the
+     * session with the failure invisible — the same endless spinner, arrived at
+     * a different way. A screen that shows the gate has to be able to tell it
+     * the read gave up.
+     */
+    const ungated = files
+      .filter((f) => f.code.includes('<RecordGate') && !f.code.includes('failed={'))
+      .map((f) => f.path);
+    expect(ungated).toEqual([]);
+  });
+
+  it('never lets a share sheet that did not open pass without a word', () => {
+    /*
+     * `shareFile` returns false rather than throwing when the platform has no
+     * share sheet, because the file itself was written. Sixteen of seventeen
+     * callers dropped that answer: press Export, watch the spinner run and
+     * stop, and nothing happens at all. Reading the result is the whole fix, so
+     * that is what is checked — a call whose answer goes nowhere is the bug.
+     */
+    const ignored: string[] = [];
+    for (const f of files) {
+      for (const call of f.code.matchAll(/\bshareFile\s*\(/g)) {
+        const before = f.code.slice(Math.max(0, call.index - 30), call.index);
+        // An import names it too; only a call has an `await` in front of it.
+        if (!/await\s*$/.test(before)) continue;
+        if (!/=\s*await\s*$/.test(before)) ignored.push(`${f.path}@${call.index}`);
+      }
+    }
+    expect(ignored).toEqual([]);
+  });
+
+  it('raises every message through the seam that works in a browser', () => {
+    /*
+     * `react-native-web`'s Alert is `static alert() {}` — not a stub that logs,
+     * the whole implementation. A screen that calls `Alert.alert` says nothing
+     * at all on the web build, and the web build is how this app reaches an
+     * iPhone. Every message in the app went through it, including "Photo
+     * required" and the confirmation before a rectification date is stamped.
+     *
+     * `showAlert` is the same modal on a phone and a browser prompt on the web,
+     * so what is checked is that no screen has gone back to the direct call.
+     */
+    const direct = files.filter((f) => /\bAlert\.alert\s*\(/.test(f.code)).map((f) => f.path);
+    expect(direct).toEqual([]);
+
+    const importsAlert = files
+      .filter((f) => /^import \{[^}]*\bAlert\b[^}]*\} from 'react-native';$/m.test(f.code))
+      .map((f) => f.path);
+    expect(importsAlert).toEqual([]);
+  });
+
+  it('has a browser half of the seam, and it is the one that does the work', () => {
+    // A seam with only a native side is the bug with extra steps.
+    const web = readFileSync(join(REPO, 'src/components/alert.web.ts'), 'utf8');
+    expect(web).toMatch(/confirm/);
+    expect(web).toMatch(/alert\?\./);
   });
 
   it('offers a way back from a record that is not there', () => {
@@ -89,16 +167,16 @@ describe('record screens', () => {
      * says "no such document" outright and is right to.
      */
     const fetches = (text: string) => /await |\.then\(/.test(text);
-    const byId = files.filter((f) => /\[id\]\.tsx$/.test(f.path) && fetches(f.text));
+    const byId = files.filter((f) => /\[id\]\.tsx$/.test(f.path) && fetches(f.code));
     expect(byId.length).toBeGreaterThan(8);
 
-    const notGated = byId.filter((f) => !f.text.includes('<RecordGate')).map((f) => f.path);
+    const notGated = byId.filter((f) => !f.code.includes('<RecordGate')).map((f) => f.path);
     expect(notGated).toEqual([]);
   });
 
   it('still answers on a screen whose record is already in memory', () => {
     // The exemption above is only safe because that screen does say something.
     const library = files.find((f) => f.path.endsWith('app/library/[id].tsx'))!;
-    expect(library.text).toContain('No such document');
+    expect(library.code).toContain('No such document');
   });
 });

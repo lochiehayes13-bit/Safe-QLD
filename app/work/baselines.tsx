@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, FlatList, View } from 'react-native';
+import { FlatList, View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { createBaseline, listBaselines } from '@/db/baselineRepo';
 import { listSites } from '@/db/repo';
@@ -7,7 +7,9 @@ import { completeness, type BaselineData } from '@/domain/baseline';
 import type { Site } from '@/domain/types';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
-import { Button, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
+import { Banner, Button, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
+import { describeLoadFailure } from '@/domain/loadFailure';
+import { showAlert } from '@/components/alert';
 
 /** Baseline data records across every site. */
 export default function BaselinesScreen() {
@@ -15,10 +17,18 @@ export default function BaselinesScreen() {
   const [records, setRecords] = useState<BaselineData[]>([]);
   const [sites, setSites] = useState<Map<string, Site>>(new Map());
 
+  const [failed, setFailed] = useState<string | null>(null);
+
   const load = useCallback(async () => {
-    const [b, s] = await Promise.all([listBaselines(), listSites()]);
-    setRecords(b);
-    setSites(new Map(s.map((x) => [x.id, x])));
+    setFailed(null);
+    try {
+      const [b, s] = await Promise.all([listBaselines(), listSites()]);
+      setRecords(b);
+      setSites(new Map(s.map((x) => [x.id, x])));
+    } catch (e) {
+      setRecords([]);
+      setFailed(describeLoadFailure(e, 'the baseline records on this device'));
+    }
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
@@ -26,7 +36,7 @@ export default function BaselinesScreen() {
   const create = async () => {
     const all = await listSites();
     if (!all.length) {
-      Alert.alert('No sites yet', 'Add a site first — baseline data belongs to a building.');
+      showAlert('No sites yet', 'Add a site first — baseline data belongs to a building.');
       return;
     }
     if (all.length === 1) {
@@ -34,7 +44,7 @@ export default function BaselinesScreen() {
       router.push({ pathname: '/baseline/[id]', params: { id: rec.id } });
       return;
     }
-    Alert.alert('Pick a site', 'Open the site and start baseline data from there.');
+    showAlert('Pick a site', 'Open the site and start baseline data from there.');
   };
 
   return (
@@ -45,13 +55,18 @@ export default function BaselinesScreen() {
           data={records}
           keyExtractor={(r) => r.id}
           contentContainerStyle={{ padding: t.space(4), gap: t.space(3), paddingBottom: t.space(20) }}
-          ListHeaderComponent={<Button title="New baseline record" onPress={create} />}
-          ListEmptyComponent={
+          ListHeaderComponent={(
+            <>
+              <Button title="New baseline record" onPress={create} />
+              {failed ? <Banner tone="fail" title="This list could not be read" body={failed} /> : null}
+            </>
+          )}
+          ListEmptyComponent={failed ? null : (
             <EmptyState
               title="No baseline data yet"
               body="Baseline data records what the system looked like when it was commissioned, so later services have something to test against."
             />
-          }
+          )}
           renderItem={({ item }) => {
             const c = completeness(item);
             return (

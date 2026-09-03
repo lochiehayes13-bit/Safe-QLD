@@ -1,42 +1,56 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, RefreshControl, TextInput, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { listSiteSummaries, type SiteSummary } from '@/db/repo';
+import { listSiteSummaries, type SiteSummary, type SiteSummaryPage } from '@/db/repo';
 import { useTheme } from '@/theme';
 import { Button, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
 import { Reveal, Skeleton } from '@/components/motion';
-import { ambiguousNames, disambiguator } from '@/domain/siteNames';
+import { disambiguator } from '@/domain/siteNames';
 
-/** Site list. A technician's mental model is "which job am I on", so sites lead. */
+/**
+ * Site list. A technician's mental model is "which job am I on", so sites lead.
+ *
+ * The search and the cap are the database's. This screen used to read all
+ * three thousand sites on every focus and filter them in JavaScript on every
+ * keystroke; the office has three thousand and fifty-nine of them.
+ */
+
+/** How many site rows the list draws at once. Where it cuts, the list says so. */
+const PAGE = 300;
+
 export default function SitesScreen() {
   const t = useTheme();
-  const [sites, setSites] = useState<SiteSummary[]>([]);
+  const [page, setPage] = useState<SiteSummaryPage | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [query, setQuery] = useState('');
+
+  // The search is a query now, so it waits for the typing to stop.
+  useEffect(() => {
+    const h = setTimeout(() => setQuery(search), 200);
+    return () => clearTimeout(h);
+  }, [search]);
 
   const load = useCallback(async () => {
-    setSites(await listSiteSummaries());
+    setPage(await listSiteSummaries({ query, limit: PAGE }));
     setLoading(false);
-  }, []);
+  }, [query]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   /*
-   * Worked out across the whole list rather than the filtered one: a name is
+   * Worked out across every site rather than across the page: a name is
    * ambiguous because two sites share it, and that stays true when a search
-   * happens to show only one of them. Deciding it from the filtered list would
-   * make the warning appear and disappear as somebody types.
+   * happens to show only one of them. Deciding it from the rows on screen
+   * would make the warning appear and disappear as somebody types, which is
+   * why the count is made in the same statement that reads them.
    */
-  const ambiguous = useMemo(() => ambiguousNames(sites), [sites]);
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return sites;
-    return sites.filter((s) =>
-      [s.name, s.address, s.suburb, s.clientName, s.siteRef].some((v) => v?.toLowerCase().includes(q)),
-    );
-  }, [sites, search]);
+  const filtered = page?.rows ?? [];
+  const ambiguous = useMemo(
+    () => new Set(filtered.filter((s) => s.sharesName).map((s) => s.name.trim().toLowerCase())),
+    [filtered],
+  );
 
   return (
     <Screen scroll={false} padded={false}>
@@ -66,6 +80,11 @@ export default function SitesScreen() {
                 style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md }}
               />
             </View>
+            {page && page.capped ? (
+              <Txt size="xs" tone="faint">
+                First {PAGE} of {page.matching.toLocaleString()} sites. Search to narrow.
+              </Txt>
+            ) : null}
             <Rowed gap={2}>
               <Button
                 title="Map"

@@ -1,18 +1,31 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, FlatList, View } from 'react-native';
+import { FlatList, View } from 'react-native';
 import { Stack, useFocusEffect } from 'expo-router';
 import { listPurchaseRequests, setPurchaseStatus, type PurchaseRequest } from '@/db/opsRepo';
 import { queuePurchaseOrder } from '@/simpro/sync';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
-import { Button, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
+import { Banner, Button, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
+import { describeLoadFailure } from '@/domain/loadFailure';
+import { showAlert } from '@/components/alert';
 
 /** Purchase requests — parts to order, ready to push to Simpro. */
 export default function PurchasesScreen() {
   const t = useTheme();
   const [items, setItems] = useState<PurchaseRequest[]>([]);
 
-  const load = useCallback(async () => setItems(await listPurchaseRequests()), []);
+  // "Nothing on order" is a statement somebody restocks a van on.
+  const [failed, setFailed] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setFailed(null);
+    try {
+      setItems(await listPurchaseRequests());
+    } catch (e) {
+      setItems([]);
+      setFailed(describeLoadFailure(e, 'the purchase requests on this device'));
+    }
+  }, []);
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   /**
@@ -40,12 +53,12 @@ export default function PurchasesScreen() {
       });
       await setPurchaseStatus(item.id, 'submitted');
       void load();
-      Alert.alert(
+      showAlert(
         'Queued for the office',
         'It goes to the office as soon as there is signal. Nothing is lost if you are out of it now.',
       );
     } catch (e) {
-      Alert.alert('Could not queue it', e instanceof Error ? e.message : String(e));
+      showAlert('Could not queue it', e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -57,12 +70,13 @@ export default function PurchasesScreen() {
           data={items}
           keyExtractor={(p) => p.id}
           contentContainerStyle={{ padding: t.space(4), gap: t.space(3), paddingBottom: t.space(20) }}
-          ListEmptyComponent={
+          ListHeaderComponent={failed ? <Banner tone="fail" title="This list could not be read" body={failed} /> : null}
+          ListEmptyComponent={failed ? null : (
             <EmptyState
               title="Nothing on order"
               body="Requests raised from van stock or from a defect's quote lines appear here before they go to the office."
             />
-          }
+          )}
           renderItem={({ item }) => (
             <Card>
               <Rowed align="flex-start">

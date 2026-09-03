@@ -1,4 +1,10 @@
-import { failedSync, forgetSync, getJob, listJobSummaries, listJobs, setJobStatus, upsertJob } from '@/db/opsRepo';
+import {
+  failedSync, forgetSync, getJob, jobSummariesByExternalIds, listJobPage, listJobSummaries, listJobs,
+  openJobPicks, setJobStatus, upsertJob,
+} from '@/db/opsRepo';
+import { scheduledJobExternalIds } from '@/db/mirrorRepo';
+import { applyJobFilter, type JobListFilter } from '@/domain/jobPresentation';
+import type { WhoseSchedule } from '@/domain/myDay';
 import { flushSoon } from '@/simpro/flushSoon';
 import { openMigrated, type NodeSqliteDb } from './support/nodeSqlite';
 
@@ -308,5 +314,164 @@ describe('queued photographs', () => {
     const first = await enqueueSync('attachment', { jobId: '1', filename: 'a.jpg', localUri: 'photos/x.jpg' }, { contentKey: 'k1' });
     const second = await enqueueSync('attachment', { jobId: '1', filename: 'a.jpg', localUri: 'file:///other/x.jpg' }, { contentKey: 'k1' });
     expect({ dup: second.duplicate, same: first.id === second.id }).toEqual({ dup: true, same: true });
+  });
+});
+
+/**
+ * The job list, filtered and searched by the database.
+ *
+ * The screen used to read every job on the books on every focus and then
+ * filter and search them in JavaScript. Moving that into SQL is only safe if
+ * it picks exactly the same jobs in exactly the same order, so that is what
+ * these check: against `applyJobFilter` over the whole list, which is the code
+ * the screen was running until now.
+ *
+ * The cases that matter are the ones the SQL has to reproduce rather than
+ * merely allow — a stage of "pending " in the wrong case, a Queensland day
+ * that is not the UTC one, a job on today's schedule that was issued last
+ * year, an underscore typed into the search.
+ */
+describe('the job list as a query', () => {
+  const day = (d: string) => `${d}T09:00:00+10:00`;
+
+  async function book(): Promise<void> {
+    await upsertJob({
+      id: 'j-open', externalId: '43747', siteName: 'Harbourline Apartments', customerName: 'Harbourline Body Corporate',
+      title: 'Six-monthly routine', stage: 'Progress', status: 'scheduled', scheduledFor: '2026-08-28',
+      priority: 'high', techniciansJson: JSON.stringify([{ id: '17', name: 'Dale Whitmore' }]),
+    });
+    await upsertJob({
+      id: 'j-untidy', externalId: '43748', siteName: 'Baldwin Living', title: 'Callout',
+      // The office's stage as somebody typed it, which the exact comparison missed.
+      stage: 'pending ', status: 'scheduled', scheduledFor: '2026-09-04',
+      techniciansJson: JSON.stringify([{ id: '18', name: 'Corey Nankervis' }]),
+    });
+    await upsertJob({
+      id: 'j-byhand', siteName: 'Storage Choice', title: 'Add-on works', status: 'scheduled',
+      scheduledFor: '2026-09-03', technician: 'Dale Whitmore',
+    });
+    await upsertJob({
+      id: 'j-done', externalId: '43749', siteName: 'Luggage Direct', title: 'Annual routine',
+      stage: 'Invoiced', status: 'complete', scheduledFor: '2026-06-01', completedDate: '2026-06-01',
+    });
+    await upsertJob({
+      // Issued at 23:30 UTC on the 2nd, which is 09:30 on the 3rd in Brisbane.
+      id: 'j-midnight', externalId: '43750', siteName: 'Milton Reach', title: 'Detector swap',
+      stage: 'Pending', status: 'scheduled', scheduledFor: '2026-09-02T23:30:00Z',
+    });
+    await upsertJob({
+      // Issued years ago, on today's schedule: what the old read of the newest
+      // few hundred could not see.
+      id: 'j-old', externalId: '43751', siteName: 'Cathedral Chambers', title: 'Contract service',
+      stage: 'Pending', status: 'scheduled', scheduledFor: '2021-03-04',
+    });
+    await db.runAsync(
+      "INSERT INTO schedule (id,jobId,staffId,staffName,date,syncedAt) VALUES ('b1','43751','17','Dale Whitmore','2026-09-03','')",
+    );
+  }
+
+  const TODAY = '2026-09-03';
+  const ME = { by: 'id', staffId: '17', label: 'employee 17' } as const;
+
+  /** What the screen used to compute, over everything the phone holds. */
+  async function inMemory(filter: JobListFilter, query: string, who: WhoseSchedule | null) {
+    const all = await listJobSummaries({ limit: 6000 });
+    const scheduledToday = new Set(await scheduledJobExternalIds({ from: TODAY, to: TODAY }));
+    return applyJobFilter(all, { filter, today: TODAY, who, scheduledToday, query });
+  }
+
+  it.each(['open', 'mine', 'today', 'all'] as const)('picks the same jobs as the in-memory filter — %s', async (filter) => {
+    await book();
+    const page = await listJobPage({ filter, today: TODAY, who: ME, limit: 100 });
+    const expected = await inMemory(filter, '', ME);
+    expect(page.rows.map((j) => j.id)).toEqual(expected.map((j) => j.id));
+    // The small case is the one that must not move: on a book of six jobs the
+    // line over the list reads exactly what it read before — the matches, the
+    // total, and no word about a page, because there is not one.
+    expect({ matching: page.matching, total: page.total, capped: page.capped })
+      .toEqual({ matching: expected.length, total: 6, capped: false });
+  });
+
+  it('searches the same fields, in the same words, as the in-memory match', async () => {
+    await book();
+    for (const query of ['harbour', '#43747', '43747', 'routine', 'annual luggage', 'nothing at all']) {
+      const page = await listJobPage({ filter: 'all', today: TODAY, who: ME, query, limit: 100 });
+      const expected = await inMemory('all', query, ME);
+      expect({ query, ids: page.rows.map((j) => j.id) }).toEqual({ query, ids: expected.map((j) => j.id) });
+    }
+  });
+
+  it('counts the open work the way the site and customer cards count it', async () => {
+    await book();
+    // Five open: Progress, the untidy "pending ", the hand-added job with no
+    // stage at all, the one issued at half past nine Brisbane time, and the
+    // 2021 one the office never closed. In the list's own order: the urgent
+    // and high work first, then soonest first.
+    const page = await listJobPage({ filter: 'open', today: TODAY, who: ME, limit: 100 });
+    expect(page.rows.map((j) => j.id)).toEqual(['j-open', 'j-old', 'j-midnight', 'j-byhand', 'j-untidy']);
+  });
+
+  it('reads today on the Queensland calendar, and takes the schedule at its word', async () => {
+    await book();
+    const page = await listJobPage({ filter: 'today', today: TODAY, who: ME, limit: 100 });
+    // j-midnight was issued at 23:30 UTC, which is this morning in Brisbane;
+    // j-old was issued in 2021 and is on today's schedule; j-byhand is dated
+    // today outright. Nothing else.
+    expect([...page.rows.map((j) => j.id)].sort()).toEqual(['j-byhand', 'j-midnight', 'j-old']);
+  });
+
+  it('finds the person by name as well as by id, and nobody when the phone does not know whose it is', async () => {
+    await book();
+    const byName = await listJobPage({
+      filter: 'mine', today: TODAY, limit: 100,
+      who: { by: 'name', staffName: 'dale whitmore', label: 'the name "dale whitmore"' },
+    });
+    // The office's list on one, the joined name on the hand-added one.
+    expect([...byName.rows.map((j) => j.id)].sort()).toEqual(['j-byhand', 'j-open']);
+    const nobody = await listJobPage({ filter: 'mine', today: TODAY, who: null, limit: 100 });
+    expect({ rows: nobody.rows.length, matching: nobody.matching, total: nobody.total }).toEqual({ rows: 0, matching: 0, total: 6 });
+  });
+
+  it('takes a wildcard typed into the search as the character it is', async () => {
+    await upsertJob({ id: 'j-a', siteName: 'A_B Tower', title: 'Routine', status: 'scheduled' });
+    await upsertJob({ id: 'j-b', siteName: 'AXB Tower', title: 'Routine', status: 'scheduled' });
+    const page = await listJobPage({ filter: 'all', today: TODAY, query: 'a_b', limit: 100 });
+    expect(page.rows.map((j) => j.id)).toEqual(['j-a']);
+  });
+
+  it('caps the page, counts past it, and says the count is not the page', async () => {
+    for (let i = 0; i < 12; i++) {
+      await upsertJob({ id: `j-${i}`, siteName: `Site ${i}`, title: 'Routine', stage: 'Pending', status: 'scheduled' });
+    }
+    const page = await listJobPage({ filter: 'all', today: TODAY, limit: 5 });
+    expect({ rows: page.rows.length, matching: page.matching, total: page.total, capped: page.capped })
+      .toEqual({ rows: 5, matching: 12, total: 12, capped: true });
+  });
+
+  it('scopes to a site or a customer without reading anybody else’s jobs', async () => {
+    await book();
+    await db.runAsync("INSERT INTO site (id,name,createdAt,updatedAt) VALUES ('site-1','Harbourline Apartments','','')");
+    await upsertJob({
+      id: 'j-site', siteId: 'site-1', siteName: 'Harbourline Apartments', title: 'Extra',
+      customerExternalId: '812', stage: 'Pending', status: 'scheduled',
+    });
+    const atSite = await listJobPage({ filter: 'all', today: TODAY, siteId: 'site-1', limit: 100 });
+    expect({ ids: atSite.rows.map((j) => j.id), total: atSite.total }).toEqual({ ids: ['j-site'], total: 1 });
+    const forCustomer = await listJobPage({ filter: 'all', today: TODAY, customerExternalId: '812', limit: 100 });
+    expect(forCustomer.rows.map((j) => j.id)).toEqual(['j-site']);
+  });
+
+  it('offers a picker the open jobs with an office number, and only four columns of them', async () => {
+    await book();
+    const picks = await openJobPicks(50);
+    expect(picks.map((p) => p.externalId)).toEqual(['43747', '43751', '43750', '43748']);
+    expect(Object.keys(picks[0]!).sort()).toEqual(['externalId', 'siteId', 'siteName', 'status']);
+  });
+
+  it('resolves the schedule’s job numbers straight, however old the jobs are', async () => {
+    await book();
+    const rows = await jobSummariesByExternalIds(['43751', '43747', '43751', 'nope']);
+    expect([...rows.map((j) => j.externalId)].sort()).toEqual(['43747', '43751']);
+    expect(await jobSummariesByExternalIds([])).toEqual([]);
   });
 });

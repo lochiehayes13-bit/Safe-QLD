@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { Directory, File, Paths } from 'expo-file-system';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -5,6 +6,7 @@ import { buildXlsx } from './xlsx';
 import type { Sheet } from './xlsx';
 import { isPdfName, mimeTypeFor, safeFileName } from './fileNames';
 import { toCsv } from '@/parsers/csv';
+import { filesNeedThePhone } from './shareOutcome';
 
 /**
  * Writing and sharing generated files.
@@ -15,6 +17,20 @@ import { toCsv } from '@/parsers/csv';
  */
 
 const EXPORT_DIR = 'exports';
+
+/**
+ * Refuses, in words, where the platform has no file system to write to.
+ *
+ * `expo-file-system` on web is a set of stubs that warn to the console and then
+ * fail somewhere inside themselves, so without this every export on the browser
+ * build ended as `this.validatePath is not a function` in front of a
+ * technician. Checked here rather than at each of the twenty screens that
+ * export something, because a screen cannot be expected to know which of the
+ * platform's modules is real.
+ */
+function requireFiles(what: string): void {
+  if (Platform.OS === 'web') throw filesNeedThePhone(what);
+}
 
 function exportDir(): Directory {
   const dir = new Directory(Paths.cache, EXPORT_DIR);
@@ -29,6 +45,7 @@ export interface WrittenFile {
 }
 
 function writeBytes(fileName: string, bytes: Uint8Array): WrittenFile {
+  requireFiles('Producing this file');
   const file = new File(exportDir(), fileName);
   if (file.exists) file.delete();
   file.create();
@@ -37,6 +54,7 @@ function writeBytes(fileName: string, bytes: Uint8Array): WrittenFile {
 }
 
 function writeText(fileName: string, text: string): WrittenFile {
+  requireFiles('Producing this file');
   const file = new File(exportDir(), fileName);
   if (file.exists) file.delete();
   file.create();
@@ -62,6 +80,7 @@ export function writePack(baseName: string, bytes: Uint8Array): WrittenFile {
 
 /** Renders HTML to a PDF and moves it to a meaningful filename. */
 export async function writePdf(baseName: string, html: string): Promise<WrittenFile> {
+  requireFiles('Producing a PDF');
   const { uri } = await Print.printToFileAsync({ html, base64: false });
   const src = new File(uri);
   const target = new File(exportDir(), `${safeFileName(baseName)}.pdf`);

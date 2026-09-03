@@ -8,6 +8,9 @@ import { assetTypeById } from '@/seed/assetTypes';
 import { siteCoverageGaps, type SiteCoverageGap } from '@/domain/serviceCoverage';
 import { useTheme } from '@/theme';
 import { Banner, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
+import { describeLoadFailure } from '@/domain/loadFailure';
+import { ContextGate } from '@/components/ContextGate';
+import { contextId } from '@/domain/screenContext';
 
 /**
  * What did not get tested, and why.
@@ -22,7 +25,9 @@ import { Banner, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components
  */
 export default function CoverageScreen() {
   const t = useTheme();
-  const { siteId } = useLocalSearchParams<{ siteId?: string }>();
+  // `contextId` rather than the raw parameter: several screens push
+  // `siteId: siteId ?? ''`, so "no site" arrives here as an empty string.
+  const siteId = contextId(useLocalSearchParams<{ siteId?: string }>().siteId);
   const [gaps, setGaps] = useState<CoverageGap[]>([]);
   /*
    * A different kind of hole, and a quieter one. The list above is assets
@@ -32,16 +37,29 @@ export default function CoverageScreen() {
    */
   const [unserviced, setUnserviced] = useState<SiteCoverageGap[]>([]);
   const [loading, setLoading] = useState(true);
+  // "Nothing outstanding" is a coverage claim. A read that threw must not make
+  // it on the strength of an empty list.
+  const [failed, setFailed] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    // Without a site there is nothing to read, and reading every asset in the
+    // book to answer a question about one site is the wrong answer expensively.
+    // The flag is cleared rather than left set: a loader that returns without
+    // clearing it is exactly how this family of screens hung.
+    if (!siteId) { setLoading(false); return; }
     setLoading(true);
+    setFailed(null);
     try {
       const [found, assets] = await Promise.all([
         coverageGaps(siteId),
-        siteId ? queryAssets({ siteId, limit: 10000 }) : queryAssets({ limit: 10000 }),
+        queryAssets({ siteId, limit: 10000 }),
       ]);
       setGaps(found);
       setUnserviced(siteCoverageGaps(assets));
+    } catch (e) {
+      setGaps([]);
+      setUnserviced([]);
+      setFailed(describeLoadFailure(e, "this site's coverage"));
     } finally {
       setLoading(false);
     }
@@ -51,11 +69,14 @@ export default function CoverageScreen() {
 
   const repeated = gaps.filter((g) => g.attempts > 1).length;
 
+  if (!siteId) return <ContextGate kind="site" what="what was not tested" title="Not tested" />;
+
   return (
     <>
       <Stack.Screen options={{ title: 'Not tested' }} />
       <Screen scroll={false} padded={false}>
         <View style={{ padding: t.space(4), gap: t.space(3) }}>
+          {failed ? <Banner tone="fail" title="Coverage could not be read" body={failed} /> : null}
           {gaps.length ? (
             <Banner
               tone={repeated ? 'fail' : 'warn'}
@@ -108,7 +129,7 @@ export default function CoverageScreen() {
           onRefresh={load}
           refreshing={loading}
           ListEmptyComponent={
-            loading ? null : (
+            loading || failed ? null : (
               <EmptyState
                 title="Nothing outstanding"
                 body="Every asset that was attempted has since been tested. Assets of a type no routine names are listed above instead, because they are never attempted at all."

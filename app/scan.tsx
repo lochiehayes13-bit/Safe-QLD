@@ -9,7 +9,9 @@ import { getAssetByCode, findBySerial, type AssetRecord } from '@/db/assetRepo';
 import { queryCatalogue, type CatalogueItem } from '@/db/catalogueRepo';
 import { assetTypeById } from '@/seed/assetTypes';
 import { useTheme } from '@/theme';
+import { describeActionFailure } from '@/domain/loadFailure';
 import { Banner, Button, Card, Chip, Field, Rowed, Screen, Txt } from '@/components/ui';
+import { showAlert } from '@/components/alert';
 
 /**
  * Scanning a tag to find what it is attached to.
@@ -71,6 +73,8 @@ export default function ScanScreen() {
 
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       setFound({ kind: 'none', code });
+    } catch (e) {
+      showAlert('Could not look that up', describeActionFailure(e, 'look up that code'));
     } finally {
       setBusy(false);
     }
@@ -118,7 +122,32 @@ export default function ScanScreen() {
                 : 'Scanning needs access to the camera. You can also type the code below.'}
             </Txt>
             {permission?.canAskAgain !== false ? (
-              <Button title="Allow camera" variant="secondary" onPress={() => void requestPermission()} style={{ marginTop: t.space(2.5) }} />
+              <Button
+                title="Allow camera"
+                variant="secondary"
+                // A refusal comes back as a resolved permission that is still
+                // not granted, so without this the button is pressed, nothing
+                // moves, and there is nothing on screen to explain it. The same
+                // is true in a browser, which has no camera to grant.
+                onPress={() => {
+                  void requestPermission()
+                    .then((next) => {
+                      if (next.granted) return;
+                      showAlert(
+                        'Still no camera',
+                        next.canAskAgain
+                          ? 'Camera access was not given, so scanning is off. Type the code below instead.'
+                          : 'Camera access is turned off for this app and cannot be asked for again from '
+                            + 'here. Turn it on in the phone\u2019s settings, or type the code below.',
+                      );
+                    })
+                    .catch((e: unknown) => showAlert(
+                      'Could not ask for the camera',
+                      describeActionFailure(e, 'ask for camera access'),
+                    ));
+                }}
+                style={{ marginTop: t.space(2.5) }}
+              />
             ) : null}
           </Card>
         )}
@@ -141,6 +170,11 @@ export default function ScanScreen() {
             title="Look it up"
             variant="secondary"
             loading={busy}
+            // Off until there is something to look up. It used to be pressable
+            // with the box empty, and `lookup` returned on the empty string
+            // without a word — the one button on a screen whose camera has
+            // already failed, doing nothing.
+            disabled={!manual.trim()}
             onPress={() => {
               lastCode.current = null;
               void lookup(manual);

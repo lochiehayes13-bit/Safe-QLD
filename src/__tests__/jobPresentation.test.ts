@@ -2,7 +2,7 @@ import {
   applyJobFilter, applyQuoteFilter, attachmentIcon, contactActions, contrastRatio, discountLabel, formatAddress, formatFileSize,
   formatQty, invoiceMatchesQuery, invoiceState, itemHeading, itemPrice, jobDates, jobIsMine, jobIsOpen, jobMatchesQuery,
   jobStatusWord, localStateWord, orderInvoices, parseHexColor, quoteState, relativeQldTime, sectionLineCount, sellTotalLine,
-  stageLabel, stageTone, statusSwatch, sumExTax, taskState, technicianLine, telHref, mailHref,
+  stageLabel, stageTone, statusSwatch, taskState, technicianLine, telHref, mailHref,
 } from '@/domain/jobPresentation';
 
 /**
@@ -230,7 +230,6 @@ describe('money and lines', () => {
 
   it('counts lines across a section', () => {
     expect(sectionLineCount({ costCenters: [{ items: [1, 2] }, { items: [] }, { items: [3] }] })).toBe(3);
-    expect(sumExTax([{ totalExTaxCents: 100 }, {}, { totalExTaxCents: 250 }])).toBe(350);
   });
 
   it('reads a negative discount as the surcharge Simpro means by it', () => {

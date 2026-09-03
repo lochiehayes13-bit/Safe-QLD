@@ -1,5 +1,6 @@
 import { getDb, inTransaction, nowIso } from './index';
-import type { JobRecord } from './opsRepo';
+import { JOB_IS_OPEN, type JobRecord } from './opsRepo';
+import type { QuoteListFilter } from '@/domain/jobPresentation';
 import type {
   SimproAddress, SimproAttachment, SimproContact, SimproContract, SimproCostCenter, SimproCustomer,
   SimproInvoice, SimproInvoiceJob, SimproItem, SimproItemKind, SimproJob, SimproJobDetail, SimproNote,
@@ -23,15 +24,14 @@ import type {
  * holds cost, markup or margin; the columns do not exist.
  */
 
-const OPEN_STAGES = "('Pending','Progress')";
-
-/**
- * A job still open, as the Open tab counts it: neither the office nor the
- * technician has closed it. The same rule as jobPresentation.jobIsOpen, in
- * SQL, so the count on a site or customer card equals the tab it opens. A
- * job added on the phone has no stage and counts by its status alone.
+/*
+ * A job still open, as the Open tab counts it, is opsRepo's JOB_IS_OPEN — the
+ * one sentence, imported rather than written again here. The count on a site
+ * card and the tab it opens onto have to be the same jobs, and while this
+ * file held its own copy they were not quite: that copy compared the stage
+ * exactly and only against NULL, so a hand-typed "pending " counted as closed
+ * on the card and open in the tab.
  */
-const JOB_IS_OPEN = `status <> 'complete' AND (COALESCE(stageRaw, stage) IS NULL OR COALESCE(stageRaw, stage) IN ${OPEN_STAGES})`;
 
 function parseJson<T>(s: string | null | undefined, fallback: T): T {
   if (!s) return fallback;
@@ -833,6 +833,107 @@ export async function listQuotes(filter: {
     ...args,
   );
   return rows.map(hydrateQuote);
+}
+
+/** The columns a quote list draws: no description, no notes, no contact, no contract. */
+const QUOTE_SUMMARY_COLUMNS = [
+  'externalId', 'name', 'siteId', 'siteName', 'customerExternalId', 'customerName', 'orderNo',
+  'stage', 'statusName', 'statusColor', 'isClosed', 'jobExternalId', 'dateIssued', 'dueDate', 'totalExTaxCents',
+] as const;
+
+export type QuoteSummary = Pick<
+  QuoteRecord,
+  'externalId' | 'name' | 'siteId' | 'siteName' | 'customerExternalId' | 'customerName' | 'orderNo'
+  | 'stage' | 'statusName' | 'statusColor' | 'isClosed' | 'jobExternalId' | 'dateIssued' | 'dueDate' | 'totalExTaxCents'
+>;
+
+/**
+ * The five tabs on the quote list, in SQL.
+ *
+ * The same sentences as jobPresentation.applyQuoteFilter, which is what the
+ * screen ran over every quote on the phone until now: open is neither closed
+ * nor converted, approved is an open quote the customer has said yes to that
+ * the office has not turned into a job, converted has a job number, closed is
+ * the rest.
+ */
+const QUOTE_FILTER_SQL: Record<QuoteListFilter, string> = {
+  open: 'isClosed = 0 AND jobExternalId IS NULL',
+  approved: "jobExternalId IS NULL AND LOWER(COALESCE(stage, '')) LIKE '%approv%'",
+  converted: 'jobExternalId IS NOT NULL',
+  closed: 'isClosed = 1 AND jobExternalId IS NULL',
+  all: '1',
+};
+
+/** The columns a quote search looks in, which are the ones quoteMatchesQuery joins. */
+const QUOTE_SEARCH_COLUMNS = ['externalId', 'name', 'siteName', 'customerName', 'orderNo', 'jobExternalId'] as const;
+
+export interface QuotePage {
+  rows: QuoteSummary[];
+  /** How many quotes the tab and the search match, whether or not they all fit. */
+  matching: number;
+  /** The sell total across every match, ex GST — the whole tab, not the page. */
+  valueExTaxCents: number;
+  capped: boolean;
+}
+
+/**
+ * The rows a quote screen shows, chosen by the database.
+ *
+ * The screen read every quote the mirror holds on every focus, with the
+ * description and the notes along for the ride, and then filtered and
+ * searched them in JavaScript. The tab, the search and the cap are the
+ * query's now. The value tile still totals the whole tab rather than the page,
+ * because a number over a list has to mean the list.
+ */
+export async function listQuotePage(q: {
+  filter: QuoteListFilter;
+  query?: string;
+  siteId?: string;
+  customerExternalId?: string;
+  limit?: number;
+}): Promise<QuotePage> {
+  const db = await getDb();
+  const limit = q.limit ?? 300;
+  const where: string[] = [QUOTE_FILTER_SQL[q.filter]];
+  const args: (string | number)[] = [];
+  if (q.siteId) { where.push('siteId = ?'); args.push(q.siteId); }
+  if (q.customerExternalId) { where.push('customerExternalId = ?'); args.push(q.customerExternalId); }
+  for (const word of (q.query ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean)) {
+    const like = `%${word.replace(/^#/, '').replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    where.push(`(${QUOTE_SEARCH_COLUMNS.map((c) => `${c} LIKE ? ESCAPE '\\'`).join(' OR ')})`);
+    for (const _ of QUOTE_SEARCH_COLUMNS) args.push(like);
+  }
+  const clause = `WHERE ${where.join(' AND ')}`;
+  const order = "ORDER BY COALESCE(dateModified, dateIssued, '') DESC";
+  const [rows, totals] = await Promise.all([
+    db.getAllAsync<QuoteRow>(`SELECT ${QUOTE_SUMMARY_COLUMNS.join(', ')} FROM simpro_quote ${clause} ${order} LIMIT ?`, ...args, limit),
+    db.getFirstAsync<{ n: number; value: number }>(
+      `SELECT COUNT(*) AS n, COALESCE(SUM(totalExTaxCents), 0) AS value FROM simpro_quote ${clause}`, ...args,
+    ),
+  ]);
+  const matching = totals?.n ?? 0;
+  return {
+    rows: rows.map((r) => ({
+      externalId: r.externalId,
+      name: r.name,
+      siteId: r.siteId ?? undefined,
+      siteName: r.siteName ?? undefined,
+      customerExternalId: r.customerExternalId ?? undefined,
+      customerName: r.customerName ?? undefined,
+      orderNo: r.orderNo ?? undefined,
+      stage: r.stage ?? undefined,
+      statusName: r.statusName ?? undefined,
+      statusColor: r.statusColor ?? undefined,
+      isClosed: bool(r.isClosed),
+      jobExternalId: r.jobExternalId ?? undefined,
+      dateIssued: r.dateIssued ?? undefined,
+      dueDate: r.dueDate ?? undefined,
+      totalExTaxCents: r.totalExTaxCents ?? undefined,
+    })),
+    matching,
+    valueExTaxCents: totals?.value ?? 0,
+    capped: matching > limit,
+  };
 }
 
 /** Quotes whose children are worth reading now: never read, or older than `maxAgeMs`, and modified since. */

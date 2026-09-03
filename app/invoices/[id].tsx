@@ -12,6 +12,7 @@ import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
 import { Card, Chip, H2, Rowed, Screen, StatTile, StatusPill, Txt } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { describeLoadFailure } from '@/domain/loadFailure';
 
 /**
  * One invoice: what it bills, for whom, and where it stands.
@@ -42,32 +43,41 @@ export default function InvoiceScreen() {
   const [invoice, setInvoice] = useState<InvoiceRecord | null>(null);
   // Loaded-and-absent is not the same as still loading. See RecordGate.
   const [missing, setMissing] = useState(false);
+  // And a read that threw is neither. See RecordGate.
+  const [failed, setFailed] = useState<string | null>(null);
   const [jobs, setJobs] = useState<BilledJob[]>([]);
+
+  const [reloads, setReloads] = useState(0);
 
   useFocusEffect(useCallback(() => {
     let cancelled = false;
     void (async () => {
       if (!id) return;
-      const inv = await getInvoice(id);
-      if (cancelled) return;
-      setInvoice(inv);
-      setMissing(!inv);
-      if (!inv) return;
-      const billed = await Promise.all(inv.jobs.map(async (j): Promise<BilledJob> => {
-        const full = await getJobFull(localJobId(j.id));
-        return {
-          ...j,
-          held: !!full,
-          siteName: full?.job.siteName,
-          title: full?.job.title,
-          costCenters: full ? full.sections.flatMap((s) => s.costCenters) : [],
-          detailSynced: full?.detailSynced ?? false,
-        };
-      }));
-      if (!cancelled) setJobs(billed);
+      setFailed(null);
+      try {
+        const inv = await getInvoice(id);
+        if (cancelled) return;
+        setInvoice(inv);
+        setMissing(!inv);
+        if (!inv) return;
+        const billed = await Promise.all(inv.jobs.map(async (j): Promise<BilledJob> => {
+          const full = await getJobFull(localJobId(j.id));
+          return {
+            ...j,
+            held: !!full,
+            siteName: full?.job.siteName,
+            title: full?.job.title,
+            costCenters: full ? full.sections.flatMap((s) => s.costCenters) : [],
+            detailSynced: full?.detailSynced ?? false,
+          };
+        }));
+        if (!cancelled) setJobs(billed);
+      } catch (e) {
+        if (!cancelled) setFailed(describeLoadFailure(e, 'this invoice'));
+      }
     })();
     return () => { cancelled = true; };
-  }, [id]));
+  }, [id, reloads]));
 
   if (!invoice) {
     return (
@@ -75,6 +85,8 @@ export default function InvoiceScreen() {
         missing={missing}
         what="invoice"
         why="The phone holds the last two years of invoices from Simpro. This one is older than that, or has not come down yet."
+        failed={failed}
+        onRetry={() => setReloads((n) => n + 1)}
       />
     );
   }

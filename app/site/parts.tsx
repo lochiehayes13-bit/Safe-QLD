@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getSite, listDefects } from '@/db/repo';
@@ -18,6 +18,9 @@ import { DevicePicker } from '@/components/DevicePicker';
 import {
   Banner, Button, Card, Chip, Divider, Field, H2, Rowed, Screen, Txt,
 } from '@/components/ui';
+import { ContextGate } from '@/components/ContextGate';
+import { contextId } from '@/domain/screenContext';
+import { showAlert } from '@/components/alert';
 
 /**
  * Parts needed to clear a site's open defects.
@@ -37,7 +40,9 @@ import {
  */
 export default function SitePartsScreen() {
   const t = useTheme();
-  const { siteId } = useLocalSearchParams<{ siteId?: string }>();
+  // `contextId` rather than the raw parameter: several screens push
+  // `siteId: siteId ?? ''`, so "no site" arrives here as an empty string.
+  const siteId = contextId(useLocalSearchParams<{ siteId?: string }>().siteId);
   const [site, setSite] = useState<Site | null>(null);
   const [defects, setDefects] = useState<Defect[]>([]);
   const [chosen, setChosen] = useState<Record<string, { partNumber: string; label: string }>>({});
@@ -91,7 +96,7 @@ export default function SitePartsScreen() {
       });
 
     if (!lines.length) {
-      Alert.alert('Nothing to order', 'Every line is set to zero.');
+      showAlert('Nothing to order', 'Every line is set to zero.');
       return;
     }
 
@@ -104,7 +109,7 @@ export default function SitePartsScreen() {
         lines,
         notes: `Raised from ${defects.length} open defect${defects.length === 1 ? '' : 's'} at ${site.name}.`,
       });
-      Alert.alert(
+      showAlert(
         'Request raised',
         [
           `${lines.length} line${lines.length === 1 ? '' : 's'} saved as a draft.`,
@@ -114,7 +119,7 @@ export default function SitePartsScreen() {
       );
       router.push('/work/purchases');
     } catch (e) {
-      Alert.alert('Could not raise the request', e instanceof Error ? e.message : String(e));
+      showAlert('Could not raise the request', e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
@@ -144,6 +149,8 @@ export default function SitePartsScreen() {
       note: eff.note,
     };
   }, [defects, prefs, card]);
+
+  if (!siteId) return <ContextGate kind="site" what="the parts the open defects need" title="Parts needed" />;
 
   return (
     <>

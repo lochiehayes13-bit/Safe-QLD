@@ -10,6 +10,9 @@ import type { Site } from '@/domain/types';
 import {
   Banner, Card, Chip, Divider, EmptyState, H2, Rowed, Screen, Txt,
 } from '@/components/ui';
+import { describeLoadFailure } from '@/domain/loadFailure';
+import { ContextGate } from '@/components/ContextGate';
+import { contextId } from '@/domain/screenContext';
 
 /**
  * What has actually been done at a site, and whether it was done on time.
@@ -43,15 +46,27 @@ const SHORT: Record<RunStatus, string> = {
 };
 
 export default function SiteHistoryScreen() {
-  const { siteId } = useLocalSearchParams<{ siteId?: string }>();
+  // `contextId` rather than the raw parameter: several screens push
+  // `siteId: siteId ?? ''`, so "no site" arrives here as an empty string.
+  const siteId = contextId(useLocalSearchParams<{ siteId?: string }>().siteId);
   const [site, setSite] = useState<Site | null>(null);
   const [runs, setRuns] = useState<RoutineRun[]>([]);
 
+  // "Nothing recorded here yet" reads as a site with no service history, which
+  // is a very different thing from a history nobody could read.
+  const [failed, setFailed] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     if (!siteId) return;
-    const [s, r] = await Promise.all([getSite(siteId), listRoutineRuns(siteId)]);
-    setSite(s);
-    setRuns(r);
+    setFailed(null);
+    try {
+      const [s, r] = await Promise.all([getSite(siteId), listRoutineRuns(siteId)]);
+      setSite(s);
+      setRuns(r);
+    } catch (e) {
+      setRuns([]);
+      setFailed(describeLoadFailure(e, "this site's service history"));
+    }
   }, [siteId]);
 
   useEffect(() => { void load(); }, [load]);
@@ -88,6 +103,8 @@ export default function SiteHistoryScreen() {
 
   const late = byRoutine.reduce((n, g) => n + g.late, 0);
 
+  if (!siteId) return <ContextGate kind="site" what="every routine carried out" title="Service history" />;
+
   return (
     <>
       <Stack.Screen options={{ title: 'Service history' }} />
@@ -97,7 +114,9 @@ export default function SiteHistoryScreen() {
           schedule called for rather than against the service before it.
         </Txt>
 
-        {!runs.length ? (
+        {failed ? (
+          <Banner tone="fail" title="The history could not be read" body={failed} />
+        ) : !runs.length ? (
           <EmptyState
             title="Nothing recorded here yet"
             body="A routine run from this app is recorded automatically. Services carried out before the app was in use are not here unless they were imported."

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, ScrollView, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { Stack, router } from 'expo-router';
 import { listSites } from '@/db/repo';
 import { createImpairment } from '@/db/opsRepo';
@@ -7,7 +7,9 @@ import { SYSTEM_LABELS, activeSystems, type SystemKind } from '@/seed/assetTypes
 import type { Site } from '@/domain/types';
 import { loadPrefs } from '@/app-prefs';
 import { useTheme } from '@/theme';
+import { describeActionFailure } from '@/domain/loadFailure';
 import { Banner, Button, Chip, Field, H2, Screen, Txt } from '@/components/ui';
+import { showAlert } from '@/components/alert';
 
 /**
  * Declaring an impairment.
@@ -38,11 +40,11 @@ export default function NewImpairmentScreen() {
 
   const start = async () => {
     if (!siteId) {
-      Alert.alert('Which site?', 'Pick the site the system belongs to.');
+      showAlert('Which site?', 'Pick the site the system belongs to.');
       return;
     }
     if (!scope.trim()) {
-      Alert.alert('What is out of service?', 'Record what is affected — a whole panel, a loop, a zone, one device. The person taking over needs to know.');
+      showAlert('What is out of service?', 'Record what is affected — a whole panel, a loop, a zone, one device. The person taking over needs to know.');
       return;
     }
     setSaving(true);
@@ -56,6 +58,8 @@ export default function NewImpairmentScreen() {
         technician: technician.trim() || undefined,
       });
       router.replace({ pathname: '/impairment/[id]', params: { id: rec.id } });
+    } catch (e) {
+      showAlert('Could not declare it', describeActionFailure(e, 'record this impairment'));
     } finally {
       setSaving(false);
     }

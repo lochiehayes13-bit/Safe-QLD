@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
@@ -17,6 +17,8 @@ import type { PageHit } from '@/domain/docSearch';
 import { askGrounded, hasKey } from '@/ai/client';
 import type { GroundedAnswer, Passage } from '@/ai/grounding';
 import { useTheme } from '@/theme';
+import { describeActionFailure } from '@/domain/loadFailure';
+import { showAlert } from '@/components/alert';
 import {
   Banner, Button, Card, Chip, Field, H2, Rowed, Screen, Txt,
 } from '@/components/ui';
@@ -128,6 +130,8 @@ export default function LibraryScreen() {
     setThinking(true);
     try {
       setAnswer(await askGrounded({ question: q, passages }));
+    } catch (e) {
+      showAlert('Could not search', describeActionFailure(e, 'search the library'));
     } finally {
       setThinking(false);
     }
@@ -157,24 +161,24 @@ export default function LibraryScreen() {
       const bytes = await new File(asset.uri).bytes();
       const result = await importPdf({ bytes, fileName: asset.name ?? 'document.pdf' });
       if (result.refused) {
-        Alert.alert('Not imported', result.refused);
+        showAlert('Not imported', result.refused);
         return;
       }
       await load();
-      Alert.alert(
+      showAlert(
         'Imported',
         `${result.doc!.title} — ${result.doc!.pageCount} pages, searchable offline. `
         + 'The file itself stays where it is; the app kept only the text it read.',
       );
     } catch (e) {
-      Alert.alert('Could not read that file', e instanceof Error ? e.message : String(e));
+      showAlert('Could not read that file', e instanceof Error ? e.message : String(e));
     } finally {
       setImporting(false);
     }
   };
 
   const forget = (doc: LibraryDoc) => {
-    Alert.alert(`Remove ${doc.title}?`, 'The original file is not touched — only the text this app read from it.', [
+    showAlert(`Remove ${doc.title}?`, 'The original file is not touched — only the text this app read from it.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Remove',

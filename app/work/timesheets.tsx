@@ -8,14 +8,27 @@ import { qldIsoDay } from '@/domain/qldTime';
 import { nowIso } from '@/db';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
-import { Button, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
+import { Banner, Button, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
+import { describeLoadFailure } from '@/domain/loadFailure';
 
 /** Weekly timesheets, newest first. */
 export default function TimesheetsScreen() {
   const t = useTheme();
   const [sheets, setSheets] = useState<Timesheet[]>([]);
 
-  const load = useCallback(async () => setSheets(await listTimesheets()), []);
+  // A week that will not load is a week somebody re-enters from memory, so the
+  // empty state is withheld until the read has actually answered.
+  const [failed, setFailed] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setFailed(null);
+    try {
+      setSheets(await listTimesheets());
+    } catch (e) {
+      setSheets([]);
+      setFailed(describeLoadFailure(e, 'your timesheets'));
+    }
+  }, []);
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const startWeek = async () => {
@@ -47,8 +60,13 @@ export default function TimesheetsScreen() {
           data={sheets}
           keyExtractor={(s) => s.id}
           contentContainerStyle={{ padding: t.space(4), gap: t.space(3), paddingBottom: t.space(20) }}
-          ListHeaderComponent={<Button title="Start this week" onPress={startWeek} />}
-          ListEmptyComponent={<EmptyState title="No timesheets yet" body="Start a week and fill it in as you go, rather than reconstructing it on Friday afternoon." />}
+          ListHeaderComponent={(
+            <>
+              <Button title="Start this week" onPress={startWeek} />
+              {failed ? <Banner tone="fail" title="This list could not be read" body={failed} /> : null}
+            </>
+          )}
+          ListEmptyComponent={failed ? null : <EmptyState title="No timesheets yet" body="Start a week and fill it in as you go, rather than reconstructing it on Friday afternoon." />}
           renderItem={({ item }) => {
             const totals = timesheetTotals(item);
             return (

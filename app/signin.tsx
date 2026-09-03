@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, TextInput, View } from 'react-native';
+import { TextInput, View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { loadPrefs, savePrefs, type Prefs } from '@/app-prefs';
@@ -10,6 +10,7 @@ import { prefsFromIdentity, resolveIdentity, type CurrentUser } from '@/simpro/i
 import { REDIRECT_URI } from '@/simpro/oauth';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Field, Screen, Txt } from '@/components/ui';
+import { showAlert } from '@/components/alert';
 
 /**
  * Sign in with your Simpro login.
@@ -47,12 +48,12 @@ export default function SignInScreen() {
     const current = await loadPrefs();
     if (identity) {
       await savePrefs({ ...current, ...prefsFromIdentity(current, identity) });
-      Alert.alert('Signed in', `Simpro says you are ${identity.name}. This phone is yours now.`, [
+      showAlert('Signed in', `Simpro says you are ${identity.name}. This phone is yours now.`, [
         { text: 'OK', onPress: () => router.back() },
       ]);
       return;
     }
-    Alert.alert(
+    showAlert(
       'Signed in',
       who
         ? `Simpro says you are ${who.name ?? who.email ?? 'signed in'}, but that does not match anyone on the staff list this phone holds. Pick yourself from it.`

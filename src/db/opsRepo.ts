@@ -1,6 +1,9 @@
 import { getDb, newId, nowIso } from './index';
 import { queueKey } from '@/domain/queueKey';
 import { workCompletedNote, type WorkCompletedRun } from '@/domain/outboundWork';
+import { jobIsMine, type JobListFilter } from '@/domain/jobPresentation';
+import type { WhoseSchedule } from '@/domain/myDay';
+import { QLD_UTC_OFFSET_HOURS } from '@/domain/qldTime';
 import { flushSoon } from '@/simpro/flushSoon';
 import { defectByCode, type Severity } from '@/seed/defectLibrary';
 
@@ -83,6 +86,62 @@ export interface JobRecord {
   detailSyncedAt?: string;
 }
 
+/**
+ * Open work first, soonest first; finished work after it, newest first.
+ *
+ * The order used to be priority then date, ascending, which was fine while
+ * the phone held the five hundred most recently changed jobs. It holds every
+ * job on the books now, and ascending by date under a cap of five hundred is
+ * the five hundred oldest — 2019's jobs on every screen and this week's on
+ * none. Finished work is turned the other way so a picker looking for last
+ * week's job finds it inside the cap.
+ *
+ * One string, used by every list of jobs, so a page and its count and the
+ * full read cannot disagree about which job comes first.
+ */
+const JOB_LIST_ORDER = `ORDER BY CASE WHEN status = 'complete' THEN 1 ELSE 0 END,
+              CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
+              CASE WHEN status = 'complete' THEN '' ELSE COALESCE(scheduledFor, '') END,
+              COALESCE(scheduledFor, '') DESC`;
+
+/**
+ * A job's stage, folded the way jobPresentation folds it: the office's own
+ * word where there is one, trimmed and lowered, and an empty string for a job
+ * added by hand that has no stage at all.
+ *
+ * Written as one expression so an index can hold it — see migration v21.
+ */
+export const JOB_STAGE_KEY = "LOWER(TRIM(COALESCE(stageRaw, stage, '')))";
+
+/**
+ * A job still open, in SQL: neither the office nor this phone has closed it.
+ *
+ * The same sentence as jobPresentation.jobIsOpen — no stage at all, or a
+ * stage of Pending or Progress, and not completed on this phone — because the
+ * Open tab, the count on a site card and the count on a customer card are
+ * this sentence three times over and a technician reads them beside each
+ * other. It was written twice before; the mirror's copy compared the stage
+ * exactly and against NULL only, so a hand-typed "pending " counted as closed
+ * on the card and open in the tab.
+ */
+export const JOB_IS_OPEN = `status <> 'complete' AND ${JOB_STAGE_KEY} IN ('', 'pending', 'progress')`;
+
+/**
+ * The Queensland calendar day a job was issued on, in SQL.
+ *
+ * The same rule as qldIsoDay, which the Today filter used before this ran in
+ * the database: a date-only value is already a calendar day and is left
+ * alone, an instant is moved by Queensland's ten hours before the day is read
+ * off it, and anything else is no day at all rather than a guess. Between
+ * midnight and 10am the UTC day is yesterday's, and this company starts at
+ * seven.
+ */
+const JOB_QLD_DAY = `CASE
+       WHEN scheduledFor GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' THEN scheduledFor
+       WHEN scheduledFor GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*'
+         THEN substr(datetime(scheduledFor, '+${QLD_UTC_OFFSET_HOURS} hours'), 1, 10)
+     END`;
+
 export async function listJobs(filter: { status?: JobRecord['status']; onDate?: string; limit?: number } = {}): Promise<JobRecord[]> {
   const db = await getDb();
   const where: string[] = [];
@@ -90,22 +149,9 @@ export async function listJobs(filter: { status?: JobRecord['status']; onDate?: 
   if (filter.status) { where.push('status = ?'); args.push(filter.status); }
   if (filter.onDate) { where.push('substr(scheduledFor,1,10) = ?'); args.push(filter.onDate); }
   args.push(filter.limit ?? 200);
-  /*
-   * Open work first, soonest first; finished work after it, newest first.
-   *
-   * The order used to be priority then date, ascending, which was fine while
-   * the phone held the five hundred most recently changed jobs. It holds
-   * every job on the books now, and ascending by date under a cap of five
-   * hundred is the five hundred oldest — 2019's jobs on every screen and
-   * this week's on none. Finished work is turned the other way so a picker
-   * looking for last week's job finds it inside the cap.
-   */
   return db.getAllAsync<JobRecord>(
     `SELECT * FROM job ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-     ORDER BY CASE WHEN status = 'complete' THEN 1 ELSE 0 END,
-              CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
-              CASE WHEN status = 'complete' THEN '' ELSE COALESCE(scheduledFor, '') END,
-              COALESCE(scheduledFor, '') DESC
+     ${JOB_LIST_ORDER}
      LIMIT ?`,
     ...args,
   );
@@ -137,13 +183,264 @@ export async function listJobSummaries(filter: { status?: JobRecord['status']; o
   args.push(filter.limit ?? 200);
   return db.getAllAsync<JobSummary>(
     `SELECT ${JOB_SUMMARY_COLUMNS.join(', ')} FROM job ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-     ORDER BY CASE WHEN status = 'complete' THEN 1 ELSE 0 END,
-              CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
-              CASE WHEN status = 'complete' THEN '' ELSE COALESCE(scheduledFor, '') END,
-              COALESCE(scheduledFor, '') DESC
+     ${JOB_LIST_ORDER}
      LIMIT ?`,
     ...args,
   );
+}
+
+// ---------------------------------------------------------------------------
+// The job list as a query, rather than as a read of everything
+// ---------------------------------------------------------------------------
+
+/**
+ * A word typed into a search, as a LIKE pattern.
+ *
+ * The literal wildcards are escaped, because a technician who types a site
+ * called "A_B" means the underscore. A leading # is dropped the way the
+ * in-memory match drops it: the number is written both "#43747" and "43747"
+ * on the phone, on the job card and over the radio.
+ */
+function likeWord(word: string): string {
+  return `%${word.replace(/^#/, '').replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+}
+
+/** The words of a search, as jobMatchesQuery splits them. */
+function searchWords(query: string | undefined): string[] {
+  return (query ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+/**
+ * The columns a job search looks in, which are the ones jobMatchesQuery joins
+ * into its haystack. A word has to appear in one of them; every word has to
+ * appear somewhere. Splitting the haystack per column is the same test — a
+ * word cannot span two of them, because the words were split on whitespace.
+ */
+const JOB_SEARCH_COLUMNS = ['externalId', 'siteName', 'customerName', 'title', 'address', 'orderNo'] as const;
+
+export interface JobPageQuery {
+  filter: JobListFilter;
+  /** The Queensland day, yyyy-mm-dd, for Today. */
+  today: string;
+  /** Whose phone this is, for Mine. Null where nobody has said. */
+  who?: WhoseSchedule | null;
+  query?: string;
+  /** Opened from a site, or from a customer: only theirs. */
+  siteId?: string;
+  customerExternalId?: string;
+  /** How many rows the screen will draw. */
+  limit?: number;
+}
+
+export interface JobPage {
+  rows: JobSummary[];
+  /** How many jobs the filter and the search match, whether or not they all fit. */
+  matching: number;
+  /** How many jobs the phone holds in this scope at all, filter and search aside. */
+  total: number;
+  /** Whether the rows are a page of the matches rather than every one of them. */
+  capped: boolean;
+}
+
+/**
+ * The rows a job screen shows, chosen by the database.
+ *
+ * The list used to read every job on the books on every focus — four and a
+ * half thousand rows, with their JSON columns, re-read every time a
+ * technician backed out of a job — and then apply the filter and the search
+ * in JavaScript. On the twenty rows a test writes that is instant. On the
+ * owner's phone it is a second of nothing happening each time, which is what
+ * a technician means when they say the module is broken.
+ *
+ * So the filter, the search and the cap are the query. What comes back is one
+ * screenful in the same order as before, plus the two numbers the line above
+ * the list needs: how many match, and how many the phone holds. Both are
+ * counts rather than lengths, so "692 of 4,562 jobs" is still true when only
+ * three hundred rows were read.
+ *
+ * Mine is the one filter that cannot be settled in SQL alone. Whether a job
+ * is booked to this person is a question about the office's technicians list,
+ * which is JSON on the row, and jobPresentation.jobIsMine is the answer — by
+ * employee id where the phone knows one, by name otherwise, against both the
+ * list and the joined names a hand-added job carries. So SQL narrows to the
+ * open jobs that so much as mention this person and jobIsMine settles it over
+ * those few. Narrowing with LIKE can only ever offer too many rows, never too
+ * few, so the answer is jobIsMine's own.
+ */
+export async function listJobPage(q: JobPageQuery): Promise<JobPage> {
+  const db = await getDb();
+  const limit = q.limit ?? 300;
+  const scope: string[] = [];
+  const scopeArgs: (string | number)[] = [];
+  if (q.siteId) { scope.push('siteId = ?'); scopeArgs.push(q.siteId); }
+  if (q.customerExternalId) { scope.push('customerExternalId = ?'); scopeArgs.push(q.customerExternalId); }
+
+  const where = [...scope];
+  const args = [...scopeArgs];
+
+  switch (q.filter) {
+    case 'open':
+    case 'mine':
+      where.push(`(${JOB_IS_OPEN})`);
+      break;
+    case 'today':
+      // The schedule's word first — a block on today's schedule is today's
+      // work whatever the job's issue date says — and the issue date second,
+      // for a phone whose schedule has not synced. No status condition at
+      // all: a job finished at ten this morning is still today's work.
+      where.push(`(
+        (externalId IS NOT NULL AND externalId IN (SELECT jobId FROM schedule WHERE date = ? AND jobId IS NOT NULL))
+        OR ${JOB_QLD_DAY} = ?
+      )`);
+      args.push(q.today, q.today);
+      break;
+    default:
+      break;
+  }
+
+  for (const word of searchWords(q.query)) {
+    where.push(`(${JOB_SEARCH_COLUMNS.map((c) => `${c} LIKE ? ESCAPE '\\'`).join(' OR ')})`);
+    for (const _ of JOB_SEARCH_COLUMNS) args.push(likeWord(word));
+  }
+
+  if (q.filter === 'mine') {
+    // Nobody has said whose phone this is, so nothing is booked to them.
+    if (!q.who) return { rows: [], matching: 0, total: await countJobs(db, scope, scopeArgs), capped: false };
+    const mentions = q.who.by === 'id'
+      // SimproPerson writes its id as a string; the unquoted form is matched
+      // too so a future numeric id cannot silently empty this tab.
+      ? [`(techniciansJson LIKE ? ESCAPE '\\' OR techniciansJson LIKE ? ESCAPE '\\')`, likeWord(`"id":"${q.who.staffId}"`), likeWord(`"id":${q.who.staffId}`)] as const
+      : [`(techniciansJson LIKE ? ESCAPE '\\' OR technician LIKE ? ESCAPE '\\')`, likeWord(q.who.staffName), likeWord(q.who.staffName)] as const;
+    where.push(mentions[0]);
+    args.push(mentions[1], mentions[2]);
+    const candidates = await db.getAllAsync<JobSummary>(
+      `SELECT ${JOB_SUMMARY_COLUMNS.join(', ')} FROM job WHERE ${where.join(' AND ')} ${JOB_LIST_ORDER}`,
+      ...args,
+    );
+    const mine = candidates.filter((j) => jobIsMine(j, q.who ?? null));
+    return {
+      rows: mine.slice(0, limit),
+      matching: mine.length,
+      total: await countJobs(db, scope, scopeArgs),
+      capped: mine.length > limit,
+    };
+  }
+
+  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  // Under All with nothing typed there is no filter beyond the scope, so the
+  // two numbers over the list are the same number: counted once.
+  const narrowed = where.length > scope.length;
+  const [rows, matching, total] = await Promise.all([
+    db.getAllAsync<JobSummary>(
+      `SELECT ${JOB_SUMMARY_COLUMNS.join(', ')} FROM job ${clause} ${JOB_LIST_ORDER} LIMIT ?`,
+      ...args, limit,
+    ),
+    narrowed ? db.getFirstAsync<{ n: number }>(`SELECT COUNT(*) AS n FROM job ${clause}`, ...args) : null,
+    countJobs(db, scope, scopeArgs),
+  ]);
+  const n = narrowed ? (matching?.n ?? 0) : total;
+  return { rows, matching: n, total, capped: n > limit };
+}
+
+/** How many jobs the phone holds in a scope, whatever the filter says. */
+async function countJobs(
+  db: Awaited<ReturnType<typeof getDb>>,
+  scope: readonly string[],
+  args: readonly (string | number)[],
+): Promise<number> {
+  const row = await db.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM job ${scope.length ? `WHERE ${scope.join(' AND ')}` : ''}`,
+    ...args,
+  );
+  return row?.n ?? 0;
+}
+
+/** The little a picker needs off a job: the office's number, where it is, and whether it is still on. */
+export type JobPick = Pick<JobRecord, 'externalId' | 'siteName' | 'siteId' | 'status'>;
+
+/**
+ * The open jobs a picker offers, newest first.
+ *
+ * The timesheet's job picker read four hundred whole job rows — description,
+ * office notes, contact, contract, tags — to build a list of job numbers and
+ * site names, and then threw away every complete one. Four columns, and only
+ * the jobs that could be offered.
+ */
+export async function openJobPicks(limit = 400): Promise<JobPick[]> {
+  const db = await getDb();
+  return db.getAllAsync<JobPick>(
+    `SELECT externalId, siteName, siteId, status FROM job
+     WHERE ${JOB_IS_OPEN} AND externalId IS NOT NULL
+     ${JOB_LIST_ORDER} LIMIT ?`,
+    limit,
+  );
+}
+
+/**
+ * The jobs behind a set of office job numbers.
+ *
+ * The home screen resolves the handful of blocks on today's schedule to the
+ * jobs they belong to. It used to do that by reading three hundred jobs and
+ * looking through them, which found the right one only if it happened to be
+ * inside the three hundred — and missed a job scheduled for today that was
+ * issued last year, which is most of a maintenance contract.
+ */
+export async function jobSummariesByExternalIds(externalIds: readonly string[]): Promise<JobSummary[]> {
+  const wanted = [...new Set(externalIds.filter(Boolean))];
+  if (!wanted.length) return [];
+  const db = await getDb();
+  return db.getAllAsync<JobSummary>(
+    `SELECT ${JOB_SUMMARY_COLUMNS.join(', ')} FROM job WHERE externalId IN (${wanted.map(() => '?').join(',')})`,
+    ...wanted,
+  );
+}
+
+/** The nine numbers on the Work hub's tiles. */
+export interface WorkHubCounts {
+  jobsOpen: number;
+  reportsDraft: number;
+  defectsOpen: number;
+  timesheetsDraft: number;
+  baselines: number;
+  purchasesDraft: number;
+  impairmentsOpen: number;
+  restock: number;
+  promisesOpen: number;
+}
+
+/**
+ * The Work hub's badges, counted rather than read.
+ *
+ * The hub used to build its nine numbers by reading nine whole tables and
+ * taking the length of what came back — five hundred jobs with their
+ * descriptions, every service report with the technician's signature in it as
+ * a data URI, every baseline with its zone results, every timesheet with its
+ * week of entries — to draw nine integers, on every focus. One statement, nine
+ * counts, no rows.
+ *
+ * The jobs badge counts open work the way the Jobs screen's Open tab does.
+ * It used to count what was not complete inside the newest five hundred rows,
+ * which on a phone holding four and a half thousand was neither the open work
+ * nor five hundred of it.
+ */
+export async function workHubCounts(): Promise<WorkHubCounts> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<WorkHubCounts>(
+    `SELECT
+       (SELECT COUNT(*) FROM job WHERE ${JOB_IS_OPEN}) AS jobsOpen,
+       (SELECT COUNT(*) FROM report WHERE status = 'draft') AS reportsDraft,
+       (SELECT COUNT(*) FROM defect WHERE status = 'open') AS defectsOpen,
+       (SELECT COUNT(*) FROM timesheet WHERE status = 'draft') AS timesheetsDraft,
+       (SELECT COUNT(*) FROM baseline) AS baselines,
+       (SELECT COUNT(*) FROM purchase_request WHERE status = 'draft') AS purchasesDraft,
+       (SELECT COUNT(*) FROM impairment WHERE restoredAt IS NULL) AS impairmentsOpen,
+       (SELECT COUNT(*) FROM stock_item WHERE quantity <= minimum) AS restock,
+       (SELECT COUNT(*) FROM promise WHERE completedAt IS NULL) AS promisesOpen`,
+  );
+  return row ?? {
+    jobsOpen: 0, reportsDraft: 0, defectsOpen: 0, timesheetsDraft: 0, baselines: 0,
+    purchasesDraft: 0, impairmentsOpen: 0, restock: 0, promisesOpen: 0,
+  };
 }
 
 export async function getJob(id: string): Promise<JobRecord | null> {

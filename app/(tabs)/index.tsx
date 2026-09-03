@@ -3,7 +3,7 @@ import { Pressable, ScrollView, TextInput, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { listImpairments, impairmentElapsedMs, listJobs, type ImpairmentRecord } from '@/db/opsRepo';
+import { listImpairments, impairmentElapsedMs, jobSummariesByExternalIds, type ImpairmentRecord } from '@/db/opsRepo';
 import { defectsAwaitingNotice } from '@/db/repo';
 import { listScheduleFor } from '@/db/scheduleRepo';
 import { nowIso } from '@/db';
@@ -14,7 +14,8 @@ import {
 } from '@/domain/modules';
 import { groupScheduleByDay, scheduleWindow, whoseSchedule, type MyDayRow } from '@/domain/myDay';
 import { useTheme, type Theme } from '@/theme';
-import { Card, IconPlate, Rowed, Screen, SectionHeader, Txt } from '@/components/ui';
+import { Banner, Card, IconPlate, Rowed, Screen, SectionHeader, Txt } from '@/components/ui';
+import { describeLoadFailure } from '@/domain/loadFailure';
 import { Bounce, Reveal, animateNextLayout } from '@/components/motion';
 import { UpdateBanner } from '@/components/UpdateBanner';
 
@@ -41,29 +42,45 @@ export default function HomeScreen() {
   const [notices, setNotices] = useState<Defect[]>([]);
   const [upNext, setUpNext] = useState<{ rows: MyDayRow[]; label: string } | null>(null);
   const [editing, setEditing] = useState(false);
+  /*
+   * A read that threw here was the quietest failure in the app. This screen
+   * carries the live impairment banners and the notices still owed inside
+   * twenty-four hours, and both come from one `void load()` — so a database
+   * that would not answer produced a home screen that looked completely
+   * normal, with a system down and nothing on it saying so. It says so now.
+   */
+  const [failed, setFailed] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const [p, imp, nt] = await Promise.all([loadPrefs(), listImpairments(true), defectsAwaitingNotice()]);
-    setPrefs(p);
-    setImpairments(imp);
-    setNotices(nt);
-    // Today's scheduled blocks for this person, if the phone knows who that is.
-    const who = whoseSchedule(p);
-    if (!who) { setUpNext(null); return; }
-    const now = nowIso();
-    const window = scheduleWindow(now);
-    const [rows, jobs] = await Promise.all([
-      listScheduleFor({
+    setFailed(null);
+    try {
+      const [p, imp, nt] = await Promise.all([loadPrefs(), listImpairments(true), defectsAwaitingNotice()]);
+      setPrefs(p);
+      setImpairments(imp);
+      setNotices(nt);
+      // Today's scheduled blocks for this person, if the phone knows who that is.
+      const who = whoseSchedule(p);
+      if (!who) { setUpNext(null); return; }
+      const now = nowIso();
+      const window = scheduleWindow(now);
+      const rows = await listScheduleFor({
         staffId: who.by === 'id' ? who.staffId : undefined,
         staffName: who.by === 'name' ? who.staffName : undefined,
         from: window.today, to: window.tomorrow,
-      }),
-      listJobs({ limit: 300 }),
-    ]);
-    const groups = groupScheduleByDay(rows, now, jobs.map((j) => ({
-      id: j.id, externalId: j.externalId, siteName: j.siteName, title: j.title, address: j.address,
-    })));
-    setUpNext({ rows: groups.today.length ? groups.today : groups.tomorrow, label: groups.today.length ? 'Today' : 'Tomorrow' });
+      });
+      // Only the jobs those blocks are actually on. This used to read the
+      // newest three hundred jobs and look through them, which found the job a
+      // block belongs to only if it happened to be inside the three hundred —
+      // so a block on a contract service issued last year had no site, no
+      // title and no address on it, which is the whole of what the strip says.
+      const jobs = await jobSummariesByExternalIds(rows.map((r) => r.jobId).filter((id): id is string => !!id));
+      const groups = groupScheduleByDay(rows, now, jobs.map((j) => ({
+        id: j.id, externalId: j.externalId, siteName: j.siteName, title: j.title, address: j.address,
+      })));
+      setUpNext({ rows: groups.today.length ? groups.today : groups.tomorrow, label: groups.today.length ? 'Today' : 'Tomorrow' });
+    } catch (e) {
+      setFailed(describeLoadFailure(e, "today's work"));
+    }
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
@@ -75,7 +92,9 @@ export default function HomeScreen() {
     animateNextLayout();
     const merged = { ...prefs, shortcuts: next };
     setPrefs(merged);
-    void savePrefs(merged);
+    // The tiles move on screen whatever happens; if the write fails they move
+    // back on the next visit, which looked like the app ignoring the change.
+    void savePrefs(merged).catch((e: unknown) => setFailed(describeLoadFailure(e, 'your tile order')));
   };
 
   return (
@@ -83,6 +102,14 @@ export default function HomeScreen() {
       <Hero name={prefs?.technicianName ?? ''} />
       <AskBar />
 
+      {failed ? (
+        <Banner
+          tone="fail"
+          title="This screen could not read what is running"
+          body={`${failed}\n\nAnything against a clock — an impairment, a notice owed — is not shown `
+            + 'below, because it could not be read. Do not take the quiet page as good news.'}
+        />
+      ) : null}
       {impairments.map((imp) => <ImpairmentBanner key={imp.id} impairment={imp} />)}
       {notices.length ? <NoticeBanner notices={notices} /> : null}
       <UpdateBanner />

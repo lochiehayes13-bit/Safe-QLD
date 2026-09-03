@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { nowIso } from '@/db';
 import { qldIsoDay, qldMoment } from '@/domain/qldTime';
-import { Alert, Linking, Platform, View } from 'react-native';
+import { Linking, Platform, View } from 'react-native';
 import { Stack, router } from 'expo-router';
 import * as Location from 'expo-location';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { listJobs, type JobRecord } from '@/db/opsRepo';
 import { formatKm, planRoute, type RoutePoint } from '@/domain/routing';
 import { useTheme } from '@/theme';
+import { showAlert } from '@/components/alert';
 import {
   Banner, Button, Card, Chip, EmptyState, H2, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
@@ -122,7 +123,7 @@ export default function RouteScreen() {
       default: `geo:0,0?q=${encodeURIComponent(destination)}`,
     })!;
     void Linking.openURL(url).catch(() => {
-      Alert.alert('No maps app', `Could not open a maps app for ${destination}.`);
+      showAlert('No maps app', `Could not open a maps app for ${destination}.`);
     });
   };
 

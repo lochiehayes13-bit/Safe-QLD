@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, View } from 'react-native';
+import { View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { expireLapsedQuotes, listQuotes, setQuoteStatus } from '@/db/quoteRepo';
 import {
@@ -10,6 +10,7 @@ import { formatCents } from '@/domain/rates';
 import { formatAuDate } from '@/export/sheets';
 import { nowIso } from '@/db';
 import { useTheme } from '@/theme';
+import { showAlert } from '@/components/alert';
 import {
   Banner, Button, Card, Chip, EmptyState, Rowed, Screen, Segmented, StatTile, Txt,
 } from '@/components/ui';
@@ -102,14 +103,14 @@ export default function QuotesScreen() {
     if (!check.allowed) {
       // The state machine's own words. It says why in a sentence meant for a
       // person, and rewording it here would only make the two disagree.
-      Alert.alert('Cannot change this quote', check.reason ?? 'That change is not allowed.');
+      showAlert('Cannot change this quote', check.reason ?? 'That change is not allowed.');
       return;
     }
     try {
       await setQuoteStatus(row.quote.id, to, { asAt: nowIso() });
       await load();
     } catch (e) {
-      Alert.alert('Could not change this quote', e instanceof Error ? e.message : String(e));
+      showAlert('Could not change this quote', e instanceof Error ? e.message : String(e));
     }
   };
 

@@ -2,39 +2,31 @@ import React, { useCallback, useState } from 'react';
 import { View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { listReports, listDefects } from '@/db/repo';
-import { listTimesheets } from '@/db/timesheetRepo';
-import { listBaselines } from '@/db/baselineRepo';
-import { listJobs, listPurchaseRequests, listImpairments, restockNeeded, listPromises } from '@/db/opsRepo';
+import { workHubCounts, type WorkHubCounts } from '@/db/opsRepo';
 import { useTheme } from '@/theme';
 import { Card, Chip, H2, IconPlate, Rowed, Screen, Txt } from '@/components/ui';
 import { Reveal } from '@/components/motion';
 
-/** Work hub — everything that produces a record the office needs. */
+/**
+ * Work hub — everything that produces a record the office needs.
+ *
+ * The nine badges are nine counts in one statement. They were nine whole
+ * tables read into memory to be measured with `.length`: every service report
+ * with the technician's signature in it, every baseline with its zone
+ * results, five hundred jobs with their descriptions — all of it thrown away
+ * except the number of rows, every time the tab is opened.
+ */
+const NO_COUNTS: WorkHubCounts = {
+  jobsOpen: 0, reportsDraft: 0, defectsOpen: 0, timesheetsDraft: 0, baselines: 0,
+  purchasesDraft: 0, impairmentsOpen: 0, restock: 0, promisesOpen: 0,
+};
+
 export default function WorkScreen() {
   const t = useTheme();
-  const [counts, setCounts] = useState({
-    jobs: 0, reports: 0, defects: 0, timesheets: 0, baselines: 0,
-    purchases: 0, impairments: 0, restock: 0, promises: 0,
-  });
+  const [counts, setCounts] = useState<WorkHubCounts>(NO_COUNTS);
 
   const load = useCallback(async () => {
-    const [j, r, d, ts, bl, po, imp, rs, pr] = await Promise.all([
-      listJobs({ limit: 500 }), listReports(), listDefects(undefined, 'open'),
-      listTimesheets(), listBaselines(), listPurchaseRequests(),
-      listImpairments(true), restockNeeded(), listPromises(true),
-    ]);
-    setCounts({
-      jobs: j.filter((x) => x.status !== 'complete').length,
-      reports: r.filter((x) => x.status === 'draft').length,
-      defects: d.length,
-      timesheets: ts.filter((x) => x.status === 'draft').length,
-      baselines: bl.length,
-      purchases: po.filter((x) => x.status === 'draft').length,
-      impairments: imp.length,
-      restock: rs.length,
-      promises: pr.length,
-    });
+    setCounts(await workHubCounts());
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
@@ -43,14 +35,14 @@ export default function WorkScreen() {
     {
       title: 'On the tools',
       rows: [
-        { label: 'Jobs', sub: 'Scheduled and outstanding work', icon: 'clipboard-list-outline', href: '/work/jobs', badge: counts.jobs },
+        { label: 'Jobs', sub: 'Scheduled and outstanding work', icon: 'clipboard-list-outline', href: '/work/jobs', badge: counts.jobsOpen },
         { label: 'Month plan', sub: 'The month day by day, with what could not be planned said out loud', icon: 'calendar-month-outline', href: '/work/plan' },
         { label: 'Portfolio health', sub: 'How the whole book is going, coverage stated before any score', icon: 'chart-donut', href: '/work/portfolio' },
         { label: "Today's run", sub: 'Jobs ordered by how close they are, urgent first', icon: 'map-marker-path', href: '/work/route' },
         { label: 'Overdue and due', sub: 'Routines past their tolerance window, across every site', icon: 'calendar-alert', href: '/work/due' },
-        { label: 'Impairments', sub: 'Systems currently out of service', icon: 'alert-octagon-outline', href: '/work/impairments', badge: counts.impairments, tone: counts.impairments ? 'fail' : undefined },
-        { label: 'Defects', sub: 'Raised, quoted and outstanding', icon: 'alert-circle-outline', href: '/work/defects', badge: counts.defects, tone: counts.defects ? 'warn' : undefined },
-        { label: 'Promises', sub: "Things you said you'd come back for", icon: 'hand-back-right-outline', href: '/work/promises', badge: counts.promises },
+        { label: 'Impairments', sub: 'Systems currently out of service', icon: 'alert-octagon-outline', href: '/work/impairments', badge: counts.impairmentsOpen, tone: counts.impairmentsOpen ? 'fail' : undefined },
+        { label: 'Defects', sub: 'Raised, quoted and outstanding', icon: 'alert-circle-outline', href: '/work/defects', badge: counts.defectsOpen, tone: counts.defectsOpen ? 'warn' : undefined },
+        { label: 'Promises', sub: "Things you said you'd come back for", icon: 'hand-back-right-outline', href: '/work/promises', badge: counts.promisesOpen },
       ],
     },
     {
@@ -59,9 +51,9 @@ export default function WorkScreen() {
         { label: 'Send to the office', sub: 'Push a finished service and its defects to the Simpro job', icon: 'cloud-upload-outline', href: '/work/outbound' },
         { label: 'Occupier statements', sub: 'Every statement across every site, closest to late first', icon: 'file-certificate-outline', href: '/occupier' },
         { label: 'Quotes', sub: 'What is out with clients and what is about to lapse', icon: 'file-sign', href: '/quotes' },
-        { label: 'Test sheets', sub: 'Service reports and device testing', icon: 'file-document-outline', href: '/work/reports', badge: counts.reports },
+        { label: 'Test sheets', sub: 'Service reports and device testing', icon: 'file-document-outline', href: '/work/reports', badge: counts.reportsDraft },
         { label: 'Baseline data', sub: 'Commissioning records', icon: 'clipboard-text-outline', href: '/work/baselines', badge: counts.baselines },
-        { label: 'Timesheets', sub: 'Weekly hours and sign off', icon: 'calendar-clock-outline', href: '/work/timesheets', badge: counts.timesheets },
+        { label: 'Timesheets', sub: 'Weekly hours and sign off', icon: 'calendar-clock-outline', href: '/work/timesheets', badge: counts.timesheetsDraft },
       ],
     },
     {
@@ -69,7 +61,7 @@ export default function WorkScreen() {
       rows: [
         { label: 'Asset labels', sub: 'Issue numbers to untagged assets and print the sheet', icon: 'tag-multiple-outline', href: '/work/labels' },
         { label: 'Van stock', sub: 'What you carry and what needs restocking', icon: 'van-utility', href: '/work/stock', badge: counts.restock, tone: counts.restock ? 'warn' : undefined },
-        { label: 'Purchase requests', sub: 'Parts to order', icon: 'cart-outline', href: '/work/purchases', badge: counts.purchases },
+        { label: 'Purchase requests', sub: 'Parts to order', icon: 'cart-outline', href: '/work/purchases', badge: counts.purchasesDraft },
         { label: 'Company knowledge', sub: 'Tricks of the trade, approved and unverified', icon: 'lightbulb-on-outline', href: '/work/knowledge' },
       ],
     },

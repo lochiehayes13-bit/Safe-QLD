@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, FlatList, View } from 'react-native';
+import { FlatList, View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
@@ -9,6 +9,8 @@ import {
 import { loadPrefs } from '@/app-prefs';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Chip, EmptyState, Field, Rowed, Screen, Txt } from '@/components/ui';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
+import { showAlert } from '@/components/alert';
 
 /**
  * Van and workshop stock.
@@ -29,22 +31,39 @@ export default function StockScreen() {
   const [qty, setQty] = useState('');
   const [min, setMin] = useState('');
 
+  /*
+   * A read that threw left `locations` empty, and an empty list here is not a
+   * blank screen — it is the "Set up my van" button, offered to somebody who
+   * already has a van set up. Pressing it makes a second one, and the stock is
+   * then split across two locations neither of which is right.
+   */
+  const [failed, setFailed] = useState<string | null>(null);
+
   const load = useCallback(async () => {
-    const locs = await listStockLocations();
-    setLocations(locs);
-    const current = active ?? locs[0]?.id;
-    setActive(current);
-    setItems(await listStock(current));
-    setLow(await restockNeeded(current));
+    setFailed(null);
+    try {
+      const locs = await listStockLocations();
+      setLocations(locs);
+      const current = active ?? locs[0]?.id;
+      setActive(current);
+      setItems(await listStock(current));
+      setLow(await restockNeeded(current));
+    } catch (e) {
+      setFailed(describeLoadFailure(e, 'your van stock'));
+    }
   }, [active]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const addVan = async () => {
-    const prefs = await loadPrefs();
-    const loc = await createStockLocation(prefs.vehicleRego ? `Van ${prefs.vehicleRego}` : 'My van', 'van', prefs.technicianName);
-    setActive(loc.id);
-    void load();
+    try {
+      const prefs = await loadPrefs();
+      const loc = await createStockLocation(prefs.vehicleRego ? `Van ${prefs.vehicleRego}` : 'My van', 'van', prefs.technicianName);
+      setActive(loc.id);
+      void load();
+    } catch (e) {
+      showAlert('Could not set up the van', describeActionFailure(e, 'create a stock location'));
+    }
   };
 
   const addItem = async () => {
@@ -74,7 +93,7 @@ export default function StockScreen() {
       })),
       notes: 'Automatic restock request from van stock levels.',
     });
-    Alert.alert('Restock requested', `${low.length} line${low.length === 1 ? '' : 's'} added to a purchase request.`);
+    showAlert('Restock requested', `${low.length} line${low.length === 1 ? '' : 's'} added to a purchase request.`);
     router.push('/work/purchases');
   };
 
@@ -94,9 +113,11 @@ export default function StockScreen() {
                 />
               ))}
             </Rowed>
-          ) : (
+          ) : failed ? null : (
             <Button title="Set up my van" onPress={addVan} />
           )}
+
+          {failed ? <Banner tone="fail" title="Your stock could not be read" body={failed} /> : null}
 
           {low.length ? (
             <>

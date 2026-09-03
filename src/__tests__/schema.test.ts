@@ -4,8 +4,10 @@ import { join } from 'path';
 import { MIGRATIONS, SCHEMA_VERSION } from '@/db/schema';
 import { applyMigrations } from '@/db/migrate';
 import { nextAssetCode } from '@/db/assetRepo';
-import { createDefect, createSite, listDefects } from '@/db/repo';
-import { openMigrated, wrapNodeSqlite } from './support/nodeSqlite';
+import { createDefect, createSite, listDefects, listSiteSummaries } from '@/db/repo';
+import { listJobPage, upsertJob } from '@/db/opsRepo';
+import { customerStats, listQuotePage, scheduledJobExternalIds, siteStats } from '@/db/mirrorRepo';
+import { openMigrated, wrapNodeSqlite, type NodeSqliteDb } from './support/nodeSqlite';
 
 jest.mock('@/db/index', () => jest.requireActual('./support/nodeSqlite'));
 
@@ -379,5 +381,152 @@ describe('tables the app writes to', () => {
       expect(declared).toContain(table);
       expect(new RegExp(`(?:FROM|JOIN)\\s+${table}\\b`, 'i').test(code)).toBe(false);
     }
+  });
+});
+
+/**
+ * The indexes v21 added, proved by the plan SQLite actually chooses.
+ *
+ * An index is a claim about a query, and the claim is only true if the
+ * planner agrees. Two of these are indexes on expressions — the fold that
+ * decides whether a job is open, and the Queensland day a job was issued —
+ * and an expression index is only used when the expression in the query and
+ * the expression in the index parse to the same thing. The two copies live in
+ * different files: the query's in `opsRepo`, the index's in the migration,
+ * which is append-only and can never be edited to follow it. If they ever
+ * drift the plan silently becomes a full table scan, which is exactly the
+ * thing this work was undoing. So these read the plan rather than assert in a
+ * comment that the index exists.
+ *
+ * The other half of the claim is the one nobody writes down: an index that no
+ * query searches is write cost on every sync for nothing, and this schema has
+ * shipped one of those before.
+ */
+describe('the indexes the lists search', () => {
+  /** The plan for the last statement a repository ran that matches. */
+  function planFor(db: NodeSqliteDb, match: RegExp): string {
+    const ran = [...db.statements].reverse().find((s) => match.test(s.sql));
+    expect({ found: Boolean(ran), looking: String(match) }).toEqual({ found: true, looking: String(match) });
+    const plan = db.raw.prepare(`EXPLAIN QUERY PLAN ${ran!.sql}`).all(...ran!.params) as { detail: string }[];
+    return plan.map((p) => p.detail).join(' | ');
+  }
+
+  async function book(db: NodeSqliteDb): Promise<void> {
+    await createSite({ id: 'site-1', name: 'Harbourline Apartments' });
+    for (let i = 0; i < 200; i++) {
+      const open = i % 4 === 0;
+      await upsertJob({
+        id: `j${i}`, externalId: String(40000 + i), siteId: 'site-1', siteName: 'Harbourline Apartments',
+        title: 'Routine', customerExternalId: '812',
+        stage: open ? 'Pending' : 'Invoiced', status: open ? 'scheduled' : 'complete',
+        scheduledFor: i % 7 === 0 ? '2026-09-03' : '2024-02-11',
+      });
+      await db.runAsync(
+        'INSERT INTO simpro_quote (externalId,name,isClosed,jobExternalId,siteId,syncedAt) VALUES (?,?,?,?,?,?)',
+        String(20000 + i), 'Quote', i % 3 === 0 ? 1 : 0, i % 5 === 0 ? String(40000 + i) : null, 'site-1', '',
+      );
+      await db.runAsync(
+        "INSERT INTO defect (id,siteId,location,description,severity,status,raisedAt,photos) VALUES (?,'site-1','L','D','non-critical',?,'2026-01-01T00:00:00Z','[]')",
+        `d${i}`, i % 3 === 0 ? 'open' : 'rectified',
+      );
+      await db.runAsync(
+        "INSERT INTO schedule (id,jobId,staffId,staffName,date,syncedAt) VALUES (?,?,'17','Dale','2026-09-03','')",
+        `b${i}`, String(40000 + i),
+      );
+    }
+  }
+
+  const TODAY = '2026-09-03';
+
+  it('searches the open work rather than reading every job to find it', async () => {
+    const db = openMigrated();
+    await book(db);
+    db.statements.length = 0;
+    await listJobPage({ filter: 'open', today: TODAY, limit: 50 });
+    const plan = planFor(db, /^SELECT id, externalId/);
+    // The expression index in the migration still means what opsRepo's
+    // JOB_IS_OPEN means. If it stopped, this would read SCAN job.
+    expect(plan).toContain('idx_job_open_stage');
+    expect(plan).not.toMatch(/SCAN job\b/);
+    await db.closeAsync();
+  });
+
+  it('searches today by the Queensland day, and the schedule by the day, on both halves of the Today tab', async () => {
+    const db = openMigrated();
+    await book(db);
+    db.statements.length = 0;
+    await listJobPage({ filter: 'today', today: TODAY, limit: 50 });
+    const plan = planFor(db, /^SELECT id, externalId/);
+    expect(plan).toContain('MULTI-INDEX OR');
+    // The office's job numbers on the day, out of the covering index.
+    expect(plan).toContain('idx_schedule_day_job');
+    // And the jobs issued today in Brisbane, out of the expression index.
+    expect(plan).toContain('idx_job_qld_day');
+    expect(plan).not.toMatch(/SCAN job\b/);
+    await db.closeAsync();
+  });
+
+  it('reads a day of the schedule out of the index without touching the table', async () => {
+    const db = openMigrated();
+    await book(db);
+    db.statements.length = 0;
+    await scheduledJobExternalIds({ from: TODAY, to: TODAY });
+    expect(planFor(db, /FROM schedule/)).toContain('COVERING INDEX idx_schedule_day_job');
+    await db.closeAsync();
+  });
+
+  it('searches the open defects across every site', async () => {
+    const db = openMigrated();
+    await book(db);
+    db.statements.length = 0;
+    await listDefects(undefined, 'open', 300);
+    const plan = planFor(db, /FROM defect/);
+    expect(plan).toContain('idx_defect_status');
+    expect(plan).not.toMatch(/SCAN defect\b/);
+    await db.closeAsync();
+  });
+
+  it("searches the quote list's tabs", async () => {
+    const db = openMigrated();
+    await book(db);
+    db.statements.length = 0;
+    await listQuotePage({ filter: 'open', limit: 50 });
+    expect(planFor(db, /FROM simpro_quote/)).toContain('idx_simpro_quote_open');
+    await db.closeAsync();
+  });
+
+  it('walks the site list in order and stops at the page, rather than sorting every site', async () => {
+    const db = openMigrated();
+    for (let i = 0; i < 200; i++) await createSite({ id: `s${i}`, name: `Site ${i}` });
+    db.statements.length = 0;
+    await listSiteSummaries({ limit: 20 });
+    const plan = planFor(db, /panelCount/);
+    // The order comes out of the index, so there is no temp b-tree to fill
+    // before the first row can be drawn — which is the whole of what the cap
+    // is worth on three thousand sites.
+    expect(plan).toContain('idx_site_name');
+    expect(plan).not.toContain('USE TEMP B-TREE FOR ORDER BY');
+    // And whether a name is shared is a seek, not a pass over every site.
+    expect(plan).toContain('idx_site_name_key');
+    await db.closeAsync();
+  });
+
+  it('counts a customer’s and a site’s jobs through their own indexes', async () => {
+    const db = openMigrated();
+    await book(db);
+    db.statements.length = 0;
+    await customerStats('812');
+    const forCustomer = planFor(db, /jobsTotal/);
+    // Every one of the five counts on the card is a search. The open one asks
+    // the same question as the Open tab and reaches it through the customer
+    // rather than through the stage, because naming a customer is the
+    // narrower half — but neither reads a row it does not need.
+    expect(forCustomer).toContain('idx_job_customer_external');
+    expect(forCustomer).toContain('idx_simpro_quote_open');
+    expect(forCustomer).not.toMatch(/SCAN (job|simpro_quote|invoice)\b/);
+    db.statements.length = 0;
+    await siteStats('site-1');
+    expect(planFor(db, /jobsTotal/)).toContain('idx_job_site');
+    await db.closeAsync();
   });
 });

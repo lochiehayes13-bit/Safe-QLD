@@ -12,6 +12,9 @@ import type { Site } from '@/domain/types';
 import { nowIso } from '@/db';
 import { useTheme } from '@/theme';
 import { Banner, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
+import { describeLoadFailure } from '@/domain/loadFailure';
+import { ContextGate } from '@/components/ContextGate';
+import { contextId } from '@/domain/screenContext';
 
 /**
  * What is due at this site.
@@ -34,18 +37,30 @@ const TONE: Record<DueState, 'fail' | 'warn' | 'pass' | 'default'> = {
 
 export default function SiteDueScreen() {
   const t = useTheme();
-  const { siteId } = useLocalSearchParams<{ siteId?: string }>();
+  // `contextId` rather than the raw parameter: several screens push
+  // `siteId: siteId ?? ''`, so "no site" arrives here as an empty string.
+  const siteId = contextId(useLocalSearchParams<{ siteId?: string }>().siteId);
   const [site, setSite] = useState<Site | null>(null);
   const [items, setItems] = useState<RoutineDue[]>([]);
   const [loading, setLoading] = useState(true);
+  // An empty list here reads as "this site is up to date", so a read that threw
+  // has to say so rather than let silence answer for it.
+  const [failed, setFailed] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!siteId) return;
+    // Clearing the flag on the way out matters even though the gate below now
+    // returns first: a loader that can leave its own spinner up for ever is the
+    // trap this screen was, and leaving the shape behind invites it back.
+    if (!siteId) { setLoading(false); return; }
     setLoading(true);
+    setFailed(null);
     try {
       const [s, due] = await Promise.all([getSite(siteId), dueAtSite(siteId, nowIso())]);
       setSite(s);
       setItems(due);
+    } catch (e) {
+      setItems([]);
+      setFailed(describeLoadFailure(e, "this site's schedule"));
     } finally {
       setLoading(false);
     }
@@ -56,11 +71,14 @@ export default function SiteDueScreen() {
   const overdue = items.filter((i) => i.state === 'overdue').length;
   const dueNow = items.filter((i) => i.state === 'due').length;
 
+  if (!siteId) return <ContextGate kind="site" what="what is due" title="What is due" />;
+
   return (
     <>
       <Stack.Screen options={{ title: 'What is due' }} />
       <Screen scroll={false} padded={false}>
         <View style={{ padding: t.space(4), gap: t.space(3) }}>
+          {failed ? <Banner tone="fail" title="What is due could not be read" body={failed} /> : null}
           {overdue || dueNow ? (
             <Banner
               tone={overdue ? 'fail' : 'warn'}
@@ -81,7 +99,8 @@ export default function SiteDueScreen() {
           onRefresh={load}
           refreshing={loading}
           ListEmptyComponent={
-            loading ? null : <EmptyState title="No routines" body="No service routines are defined for this build." />
+            loading || failed ? null
+              : <EmptyState title="No routines" body="No service routines are defined for this build." />
           }
           renderItem={({ item }) => <DueRow due={item} siteId={siteId} />}
         />

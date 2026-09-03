@@ -20,6 +20,7 @@ import { nowIso } from '@/db';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { describeLoadFailure } from '@/domain/loadFailure';
 
 /**
  * Asset detail and timeline.
@@ -61,6 +62,8 @@ export default function AssetScreen() {
   const [asset, setAsset] = useState<AssetRecord | null>(null);
   // Loaded-and-absent is not the same as still loading. See RecordGate.
   const [missing, setMissing] = useState(false);
+  // And a read that threw is neither. See RecordGate.
+  const [failed, setFailed] = useState<string | null>(null);
   const [site, setSite] = useState<Site | null>(null);
   const [events, setEvents] = useState<AssetEvent[]>([]);
   const [schedule, setSchedule] = useState<RegisterScheduleRow[]>([]);
@@ -68,16 +71,21 @@ export default function AssetScreen() {
 
   const load = useCallback(async () => {
     if (!id) return;
-    const a = await getAsset(id);
-    setAsset(a);
-    setMissing(!a);
-    if (a) {
-      const [s, e, sched] = await Promise.all([
-        getSite(a.siteId), assetTimeline(a.id), assetSchedule(a.id),
-      ]);
-      setSite(s);
-      setEvents(e);
-      setSchedule(sched);
+    setFailed(null);
+    try {
+      const a = await getAsset(id);
+      setAsset(a);
+      setMissing(!a);
+      if (a) {
+        const [s, e, sched] = await Promise.all([
+          getSite(a.siteId), assetTimeline(a.id), assetSchedule(a.id),
+        ]);
+        setSite(s);
+        setEvents(e);
+        setSchedule(sched);
+      }
+    } catch (e) {
+      setFailed(describeLoadFailure(e, 'this asset'));
     }
   }, [id]);
 
@@ -100,7 +108,7 @@ export default function AssetScreen() {
     void load();
   };
 
-  if (!asset) return <RecordGate missing={missing} what="asset" />;
+  if (!asset) return <RecordGate missing={missing} what="asset" failed={failed} onRetry={() => { void load(); }} />;
 
   const type = assetTypeById(asset.assetTypeId);
   const failures = events.filter((e) => e.kind === 'failed').length;

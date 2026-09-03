@@ -26,6 +26,9 @@ import {
   Banner, Card, Chip, Divider, EmptyState, Field, H2, Label, ResultBlock, Rowed, Screen, StatTile, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { ContextGate } from '@/components/ContextGate';
+import { describeLoadFailure } from '@/domain/loadFailure';
+import { contextId } from '@/domain/screenContext';
 
 /**
  * One asset's measurements over its whole life.
@@ -70,20 +73,34 @@ const INTERVENTION_KINDS = new Set([
 
 export default function MeasurementTrendScreen() {
   const t = useTheme();
-  const { id, key: keyParam } = useLocalSearchParams<{ id: string; key?: string }>();
+  const { id: idParam, key: keyParam } = useLocalSearchParams<{ id?: string; key?: string }>();
+  /*
+   * This screen is reached from an asset, and it is also in the manifest by
+   * name — so search and a stale link both open it with no asset at all. It
+   * used to return out of its loader before setting either flag, which left
+   * the gate below on "Loading…" for the rest of the session.
+   */
+  const id = contextId(idParam);
   const [asset, setAsset] = useState<AssetRecord | null>(null);
   // Loaded-and-absent is not the same as still loading. See RecordGate.
   const [missing, setMissing] = useState(false);
+  // And a read that threw is neither. See RecordGate.
+  const [failed, setFailed] = useState<string | null>(null);
   const [events, setEvents] = useState<AssetEvent[]>([]);
   const [selected, setSelected] = useState<string | undefined>(keyParam);
   const [thresholdText, setThresholdText] = useState('');
 
   const load = useCallback(async () => {
     if (!id) return;
-    const a = await getAsset(id);
-    setAsset(a);
-    setMissing(!a);
-    setEvents(a ? await assetTimeline(a.id, 500) : []);
+    setFailed(null);
+    try {
+      const a = await getAsset(id);
+      setAsset(a);
+      setMissing(!a);
+      setEvents(a ? await assetTimeline(a.id, 500) : []);
+    } catch (e) {
+      setFailed(describeLoadFailure(e, 'this asset'));
+    }
   }, [id]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
@@ -132,11 +149,13 @@ export default function MeasurementTrendScreen() {
     [trend, thresholdValue, thresholdUnit],
   );
 
+  if (!id) return <ContextGate kind="asset" what="every measurement recorded" title="Measurement trend" />;
+
   if (!asset) {
     return (
       <>
         <Stack.Screen options={{ title: 'Measurement trend' }} />
-        <RecordGate missing={missing} what="asset" />
+        <RecordGate missing={missing} what="asset" failed={failed} onRetry={() => { void load(); }} />
       </>
     );
   }

@@ -32,6 +32,25 @@ export async function listSites(): Promise<Site[]> {
   return db.getAllAsync<Site>('SELECT * FROM site ORDER BY name COLLATE NOCASE');
 }
 
+/** The little a picker or a name map needs off a site. */
+export type SitePick = Pick<Site, 'id' | 'name' | 'suburb' | 'address' | 'clientName' | 'siteRef'>;
+
+/**
+ * Sites as a picker shows them, and nothing else.
+ *
+ * `listSites` hands back every column of all three thousand of them —
+ * contacts, notes, the office's public notes, timestamps — and a dozen
+ * screens were reading that to draw a name and a suburb, or to build a map
+ * from site id to site name. Six columns instead of nineteen is most of the
+ * bytes and all of the pixels.
+ */
+export async function listSitePicks(): Promise<SitePick[]> {
+  const db = await getDb();
+  return db.getAllAsync<SitePick>(
+    'SELECT id, name, suburb, address, clientName, siteRef FROM site ORDER BY name COLLATE NOCASE',
+  );
+}
+
 export async function getSite(id: string): Promise<Site | null> {
   const db = await getDb();
   return (await db.getFirstAsync<Site>('SELECT * FROM site WHERE id = ?', id)) ?? null;
@@ -97,22 +116,87 @@ export async function deleteSite(id: string): Promise<void> {
 }
 
 /** Counts shown on the site list so a tech can see at a glance what a site holds. */
-export interface SiteSummary extends Site {
+export interface SiteSummary extends SitePick {
+  state?: string;
   panelCount: number;
   pointCount: number;
   openDefects: number;
+  /**
+   * Whether another site on the books is called the same thing, worked out
+   * across every site rather than across the page — a name is ambiguous
+   * because two buildings share it, and that stays true when a search happens
+   * to show only one of them.
+   */
+  sharesName: boolean;
 }
 
-export async function listSiteSummaries(): Promise<SiteSummary[]> {
+export interface SiteSummaryPage {
+  rows: SiteSummary[];
+  /** How many sites the search matches, whether or not they all fit. */
+  matching: number;
+  /** How many sites the phone holds at all. */
+  total: number;
+  capped: boolean;
+}
+
+/**
+ * The site list, with what each site holds.
+ *
+ * Three things were expensive here on three thousand sites, and the tab
+ * re-read all of it on every focus. The row was every column of the site
+ * table — contacts, notes, the office's public notes, timestamps — read to
+ * draw a name, an address and three chips. The counts were three correlated
+ * subqueries per site, the middle one walking every panel at the site and
+ * then every point under each panel. And the search was a pass over all three
+ * thousand rows in JavaScript on every keystroke.
+ *
+ * So: seven columns, the counts grouped once and joined, and the search and
+ * the cap in the query. The shared-name flag is the one thing that cannot be
+ * decided from a page, so it is decided in the same statement, over the whole
+ * table.
+ */
+export async function listSiteSummaries(options: { query?: string; limit?: number } = {}): Promise<SiteSummaryPage> {
   const db = await getDb();
-  return db.getAllAsync<SiteSummary>(`
-    SELECT s.*,
-      (SELECT COUNT(*) FROM panel p WHERE p.siteId = s.id) AS panelCount,
-      (SELECT COUNT(*) FROM point pt JOIN panel p2 ON pt.panelId = p2.id WHERE p2.siteId = s.id) AS pointCount,
-      (SELECT COUNT(*) FROM defect d WHERE d.siteId = s.id AND d.status = 'open') AS openDefects
-    FROM site s
-    ORDER BY s.name COLLATE NOCASE
-  `);
+  const limit = options.limit ?? 300;
+  const term = (options.query ?? '').trim();
+  const args: (string | number)[] = [];
+  let where = '';
+  if (term) {
+    const like = `%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    where = `WHERE (s.name LIKE ? ESCAPE '\\' OR s.address LIKE ? ESCAPE '\\' OR s.suburb LIKE ? ESCAPE '\\'
+                    OR s.clientName LIKE ? ESCAPE '\\' OR s.siteRef LIKE ? ESCAPE '\\')`;
+    args.push(like, like, like, like, like);
+  }
+  const [rows, counts] = await Promise.all([
+    /*
+     * The counts are asked per row rather than grouped and joined, so the cap
+     * is worth something: grouped, the twenty-two thousand points would be
+     * counted in full to draw three hundred rows. Each subquery is one index
+     * seek, and v21's index on the name is what lets the read walk the list in
+     * order and stop at the page rather than sort three thousand sites first.
+     */
+    db.getAllAsync<Omit<SiteSummary, 'sharesName'> & { sharesName: number }>(`
+      SELECT s.id, s.name, s.address, s.suburb, s.state, s.clientName, s.siteRef,
+        (SELECT COUNT(*) FROM panel p WHERE p.siteId = s.id) AS panelCount,
+        (SELECT COUNT(*) FROM point pt JOIN panel p2 ON pt.panelId = p2.id WHERE p2.siteId = s.id) AS pointCount,
+        (SELECT COUNT(*) FROM defect d WHERE d.siteId = s.id AND d.status = 'open') AS openDefects,
+        (SELECT COUNT(*) > 1 FROM site x WHERE LOWER(TRIM(x.name)) = LOWER(TRIM(s.name))) AS sharesName
+      FROM site s
+      ${where}
+      ORDER BY s.name COLLATE NOCASE
+      LIMIT ?`, ...args, limit),
+    db.getFirstAsync<{ matching: number; total: number }>(
+      `SELECT (SELECT COUNT(*) FROM site s ${where}) AS matching, (SELECT COUNT(*) FROM site) AS total`,
+      ...args,
+    ),
+  ]);
+  const matching = counts?.matching ?? 0;
+  return {
+    rows: rows.map((r) => ({ ...r, sharesName: r.sharesName === 1 })),
+    matching,
+    total: counts?.total ?? 0,
+    capped: matching > limit,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -575,7 +659,16 @@ export async function updateCheckRow(id: string, patch: Partial<CheckRow>): Prom
 // Defects
 // ---------------------------------------------------------------------------
 
-export async function listDefects(siteId?: string, status?: Defect['status']): Promise<Defect[]> {
+/**
+ * Defects, worst first and newest of those first.
+ *
+ * `limit` is for the screens that ask across every site: the company has
+ * fourteen hundred defects on the book and a list nobody scrolls past the
+ * first screenful of does not need all of them. A site's own defects are
+ * never capped — that list is the site's whole outstanding works and a
+ * quote or an occupier statement is built from it.
+ */
+export async function listDefects(siteId?: string, status?: Defect['status'], limit?: number): Promise<Defect[]> {
   const db = await getDb();
   const where: string[] = [];
   const args: SqlValue[] = [];
@@ -583,8 +676,9 @@ export async function listDefects(siteId?: string, status?: Defect['status']): P
   if (status) { where.push('status = ?'); args.push(status); }
   const rows = await db.getAllAsync<Omit<Defect, 'photos'> & { photos: string }>(
     `SELECT * FROM defect ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY
-      CASE severity WHEN 'critical' THEN 0 ELSE 1 END, raisedAt DESC`,
-    ...args,
+      CASE severity WHEN 'critical' THEN 0 ELSE 1 END, raisedAt DESC
+      ${limit === undefined ? '' : 'LIMIT ?'}`,
+    ...(limit === undefined ? args : [...args, limit]),
   );
   return rows.map((r) => ({
     ...r,

@@ -3,7 +3,7 @@ import { qldIsoDay } from '@/domain/qldTime';
 import { loadPrefs } from '@/app-prefs';
 import { simproConfigFromPrefs } from '@/simpro/config';
 import { syncSiteDetail } from '@/simpro/sync';
-import { Alert, Linking, Pressable, View } from 'react-native';
+import { Linking, Pressable, View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
@@ -15,6 +15,7 @@ import { createAssessment, listAssessments } from '@/db/assessmentRepo';
 import { configTotals, siteToConfig } from '@/share/siteToConfig';
 import { encodePack, formatBytes } from '@/share/pack';
 import { shareFile, writePack, writePdf } from '@/export/files';
+import { notSharedNotice } from '@/export/shareOutcome';
 import { formatAuDate } from '@/export/sheets';
 import { buildRoutineReport } from '@/db/routineReportRepo';
 import { listJobsFor, listQuotes, siteStats, type CustomerStats } from '@/db/mirrorRepo';
@@ -31,6 +32,8 @@ import {
   Button, Card, Chip, EmptyState, H2, Label, Rowed, Screen, StatTile, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
+import { showAlert } from '@/components/alert';
 
 /** Site detail — the hub every other screen hangs off. */
 export default function SiteScreen() {
@@ -39,6 +42,8 @@ export default function SiteScreen() {
   const [site, setSite] = useState<Site | null>(null);
   // Loaded-and-absent is not the same as still loading. See RecordGate.
   const [missing, setMissing] = useState(false);
+  // And a read that threw is neither. See RecordGate.
+  const [failed, setFailed] = useState<string | null>(null);
   const [panels, setPanels] = useState<Panel[]>([]);
   const [reports, setReports] = useState<ServiceReport[]>([]);
   const [defects, setDefects] = useState<Defect[]>([]);
@@ -52,28 +57,33 @@ export default function SiteScreen() {
 
   const load = useCallback(async () => {
     if (!id) return;
-    const [s, p, r, d, n] = await Promise.all([
-      getSite(id),
-      listPanels(id),
-      listReports(id),
-      listDefects(id),
-      // Counted in SQL. Reading every point row on a large site only to take
-      // its length was the slowest thing on this screen.
-      countPoints(id),
-    ]);
-    setSite(s);
-    setMissing(!s);
-    setPanels(p);
-    setReports(r);
-    setDefects(d);
-    setPointCount(n);
-    // The office's records last, so the mirror never holds up the site's own.
-    const [stats, jobs, quotes] = await Promise.all([
-      siteStats(id),
-      listJobsFor({ siteId: id, limit: 500 }),
-      listQuotes({ siteId: id, limit: 500 }),
-    ]);
-    setOffice({ stats, quoteCount: quotes.length, customers: siteCustomers(jobs, quotes) });
+    setFailed(null);
+    try {
+      const [s, p, r, d, n] = await Promise.all([
+        getSite(id),
+        listPanels(id),
+        listReports(id),
+        listDefects(id),
+        // Counted in SQL. Reading every point row on a large site only to take
+        // its length was the slowest thing on this screen.
+        countPoints(id),
+      ]);
+      setSite(s);
+      setMissing(!s);
+      setPanels(p);
+      setReports(r);
+      setDefects(d);
+      setPointCount(n);
+      // The office's records last, so the mirror never holds up the site's own.
+      const [stats, jobs, quotes] = await Promise.all([
+        siteStats(id),
+        listJobsFor({ siteId: id, limit: 500 }),
+        listQuotes({ siteId: id, limit: 500 }),
+      ]);
+      setOffice({ stats, quoteCount: quotes.length, customers: siteCustomers(jobs, quotes) });
+    } catch (e) {
+      setFailed(describeLoadFailure(e, 'this site'));
+    }
   }, [id]);
 
   /**
@@ -132,6 +142,8 @@ export default function SiteScreen() {
         status: 'draft',
       });
       router.push({ pathname: '/report/[id]', params: { id: report.id } });
+    } catch (e) {
+      showAlert('Could not start the sheet', describeActionFailure(e, 'start a test sheet for this site'));
     } finally {
       setCreating(false);
     }
@@ -139,7 +151,7 @@ export default function SiteScreen() {
 
   const confirmDelete = () => {
     if (!site) return;
-    Alert.alert(
+    showAlert(
       'Delete site?',
       `This removes ${site.name} and everything under it — panels, points, reports and defects. It cannot be undone.`,
       [
@@ -156,7 +168,7 @@ export default function SiteScreen() {
     );
   };
 
-  if (!site) return <RecordGate missing={missing} what="site" />;
+  if (!site) return <RecordGate missing={missing} what="site" failed={failed} onRetry={() => { void load(); }} />;
 
   const openDefects = defects.filter((d) => d.status === 'open');
   const criticalDefects = openDefects.filter((d) => d.severity === 'critical');
@@ -218,7 +230,7 @@ export default function SiteScreen() {
       });
 
       if (!input) {
-        Alert.alert(
+        showAlert(
           'Nothing to report yet',
           'No assets at this site have been passed, failed or recorded as not tested in the last '
           + 'month. Run a routine first — the report is built from what was actually recorded, not '
@@ -230,7 +242,7 @@ export default function SiteScreen() {
       const tally = tallyReport(input);
       const html = routineServiceReportHtml(input);
       const file = await writePdf(`${site.name} service report`, html);
-      await shareFile(
+      const shared = await shareFile(
         file,
         // The issued format carries no summary, so the counts go here where a
         // technician sees them before the document leaves the phone.
@@ -239,8 +251,12 @@ export default function SiteScreen() {
         + `${tally.missingReason ? ` (${tally.missingReason} with no reason given)` : ''}`
         + `${job.reason ? `. ${job.reason}` : ''}`,
       );
+      if (!shared) {
+        const notice = notSharedNotice(file.name, 'report');
+        showAlert(notice.title, notice.body);
+      }
     } catch (e) {
-      Alert.alert('Could not build the report', e instanceof Error ? e.message : String(e));
+      showAlert('Could not build the report', e instanceof Error ? e.message : String(e));
     } finally {
       setReporting(false);
     }
@@ -253,7 +269,7 @@ export default function SiteScreen() {
       const config = await siteToConfig(site);
       const totals = configTotals(config);
       if (!totals.panels) {
-        Alert.alert('Nothing to share', 'This site has no panel data yet. Import a device list first.');
+        showAlert('Nothing to share', 'This site has no panel data yet. Import a device list first.');
         return;
       }
       const bytes = encodePack({
@@ -261,13 +277,17 @@ export default function SiteScreen() {
         config,
       });
       const file = writePack(`${site.name}`, bytes);
-      await shareFile(
+      const shared = await shareFile(
         file,
         `${site.name} — ${totals.panels} panel${totals.panels === 1 ? '' : 's'}, ` +
         `${totals.points} devices (${formatBytes(bytes.byteLength)})`,
       );
+      if (!shared) {
+        const notice = notSharedNotice(file.name, 'share pack');
+        showAlert(notice.title, notice.body);
+      }
     } catch (e) {
-      Alert.alert('Could not build the pack', e instanceof Error ? e.message : String(e));
+      showAlert('Could not build the pack', e instanceof Error ? e.message : String(e));
     } finally {
       setSharing(false);
     }

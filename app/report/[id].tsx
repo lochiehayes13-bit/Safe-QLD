@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, ScrollView, View } from 'react-native';
+import { FlatList, Pressable, ScrollView, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -20,6 +20,7 @@ import { SERVICE_ROUTINES, type ServiceRoutine } from '@/seed/serviceRoutines';
 import { checkSheet, defectSheet, reportCoverSheet, testResultSheet, type ReportBundle } from '@/export/sheets';
 import { serviceReportHtml } from '@/export/pdf';
 import { shareFile, writePdf, writeXlsx } from '@/export/files';
+import { notSharedNotice } from '@/export/shareOutcome';
 import {
   CERTIFICATION_STATEMENT, validateMaintenanceRecord, type MaintenanceRecord,
 } from '@/domain/qldCompliance';
@@ -30,7 +31,9 @@ import {
   Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { SignaturePad } from '@/components/SignaturePad';
+import { showAlert } from '@/components/alert';
 
 /**
  * Test sheet.
@@ -58,6 +61,8 @@ export default function ReportScreen() {
   const [report, setReport] = useState<ServiceReport | null>(null);
   // Loaded-and-absent is not the same as still loading. See RecordGate.
   const [missing, setMissing] = useState(false);
+  // And a read that threw is neither. See RecordGate.
+  const [failed, setFailed] = useState<string | null>(null);
   const [site, setSite] = useState<Site | null>(null);
   const [panel, setPanel] = useState<Panel | null>(null);
   const [rows, setRows] = useState<TestRow[]>([]);
@@ -78,56 +83,61 @@ export default function ReportScreen() {
 
   const load = useCallback(async () => {
     if (!id) return;
-    const found = await getReport(id);
-    setMissing(!found);
-    if (!found) { setReport(null); return; }
-    const today = qldIsoDay(nowIso()) ?? '';
-    const [s, p, tr, cr, df, prefs, siteAssets, siteJobs, onSchedule] = await Promise.all([
-      getSite(found.siteId),
-      found.panelId ? getPanel(found.panelId) : Promise.resolve(null),
-      listTestRows(found.id),
-      listCheckRows(found.id),
-      listDefects(found.siteId),
-      loadPrefs(),
-      queryAssets({ siteId: found.siteId, limit: 5000 }),
-      listJobsFor({ siteId: found.siteId, limit: 200 }),
-      // Today's booked jobs, from the schedule and for anyone: the job
-      // record's own date is the day the office issued it, not the booking.
-      scheduledJobExternalIds({ from: today, to: today }),
-    ]);
+    setFailed(null);
+    try {
+      const found = await getReport(id);
+      setMissing(!found);
+      if (!found) { setReport(null); return; }
+      const today = qldIsoDay(nowIso()) ?? '';
+      const [s, p, tr, cr, df, prefs, siteAssets, siteJobs, onSchedule] = await Promise.all([
+        getSite(found.siteId),
+        found.panelId ? getPanel(found.panelId) : Promise.resolve(null),
+        listTestRows(found.id),
+        listCheckRows(found.id),
+        listDefects(found.siteId),
+        loadPrefs(),
+        queryAssets({ siteId: found.siteId, limit: 5000 }),
+        listJobsFor({ siteId: found.siteId, limit: 200 }),
+        // Today's booked jobs, from the schedule and for anyone: the job
+        // record's own date is the day the office issued it, not the booking.
+        scheduledJobExternalIds({ from: today, to: today }),
+      ]);
 
-    /*
-     * What the app already knows goes on the report before anybody types.
-     *
-     * The technician, licence and company are in Settings; the customer and
-     * site contact are on the site the office synced. Every report used to
-     * open with all of them blank and "Technician name is blank" at the top
-     * of the readiness list, on a phone that knew the name. Blanks only: a
-     * report somebody has edited keeps what they wrote.
-     */
-    const patch: Partial<ServiceReport> = {};
-    if (!found.technicianName?.trim() && prefs.technicianName) patch.technicianName = prefs.technicianName;
-    if (!found.technicianLicence?.trim() && prefs.technicianLicence) patch.technicianLicence = prefs.technicianLicence;
-    if (!found.companyName?.trim() && prefs.companyName) patch.companyName = prefs.companyName;
-    if (!found.customerName?.trim() && s?.clientName) patch.customerName = s.clientName;
-    if (!found.siteContactName?.trim() && s?.contactName) {
-      patch.siteContactName = s.contactName;
-      if (!found.siteContactPhone?.trim()) patch.siteContactPhone = s.contactMobile ?? s.contactWorkPhone;
+      /*
+       * What the app already knows goes on the report before anybody types.
+       *
+       * The technician, licence and company are in Settings; the customer and
+       * site contact are on the site the office synced. Every report used to
+       * open with all of them blank and "Technician name is blank" at the top
+       * of the readiness list, on a phone that knew the name. Blanks only: a
+       * report somebody has edited keeps what they wrote.
+       */
+      const patch: Partial<ServiceReport> = {};
+      if (!found.technicianName?.trim() && prefs.technicianName) patch.technicianName = prefs.technicianName;
+      if (!found.technicianLicence?.trim() && prefs.technicianLicence) patch.technicianLicence = prefs.technicianLicence;
+      if (!found.companyName?.trim() && prefs.companyName) patch.companyName = prefs.companyName;
+      if (!found.customerName?.trim() && s?.clientName) patch.customerName = s.clientName;
+      if (!found.siteContactName?.trim() && s?.contactName) {
+        patch.siteContactName = s.contactName;
+        if (!found.siteContactPhone?.trim()) patch.siteContactPhone = s.contactMobile ?? s.contactWorkPhone;
+      }
+      const r = { ...found, ...patch };
+      if (Object.keys(patch).length) await updateReport(r.id, patch);
+
+      setReport(r);
+      // The record-of-maintenance answers live on the report now, not on the
+      // screen: they used to vanish when the screen was left.
+      setQdcAffirmed(r.qdcCompliance === true);
+      setWorkingOrder(r.inProperWorkingOrder ?? null);
+      setHardcopyLeft(r.hardcopyLeftOnSite === true);
+      setSite(s); setPanel(p); setRows(tr); setChecks(cr); setDefects(df);
+      setAssets(siteAssets);
+      setJobs(siteJobs);
+      setTechnician(r.technicianName ?? prefs.technicianName);
+      setOffer(jobToOffer(siteJobs, { siteId: r.siteId, today, scheduledToday: new Set(onSchedule) }));
+    } catch (e) {
+      setFailed(describeLoadFailure(e, 'this service report'));
     }
-    const r = { ...found, ...patch };
-    if (Object.keys(patch).length) await updateReport(r.id, patch);
-
-    setReport(r);
-    // The record-of-maintenance answers live on the report now, not on the
-    // screen: they used to vanish when the screen was left.
-    setQdcAffirmed(r.qdcCompliance === true);
-    setWorkingOrder(r.inProperWorkingOrder ?? null);
-    setHardcopyLeft(r.hardcopyLeftOnSite === true);
-    setSite(s); setPanel(p); setRows(tr); setChecks(cr); setDefects(df);
-    setAssets(siteAssets);
-    setJobs(siteJobs);
-    setTechnician(r.technicianName ?? prefs.technicianName);
-    setOffer(jobToOffer(siteJobs, { siteId: r.siteId, today, scheduledToday: new Set(onSchedule) }));
   }, [id]);
 
   useEffect(() => { void load(); }, [load]);
@@ -209,7 +219,7 @@ export default function ReportScreen() {
         if (n) added.push(`${n} asset${n === 1 ? '' : 's'} from the register`);
       }
       if (!added.length) {
-        Alert.alert(
+        showAlert(
           'No devices',
           report.panelId
             ? (points.length
@@ -222,8 +232,10 @@ export default function ReportScreen() {
         );
         return;
       }
-      Alert.alert('Added', `${added.join(' and ')} added to the test sheet.`);
+      showAlert('Added', `${added.join(' and ')} added to the test sheet.`);
       void load();
+    } catch (e) {
+      showAlert('Could not add the devices', describeActionFailure(e, 'add the devices to this sheet'));
     } finally {
       setBusy(false);
     }
@@ -292,7 +304,7 @@ export default function ReportScreen() {
     }
     if (!changes.length) { patchReport(patch); return; }
 
-    Alert.alert(
+    showAlert(
       `Use job ${offer.jobNumber}`,
       `The job would change what is on the report:\n\n${changes.join('\n')}`,
       [
@@ -360,9 +372,13 @@ export default function ReportScreen() {
         hardcopyLeftOnSite: hardcopyLeft,
       });
       const file = await writePdf(`${b.report.title} - ${b.site.name}`, html);
-      await shareFile(file, 'Service report');
+      const shared = await shareFile(file, 'Service report');
+      if (!shared) {
+        const notice = notSharedNotice(file.name, 'report');
+        showAlert(notice.title, notice.body);
+      }
     } catch (e) {
-      Alert.alert('Could not create the PDF', e instanceof Error ? e.message : String(e));
+      showAlert('Could not create the PDF', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -379,13 +395,19 @@ export default function ReportScreen() {
         checkSheet(b.checkRows),
         defectSheet(b.defects),
       ]);
-      await shareFile(file, 'Service report');
+      const shared = await shareFile(file, 'Service report');
+      if (!shared) {
+        const notice = notSharedNotice(file.name, 'spreadsheet');
+        showAlert(notice.title, notice.body);
+      }
+    } catch (e) {
+      showAlert('Could not build the spreadsheet', describeActionFailure(e, 'build the spreadsheet'));
     } finally {
       setBusy(false);
     }
   };
 
-  if (!report) return <RecordGate missing={missing} what="service report" />;
+  if (!report) return <RecordGate missing={missing} what="service report" failed={failed} onRetry={() => { void load(); }} />;
 
   const offered = offer.jobNumber && report.jobNumber?.trim() !== offer.jobNumber ? offer : null;
 
@@ -672,7 +694,7 @@ export default function ReportScreen() {
                 // not. The list is repeated here because the banner is a
                 // screen's length above the button.
                 if (next === 'complete' && readiness.length) {
-                  Alert.alert(
+                  showAlert(
                     `${readiness.length} thing${readiness.length === 1 ? '' : 's'} before this goes out`,
                     readiness.join('\n'),
                     [

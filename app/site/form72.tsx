@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, View } from 'react-native';
+import { View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { createForm72, deleteForm72, listForm72, type StoredForm72 } from '@/db/form72Repo';
@@ -17,6 +17,9 @@ import { useTheme } from '@/theme';
 import {
   Banner, Button, Card, Chip, EmptyState, H2, Rowed, Screen, Txt,
 } from '@/components/ui';
+import { ContextGate } from '@/components/ContextGate';
+import { contextId } from '@/domain/screenContext';
+import { showAlert } from '@/components/alert';
 
 /**
  * The Form 72s raised for one site.
@@ -33,7 +36,9 @@ import {
  */
 export default function SiteForm72ListScreen() {
   const t = useTheme();
-  const { siteId } = useLocalSearchParams<{ siteId: string }>();
+  // `contextId` rather than the raw parameter: several screens push
+  // `siteId: siteId ?? ''`, so "no site" arrives here as an empty string.
+  const siteId = contextId(useLocalSearchParams<{ siteId?: string }>().siteId);
   const [site, setSite] = useState<Site | null>(null);
   const [forms, setForms] = useState<StoredForm72[]>([]);
   const [creating, setCreating] = useState(false);
@@ -78,14 +83,14 @@ export default function SiteForm72ListScreen() {
       });
       router.push({ pathname: '/form72/[id]', params: { id: rec.id } });
     } catch (e) {
-      Alert.alert('Could not start the form', e instanceof Error ? e.message : String(e));
+      showAlert('Could not start the form', e instanceof Error ? e.message : String(e));
     } finally {
       setCreating(false);
     }
   }, [site]);
 
   const onDelete = useCallback((form: StoredForm72) => {
-    Alert.alert(
+    showAlert(
       'Delete this draft?',
       'Nothing on it is kept.',
       [
@@ -98,7 +103,7 @@ export default function SiteForm72ListScreen() {
               await deleteForm72(form.id);
               await load();
             } catch (e) {
-              Alert.alert('Not deleted', e instanceof Error ? e.message : String(e));
+              showAlert('Not deleted', e instanceof Error ? e.message : String(e));
             }
           },
         },
@@ -107,6 +112,8 @@ export default function SiteForm72ListScreen() {
   }, [load]);
 
   const owing = forms.filter((f) => f.status === 'issued' && !f.copyGivenAt);
+
+  if (!siteId) return <ContextGate kind="site" what="the Form 72s raised" title="Form 72" />;
 
   return (
     <Screen>

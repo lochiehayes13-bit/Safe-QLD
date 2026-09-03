@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
@@ -10,10 +10,15 @@ import type { CauseEffectRule, CauseKind, CellState, EffectKind, Panel, Site, Zo
 import { EFFECT_LABEL, causeEffectMatrixSheet } from '@/export/sheets';
 import { causeEffectHtml } from '@/export/pdf';
 import { shareFile, writePdf, writeXlsx } from '@/export/files';
+import { notSharedNotice } from '@/export/shareOutcome';
 import { useTheme } from '@/theme';
+import { describeActionFailure } from '@/domain/loadFailure';
 import {
   Banner, Button, Card, Chip, Divider, EmptyState, Field, H2, Label, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
+import { ContextGate } from '@/components/ContextGate';
+import { contextId } from '@/domain/screenContext';
+import { showAlert } from '@/components/alert';
 
 /**
  * Cause and effect.
@@ -53,7 +58,9 @@ type Mode = 'edit' | 'test';
 
 export default function CauseEffectScreen() {
   const t = useTheme();
-  const { siteId } = useLocalSearchParams<{ siteId?: string }>();
+  // `contextId` rather than the raw parameter: several screens push
+  // `siteId: siteId ?? ''`, so "no site" arrives here as an empty string.
+  const siteId = contextId(useLocalSearchParams<{ siteId?: string }>().siteId);
   const [site, setSite] = useState<Site | null>(null);
   const [panels, setPanels] = useState<Panel[]>([]);
   const [panelId, setPanelId] = useState<string>();
@@ -91,15 +98,27 @@ export default function CauseEffectScreen() {
       if (kind === 'pdf') {
         const html = causeEffectHtml(panel, rules, site.name, new Date().toISOString());
         const file = await writePdf(name, html);
-        await shareFile(file, 'Cause and effect');
+        const shared = await shareFile(file, 'Cause and effect');
+        if (!shared) {
+          const notice = notSharedNotice(file.name, 'matrix');
+          showAlert(notice.title, notice.body);
+        }
       } else {
         const file = writeXlsx(name, [causeEffectMatrixSheet(panel, rules)]);
-        await shareFile(file, 'Cause and effect');
+        const shared = await shareFile(file, 'Cause and effect');
+        if (!shared) {
+          const notice = notSharedNotice(file.name, 'matrix');
+          showAlert(notice.title, notice.body);
+        }
       }
+    } catch (e) {
+      showAlert('Could not export', describeActionFailure(e, 'export the matrix'));
     } finally {
       setBusy(false);
     }
   };
+
+  if (!siteId) return <ContextGate kind="site" what="the cause and effect matrix" title="Cause &amp; effect" />;
 
   return (
     <>
@@ -160,7 +179,7 @@ export default function CauseEffectScreen() {
               rule={r}
               mode={mode}
               onDelete={() => {
-                Alert.alert('Remove this cause?', r.causeLabel, [
+                showAlert('Remove this cause?', r.causeLabel, [
                   { text: 'Cancel', style: 'cancel' },
                   {
                     text: 'Remove',

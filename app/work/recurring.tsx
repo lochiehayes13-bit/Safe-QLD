@@ -5,6 +5,7 @@ import { recurringFailures, type RecurringFailure } from '@/db/assetRepo';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
 import { Banner, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
+import { describeLoadFailure } from '@/domain/loadFailure';
 
 /**
  * Assets that keep failing.
@@ -16,7 +17,19 @@ export default function RecurringScreen() {
   const t = useTheme();
   const [items, setItems] = useState<RecurringFailure[]>([]);
 
-  const load = useCallback(async () => setItems(await recurringFailures(undefined, 2)), []);
+  // An empty list here says nothing keeps failing. A read that threw has no
+  // business saying that, so it says what happened instead.
+  const [failed, setFailed] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setFailed(null);
+    try {
+      setItems(await recurringFailures(undefined, 2));
+    } catch (e) {
+      setItems([]);
+      setFailed(describeLoadFailure(e, 'the failure history'));
+    }
+  }, []);
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   return (
@@ -28,7 +41,9 @@ export default function RecurringScreen() {
           keyExtractor={(r) => r.assetId}
           contentContainerStyle={{ padding: t.space(4), gap: t.space(3), paddingBottom: t.space(20) }}
           ListHeaderComponent={
-            items.length ? (
+            failed ? (
+              <Banner tone="fail" title="This list could not be read" body={failed} />
+            ) : items.length ? (
               <Banner
                 tone="warn"
                 title="Worth a root cause, not another swap"
@@ -37,10 +52,12 @@ export default function RecurringScreen() {
             ) : null
           }
           ListEmptyComponent={
+            failed ? null : (
             <EmptyState
               title="Nothing failing repeatedly"
               body="Once assets have a few services behind them, anything failing more than once will show up here."
             />
+            )
           }
           renderItem={({ item }) => (
             <Card>

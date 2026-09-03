@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, FlatList, View } from 'react-native';
+import { FlatList, View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { getSite, listDefects, reopenDefect, updateDefect } from '@/db/repo';
 import { nowIso } from '@/db';
@@ -7,23 +7,40 @@ import type { Defect, Site } from '@/domain/types';
 import { formatAuDate } from '@/export/sheets';
 import { defectSheet } from '@/export/sheets';
 import { shareFile, writeXlsx } from '@/export/files';
+import { notSharedNotice } from '@/export/shareOutcome';
 import { useTheme } from '@/theme';
-import { Button, Card, Chip, EmptyState, Rowed, Screen, Segmented, Txt } from '@/components/ui';
+import { Banner, Button, Card, Chip, EmptyState, Rowed, Screen, Segmented, Txt } from '@/components/ui';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
+import { ContextGate } from '@/components/ContextGate';
+import { contextId } from '@/domain/screenContext';
+import { showAlert } from '@/components/alert';
 
 /** Defects for one site. */
 export default function SiteDefectsScreen() {
   const t = useTheme();
-  const { siteId } = useLocalSearchParams<{ siteId?: string }>();
+  // `contextId` rather than the raw parameter: several screens push
+  // `siteId: siteId ?? ''`, so "no site" arrives here as an empty string.
+  const siteId = contextId(useLocalSearchParams<{ siteId?: string }>().siteId);
   const [site, setSite] = useState<Site | null>(null);
   const [defects, setDefects] = useState<Defect[]>([]);
   const [status, setStatus] = useState<'open' | 'all'>('open');
   const [busy, setBusy] = useState(false);
 
+  // An empty list under "Nothing outstanding here" is a compliance statement
+  // about the site, so a read that threw says so instead of making it.
+  const [failed, setFailed] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     if (!siteId) return;
-    const [s, d] = await Promise.all([getSite(siteId), listDefects(siteId)]);
-    setSite(s);
-    setDefects(d);
+    setFailed(null);
+    try {
+      const [s, d] = await Promise.all([getSite(siteId), listDefects(siteId)]);
+      setSite(s);
+      setDefects(d);
+    } catch (e) {
+      setDefects([]);
+      setFailed(describeLoadFailure(e, "this site's defects"));
+    }
   }, [siteId]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
@@ -37,7 +54,7 @@ export default function SiteDefectsScreen() {
    * touched, with no way back. It asks now, and a slip can be reopened.
    */
   const markRectified = (d: Defect) => {
-    Alert.alert(
+    showAlert(
       'Mark this defect rectified?',
       `${d.location}\n\nThis records today as the rectification date, which the occupier statement and any critical defect notice read back.`,
       [
@@ -56,7 +73,7 @@ export default function SiteDefectsScreen() {
   };
 
   const reopen = (d: Defect) => {
-    Alert.alert('Reopen this defect?', 'It goes back to open and the rectification date is cleared.', [
+    showAlert('Reopen this defect?', 'It goes back to open and the rectification date is cleared.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Reopen',
@@ -72,15 +89,33 @@ export default function SiteDefectsScreen() {
   };
 
   const exportList = async () => {
-    if (!shown.length) return;
+    // The button is always on screen, so an empty list used to make it do
+    // nothing at all — press, no spinner, no sheet, no word.
+    if (!shown.length) {
+      showAlert(
+        'Nothing to export',
+        status === 'open'
+          ? 'There are no open defects at this site. Switch to All if you want the ones already cleared.'
+          : 'No defects have been recorded at this site yet.',
+      );
+      return;
+    }
     setBusy(true);
     try {
       const file = writeXlsx(`Defects - ${site?.name ?? 'Site'}`, [defectSheet(shown)]);
-      await shareFile(file, 'Defect list');
+      const shared = await shareFile(file, 'Defect list');
+      if (!shared) {
+        const notice = notSharedNotice(file.name, 'spreadsheet');
+        showAlert(notice.title, notice.body);
+      }
+    } catch (e) {
+      showAlert('Could not export', describeActionFailure(e, 'export this defect list'));
     } finally {
       setBusy(false);
     }
   };
+
+  if (!siteId) return <ContextGate kind="site" what="the defects raised" title="Defects" />;
 
   return (
     <>
@@ -96,6 +131,7 @@ export default function SiteDefectsScreen() {
             />
             <Button title="Export" variant="secondary" style={{ flex: 1 }} onPress={exportList} loading={busy} />
           </Rowed>
+          {failed ? <Banner tone="fail" title="This list could not be read" body={failed} /> : null}
         </View>
 
         <FlatList
@@ -103,10 +139,12 @@ export default function SiteDefectsScreen() {
           keyExtractor={(d) => d.id}
           contentContainerStyle={{ padding: t.space(4), paddingTop: 0, gap: t.space(3), paddingBottom: t.space(20) }}
           ListEmptyComponent={
-            <EmptyState
-              title={status === 'open' ? 'Nothing outstanding here' : 'No defects recorded'}
-              body="Defects raised on this site appear here until they are cleared."
-            />
+            failed ? null : (
+              <EmptyState
+                title={status === 'open' ? 'Nothing outstanding here' : 'No defects recorded'}
+                body="Defects raised on this site appear here until they are cleared."
+              />
+            )
           }
           renderItem={({ item }) => (
             <Card>

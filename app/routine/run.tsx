@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, View } from 'react-native';
+import { FlatList, Pressable, View } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -20,6 +20,9 @@ import { useTheme } from '@/theme';
 import {
   Banner, Button, Card, Chip, EmptyState, Field, H2, Label, Rowed, Screen, Txt,
 } from '@/components/ui';
+import { ContextGate } from '@/components/ContextGate';
+import { contextId } from '@/domain/screenContext';
+import { showAlert } from '@/components/alert';
 
 /**
  * Running a service routine against a site's assets.
@@ -70,6 +73,9 @@ function searchText(a: AssetRecord): string {
 export default function RunRoutineScreen() {
   const t = useTheme();
   const params = useLocalSearchParams<{ siteId?: string; routineId?: string }>();
+  // `contextId` rather than the raw parameter: several screens push
+  // `siteId: siteId ?? ''`, so "no site" arrives here as an empty string.
+  const siteId = contextId(params.siteId);
   const [site, setSite] = useState<Site | null>(null);
   const [routine, setRoutine] = useState<ServiceRoutine | null>(
     params.routineId ? (routineById(params.routineId) ?? null) : null,
@@ -80,18 +86,18 @@ export default function RunRoutineScreen() {
   const [saving, setSaving] = useState(false);
 
   const draft = useDraft<Record<string, Answer>>(
-    `routine:${params.siteId ?? 'x'}:${routine?.id ?? 'x'}`,
+    `routine:${siteId ?? 'x'}:${routine?.id ?? 'x'}`,
     {},
   );
 
   useEffect(() => {
-    if (params.siteId) void getSite(params.siteId).then(setSite);
-  }, [params.siteId]);
+    if (siteId) void getSite(siteId).then(setSite);
+  }, [siteId]);
 
   const load = useCallback(async () => {
-    if (!routine || !params.siteId) return;
-    setAssets(await queryAssets({ siteId: params.siteId, system: routine.system, limit: 2000 }));
-  }, [routine, params.siteId]);
+    if (!routine || !siteId) return;
+    setAssets(await queryAssets({ siteId, system: routine.system, limit: 2000 }));
+  }, [routine, siteId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -269,7 +275,7 @@ export default function RunRoutineScreen() {
       });
 
       await draft.discard();
-      Alert.alert(
+      showAlert(
         'Routine recorded',
         [
           `${recorded} asset result${recorded === 1 ? '' : 's'} written to history.`,
@@ -282,7 +288,7 @@ export default function RunRoutineScreen() {
       );
       router.back();
     } catch (e) {
-      Alert.alert('Could not record', e instanceof Error ? e.message : String(e));
+      showAlert('Could not record', e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
@@ -300,7 +306,7 @@ export default function RunRoutineScreen() {
   const finish = () => {
     if (!routine || !site || nothingAnswered) return;
     if (blank > 0) {
-      Alert.alert(
+      showAlert(
         `${blank} check${blank === 1 ? ' has' : 's have'} no answer`,
         `${blank === 1 ? 'It' : 'They'} will be recorded as a coverage gap, not as a pass. Record the routine anyway?`,
         [
@@ -312,6 +318,14 @@ export default function RunRoutineScreen() {
     }
     void record();
   };
+
+  /*
+   * A routine is recorded against a site, and `record()` returned silently when
+   * there was not one — so opened from search rather than from a site, this
+   * screen let a whole annual be answered and then did nothing at all when
+   * "Record this routine" was pressed. Nothing was saved and nothing was said.
+   */
+  if (!siteId) return <ContextGate kind="site" what="a service routine run against its assets" title="Run a routine" />;
 
   if (!routine) {
     return (

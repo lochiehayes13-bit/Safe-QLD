@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { Alert, Linking, Pressable, StyleSheet, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { loadPrefs } from '@/app-prefs';
@@ -21,6 +21,8 @@ import { useTheme } from '@/theme';
 import { animateNextLayout } from '@/components/motion';
 import { Button, Card, Chip, H2, Label, Rowed, Screen, StatusPill, Txt } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
+import { showAlert } from '@/components/alert';
 
 /**
  * One of the office's quotes, as the office holds it.
@@ -44,6 +46,8 @@ export default function SimproQuoteScreen() {
   const [full, setFull] = useState<QuoteFull | null>(null);
   // Loaded-and-absent is not the same as still loading. See RecordGate.
   const [missing, setMissing] = useState(false);
+  // And a read that threw is neither. See RecordGate.
+  const [failed, setFailed] = useState<string | null>(null);
   const [jobHeld, setJobHeld] = useState(false);
   const [refresh, setRefresh] = useState<Refresh>({ state: 'idle' });
   const [opening, setOpening] = useState<string | null>(null);
@@ -51,11 +55,16 @@ export default function SimproQuoteScreen() {
 
   const load = useCallback(async () => {
     if (!id) return;
-    const f = await getQuoteFull(id);
-    setFull(f);
-    setMissing(!f);
-    if (f?.quote.jobExternalId) setJobHeld(!!(await getJob(localJobId(f.quote.jobExternalId))));
-    return f;
+    setFailed(null);
+    try {
+      const f = await getQuoteFull(id);
+      setFull(f);
+      setMissing(!f);
+      if (f?.quote.jobExternalId) setJobHeld(!!(await getJob(localJobId(f.quote.jobExternalId))));
+      return f;
+    } catch (e) {
+      setFailed(describeLoadFailure(e, 'this quote'));
+    }
   }, [id]);
 
   const refreshFromOffice = useCallback(async (externalId: string) => {
@@ -90,7 +99,7 @@ export default function SimproQuoteScreen() {
     return () => { cancelled = true; };
   }, [load, refreshFromOffice]));
 
-  if (!full) return <RecordGate missing={missing} what="quote" />;
+  if (!full) return <RecordGate missing={missing} what="quote" failed={failed} onRetry={() => { void load(); }} />;
 
   const { quote: q } = full;
   const state = quoteState(q);
@@ -108,8 +117,12 @@ export default function SimproQuoteScreen() {
     try {
       const outcome = await openAttachment({ kind: 'quote', externalId: q.externalId }, a);
       const words = describeOpenOutcome(outcome);
-      if (words) Alert.alert(words.title, words.body);
+      if (words) showAlert(words.title, words.body);
       else await load();
+    } catch (e) {
+      // The spinner on the row stops either way; without this the tap simply
+      // stopped meaning anything, which reads as the attachment being broken.
+      showAlert('Could not open that attachment', describeActionFailure(e, 'open this attachment'));
     } finally {
       setOpening(null);
     }

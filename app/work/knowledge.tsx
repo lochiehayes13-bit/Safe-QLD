@@ -6,6 +6,7 @@ import { createKnowledge, listKnowledge, setKnowledgeStatus, type KnowledgeNote 
 import { loadPrefs } from '@/app-prefs';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Chip, EmptyState, Field, Rowed, Screen, Txt } from '@/components/ui';
+import { describeLoadFailure } from '@/domain/loadFailure';
 
 /**
  * Company knowledge.
@@ -29,7 +30,17 @@ export default function KnowledgeScreen() {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
 
-  const load = useCallback(async () => setNotes(await listKnowledge({ search })), [search]);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setFailed(null);
+    try {
+      setNotes(await listKnowledge({ search }));
+    } catch (e) {
+      setNotes([]);
+      setFailed(describeLoadFailure(e, 'the notes on this device'));
+    }
+  }, [search]);
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const add = async () => {
@@ -88,10 +99,12 @@ export default function KnowledgeScreen() {
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ padding: t.space(4), paddingTop: 0, gap: t.space(3), paddingBottom: t.space(20) }}
           ListEmptyComponent={
+            failed ? <Banner tone="fail" title="The notes could not be read" body={failed} /> : (
             <EmptyState
               title={search ? 'Nothing matched' : 'No notes yet'}
               body="Panel quirks, difficult sites, access tricks, common faults — the things that normally live in one person's head."
             />
+            )
           }
           renderItem={({ item }) => (
             <Card>

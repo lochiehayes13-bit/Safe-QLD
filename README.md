@@ -193,6 +193,24 @@ do not — a typo means a failed check silently raises nothing. Those references
 are tested, along with the rule that a check may only target an asset type in
 its own routine's system, since that is how the runner finds them.
 
+One test is off by default, because it is a measurement rather than an
+assertion and a slow machine must not fail somebody's build. It builds a
+database at the volumes the owner's phone actually holds — 4,562 jobs, 3,059
+sites, 12,568 assets, 2,482 customers, 970 quotes, 2,232 invoices and some
+thirty-one thousand routine schedule rows, all invented values — and times
+every read each screen makes when it opens:
+
+```bash
+SAFEQLD_SCALE=1 npx jest scale --silent=false
+```
+
+That is the test that found the screens the owner meant when he said the
+modules were broken. The job list was reading all four and a half thousand
+rows on every focus and filtering them in JavaScript; so, in their own way,
+were the sites tab, the quote list, the defect list, the Work hub's badges,
+the home screen's schedule strip and the timesheet's job picker. The numbers
+it prints are a development machine's; a handset is several times slower.
+
 The parsers are verified against real vendor site files. Those are live
 customer data and are never committed, so the tests that read them skip when
 the files are absent — every parser therefore also has fixtures built inside

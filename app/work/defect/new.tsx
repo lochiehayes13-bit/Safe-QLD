@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -24,6 +24,7 @@ import type { Site } from '@/domain/types';
 import { useDraft } from '@/hooks/useDraft';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
+import { showAlert } from '@/components/alert';
 
 /**
  * Defect capture.
@@ -130,7 +131,7 @@ export default function NewDefectScreen() {
       ? await ImagePicker.requestCameraPermissionsAsync()
       : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('Permission needed', 'Safe QLD needs access to attach a photo to this defect.');
+      showAlert('Permission needed', 'Safe QLD needs access to attach a photo to this defect.');
       return;
     }
     const result = fromCamera
@@ -159,7 +160,7 @@ export default function NewDefectScreen() {
       });
       setPhotos((prev) => [...prev, kept.path]);
     } catch (e) {
-      Alert.alert(
+      showAlert(
         'Could not keep that photo',
         `The photo was taken but could not be saved to this device, so it has not been attached. ${
           e instanceof Error ? e.message : String(e)
@@ -171,11 +172,11 @@ export default function NewDefectScreen() {
   const save = async () => {
     if (!selected) return;
     if (!siteId) {
-      Alert.alert('Which site?', 'Pick the site this defect belongs to.');
+      showAlert('Which site?', 'Pick the site this defect belongs to.');
       return;
     }
     if (selected.photoRequired && !photos.length) {
-      Alert.alert('Photo required', 'This defect type needs a photo as evidence. Add one before saving.');
+      showAlert('Photo required', 'This defect type needs a photo as evidence. Add one before saving.');
       return;
     }
 
@@ -239,11 +240,11 @@ export default function NewDefectScreen() {
             plan.missing ? `${plural(plan.missing)} could not be found on this device and stay with the defect only.` : undefined,
           ].filter(Boolean);
           await new Promise<void>((resolve) => {
-            Alert.alert(queued ? 'Photos queued for the office' : 'Nothing new to send', lines.join('\n'), [{ text: 'OK', onPress: () => resolve() }]);
+            showAlert(queued ? 'Photos queued for the office' : 'Nothing new to send', lines.join('\n'), [{ text: 'OK', onPress: () => resolve() }]);
           });
         } catch (e) {
           await new Promise<void>((resolve) => {
-            Alert.alert(
+            showAlert(
               'Defect saved, photos not queued',
               `The defect is on the phone. Its photos could not be queued for job #${jobId}: ${e instanceof Error ? e.message : String(e)}`,
               [{ text: 'OK', onPress: () => resolve() }],
@@ -254,7 +255,7 @@ export default function NewDefectScreen() {
 
       router.back();
     } catch (e) {
-      Alert.alert('Could not save', e instanceof Error ? e.message : String(e));
+      showAlert('Could not save', e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }

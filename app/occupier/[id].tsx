@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { qldIsoDay } from '@/domain/qldTime';
 import { formatAuDate } from '@/export/sheets';
-import { Alert, Pressable, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
@@ -22,6 +22,7 @@ import {
 } from '@/domain/statementEvidence';
 import { occupierStatementHtml } from '@/export/occupierStatement';
 import { shareFile, writePdf } from '@/export/files';
+import { notSharedNotice } from '@/export/shareOutcome';
 import { loadPrefs } from '@/app-prefs';
 import { nowIso } from '@/db';
 import { useTheme } from '@/theme';
@@ -30,6 +31,8 @@ import {
   Banner, Button, Card, Chip, Divider, Field, H2, Rowed, Screen, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { describeLoadFailure } from '@/domain/loadFailure';
+import { showAlert } from '@/components/alert';
 
 /**
  * The annual occupier statement.
@@ -50,6 +53,8 @@ export default function OccupierStatementScreen() {
   const [rec, setRec] = useState<OccupierStatement | null>(null);
   // Loaded-and-absent is not the same as still loading. See RecordGate.
   const [missing, setMissing] = useState(false);
+  // And a read that threw is neither. See RecordGate.
+  const [failed, setFailed] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [prefilled, setPrefilled] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -61,10 +66,14 @@ export default function OccupierStatementScreen() {
   const sentBad = sentDraft !== null && sentDraft.trim() !== '' && !qldIsoDay(sentDraft);
 
   const load = useCallback(async () => {
-    if (id) {
+    if (!id) return;
+    setFailed(null);
+    try {
       const found = await getOccupierStatement(id);
       setRec(found);
       setMissing(!found);
+    } catch (e) {
+      setFailed(describeLoadFailure(e, 'this occupier statement'));
     }
   }, [id]);
 
@@ -201,7 +210,7 @@ export default function OccupierStatementScreen() {
           : ''),
       );
     } catch (e) {
-      Alert.alert('Could not prefill', e instanceof Error ? e.message : String(e));
+      showAlert('Could not prefill', e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
@@ -228,9 +237,13 @@ export default function OccupierStatementScreen() {
       });
       const name = `occupier-statement-${(rec.premisesName || 'premises').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`;
       const file = await writePdf(name, html);
-      await shareFile(file, 'Occupier statement');
+      const shared = await shareFile(file, 'Occupier statement');
+      if (!shared) {
+        const notice = notSharedNotice(file.name, 'statement');
+        showAlert(notice.title, notice.body);
+      }
     } catch (e) {
-      Alert.alert('Could not produce the statement', e instanceof Error ? e.message : String(e));
+      showAlert('Could not produce the statement', e instanceof Error ? e.message : String(e));
     } finally {
       setExporting(false);
     }
@@ -316,7 +329,7 @@ export default function OccupierStatementScreen() {
     return count.days ?? null;
   }, [deadline.due]);
 
-  if (!rec) return <RecordGate missing={missing} what="occupier statement" />;
+  if (!rec) return <RecordGate missing={missing} what="occupier statement" failed={failed} onRetry={() => { void load(); }} />;
 
   return (
     <>

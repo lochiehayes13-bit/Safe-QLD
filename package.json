@@ -67,6 +67,8 @@
     "@types/pako": "^2.0.4",
     "@types/react": "~19.2.2",
     "@types/semver": "^7.8.0",
+    "eslint": "^9.0.0",
+    "eslint-config-expo": "~57.0.2",
     "jest": "^30.5.0",
     "semver": "^7.8.5",
     "ts-jest": "^29.4.12",

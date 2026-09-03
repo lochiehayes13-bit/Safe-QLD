@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Alert, View } from 'react-native';
+import { View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
 import * as MailComposer from 'expo-mail-composer';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -10,6 +10,7 @@ import {
 import { TIMESHEET_INBOX } from '@/domain/timesheetEmail';
 import { useTheme } from '@/theme';
 import { Button, Card, Field, Screen, Segmented, Txt } from '@/components/ui';
+import { showAlert } from '@/components/alert';
 
 /**
  * A leave request.
@@ -47,27 +48,27 @@ export default function LeaveRequestScreen() {
   const send = async () => {
     if (!prefs) return;
     if (fromText.trim() && !fromDate) {
-      Alert.alert('Check the first day', 'Write it as day/month/year, like 7/9/2026.');
+      showAlert('Check the first day', 'Write it as day/month/year, like 7/9/2026.');
       return;
     }
     if (toText.trim() && !toDate) {
-      Alert.alert('Check the last day', 'Write it as day/month/year, like 11/9/2026.');
+      showAlert('Check the last day', 'Write it as day/month/year, like 11/9/2026.');
       return;
     }
     const r = request();
     const blocked = leaveNotReady(r);
     if (blocked) {
-      Alert.alert('Not ready to send', blocked);
+      showAlert('Not ready to send', blocked);
       return;
     }
     if (!prefs.supervisorEmail.trim()) {
-      Alert.alert('No supervisor address', 'Set where requests go in Settings first.');
+      showAlert('No supervisor address', 'Set where requests go in Settings first.');
       return;
     }
     setBusy(true);
     try {
       if (!(await MailComposer.isAvailableAsync())) {
-        Alert.alert('No mail app set up', 'This phone has no email account configured, so the request cannot be sent from here.');
+        showAlert('No mail app set up', 'This phone has no email account configured, so the request cannot be sent from here.');
         return;
       }
       const { status } = await MailComposer.composeAsync({
@@ -77,12 +78,12 @@ export default function LeaveRequestScreen() {
         body: leaveBody(r),
       });
       if (status === MailComposer.MailComposerStatus.SENT) {
-        Alert.alert('Sent', `Your request has gone to ${prefs.supervisorEmail}, with ${TIMESHEET_INBOX} copied in. It is a request until someone says yes.`, [{ text: 'OK', onPress: () => router.back() }]);
+        showAlert('Sent', `Your request has gone to ${prefs.supervisorEmail}, with ${TIMESHEET_INBOX} copied in. It is a request until someone says yes.`, [{ text: 'OK', onPress: () => router.back() }]);
       } else {
-        Alert.alert('Not sent', 'The email was not sent. Nothing has reached the office.');
+        showAlert('Not sent', 'The email was not sent. Nothing has reached the office.');
       }
     } catch (e) {
-      Alert.alert('Could not send', e instanceof Error ? e.message : String(e));
+      showAlert('Could not send', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }

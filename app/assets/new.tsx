@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { createAsset, nextAssetCode } from '@/db/assetRepo';
 import { listSites } from '@/db/repo';
@@ -13,6 +13,7 @@ import type { Site } from '@/domain/types';
 import { useDraft } from '@/hooks/useDraft';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Chip, Field, H2, Label, Rowed, Screen, Segmented, Txt } from '@/components/ui';
+import { showAlert } from '@/components/alert';
 
 /**
  * Adding an asset by hand.
@@ -72,11 +73,11 @@ export default function NewAssetScreen() {
 
   const save = async () => {
     if (!d.siteId) {
-      Alert.alert('Which site?', 'Pick the site this asset belongs to.');
+      showAlert('Which site?', 'Pick the site this asset belongs to.');
       return;
     }
     if (!d.assetTypeId) {
-      Alert.alert('What is it?', 'Choose the asset type so the right details are recorded.');
+      showAlert('What is it?', 'Choose the asset type so the right details are recorded.');
       return;
     }
     setSaving(true);
@@ -98,7 +99,7 @@ export default function NewAssetScreen() {
       await draft.discard();
       router.replace({ pathname: '/assets/[id]', params: { id: asset.id } });
     } catch (e) {
-      Alert.alert('Could not save', e instanceof Error ? e.message : String(e));
+      showAlert('Could not save', e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }

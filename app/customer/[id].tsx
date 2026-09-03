@@ -18,6 +18,7 @@ import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Chip, H2, Label, Rowed, Screen, SectionHeader, StatTile, StatusPill, Txt } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { describeLoadFailure } from '@/domain/loadFailure';
 
 /**
  * A customer, as the office holds them.
@@ -36,36 +37,45 @@ export default function CustomerScreen() {
   const [customer, setCustomer] = useState<CustomerRecord | null>(null);
   // Loaded-and-absent is not the same as still loading. See RecordGate.
   const [missing, setMissing] = useState(false);
+  // And a read that threw is neither. See RecordGate.
+  const [failed, setFailed] = useState<string | null>(null);
   const [stats, setStats] = useState<CustomerStats | null>(null);
   const [siteIds, setSiteIds] = useState<Map<string, string>>(new Map());
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [quotes, setQuotes] = useState<QuoteRecord[]>([]);
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
 
+  const [reloads, setReloads] = useState(0);
+
   useFocusEffect(useCallback(() => {
     let cancelled = false;
     void (async () => {
       if (!id) return;
-      const c = await getCustomer(id);
-      if (cancelled) return;
-      setCustomer(c);
-      setMissing(!c);
-      if (!c) return;
-      const [s, sites, j, q, inv] = await Promise.all([
-        customerStats(id),
-        listSites(),
-        listJobsFor({ customerExternalId: id, limit: 6 }),
-        listQuotes({ customerExternalId: id, limit: 6 }),
-        listInvoices({ customerExternalId: id, limit: 6 }),
-      ]);
-      if (cancelled) return;
-      setStats(s);
-      // The office's site number to the phone's site id, for the sites list.
-      setSiteIds(new Map(sites.filter((x) => x.externalId).map((x) => [x.externalId!, x.id])));
-      setJobs(j); setQuotes(q); setInvoices(inv);
+      setFailed(null);
+      try {
+        const c = await getCustomer(id);
+        if (cancelled) return;
+        setCustomer(c);
+        setMissing(!c);
+        if (!c) return;
+        const [s, sites, j, q, inv] = await Promise.all([
+          customerStats(id),
+          listSites(),
+          listJobsFor({ customerExternalId: id, limit: 6 }),
+          listQuotes({ customerExternalId: id, limit: 6 }),
+          listInvoices({ customerExternalId: id, limit: 6 }),
+        ]);
+        if (cancelled) return;
+        setStats(s);
+        // The office's site number to the phone's site id, for the sites list.
+        setSiteIds(new Map(sites.filter((x) => x.externalId).map((x) => [x.externalId!, x.id])));
+        setJobs(j); setQuotes(q); setInvoices(inv);
+      } catch (e) {
+        if (!cancelled) setFailed(describeLoadFailure(e, 'this customer'));
+      }
     })();
     return () => { cancelled = true; };
-  }, [id]));
+  }, [id, reloads]));
 
   if (!customer) {
     return (
@@ -73,6 +83,8 @@ export default function CustomerScreen() {
         missing={missing}
         what="customer"
         why="Customers come down with a sync once Simpro is connected. This one is not on the phone yet, or the office has removed it."
+        failed={failed}
+        onRetry={() => setReloads((n) => n + 1)}
       />
     );
   }

@@ -12,6 +12,7 @@ import { getDb } from '@/db';
 import { seedReferenceData } from '@/db/assetRepo';
 import { startCatalogueSeed } from '@/seed/catalogueSeed';
 import { setFontsReady, useTheme } from '@/theme';
+import { STARTUP_PATIENCE_MS, startupStalled } from '@/domain/startup';
 import { Banner, Txt } from '@/components/ui';
 
 // Held until the faces and the database are ready, so the first frame is the
@@ -29,6 +30,16 @@ export default function RootLayout() {
   const t = useTheme();
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /*
+   * How long the open has been going, once it has gone on too long.
+   *
+   * A rejection is handled below; a promise that never settles was not. On the
+   * browser build — the one that reaches an iPhone — a page refused its own
+   * storage gets exactly that from `getDb()`, and the app sat on a bare spinner
+   * with no text on the page at all. See `src/domain/startup.ts` for why this
+   * keeps waiting rather than giving up or retrying.
+   */
+  const [waitedMs, setWaitedMs] = useState(0);
   const [fontsLoaded, fontError] = useFonts({
     Manrope_500Medium, Manrope_600SemiBold, Manrope_700Bold, Manrope_800ExtraBold,
   });
@@ -42,6 +53,13 @@ export default function RootLayout() {
   useEffect(() => {
     if ((ready || error) && fontsSettled) void SplashScreen.hideAsync().catch(() => {});
   }, [ready, error, fontsSettled]);
+
+  useEffect(() => {
+    if (ready || error) return undefined;
+    const started = Date.now();
+    const h = setInterval(() => setWaitedMs(Date.now() - started), 1000);
+    return () => clearInterval(h);
+  }, [ready, error]);
 
   useEffect(() => {
     let cancelled = false;
@@ -77,10 +95,12 @@ export default function RootLayout() {
   }
 
   if (!ready || !fontsSettled) {
+    const stalled = waitedMs >= STARTUP_PATIENCE_MS ? startupStalled(waitedMs / 1000) : null;
     return (
       <SafeAreaProvider>
-        <View style={{ flex: 1, backgroundColor: t.color.bg, alignItems: 'center', justifyContent: 'center' }}>
+        <View style={{ flex: 1, backgroundColor: t.color.bg, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 16 }}>
           <ActivityIndicator color={t.color.accent} size="large" />
+          {stalled ? <Banner tone="warn" title={stalled.title} body={stalled.body} /> : null}
         </View>
       </SafeAreaProvider>
     );

@@ -1,9 +1,9 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { getCustomer, listQuotes, type QuoteRecord } from '@/db/mirrorRepo';
+import { getCustomer, listQuotePage, type QuotePage, type QuoteSummary } from '@/db/mirrorRepo';
 import { getSite } from '@/db/repo';
-import { applyQuoteFilter, quoteState, statusSwatch, sumExTax, type QuoteListFilter } from '@/domain/jobPresentation';
+import { quoteState, statusSwatch, type QuoteListFilter } from '@/domain/jobPresentation';
 import { formatCents } from '@/domain/rates';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
@@ -20,41 +20,62 @@ import { Card, EmptyState, Rowed, Screen, SearchBox, Segmented, StatTile, Txt } 
  *
  * Totals shown are sell totals. The mirror holds no cost, so nothing here
  * could show a margin.
+ *
+ * The tab, the search and the cap are the database's, the way the job list's
+ * are: this screen used to read every quote the mirror holds — description,
+ * notes and all — on every focus and pick through them in JavaScript. The
+ * value tile still totals the whole tab rather than the rows on screen,
+ * because a figure over a list has to mean the list.
  */
+
+/** How many quote rows the list draws at once. See the note on the job list's page. */
+const PAGE = 300;
+
 export default function SimproQuotesScreen() {
   const t = useTheme();
   const params = useLocalSearchParams<{ siteId?: string; customerId?: string }>();
-  const [quotes, setQuotes] = useState<QuoteRecord[] | null>(null);
+  const [page, setPage] = useState<QuotePage | null>(null);
+  const [held, setHeld] = useState<number | null>(null);
   const [filter, setFilter] = useState<QuoteListFilter>('open');
   const [query, setQuery] = useState('');
+  const [typed, setTyped] = useState('');
   const [scope, setScope] = useState<string | undefined>(undefined);
 
+  // The search is a query now, so it waits for the typing to stop.
+  useEffect(() => {
+    const h = setTimeout(() => setQuery(typed), 200);
+    return () => clearTimeout(h);
+  }, [typed]);
+
   const load = useCallback(async () => {
+    const scoped = { siteId: params.siteId, customerExternalId: params.customerId };
+    const [rows, all] = await Promise.all([
+      listQuotePage({ filter, query, limit: PAGE, ...scoped }),
+      // How many quotes this phone holds in this scope at all, so "no quotes
+      // yet" is told from "none under this tab".
+      listQuotePage({ filter: 'all', limit: 0, ...scoped }),
+    ]);
+    setPage(rows);
+    setHeld(all.matching);
     if (params.siteId) {
-      const [rows, site] = await Promise.all([listQuotes({ siteId: params.siteId, limit: 2000 }), getSite(params.siteId)]);
-      setQuotes(rows);
+      const site = await getSite(params.siteId);
       setScope(site ? `at ${site.name}` : 'at this site');
     } else if (params.customerId) {
-      const [rows, customer] = await Promise.all([
-        listQuotes({ customerExternalId: params.customerId, limit: 2000 }),
-        getCustomer(params.customerId),
-      ]);
-      setQuotes(rows);
+      const customer = await getCustomer(params.customerId);
       setScope(customer ? `for ${customer.name}` : 'for this customer');
     } else {
-      setQuotes(await listQuotes({ limit: 5000 }));
       setScope(undefined);
     }
-  }, [params.siteId, params.customerId]);
+  }, [params.siteId, params.customerId, filter, query]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
-  const shown = useMemo(() => applyQuoteFilter(quotes ?? [], filter, query), [quotes, filter, query]);
-  const value = sumExTax(shown);
+  const shown = page?.rows ?? [];
+  const value = page?.valueExTaxCents ?? 0;
 
   const empty = (() => {
-    if (quotes === null) return null;
-    if (!quotes.length) {
+    if (page === null || held === null) return null;
+    if (!held) {
       return {
         title: scope ? `No Simpro quotes ${scope}` : 'No Simpro quotes on this phone yet',
         body: 'Quotes come down with a sync once Simpro is connected in Settings. Quotes raised on this phone are under Ours.',
@@ -76,7 +97,7 @@ export default function SimproQuotesScreen() {
               options={[{ value: 'ours', label: 'Ours on this phone' }, { value: 'simpro', label: 'Simpro' }]}
             />
           ) : null}
-          <SearchBox value={query} onChange={setQuery} placeholder="Quote number, site, customer or job" />
+          <SearchBox value={typed} onChange={setTyped} placeholder="Quote number, site, customer or job" />
           <Segmented
             value={filter}
             onChange={setFilter}
@@ -88,11 +109,16 @@ export default function SimproQuotesScreen() {
               { value: 'all', label: 'All' },
             ]}
           />
-          {quotes ? (
-            <Rowed gap={2}>
-              <StatTile label="Shown" value={shown.length} />
-              <StatTile label="Value ex GST" value={formatCents(value)} tone={value ? 'default' : 'muted'} />
-            </Rowed>
+          {page ? (
+            <>
+              <Rowed gap={2}>
+                <StatTile label="Shown" value={page.matching.toLocaleString()} />
+                <StatTile label="Value ex GST" value={formatCents(value)} tone={value ? 'default' : 'muted'} />
+              </Rowed>
+              {/* Said out loud where the list is cut. The search still reaches
+                  every quote: it runs in the database, not over the rows. */}
+              {page.capped ? <Txt size="xs" tone="faint">First {PAGE} shown, search to narrow</Txt> : null}
+            </>
           ) : null}
         </View>
         <FlatList
@@ -117,7 +143,7 @@ const FILTER_WORD: Record<QuoteListFilter, string> = {
   open: 'open', approved: 'approved', converted: 'converted', closed: 'closed', all: '',
 };
 
-function QuoteRow({ quote: q }: { quote: QuoteRecord }) {
+function QuoteRow({ quote: q }: { quote: QuoteSummary }) {
   const t = useTheme();
   const state = quoteState(q);
   const swatch = statusSwatch(q.statusColor, t.color.surface);

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
@@ -7,9 +7,11 @@ import {
   type CombinedFlowInput, type FlowTestEquipment,
 } from '@/export/combinedFlowCertificate';
 import { shareFile, writePdf } from '@/export/files';
+import { notSharedNotice } from '@/export/shareOutcome';
 import { formatAuDate } from '@/export/sheets';
 import { loadPrefs } from '@/app-prefs';
 import { useTheme } from '@/theme';
+import { showAlert } from '@/components/alert';
 import {
   Banner, Button, Card, Chip, Divider, Field, H2, Label, ResultBlock, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
@@ -91,9 +93,13 @@ export default function FlowCertificateScreen() {
         `Flow test certificate ${input.buildingName || 'untitled'}`,
         html,
       );
-      await shareFile(file, 'Flow test certificate');
+      const shared = await shareFile(file, 'Flow test certificate');
+      if (!shared) {
+        const notice = notSharedNotice(file.name, 'certificate');
+        showAlert(notice.title, notice.body);
+      }
     } catch (e) {
-      Alert.alert('Could not produce the certificate', e instanceof Error ? e.message : String(e));
+      showAlert('Could not produce the certificate', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -471,7 +477,7 @@ function RemoveButton({ what, onRemove }: { what: string; onRemove: () => void }
   const t = useTheme();
   return (
     <Pressable
-      onPress={() => Alert.alert(`Remove this ${what}?`, 'It cannot be put back.', [
+      onPress={() => showAlert(`Remove this ${what}?`, 'It cannot be put back.', [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Remove', style: 'destructive', onPress: onRemove },
       ])}

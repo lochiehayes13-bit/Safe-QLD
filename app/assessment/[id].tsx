@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Image, Pressable, View } from 'react-native';
+import { Image, Pressable, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -19,6 +19,7 @@ import {
 } from '@/domain/photoStore';
 import { shrinkForStorage } from '@/export/photoResize';
 import { shareFile, writePdf } from '@/export/files';
+import { notSharedNotice } from '@/export/shareOutcome';
 import { loadPrefs } from '@/app-prefs';
 import { newId } from '@/db';
 import type { Site } from '@/domain/types';
@@ -27,6 +28,8 @@ import {
   Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Segmented, StatTile, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { describeLoadFailure } from '@/domain/loadFailure';
+import { showAlert } from '@/components/alert';
 
 /**
  * A fire system effectiveness assessment.
@@ -48,6 +51,8 @@ export default function AssessmentScreen() {
   const [assessment, setAssessment] = useState<Assessment | null>(null);
   // Loaded-and-absent is not the same as still loading. See RecordGate.
   const [missing, setMissing] = useState(false);
+  // And a read that threw is neither. See RecordGate.
+  const [failed, setFailed] = useState<string | null>(null);
   const [site, setSite] = useState<Site | null>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
   const [defects, setDefects] = useState({ open: 0, critical: 0 });
@@ -56,15 +61,20 @@ export default function AssessmentScreen() {
 
   const load = useCallback(async () => {
     if (!id) return;
-    const a = await getAssessment(id);
-    setAssessment(a);
-    setMissing(!a);
-    if (!a) return;
-    const [s, f, d] = await Promise.all([getSite(a.siteId), listFindings(id), listDefects(a.siteId)]);
-    setSite(s);
-    setFindings(f);
-    const open = d.filter((x) => x.status === 'open');
-    setDefects({ open: open.length, critical: open.filter((x) => x.severity === 'critical').length });
+    setFailed(null);
+    try {
+      const a = await getAssessment(id);
+      setAssessment(a);
+      setMissing(!a);
+      if (!a) return;
+      const [s, f, d] = await Promise.all([getSite(a.siteId), listFindings(id), listDefects(a.siteId)]);
+      setSite(s);
+      setFindings(f);
+      const open = d.filter((x) => x.status === 'open');
+      setDefects({ open: open.length, critical: open.filter((x) => x.severity === 'critical').length });
+    } catch (e) {
+      setFailed(describeLoadFailure(e, 'this assessment'));
+    }
   }, [id]);
 
   useEffect(() => { void load(); }, [load]);
@@ -92,7 +102,7 @@ export default function AssessmentScreen() {
   };
 
   const remove = (finding: Finding) => {
-    Alert.alert(
+    showAlert(
       `Remove ${findingRef(finding.kind, finding.seq)}?`,
       'The findings after it renumber, so the register has no gap in it.',
       [
@@ -173,9 +183,13 @@ export default function AssessmentScreen() {
         `${assessment.reportReference || 'effectiveness-report'}-${site.name}`,
         html,
       );
-      await shareFile(file, 'Fire system effectiveness report');
+      const shared = await shareFile(file, 'Fire system effectiveness report');
+      if (!shared) {
+        const notice = notSharedNotice(file.name, 'report');
+        showAlert(notice.title, notice.body);
+      }
     } catch (e) {
-      Alert.alert('Could not produce the report', e instanceof Error ? e.message : String(e));
+      showAlert('Could not produce the report', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -193,7 +207,7 @@ export default function AssessmentScreen() {
   const issue = () => {
     if (!assessment || !site) return;
     if (issues.length) {
-      Alert.alert(
+      showAlert(
         `${issues.length} thing${issues.length === 1 ? '' : 's'} to fix before issuing`,
         `${issues.map((i) => i.message).join('\n')}\n\nProducing it anyway renumbers the findings as they stand.`,
         [
@@ -206,7 +220,7 @@ export default function AssessmentScreen() {
     void produce();
   };
 
-  if (!assessment) return <RecordGate missing={missing} what="assessment" />;
+  if (!assessment) return <RecordGate missing={missing} what="assessment" failed={failed} onRetry={() => { void load(); }} />;
 
   return (
     <>
@@ -429,7 +443,7 @@ function FindingCard({
       ? await ImagePicker.requestCameraPermissionsAsync()
       : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('Permission needed', 'Safe QLD needs access to add a photograph to this finding.');
+      showAlert('Permission needed', 'Safe QLD needs access to add a photograph to this finding.');
       return;
     }
     const result = fromCamera
@@ -452,7 +466,7 @@ function FindingCard({
       });
       onChange({ photos: [...finding.photos, kept.path] });
     } catch (e) {
-      Alert.alert(
+      showAlert(
         'Could not keep that photograph',
         `It was taken but could not be saved to this device, so it has not been attached. ${
           e instanceof Error ? e.message : String(e)
@@ -566,7 +580,7 @@ function FindingCard({
               {finding.photos.map((path) => (
                 <Pressable
                   key={path}
-                  onPress={() => Alert.alert('Remove this photograph?', 'It stays on the device; it just leaves the register.', [
+                  onPress={() => showAlert('Remove this photograph?', 'It stays on the device; it just leaves the register.', [
                     { text: 'Cancel', style: 'cancel' },
                     {
                       text: 'Remove',

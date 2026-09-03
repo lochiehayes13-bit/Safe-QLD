@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Alert, Pressable, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Pressable, View } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
@@ -11,6 +11,8 @@ import { qldMoment } from '@/domain/qldTime';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { describeLoadFailure } from '@/domain/loadFailure';
+import { showAlert } from '@/components/alert';
 
 /**
  * Live impairment.
@@ -25,16 +27,23 @@ export default function ImpairmentScreen() {
   const [rec, setRec] = useState<ImpairmentRecord | null>(null);
   // Loaded-and-absent is not the same as still loading. See RecordGate.
   const [missing, setMissing] = useState(false);
+  // And a read that threw is neither. See RecordGate.
+  const [failed, setFailed] = useState<string | null>(null);
   const [, tick] = useState(0);
 
-  useEffect(() => {
-    if (id) {
-      void getImpairment(id).then((found) => {
-        setRec(found);
-        setMissing(!found);
-      });
+  const load = useCallback(async () => {
+    if (!id) return;
+    setFailed(null);
+    try {
+      const found = await getImpairment(id);
+      setRec(found);
+      setMissing(!found);
+    } catch (e) {
+      setFailed(describeLoadFailure(e, 'this impairment'));
     }
   }, [id]);
+
+  useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
     if (rec?.restoredAt) return;
@@ -51,7 +60,7 @@ export default function ImpairmentScreen() {
     });
   };
 
-  if (!rec) return <RecordGate missing={missing} what="impairment record" />;
+  if (!rec) return <RecordGate missing={missing} what="impairment record" failed={failed} onRetry={() => { void load(); }} />;
 
   const ms = impairmentElapsedMs(rec);
   const hours = Math.floor(ms / 3_600_000);
@@ -62,7 +71,7 @@ export default function ImpairmentScreen() {
 
   const close = () => {
     if (outstanding.length) {
-      Alert.alert(
+      showAlert(
         'Still outstanding',
         `${outstanding.join('\n')}\n\nClose anyway?`,
         [

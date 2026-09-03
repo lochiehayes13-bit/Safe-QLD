@@ -1,15 +1,15 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { loadPrefs } from '@/app-prefs';
 import { nowIso } from '@/db';
-import { listJobSummaries, type JobSummary } from '@/db/opsRepo';
-import { getCustomer, listJobsFor, scheduledJobExternalIds } from '@/db/mirrorRepo';
+import { listJobPage, type JobPage, type JobSummary } from '@/db/opsRepo';
+import { getCustomer, scheduledJobExternalIds } from '@/db/mirrorRepo';
 import { getSite } from '@/db/repo';
 import {
-  applyJobFilter, jobStatusWord, localStateWord, stageLabel, statusSwatch, type JobListFilter,
+  jobStatusWord, localStateWord, stageLabel, statusSwatch, type JobListFilter,
 } from '@/domain/jobPresentation';
-import { whoseSchedule, type WhoseSchedule } from '@/domain/myDay';
+import { whoseSchedule } from '@/domain/myDay';
 import { qldIsoDay } from '@/domain/qldTime';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
@@ -25,71 +25,91 @@ import { Card, Chip, EmptyState, Rowed, Screen, SearchBox, Segmented, Txt } from
  * takes a job number, a site or a customer as typed. Opened from a site or
  * a customer it shows only theirs.
  *
+ * The way in is a query. This screen used to read all four and a half
+ * thousand rows on every focus — every time a technician backed out of a job
+ * — and then filter and search them in JavaScript. That is instant on the
+ * twenty rows a test writes and a second of nothing happening on the phone
+ * this app is for, over and over, all day. The filter, the search and the cap
+ * are the database's now; what comes back is one screenful, and the two
+ * numbers over the list are counts rather than the length of what was read.
+ *
  * Each row carries the office's own status, coloured with the office's own
  * colour — the same dot the scheduler is looking at on their screen when
  * they ring.
  */
+
+/**
+ * How many rows the list draws at once.
+ *
+ * Enough that no ordinary filter is ever cut — the whole open book is some
+ * six hundred jobs and Mine is tens — and few enough that All, which is every
+ * job the company has ever raised, arrives as a screenful rather than as a
+ * wait. Where it does cut, the list says so and the search reaches past it,
+ * because the search runs in the database and not over the drawn rows.
+ */
+const PAGE = 300;
+
 export default function JobsScreen() {
   const t = useTheme();
   const params = useLocalSearchParams<{ siteId?: string; customerId?: string }>();
-  const [jobs, setJobs] = useState<JobSummary[] | null>(null);
+  const [page, setPage] = useState<JobPage | null>(null);
   const [filter, setFilter] = useState<JobListFilter>('open');
   const [query, setQuery] = useState('');
-  const [who, setWho] = useState<WhoseSchedule | null>(null);
-  const [scheduledToday, setScheduledToday] = useState<ReadonlySet<string>>(new Set());
+  const [typed, setTyped] = useState('');
+  const [whoLabel, setWhoLabel] = useState<string | null>(null);
+  const [scheduledToday, setScheduledToday] = useState(0);
   const [scope, setScope] = useState<string | undefined>(undefined);
 
   const today = qldIsoDay(nowIso()) ?? '';
 
+  // The search is a query now, so it waits for the typing to stop. Long
+  // enough that a job number is one read rather than five, short enough that
+  // it still feels like the list is following the thumb.
+  useEffect(() => {
+    const h = setTimeout(() => setQuery(typed), 200);
+    return () => clearTimeout(h);
+  }, [typed]);
+
   const load = useCallback(async () => {
     const prefs = await loadPrefs();
-    setWho(whoseSchedule(prefs));
-    // Today is the schedule's word, for everyone: a block on today's schedule
-    // is today's work whatever the job's own dates say.
-    setScheduledToday(new Set(await scheduledJobExternalIds({ from: today, to: today })));
+    const who = whoseSchedule(prefs);
+    setWhoLabel(who?.label ?? null);
+    setPage(await listJobPage({
+      filter, today, who, query, limit: PAGE,
+      siteId: params.siteId, customerExternalId: params.customerId,
+    }));
     if (params.siteId) {
-      const [rows, site] = await Promise.all([listJobsFor({ siteId: params.siteId, limit: 2000 }), getSite(params.siteId)]);
-      setJobs(rows);
+      const site = await getSite(params.siteId);
       setScope(site ? `at ${site.name}` : 'at this site');
     } else if (params.customerId) {
-      const [rows, customer] = await Promise.all([
-        listJobsFor({ customerExternalId: params.customerId, limit: 2000 }),
-        getCustomer(params.customerId),
-      ]);
-      setJobs(rows);
+      const customer = await getCustomer(params.customerId);
       setScope(customer ? `for ${customer.name}` : 'for this customer');
     } else {
-      // Every job, re-read on every focus, because a status set on site in
-      // the job screen has to show here when the technician backs out. The
-      // whole set is what keeps the search and the "N of M" line instant;
-      // read as the list-shaped projection, since the row and the filter
-      // never look at the description, the notes or the JSON columns.
-      setJobs(await listJobSummaries({ limit: 6000 }));
       setScope(undefined);
     }
-  }, [params.siteId, params.customerId, today]);
+    // Only to tell "the schedule has nothing for today" from "today's blocks
+    // are all at other sites", and only on the tab that says it.
+    if (filter === 'today') setScheduledToday((await scheduledJobExternalIds({ from: today, to: today })).length);
+  }, [params.siteId, params.customerId, today, filter, query]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
-  const shown = useMemo(
-    () => applyJobFilter(jobs ?? [], { filter, today, who, scheduledToday, query }),
-    [jobs, filter, today, who, scheduledToday, query],
-  );
+  const shown = page?.rows ?? [];
 
   const empty = (() => {
-    if (jobs === null) return null;
-    if (!jobs.length) {
+    if (page === null) return null;
+    if (!page.total) {
       return {
         title: scope ? `No jobs ${scope}` : 'No jobs on this phone yet',
         body: 'Jobs come from Simpro. Connect it in Settings and sync, and every job on the books is here — or add one by hand.',
       };
     }
     if (query.trim()) return { title: 'Nothing matches', body: 'Try the job number on its own, or part of the site or customer name.' };
-    if (filter === 'mine' && !who) {
+    if (filter === 'mine' && !whoLabel) {
       return { title: 'This phone does not know whose it is', body: 'Pick yourself in Who you are, or sign in with your Simpro login, and the jobs booked to you show up here.' };
     }
-    if (filter === 'mine') return { title: 'Nothing booked to you', body: `No open job lists ${who!.label} as a technician. Today's schedule is on My day.` };
-    if (filter === 'today') return { title: 'Nothing on today', body: scheduledToday.size ? 'The schedule has nothing for today that matches.' : 'The schedule has nothing for today, or has not synced yet.' };
+    if (filter === 'mine') return { title: 'Nothing booked to you', body: `No open job lists ${whoLabel} as a technician. Today's schedule is on My day.` };
+    if (filter === 'today') return { title: 'Nothing on today', body: scheduledToday ? 'The schedule has nothing for today that matches.' : 'The schedule has nothing for today, or has not synced yet.' };
     if (filter === 'open') return { title: 'Nothing open', body: 'Every job the phone holds is complete, invoiced or archived at the office, or has been completed on this phone.' };
     return { title: 'No jobs', body: '' };
   })();
@@ -99,7 +119,7 @@ export default function JobsScreen() {
       <Stack.Screen options={{ title: scope ? `Jobs ${scope}` : 'Jobs' }} />
       <Screen scroll={false} padded={false}>
         <View style={{ padding: t.space(4), paddingBottom: t.space(2), gap: t.space(2) }}>
-          <SearchBox value={query} onChange={setQuery} placeholder="Job number, site or customer" />
+          <SearchBox value={typed} onChange={setTyped} placeholder="Job number, site or customer" />
           <Segmented
             value={filter}
             onChange={setFilter}
@@ -110,9 +130,14 @@ export default function JobsScreen() {
               { value: 'all', label: 'All' },
             ]}
           />
-          {jobs ? (
+          {page ? (
             <Txt size="xs" tone="faint">
-              {shown.length.toLocaleString()} of {jobs.length.toLocaleString()} job{jobs.length === 1 ? '' : 's'}
+              {page.matching.toLocaleString()} of {page.total.toLocaleString()} job{page.total === 1 ? '' : 's'}
+              {/* Said out loud where the list is cut, because a number over a
+                  list that does not match the rows under it is worse than no
+                  number. The search still reaches every job: it runs in the
+                  database, not over the rows on screen. */}
+              {page.capped ? ` · first ${PAGE} shown, search to narrow` : ''}
             </Txt>
           ) : null}
         </View>

@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { Alert, View } from 'react-native';
+import { View } from 'react-native';
 import { Stack, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { listRoutineRuns, type RoutineRun } from '@/db/routineRunRepo';
@@ -24,6 +24,7 @@ import { markerFor } from '@/domain/queueKey';
 import type { Site } from '@/domain/types';
 import { formatBytes } from '@/share/pack';
 import { useTheme } from '@/theme';
+import { showAlert } from '@/components/alert';
 import {
   Banner, Button, Card, Chip, Divider, EmptyState, Field, H2, Label, Rowed, Screen, Txt,
 } from '@/components/ui';
@@ -151,7 +152,7 @@ export default function OutboundScreen() {
     try {
       const prefs = await loadPrefs();
       if (!prefs.simproProxyUrl && !(await SimproClient.hasSecret())) {
-        Alert.alert(
+        showAlert(
           'No Simpro credentials',
           'Set the client secret in Settings, or point the app at a proxy so the secret never sits '
           + 'on this handset at all.',
@@ -179,7 +180,7 @@ export default function OutboundScreen() {
       await load();
       await loadPlan(run);
     } catch (e) {
-      Alert.alert('Could not send', e instanceof Error ? e.message : String(e));
+      showAlert('Could not send', e instanceof Error ? e.message : String(e));
     } finally {
       setSending(false);
     }

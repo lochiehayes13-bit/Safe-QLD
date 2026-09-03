@@ -19,6 +19,7 @@ import { MIGRATION_V17 } from './schemaV17';
 import { MIGRATION_V18 } from './schemaMirror';
 import { MIGRATION_V19 } from './schemaForms';
 import { MIGRATION_V20 } from './schemaSite';
+import { MIGRATION_V21 } from './schemaScale';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -323,6 +324,10 @@ export const MIGRATIONS: string[] = [
   // v20 — the office's public notes and customer number on the site itself,
   // so a technician on the doorstep reads what the office wrote for them
   MIGRATION_V20,
+
+  // v21 — the indexes the lists actually search, now that the filters and the
+  // searches are queries rather than a read of the whole table
+  MIGRATION_V21,
 ];
 
 /**

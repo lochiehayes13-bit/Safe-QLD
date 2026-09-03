@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { getSite, listDefects } from '@/db/repo';
 import { createQuote, nextQuoteSeq, setQuoteStatus } from '@/db/quoteRepo';
@@ -14,6 +14,7 @@ import { effectiveRateCard, formatCents, parseCents, selectRate } from '@/domain
 import { quoteDocumentHtml } from '@/export/quoteDocument';
 import { formatAuDate } from '@/export/sheets';
 import { shareFile, writePdf } from '@/export/files';
+import { notSharedNotice } from '@/export/shareOutcome';
 import { DEFAULT_PREFS, loadPrefs, type Prefs } from '@/app-prefs';
 import type { Defect, Site } from '@/domain/types';
 import { useTheme } from '@/theme';
@@ -21,6 +22,10 @@ import {
   Banner, Button, Card, Chip, Divider, EmptyState, Field, H2, Label, Rowed, Screen, Segmented,
   StatTile, Txt,
 } from '@/components/ui';
+import { ContextGate } from '@/components/ContextGate';
+import { describeLoadFailure } from '@/domain/loadFailure';
+import { contextId } from '@/domain/screenContext';
+import { showAlert } from '@/components/alert';
 
 /**
  * Building the quote that wins the rectification work.
@@ -39,13 +44,16 @@ import {
  */
 export default function SiteQuoteScreen() {
   const t = useTheme();
-  const { siteId } = useLocalSearchParams<{ siteId?: string }>();
+  // `contextId` rather than the raw parameter: several screens push
+  // `siteId: siteId ?? ''`, so "no site" arrives here as an empty string.
+  const siteId = contextId(useLocalSearchParams<{ siteId?: string }>().siteId);
 
   const [site, setSite] = useState<Site | null>(null);
   const [defects, setDefects] = useState<Defect[]>([]);
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
   const [card, setCard] = useState<StoredRateCard>({ rates: [], fees: [] });
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState<string | null>(null);
 
   const [excluded, setExcluded] = useState<Record<string, true>>({});
   const [priceText, setPriceText] = useState<Record<string, string>>({});
@@ -72,7 +80,7 @@ export default function SiteQuoteScreen() {
   const [saved, setSaved] = useState<{ quote: Quote; signature: string } | null>(null);
 
   const load = useCallback(async () => {
-    if (!siteId) return;
+    if (!siteId) { setLoading(false); return; }
     setLoading(true);
     try {
       const [s, d, p, c] = await Promise.all([
@@ -82,6 +90,12 @@ export default function SiteQuoteScreen() {
       setDefects(d);
       setPrefs(p);
       setCard(c);
+    } catch (e) {
+      // Without this the screen priced a quote off an empty defect list and
+      // said the site had nothing outstanding, which is a document going to a
+      // client with work missing from it.
+      setDefects([]);
+      setFailed(describeLoadFailure(e, "this site's open defects"));
     } finally {
       setLoading(false);
     }
@@ -228,15 +242,15 @@ export default function SiteQuoteScreen() {
     if (!site) {
       // Silently doing nothing on a press reads as a broken button, and the
       // technician presses it again on the way out of the plant room.
-      Alert.alert('Site not loaded', 'This site could not be read, so there is nothing to quote against.');
+      showAlert('Site not loaded', 'This site could not be read, so there is nothing to quote against.');
       return;
     }
     if (!built.lines.length) {
-      Alert.alert('Nothing to quote', 'Tick at least one defect that carries priced work.');
+      showAlert('Nothing to quote', 'Tick at least one defect that carries priced work.');
       return;
     }
     if (issue && validityDays === undefined) {
-      Alert.alert('Validity', 'Set the validity to a whole number of days before issuing.');
+      showAlert('Validity', 'Set the validity to a whole number of days before issuing.');
       return;
     }
 
@@ -257,7 +271,7 @@ export default function SiteQuoteScreen() {
       if (issue) quote = await setQuoteStatus(quote.id, 'issued');
       setSaved({ quote, signature });
 
-      Alert.alert(
+      showAlert(
         issue ? 'Quote issued' : 'Draft saved',
         [
           quote.reference ? `Number ${quote.reference}.` : 'No number could be built — the office will assign one.',
@@ -268,7 +282,7 @@ export default function SiteQuoteScreen() {
         ].filter(Boolean).join('\n\n'),
       );
     } catch (e) {
-      Alert.alert('Could not save the quote', e instanceof Error ? e.message : String(e));
+      showAlert('Could not save the quote', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -276,7 +290,7 @@ export default function SiteQuoteScreen() {
 
   const makePdf = async () => {
     if (!site) {
-      Alert.alert('Site not loaded', 'This site could not be read, so there is nothing to quote against.');
+      showAlert('Site not loaded', 'This site could not be read, so there is nothing to quote against.');
       return;
     }
     setBusy(true);
@@ -292,9 +306,12 @@ export default function SiteQuoteScreen() {
       const day = qldDate(new Date().toISOString()) ?? '';
       const file = await writePdf(`Quote ${printable.reference || site.name} ${day}`.trim(), html);
       const shared = await shareFile(file, 'Quotation');
-      if (!shared) Alert.alert('Saved', `Written to ${file.name}. Sharing is not available on this device.`);
+      if (!shared) {
+        const notice = notSharedNotice(file.name, 'quote');
+        showAlert(notice.title, notice.body);
+      }
     } catch (e) {
-      Alert.alert('Could not produce the quote', e instanceof Error ? e.message : String(e));
+      showAlert('Could not produce the quote', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -346,16 +363,9 @@ export default function SiteQuoteScreen() {
     );
   };
 
-  if (!siteId) {
-    return (
-      <>
-        <Stack.Screen options={{ title: 'Quote' }} />
-        <Screen>
-          <EmptyState title="No site" body="Open a quote from a site so it knows whose defects to price." />
-        </Screen>
-      </>
-    );
-  }
+  // Said "No site" with nothing to press, which is a dead end for anybody who
+  // reached this from search rather than from a site. See ContextGate.
+  if (!siteId) return <ContextGate kind="site" what="a quote priced from the open defects" title="Quote" />;
 
   return (
     <>
@@ -367,7 +377,9 @@ export default function SiteQuoteScreen() {
           unpriced rather than free.
         </Txt>
 
-        {loading ? null : !defects.length ? (
+        {failed ? (
+          <Banner tone="fail" title="The defects could not be read" body={failed} />
+        ) : loading ? null : !defects.length ? (
           <EmptyState
             title="No open defects"
             body="There is nothing outstanding at this site to quote for."

@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, View } from 'react-native';
+import { View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import * as MailComposer from 'expo-mail-composer';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -10,6 +10,7 @@ import {
 import { queueJobNote } from '@/simpro/sync';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Field, Screen, Segmented, Txt } from '@/components/ui';
+import { showAlert } from '@/components/alert';
 
 /**
  * Ask the office.
@@ -49,17 +50,17 @@ export default function RequestInformationScreen() {
     const r = request();
     const blocked = informationNotReady(r);
     if (blocked) {
-      Alert.alert('Not ready to send', blocked);
+      showAlert('Not ready to send', blocked);
       return;
     }
     if (!prefs.supervisorEmail.trim()) {
-      Alert.alert('No supervisor address', 'Set where questions go in Settings first.');
+      showAlert('No supervisor address', 'Set where questions go in Settings first.');
       return;
     }
     setBusy(true);
     try {
       if (!(await MailComposer.isAvailableAsync())) {
-        Alert.alert('No mail app set up', 'This phone has no email account configured, so the question cannot be sent from here.');
+        showAlert('No mail app set up', 'This phone has no email account configured, so the question cannot be sent from here.');
         return;
       }
       const { status } = await MailComposer.composeAsync({
@@ -68,7 +69,7 @@ export default function RequestInformationScreen() {
         body: informationBody(r),
       });
       if (status !== MailComposer.MailComposerStatus.SENT) {
-        Alert.alert('Not sent', 'The email was not sent. Nothing has reached the office.');
+        showAlert('Not sent', 'The email was not sent. Nothing has reached the office.');
         return;
       }
       // Onto the job as well, so the question and its answer are on the record
@@ -81,7 +82,7 @@ export default function RequestInformationScreen() {
           note: informationBody(r),
         });
       }
-      Alert.alert(
+      showAlert(
         'Sent',
         job
           ? `Your question has gone to ${prefs.supervisorEmail} and will be noted on job ${job} in Simpro.`
@@ -89,7 +90,7 @@ export default function RequestInformationScreen() {
         [{ text: 'OK', onPress: () => router.back() }],
       );
     } catch (e) {
-      Alert.alert('Could not send', e instanceof Error ? e.message : String(e));
+      showAlert('Could not send', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getBaseline, saveBaseline } from '@/db/baselineRepo';
@@ -12,11 +12,14 @@ import { autofillBaseline } from '@/services/baselineAutofill';
 import type { Site } from '@/domain/types';
 import { baselineSheet } from '@/export/safeqldForms';
 import { shareFile, writeXlsx } from '@/export/files';
+import { notSharedNotice } from '@/export/shareOutcome';
 import { useTheme } from '@/theme';
 import {
   Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
+import { showAlert } from '@/components/alert';
 
 /**
  * Baseline data form.
@@ -31,18 +34,26 @@ export default function BaselineScreen() {
   const [b, setB] = useState<BaselineData | null>(null);
   // Loaded-and-absent is not the same as still loading. See RecordGate.
   const [missing, setMissing] = useState(false);
+  // And a read that threw is neither. See RecordGate.
+  const [failed, setFailed] = useState<string | null>(null);
   const [site, setSite] = useState<Site | null>(null);
   const [open, setOpen] = useState<string | null>('SYSTEM DETAILS');
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!id) return;
-    void getBaseline(id).then(async (rec) => {
+    setFailed(null);
+    try {
+      const rec = await getBaseline(id);
       setB(rec);
       setMissing(!rec);
       if (rec) setSite(await getSite(rec.siteId));
-    });
+    } catch (e) {
+      setFailed(describeLoadFailure(e, 'this baseline record'));
+    }
   }, [id]);
+
+  useEffect(() => { void load(); }, [load]);
 
   // Persist on change. The form is small enough that a write per edit is
   // cheaper than the risk of losing a section.
@@ -75,10 +86,12 @@ export default function BaselineScreen() {
       });
       setB(baseline);
       await saveBaseline(baseline);
-      Alert.alert(
+      showAlert(
         filled.length ? 'Filled from site data' : 'Nothing to fill',
         filled.length ? filled.join('\n') : 'Every field the app could fill already has something in it.',
       );
+    } catch (e) {
+      showAlert('Could not fill from the site', describeActionFailure(e, 'fill this form from the site'));
     } finally {
       setBusy(false);
     }
@@ -89,13 +102,19 @@ export default function BaselineScreen() {
     setBusy(true);
     try {
       const file = writeXlsx(`Baseline Data - ${b.premisesName || site?.name || 'Site'}`, [baselineSheet(b)]);
-      await shareFile(file, 'Baseline data');
+      const shared = await shareFile(file, 'Baseline data');
+      if (!shared) {
+        const notice = notSharedNotice(file.name, 'spreadsheet');
+        showAlert(notice.title, notice.body);
+      }
+    } catch (e) {
+      showAlert('Could not export', describeActionFailure(e, 'export this baseline record'));
     } finally {
       setBusy(false);
     }
   };
 
-  if (!b) return <RecordGate missing={missing} what="baseline record" />;
+  if (!b) return <RecordGate missing={missing} what="baseline record" failed={failed} onRetry={() => { void load(); }} />;
 
   const section = (title: string, children: React.ReactNode) => (
     <Card key={title}>

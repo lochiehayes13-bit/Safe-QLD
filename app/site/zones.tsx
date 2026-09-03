@@ -5,12 +5,17 @@ import { countPointsByZone, getSite, listPanels, listZones, queryPoints } from '
 import type { Panel, Site, Zone } from '@/domain/types';
 import { zoneSheet } from '@/export/sheets';
 import { shareFile, writePdf, writeXlsx } from '@/export/files';
+import { notSharedNotice } from '@/export/shareOutcome';
 import { buildZoneChart } from '@/domain/zoneChart';
 import { zoneChartHtml } from '@/export/zoneChart';
 import { loadPrefs } from '@/app-prefs';
 import { nowIso } from '@/db';
 import { useTheme } from '@/theme';
+import { describeActionFailure } from '@/domain/loadFailure';
 import { Button, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
+import { ContextGate } from '@/components/ContextGate';
+import { contextId } from '@/domain/screenContext';
+import { showAlert } from '@/components/alert';
 
 interface ZoneWithCount extends Zone {
   deviceCount: number;
@@ -19,7 +24,9 @@ interface ZoneWithCount extends Zone {
 /** Zone list with device counts, so a tech can see zone allocation at a glance. */
 export default function ZonesScreen() {
   const t = useTheme();
-  const { siteId } = useLocalSearchParams<{ siteId?: string }>();
+  // `contextId` rather than the raw parameter: several screens push
+  // `siteId: siteId ?? ''`, so "no site" arrives here as an empty string.
+  const siteId = contextId(useLocalSearchParams<{ siteId?: string }>().siteId);
   const [site, setSite] = useState<Site | null>(null);
   const [panels, setPanels] = useState<Panel[]>([]);
   const [activePanel, setActivePanel] = useState<string | undefined>();
@@ -58,7 +65,13 @@ export default function ZonesScreen() {
     setExporting(true);
     try {
       const file = writeXlsx(`${site?.name ?? 'Site'} zones`, [zoneSheet(panel, zones)]);
-      await shareFile(file, 'Export zone list');
+      const shared = await shareFile(file, 'Export zone list');
+      if (!shared) {
+        const notice = notSharedNotice(file.name, 'spreadsheet');
+        showAlert(notice.title, notice.body);
+      }
+    } catch (e) {
+      showAlert('Could not export', describeActionFailure(e, 'export this zone list'));
     } finally {
       setExporting(false);
     }
@@ -90,11 +103,19 @@ export default function ZonesScreen() {
         site, panel, chart, companyName: prefs.companyName, generatedAt: nowIso(),
       });
       const file = await writePdf(`zone-chart-${panel.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`, html);
-      await shareFile(file, 'Zone chart');
+      const shared = await shareFile(file, 'Zone chart');
+      if (!shared) {
+        const notice = notSharedNotice(file.name, 'chart');
+        showAlert(notice.title, notice.body);
+      }
+    } catch (e) {
+      showAlert('Could not print the chart', describeActionFailure(e, 'produce the zone chart'));
     } finally {
       setCharting(false);
     }
   };
+
+  if (!siteId) return <ContextGate kind="site" what="the zones on the panels" title="Zones" />;
 
   return (
     <>

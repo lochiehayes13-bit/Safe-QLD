@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -7,8 +7,13 @@ import type { DeviceType, Panel, Point, Site } from '@/domain/types';
 import { DEVICE_TYPE_LABEL } from '@/parsers/deviceType';
 import { pointSheet } from '@/export/sheets';
 import { shareFile, writeXlsx } from '@/export/files';
+import { notSharedNotice } from '@/export/shareOutcome';
 import { useTheme } from '@/theme';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { Banner, Button, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
+import { ContextGate } from '@/components/ContextGate';
+import { contextId } from '@/domain/screenContext';
+import { showAlert } from '@/components/alert';
 
 /**
  * Point browser.
@@ -22,7 +27,11 @@ import { Banner, Button, Chip, EmptyState, Rowed, Screen, Txt } from '@/componen
  */
 export default function PointsScreen() {
   const t = useTheme();
-  const { siteId, panelId } = useLocalSearchParams<{ siteId?: string; panelId?: string }>();
+  const params = useLocalSearchParams<{ siteId?: string; panelId?: string }>();
+  // `contextId` rather than the raw parameter: several screens push
+  // `siteId: siteId ?? ''`, so "no site" arrives here as an empty string.
+  const siteId = contextId(params.siteId);
+  const panelId = contextId(params.panelId);
 
   const [site, setSite] = useState<Site | null>(null);
   const [panels, setPanels] = useState<Panel[]>([]);
@@ -35,6 +44,9 @@ export default function PointsScreen() {
   const [typeFilter, setTypeFilter] = useState<DeviceType | undefined>(undefined);
   const [activePanel, setActivePanel] = useState<string | undefined>(panelId);
   const [exporting, setExporting] = useState(false);
+  // A read that threw used to leave "No points" on screen, which reads as a
+  // site with nothing imported rather than a read that did not happen.
+  const [failed, setFailed] = useState<string | null>(null);
 
   // Debounce so typing stays smooth on a site with tens of thousands of points.
   useEffect(() => {
@@ -44,25 +56,46 @@ export default function PointsScreen() {
 
   useEffect(() => {
     if (!siteId) return;
-    void Promise.all([getSite(siteId), listPanels(siteId)]).then(([s, p]) => {
-      setSite(s);
-      setPanels(p);
-    });
+    void Promise.all([getSite(siteId), listPanels(siteId)])
+      .then(([s, p]) => { setSite(s); setPanels(p); })
+      .catch((e: unknown) => setFailed(describeLoadFailure(e, 'this site')));
   }, [siteId]);
 
+  /*
+   * A counter, so an older answer cannot land on top of a newer one.
+   *
+   * Typing in the search box starts a read of up to twenty thousand points
+   * every 180 ms, and nothing was stopping the read for "FI" finishing after
+   * the read for "FIP" and putting its rows on screen. On a large site that is
+   * a list that does not match what is in the box — the technician deletes a
+   * character to make it work and gets a different wrong list. Each read takes
+   * a ticket and only the newest one is allowed to write.
+   */
+  const readSeq = useRef(0);
+
   const load = useCallback(async () => {
+    const seq = ++readSeq.current;
     setLoading(true);
-    const rows = await queryPoints({
-      siteId: activePanel ? undefined : siteId,
-      panelId: activePanel,
-      search: debounced,
-      includeUnused,
-      loopNumber: loopFilter,
-      deviceType: typeFilter,
-      limit: 20000,
-    });
-    setPoints(rows);
-    setLoading(false);
+    setFailed(null);
+    try {
+      const rows = await queryPoints({
+        siteId: activePanel ? undefined : siteId,
+        panelId: activePanel,
+        search: debounced,
+        includeUnused,
+        loopNumber: loopFilter,
+        deviceType: typeFilter,
+        limit: 20000,
+      });
+      if (seq !== readSeq.current) return;
+      setPoints(rows);
+    } catch (e) {
+      if (seq !== readSeq.current) return;
+      setPoints([]);
+      setFailed(describeLoadFailure(e, 'the points on this site'));
+    } finally {
+      if (seq === readSeq.current) setLoading(false);
+    }
   }, [siteId, activePanel, debounced, includeUnused, loopFilter, typeFilter]);
 
   useEffect(() => {
@@ -82,7 +115,17 @@ export default function PointsScreen() {
   }, [points]);
 
   const exportList = async () => {
-    if (!points.length) return;
+    // Always on screen next to the count, so it has to answer for a count of
+    // zero rather than swallowing the press.
+    if (!points.length) {
+      showAlert(
+        'Nothing to export',
+        debounced
+          ? 'Nothing matches that search, so there are no rows to put in a spreadsheet. Clear the search first.'
+          : 'This site has no points yet. Import a device list from the panel, and they will be here.',
+      );
+      return;
+    }
     setExporting(true);
     try {
       const panel = panels.find((p) => p.id === activePanel) ?? panels[0];
@@ -90,11 +133,19 @@ export default function PointsScreen() {
       const file = writeXlsx(name, [
         pointSheet(panel ?? ({ id: '', siteId: '', name: 'Points', brand: 'other', source: 'manual', createdAt: '', updatedAt: '' } as Panel), points),
       ]);
-      await shareFile(file, 'Export point list');
+      const shared = await shareFile(file, 'Export point list');
+      if (!shared) {
+        const notice = notSharedNotice(file.name, 'spreadsheet');
+        showAlert(notice.title, notice.body);
+      }
+    } catch (e) {
+      showAlert('Could not export', describeActionFailure(e, 'export this point list'));
     } finally {
       setExporting(false);
     }
   };
+
+  if (!siteId) return <ContextGate kind="site" what="every point on the panels" title="Points" />;
 
   return (
     <>
@@ -190,15 +241,20 @@ export default function PointsScreen() {
             maxToRenderPerBatch={30}
             windowSize={11}
             removeClippedSubviews
+            ListHeaderComponent={
+              failed ? <Banner tone="fail" title="The points could not be read" body={failed} /> : null
+            }
             ListEmptyComponent={
-              <EmptyState
-                title={debounced ? 'Nothing matched' : 'No points'}
-                body={
-                  debounced
-                    ? 'Try a shorter search, or turn on unused points if you are looking at a spare address.'
-                    : 'Import a device list to populate this site.'
-                }
-              />
+              failed ? null : (
+                <EmptyState
+                  title={debounced ? 'Nothing matched' : 'No points'}
+                  body={
+                    debounced
+                      ? 'Try a shorter search, or turn on unused points if you are looking at a spare address.'
+                      : 'Import a device list to populate this site.'
+                  }
+                />
+              )
             }
             renderItem={({ item }) => <PointRow point={item} />}
           />

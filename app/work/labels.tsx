@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, View } from 'react-native';
+import { FlatList, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { nextAssetCode, queryAssets, updateAsset, type AssetRecord } from '@/db/assetRepo';
@@ -12,9 +12,12 @@ import {
   LABEL_STOCKS, buildLabelSheet, type LabelContent, type LabelStock,
 } from '@/export/assetLabels';
 import { shareFile, writePdf } from '@/export/files';
+import { notSharedNotice } from '@/export/shareOutcome';
 import type { Site } from '@/domain/types';
 import { assetTypeById } from '@/seed/assetTypes';
 import { useTheme } from '@/theme';
+import { describeActionFailure } from '@/domain/loadFailure';
+import { showAlert } from '@/components/alert';
 import {
   Banner, Button, Card, Chip, Divider, EmptyState, Field, H2, Label, Rowed, Screen, Segmented,
   StatTile, Txt,
@@ -94,6 +97,8 @@ export default function LabelsScreen() {
       setAssets(rows);
       setSelected(new Set());
       setNote(null);
+    } catch (e) {
+      showAlert('Could not open that site', describeActionFailure(e, 'read the register at that site'));
     } finally {
       setBusy(false);
     }
@@ -158,11 +163,11 @@ export default function LabelsScreen() {
         + (plan.skipped.length ? `. ${plan.skipped.length} left alone — see the list below.` : '.'),
       );
       if (plan.skipped.length && !plan.assignments.length) {
-        Alert.alert('Nothing was tagged', plan.skipped.slice(0, 4).map((s) => s.reason).join('\n\n'));
+        showAlert('Nothing was tagged', plan.skipped.slice(0, 4).map((s) => s.reason).join('\n\n'));
       }
       setFilter('ready');
     } catch (e) {
-      Alert.alert('Could not issue tags', e instanceof Error ? e.message : String(e));
+      showAlert('Could not issue tags', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -177,7 +182,7 @@ export default function LabelsScreen() {
     if (!site) return;
     const chosen = printable.filter((r) => selected.has(r.asset.id));
     if (!chosen.length) {
-      Alert.alert('Nothing selected', 'Tick the assets whose labels you want on the sheet.');
+      showAlert('Nothing selected', 'Tick the assets whose labels you want on the sheet.');
       return;
     }
     setBusy(true);
@@ -204,7 +209,7 @@ export default function LabelsScreen() {
       });
 
       if (!sheet.printed) {
-        Alert.alert('Nothing to print', sheet.warnings.join('\n\n') || 'No tag in this batch validates.');
+        showAlert('Nothing to print', sheet.warnings.join('\n\n') || 'No tag in this batch validates.');
         return;
       }
 
@@ -222,14 +227,14 @@ export default function LabelsScreen() {
           : sheet.barcode.reason,
         ...otherWarnings,
         ...sheet.omitted.map((o) => `Left off: ${o.tag} — ${o.reason}`),
-        shared ? '' : `Written to ${file.name}. Sharing is not available on this device.`,
+        shared ? '' : notSharedNotice(file.name, 'sheet').body,
       ].filter(Boolean);
       setNote(lines.join('\n'));
       if (sheet.omitted.length || otherWarnings.length || !sheet.barcode.rendered) {
-        Alert.alert('Sheet made, with notes', lines.join('\n\n'));
+        showAlert('Sheet made, with notes', lines.join('\n\n'));
       }
     } catch (e) {
-      Alert.alert('Could not make the sheet', e instanceof Error ? e.message : String(e));
+      showAlert('Could not make the sheet', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }

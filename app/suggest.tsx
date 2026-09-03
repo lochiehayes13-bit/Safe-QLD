@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, View } from 'react-native';
+import { View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import * as MailComposer from 'expo-mail-composer';
 import Constants from 'expo-constants';
@@ -11,6 +11,7 @@ import {
 } from '@/domain/suggestions';
 import { useTheme } from '@/theme';
 import { Button, Card, Field, Screen, Segmented, Txt } from '@/components/ui';
+import { showAlert } from '@/components/alert';
 
 /**
  * Suggest a change.
@@ -46,17 +47,17 @@ export default function SuggestScreen() {
     const s = suggestion();
     const blocked = suggestionNotReady(s);
     if (blocked) {
-      Alert.alert('Not ready to send', blocked);
+      showAlert('Not ready to send', blocked);
       return;
     }
     if (!prefs.suggestionsEmail.trim()) {
-      Alert.alert('Nowhere to send it', 'Set the suggestions address in Settings first.');
+      showAlert('Nowhere to send it', 'Set the suggestions address in Settings first.');
       return;
     }
     setBusy(true);
     try {
       if (!(await MailComposer.isAvailableAsync())) {
-        Alert.alert('No mail app set up', 'This phone has no email account configured, so the suggestion cannot be sent from here.');
+        showAlert('No mail app set up', 'This phone has no email account configured, so the suggestion cannot be sent from here.');
         return;
       }
       const { status } = await MailComposer.composeAsync({
@@ -65,12 +66,12 @@ export default function SuggestScreen() {
         body: suggestionBody(s),
       });
       if (status === MailComposer.MailComposerStatus.SENT) {
-        Alert.alert('Sent', 'Thanks. When it turns into a change, the new build lands at the same download link.', [{ text: 'OK', onPress: () => router.back() }]);
+        showAlert('Sent', 'Thanks. When it turns into a change, the new build lands at the same download link.', [{ text: 'OK', onPress: () => router.back() }]);
       } else {
-        Alert.alert('Not sent', 'The email was not sent, so nobody has seen it yet.');
+        showAlert('Not sent', 'The email was not sent, so nobody has seen it yet.');
       }
     } catch (e) {
-      Alert.alert('Could not send', e instanceof Error ? e.message : String(e));
+      showAlert('Could not send', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }

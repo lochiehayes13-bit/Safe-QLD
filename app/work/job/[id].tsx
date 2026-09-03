@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Linking, Pressable, StyleSheet, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { loadPrefs } from '@/app-prefs';
@@ -26,6 +26,8 @@ import { useTheme } from '@/theme';
 import { animateNextLayout } from '@/components/motion';
 import { Banner, Button, Card, Chip, H2, Label, Rowed, Screen, StatTile, StatusPill, Txt } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
+import { showAlert } from '@/components/alert';
 
 /**
  * Job detail — the office's record, and the site briefing under it.
@@ -56,6 +58,8 @@ export default function JobScreen() {
   const [full, setFull] = useState<JobFull | null>(null);
   // Loaded-and-absent is not the same as still loading. See RecordGate.
   const [missing, setMissing] = useState(false);
+  // And a read that threw is neither. See RecordGate.
+  const [failed, setFailed] = useState<string | null>(null);
   const [site, setSite] = useState<Site | null>(null);
   const [defects, setDefects] = useState<Defect[]>([]);
   const [assetCount, setAssetCount] = useState(0);
@@ -71,20 +75,25 @@ export default function JobScreen() {
 
   const load = useCallback(async () => {
     if (!id) return;
-    const f = await getJobFull(id);
-    setFull(f);
-    setMissing(!f);
-    if (f?.job.siteId) {
-      const [s, d, a, k] = await Promise.all([
-        getSite(f.job.siteId),
-        listDefects(f.job.siteId, 'open'),
-        // A count, not the rows: the briefing wants a number.
-        assetCountsBySystem(f.job.siteId),
-        listKnowledge({ siteId: f.job.siteId }),
-      ]);
-      setSite(s); setDefects(d); setAssetCount(a.reduce((n, x) => n + x.count, 0)); setKnowledge(k);
+    setFailed(null);
+    try {
+      const f = await getJobFull(id);
+      setFull(f);
+      setMissing(!f);
+      if (f?.job.siteId) {
+        const [s, d, a, k] = await Promise.all([
+          getSite(f.job.siteId),
+          listDefects(f.job.siteId, 'open'),
+          // A count, not the rows: the briefing wants a number.
+          assetCountsBySystem(f.job.siteId),
+          listKnowledge({ siteId: f.job.siteId }),
+        ]);
+        setSite(s); setDefects(d); setAssetCount(a.reduce((n, x) => n + x.count, 0)); setKnowledge(k);
+      }
+      return f;
+    } catch (e) {
+      setFailed(describeLoadFailure(e, 'this job'));
     }
-    return f;
   }, [id]);
 
   /**
@@ -147,7 +156,7 @@ export default function JobScreen() {
     if (status === 'complete' && f?.job.externalId) setNoteQueued(true);
   };
 
-  if (!full) return <RecordGate missing={missing} what="job" />;
+  if (!full) return <RecordGate missing={missing} what="job" failed={failed} onRetry={() => { void load(); }} />;
 
   const { job } = full;
   const critical = defects.filter((d) => d.severity === 'critical');
@@ -178,8 +187,12 @@ export default function JobScreen() {
     try {
       const outcome = await openAttachment({ kind: 'job', localJobId: job.id, externalId: job.externalId }, a);
       const words = describeOpenOutcome(outcome);
-      if (words) Alert.alert(words.title, words.body);
+      if (words) showAlert(words.title, words.body);
       else await load();
+    } catch (e) {
+      // The spinner on the row stops either way; without this the tap simply
+      // stopped meaning anything, which reads as the attachment being broken.
+      showAlert('Could not open that attachment', describeActionFailure(e, 'open this attachment'));
     } finally {
       setOpening(null);
     }
@@ -492,7 +505,7 @@ export default function JobScreen() {
           <Button
             title="Mark complete"
             onPress={() => {
-              Alert.alert('Complete this job?', 'Check the test sheet, defects and photos are done first — anything missing is harder to add later.', [
+              showAlert('Complete this job?', 'Check the test sheet, defects and photos are done first — anything missing is harder to add later.', [
                 { text: 'Not yet', style: 'cancel' },
                 { text: 'Complete', onPress: () => void setStatus(job.id, 'complete') },
               ]);

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
@@ -20,6 +20,7 @@ import {
   occupierCopyDueBy, testPointOutcome, testerCopyKeepUntil,
 } from '@/export/form72';
 import { shareFile, writePdf } from '@/export/files';
+import { notSharedNotice } from '@/export/shareOutcome';
 import { formatAuDate } from '@/export/sheets';
 import { queryAssets } from '@/db/assetRepo';
 import { applyForm72Prefill, form72FromAssets } from '@/domain/formsFromAssets';
@@ -31,6 +32,8 @@ import {
   Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { describeLoadFailure } from '@/domain/loadFailure';
+import { showAlert } from '@/components/alert';
 
 /**
  * Form 72 — the Queensland statutory hydrant and sprinkler form.
@@ -102,19 +105,26 @@ export default function Form72Screen() {
   const [form, setForm] = useState<StoredForm72 | null>(null);
   // Loaded-and-absent is not the same as still loading. See RecordGate.
   const [missing, setMissing] = useState(false);
+  // And a read that threw is neither. See RecordGate.
+  const [failed, setFailed] = useState<string | null>(null);
   const [part, setPart] = useState<PartKey>('A');
   const [companyName, setCompanyName] = useState('');
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!id) return;
-    void (async () => {
+    setFailed(null);
+    try {
       const [f, prefs] = await Promise.all([getForm72(id), loadPrefs()]);
       setForm(f);
       setMissing(!f);
       setCompanyName(prefs.companyName);
-    })();
+    } catch (e) {
+      setFailed(describeLoadFailure(e, 'this Form 72'));
+    }
   }, [id]);
+
+  useEffect(() => { void load(); }, [load]);
 
   const locked = form?.status === 'issued';
 
@@ -130,7 +140,7 @@ export default function Form72Screen() {
     pending.current = pending.current
       .then(() => updateForm72(id, p))
       .catch((e: unknown) => {
-        Alert.alert('Not saved', e instanceof Error ? e.message : 'That change did not save.');
+        showAlert('Not saved', e instanceof Error ? e.message : 'That change did not save.');
       });
   }, [id, locked]);
 
@@ -141,13 +151,13 @@ export default function Form72Screen() {
   const onIssue = useCallback(() => {
     if (!form) return;
     if (blockers.length) {
-      Alert.alert(
+      showAlert(
         'Not ready to issue',
         blockers.map((b) => `• Part ${b.part} — ${b.message}`).join('\n\n'),
       );
       return;
     }
-    Alert.alert(
+    showAlert(
       'Issue this Form 72?',
       'Once issued it cannot be edited — a correction needs a new form. The occupier’s copy is '
       + `then due within ${OCCUPIER_COPY_BUSINESS_DAYS} business days, and you keep yours for `
@@ -161,7 +171,7 @@ export default function Form72Screen() {
             try {
               setForm(await issueForm72(form.id));
             } catch (e) {
-              Alert.alert('Cannot issue', e instanceof Error ? e.message : String(e));
+              showAlert('Cannot issue', e instanceof Error ? e.message : String(e));
             }
           },
         },
@@ -188,7 +198,7 @@ export default function Form72Screen() {
       const prefill = form72FromAssets(assets);
       const change = applyForm72Prefill(form, prefill);
       if (Object.keys(change).length) patch(change);
-      Alert.alert(
+      showAlert(
         Object.keys(change).length ? 'Filled from the register' : 'Nothing to fill',
         [
           prefill.filled.length ? `Register holds: ${prefill.filled.join('; ')}.` : 'The register holds no water-based equipment for this site.',
@@ -197,7 +207,7 @@ export default function Form72Screen() {
         ].filter(Boolean).join('\n\n'),
       );
     } catch (e) {
-      Alert.alert('Could not read the register', e instanceof Error ? e.message : String(e));
+      showAlert('Could not read the register', e instanceof Error ? e.message : String(e));
     } finally {
       setFilling(false);
     }
@@ -215,9 +225,13 @@ export default function Form72Screen() {
         overload: form.overload,
       });
       const file = await writePdf(`Form 72 ${form.siteName}`, html);
-      await shareFile(file, 'Form 72');
+      const shared = await shareFile(file, 'Form 72');
+      if (!shared) {
+        const notice = notSharedNotice(file.name, 'form');
+        showAlert(notice.title, notice.body);
+      }
     } catch (e) {
-      Alert.alert('Could not produce the form', e instanceof Error ? e.message : String(e));
+      showAlert('Could not produce the form', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -225,7 +239,7 @@ export default function Form72Screen() {
 
   const onCopyGiven = useCallback(() => {
     if (!form) return;
-    Alert.alert(
+    showAlert(
       'Occupier has their copy?',
       'This records the date they were given it, which is the fact the ten business days actually '
       + 'runs against. Producing the PDF is not the same event as handing it over.',
@@ -239,7 +253,7 @@ export default function Form72Screen() {
               await recordOccupierCopy(form.id, at);
               setForm({ ...form, copyGivenAt: at });
             } catch (e) {
-              Alert.alert('Not recorded', e instanceof Error ? e.message : String(e));
+              showAlert('Not recorded', e instanceof Error ? e.message : String(e));
             }
           },
         },
@@ -247,7 +261,7 @@ export default function Form72Screen() {
     );
   }, [form]);
 
-  if (!form) return <RecordGate missing={missing} what="Form 72" />;
+  if (!form) return <RecordGate missing={missing} what="Form 72" failed={failed} onRetry={() => { void load(); }} />;
 
   return (
     <Screen>
@@ -1142,7 +1156,7 @@ function RemoveButton({ what, onRemove }: { what: string; onRemove: () => void }
   const t = useTheme();
   return (
     <Pressable
-      onPress={() => Alert.alert(`Remove this ${what}?`, 'The form saves as you go, so it cannot be put back.', [
+      onPress={() => showAlert(`Remove this ${what}?`, 'The form saves as you go, so it cannot be put back.', [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Remove', style: 'destructive', onPress: onRemove },
       ])}

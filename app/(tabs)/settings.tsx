@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Linking, Switch, View } from 'react-native';
+import { Linking, Switch, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SimproClient } from '@/simpro/client';
@@ -36,6 +36,7 @@ import {
 } from '@/update/check';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
+import { showAlert } from '@/components/alert';
 
 
 export default function SettingsScreen() {
@@ -151,7 +152,7 @@ export default function SettingsScreen() {
     await SimproClient.storeSecret(secret.trim());
     setSecret('');
     setHasSecret(true);
-    Alert.alert('Saved', 'The client secret is held in this device’s secure keystore. It is never written to ordinary app storage and never leaves the device except to Simpro.');
+    showAlert('Saved', 'The client secret is held in this device’s secure keystore. It is never written to ordinary app storage and never leaves the device except to Simpro.');
   };
 
   /**
@@ -170,7 +171,7 @@ export default function SettingsScreen() {
       const report = await new SimproResources(client).rateCard();
       setPullReport(report);
       if (!report.rates.length && !report.fees.length) {
-        Alert.alert(
+        showAlert(
           'Nothing came back',
           report.unreadable.length
             ? report.unreadable.map((u) => `${u.what}: ${u.error}`).join('\n\n')
@@ -181,7 +182,7 @@ export default function SettingsScreen() {
       await saveRateCard(report.rates, report.fees);
       setCard(await loadRateCard());
     } catch (e) {
-      Alert.alert('Could not read the rate card', e instanceof Error ? e.message : String(e));
+      showAlert('Could not read the rate card', e instanceof Error ? e.message : String(e));
     } finally {
       setPulling(false);
     }
@@ -260,9 +261,9 @@ export default function SettingsScreen() {
       // that is quietly not doing what it claims.
       if (r.notes.length) lines.push('', ...r.notes);
       if (r.errors.length) lines.push('', ...r.errors.slice(0, 5));
-      Alert.alert('Sync complete', lines.join('\n'));
+      showAlert('Sync complete', lines.join('\n'));
     } catch (e) {
-      Alert.alert('Sync failed', e instanceof Error ? e.message : String(e));
+      showAlert('Sync failed', e instanceof Error ? e.message : String(e));
     } finally {
       release();
       setSyncing(false);
@@ -294,9 +295,9 @@ export default function SettingsScreen() {
         r.stopped ? `Could not send: ${r.stopped.reason}` : null,
         `${r.remaining} still waiting.`,
       ].filter((line): line is string => !!line);
-      Alert.alert(r.stopped ? 'Sending stopped' : 'Queue sent', lines.join('\n'));
+      showAlert(r.stopped ? 'Sending stopped' : 'Queue sent', lines.join('\n'));
     } catch (e) {
-      Alert.alert('Could not send', e instanceof Error ? e.message : String(e));
+      showAlert('Could not send', e instanceof Error ? e.message : String(e));
     } finally {
       release();
       setSyncing(false);
@@ -926,7 +927,7 @@ export default function SettingsScreen() {
           title="Clear generated exports"
           variant="secondary"
           onPress={() => {
-            Alert.alert('Clear exports?', 'This removes generated spreadsheets and PDFs from this device. Anything already sent is unaffected, and sites, reports and defects are not touched.', [
+            showAlert('Clear exports?', 'This removes generated spreadsheets and PDFs from this device. Anything already sent is unaffected, and sites, reports and defects are not touched.', [
               { text: 'Cancel', style: 'cancel' },
               {
                 text: 'Clear',
@@ -934,7 +935,7 @@ export default function SettingsScreen() {
                 onPress: () => {
                   const n = clearExports();
                   setStorage(0);
-                  Alert.alert('Cleared', `${n} file${n === 1 ? '' : 's'} removed.`);
+                  showAlert('Cleared', `${n} file${n === 1 ? '' : 's'} removed.`);
                 },
               },
             ]);
@@ -952,7 +953,7 @@ export default function SettingsScreen() {
                * to use, and a button that quietly did it would be the same
                * fault wearing this app's colours.
                */
-              Alert.alert(
+              showAlert(
                 'Throw away unfinished forms?',
                 `${drafts.length} form${drafts.length === 1 ? ' has' : 's have'} been typed into and `
                 + 'not saved. They come back when you reopen the same form. Clearing them cannot be '
@@ -965,7 +966,7 @@ export default function SettingsScreen() {
                     onPress: () => {
                       void clearAllDrafts().then((n) => {
                         setDrafts([]);
-                        Alert.alert('Cleared', `${n} draft${n === 1 ? '' : 's'} removed.`);
+                        showAlert('Cleared', `${n} draft${n === 1 ? '' : 's'} removed.`);
                       });
                     },
                   },

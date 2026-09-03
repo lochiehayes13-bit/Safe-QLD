@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { Alert } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { createSite } from '@/db/repo';
 import { rememberPosition } from '@/geo/geocode';
 import { Button, Field, H2, Screen, Txt } from '@/components/ui';
+import { showAlert } from '@/components/alert';
 
 /**
  * Create a site by hand — no config file needed to start using the app.
@@ -25,7 +25,7 @@ export default function NewSiteScreen() {
 
   const save = async () => {
     if (!name.trim()) {
-      Alert.alert('Name required', 'Give the site a name so you can find it later.');
+      showAlert('Name required', 'Give the site a name so you can find it later.');
       return;
     }
     setSaving(true);
@@ -50,7 +50,7 @@ export default function NewSiteScreen() {
       router.replace({ pathname: '/site/[id]', params: { id: site.id } });
     } catch (e) {
       setSaving(false);
-      Alert.alert('Could not save', e instanceof Error ? e.message : String(e));
+      showAlert('Could not save', e instanceof Error ? e.message : String(e));
     }
   };
 

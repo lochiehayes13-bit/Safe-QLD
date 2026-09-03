@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as MailComposer from 'expo-mail-composer';
 import { getTimesheet, listTimesheets, saveTimesheet } from '@/db/timesheetRepo';
-import { listJobs, type JobRecord } from '@/db/opsRepo';
+import { openJobPicks, type JobPick } from '@/db/opsRepo';
 import {
   DEFAULT_EXTRAS, LEAVE_KINDS, LEAVE_LABEL, STANDARD_DAY_HOURS,
   blankEntry, copyDay, dayName, dayWorkedHours, entryHours, filterJobOptions, jobOptions,
@@ -17,12 +17,15 @@ import {
 import { timesheetSheet, timesheetSummarySheet } from '@/export/safeqldForms';
 import { formatAuDate } from '@/export/sheets';
 import { shareFile, writeXlsx } from '@/export/files';
+import { notSharedNotice } from '@/export/shareOutcome';
 import { newId, nowIso } from '@/db';
 import { qldIsoDay } from '@/domain/qldTime';
 import { useTheme, type Theme } from '@/theme';
 import { Button, Card, Chip, Rowed, Screen, Txt } from '@/components/ui';
 import { ProgressRing, Reveal } from '@/components/motion';
 import { RecordGate } from '@/components/RecordGate';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
+import { showAlert } from '@/components/alert';
 
 /**
  * The weekly timesheet, rebuilt around the day.
@@ -44,17 +47,40 @@ export default function TimesheetScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [sheet, setSheet] = useState<Timesheet | null>(null);
   const [missing, setMissing] = useState(false);
-  const [jobs, setJobs] = useState<JobRecord[]>([]);
+  // And a read that threw is neither. See RecordGate.
+  const [failed, setFailed] = useState<string | null>(null);
+  const [jobs, setJobs] = useState<JobPick[]>([]);
   const [history, setHistory] = useState<Timesheet[]>([]);
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState<{ date: string } | null>(null);
 
-  useEffect(() => {
+  /*
+   * One read, not three. The week, the job list and the history each used to be
+   * their own `void promise.then(set)`, which meant a throw in any of them
+   * landed nowhere — no sheet, no message, and the gate below still saying
+   * "Loading…" because nothing had told it the read was over.
+   */
+  const load = useCallback(async () => {
     if (!id) return;
-    void getTimesheet(id).then((found) => { setSheet(found); setMissing(!found); });
-    void listJobs({ limit: 400 }).then(setJobs);
-    void listTimesheets().then(setHistory);
+    setFailed(null);
+    try {
+      const [found, jobList, past] = await Promise.all([
+        // Four columns of the open jobs, not four hundred whole job rows —
+        // description, office notes, contact, contract and tags included —
+        // read to offer a list of job numbers and site names and then have
+        // every complete one thrown away.
+        getTimesheet(id), openJobPicks(400), listTimesheets(),
+      ]);
+      setSheet(found);
+      setMissing(!found);
+      setJobs(jobList);
+      setHistory(past);
+    } catch (e) {
+      setFailed(describeLoadFailure(e, 'this timesheet'));
+    }
   }, [id]);
+
+  useEffect(() => { void load(); }, [load]);
 
   const persist = useCallback((next: Timesheet) => {
     setSheet(next);
@@ -93,7 +119,7 @@ export default function TimesheetScreen() {
   // render there is no sheet yet, and a hook that only runs once the record
   // arrives changes the hook count between renders, which React answers by
   // throwing — a blank screen where the week should be.
-  if (!sheet || !totals) return <RecordGate missing={missing} what="timesheet" />;
+  if (!sheet || !totals) return <RecordGate missing={missing} what="timesheet" failed={failed} onRetry={() => { void load(); }} />;
 
   const addJob = (date: string, opt: JobOption | null) => {
     const entry = blankEntry(newId(), date);
@@ -106,19 +132,19 @@ export default function TimesheetScreen() {
 
   const dupPrevious = (date: string) => {
     const from = previousDayWithEntries(sheet.entries, date);
-    if (!from) { Alert.alert('Nothing to copy', 'No earlier day this week has any jobs on it yet.'); return; }
+    if (!from) { showAlert('Nothing to copy', 'No earlier day this week has any jobs on it yet.'); return; }
     const copied = copyDay(sheet.entries, from, date, newId);
-    if (!copied.length) { Alert.alert('Nothing to copy', `${dayName(from)} is a day off, so there is nothing to bring across.`); return; }
+    if (!copied.length) { showAlert('Nothing to copy', `${dayName(from)} is a day off, so there is nothing to bring across.`); return; }
     setEntries([...sheet.entries, ...copied]);
   };
 
   const emailSheet = async () => {
     const blocked = timesheetNotReady(sheet);
-    if (blocked) { Alert.alert('Not ready to send', blocked); return; }
+    if (blocked) { showAlert('Not ready to send', blocked); return; }
     setBusy(true);
     try {
       if (!(await MailComposer.isAvailableAsync())) {
-        Alert.alert('No mail app set up', 'This phone has no email account configured. Use Export and attach the file yourself.');
+        showAlert('No mail app set up', 'This phone has no email account configured. Use Export and attach the file yourself.');
         return;
       }
       const name = `Timesheet ${sheet.employeeName || ''} ${formatAuDate(sheet.weekStarting)}`.trim();
@@ -128,12 +154,12 @@ export default function TimesheetScreen() {
       });
       if (status === MailComposer.MailComposerStatus.SENT) {
         persist({ ...sheet, status: 'submitted' });
-        Alert.alert('Sent', `Your week has gone to ${TIMESHEET_INBOX} and is marked submitted.`);
+        showAlert('Sent', `Your week has gone to ${TIMESHEET_INBOX} and is marked submitted.`);
       } else {
-        Alert.alert('Not sent', 'The email was not sent, so this sheet is still a draft. Nothing has gone to the office.');
+        showAlert('Not sent', 'The email was not sent, so this sheet is still a draft. Nothing has gone to the office.');
       }
     } catch (e) {
-      Alert.alert('Could not send', e instanceof Error ? e.message : String(e));
+      showAlert('Could not send', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -144,8 +170,16 @@ export default function TimesheetScreen() {
     try {
       const name = `Timesheet ${sheet.employeeName || ''} ${formatAuDate(sheet.weekStarting)}`.trim();
       const file = writeXlsx(name, [timesheetSheet(sheet), timesheetSummarySheet(sheet)]);
-      await shareFile(file, 'Timesheet');
-    } finally { setBusy(false); }
+      const shared = await shareFile(file, 'Timesheet');
+      if (!shared) {
+        const notice = notSharedNotice(file.name, 'timesheet');
+        showAlert(notice.title, notice.body);
+      }
+    } catch (e) {
+      showAlert('Could not export', describeActionFailure(e, 'export this timesheet'));
+    } finally {
+      setBusy(false);
+    }
   };
 
 

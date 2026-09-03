@@ -292,6 +292,14 @@ export interface JobFilterContext {
  * neither the office nor this phone has closed it — and Today has no status
  * condition at all, because a job finished at ten this morning is still
  * today's work.
+ *
+ * The job list ran this over every job on the phone. It runs the same four
+ * sentences in SQL now, because four and a half thousand rows read on every
+ * focus is a screen that hangs. This stays as the reference those queries are
+ * proved against: `listJobPage` is checked row for row against it, and
+ * `siteStats` against its Open. A filter that can only be read is a filter
+ * two people can disagree about; a filter something else is measured by is
+ * one that cannot drift quietly.
  */
 export function applyJobFilter<T extends {
   externalId?: string; siteName: string; customerName?: string; title: string; address?: string; orderNo?: string;
@@ -561,6 +569,10 @@ export type QuoteListFilter = 'open' | 'approved' | 'converted' | 'closed' | 'al
  * The quote rows a filter shows. Open is neither closed nor converted; approved
  * is an open quote the customer has said yes to but the office has not yet
  * turned into a job; converted has a job number; closed is the rest.
+ *
+ * As with applyJobFilter, the quote screen asks the database these questions
+ * now; this is the sentence those queries are written from and checked
+ * against.
  */
 export function applyQuoteFilter<T extends {
   externalId: string; name: string; siteName?: string; customerName?: string; orderNo?: string;
@@ -588,11 +600,6 @@ export function quoteMatchesQuery(
   const hay = [q.externalId, q.name, q.siteName, q.customerName, q.orderNo, q.jobExternalId]
     .filter(Boolean).join(' ').toLowerCase();
   return words.every((w) => hay.includes(w));
-}
-
-/** The sell total across a set of quotes, ex GST, for the strip above a list. Lines with no figure count nothing. */
-export function sumExTax(rows: readonly { totalExTaxCents?: number }[]): number {
-  return rows.reduce((n, r) => n + (r.totalExTaxCents ?? 0), 0);
 }
 
 /** Where a task stands against today. */

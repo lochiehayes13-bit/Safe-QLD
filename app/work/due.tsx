@@ -10,6 +10,7 @@ import { formatAuDate } from '@/export/sheets';
 import { nowIso } from '@/db';
 import { useTheme } from '@/theme';
 import { Banner, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
+import { describeLoadFailure } from '@/domain/loadFailure';
 
 /**
  * Everything that has lapsed, across every site.
@@ -25,11 +26,22 @@ export default function LapsedScreen() {
   const t = useTheme();
   const [items, setItems] = useState<SiteDue[]>([]);
   const [loading, setLoading] = useState(true);
+  /*
+   * A read that threw used to leave this list empty under "Nothing lapsed",
+   * which is not a blank screen — it is the app telling an office that every
+   * site is inside its window when it has no idea. The failure is on the screen
+   * now, and the empty state is withheld until there is an answer to give.
+   */
+  const [failed, setFailed] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setFailed(null);
     try {
       setItems(await lapsedEverywhere(nowIso()));
+    } catch (e) {
+      setItems([]);
+      setFailed(describeLoadFailure(e, 'what has lapsed'));
     } finally {
       setLoading(false);
     }
@@ -44,6 +56,7 @@ export default function LapsedScreen() {
       <Stack.Screen options={{ title: 'Overdue and due' }} />
       <Screen scroll={false} padded={false}>
         <View style={{ padding: t.space(4), gap: t.space(3) }}>
+          {failed ? <Banner tone="fail" title="This list could not be read" body={failed} /> : null}
           {items.length ? (
             <Banner
               tone={overdue ? 'fail' : 'warn'}
@@ -64,7 +77,7 @@ export default function LapsedScreen() {
           onRefresh={load}
           refreshing={loading}
           ListEmptyComponent={
-            loading ? null : (
+            loading || failed ? null : (
               <EmptyState
                 title="Nothing lapsed"
                 body="No routine with a recorded history has gone past its window. This does not cover routines never recorded at a site — those are on each site's own due list, and a site with no history at all will look quiet here."

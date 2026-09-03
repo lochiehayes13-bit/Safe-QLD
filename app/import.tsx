@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, ScrollView, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { File } from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
@@ -17,6 +17,8 @@ import { createSite, importParsedConfig, listSites } from '@/db/repo';
 import type { PanelBrand, ParsedConfig, Site } from '@/domain/types';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
+import { describeActionFailure } from '@/domain/loadFailure';
+import { showAlert } from '@/components/alert';
 
 /**
  * Import.
@@ -72,7 +74,17 @@ export default function ImportScreen() {
   }, [siteId]);
 
   const pick = async () => {
-    const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
+    // The picker's own call sat outside the try below, so a platform that
+    // cannot open one — a browser, or a phone whose provider is unavailable —
+    // rejected into nothing and the only button on this screen did nothing at
+    // all. Reading the file has its own message; this is about opening it.
+    let result;
+    try {
+      result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
+    } catch (e) {
+      showAlert('Could not open the file picker', describeActionFailure(e, 'choose a file'));
+      return;
+    }
     if (result.canceled || !result.assets[0]) return;
     const asset = result.assets[0];
     setBusy(true);
@@ -105,7 +117,7 @@ export default function ImportScreen() {
       // Recognised, and known to be unreadable. Say why, once, rather than
       // leaving the tech to try again with the same file.
       if (kind.kind === 'unreadable' && kind.parser) {
-        Alert.alert(
+        showAlert(
           `${kind.parser.brandLabel} file`,
           [kind.parser.limitation, kind.parser.howToExport].filter(Boolean).join('\n\n'),
         );
@@ -131,7 +143,7 @@ export default function ImportScreen() {
 
       const p = previewTabular(raw);
       if (!p.totalRows) {
-        Alert.alert('Nothing to import', 'The file had no readable rows.');
+        showAlert('Nothing to import', 'The file had no readable rows.');
         return;
       }
       setText(raw);
@@ -140,7 +152,7 @@ export default function ImportScreen() {
       setMapping(p.mapping);
       setPanelName(asset.name.replace(/\.[^.]+$/, '').slice(0, 60));
     } catch (e) {
-      Alert.alert('Could not read the file', e instanceof Error ? e.message : String(e));
+      showAlert('Could not read the file', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -150,11 +162,11 @@ export default function ImportScreen() {
   const importRegister = async (text: string, fileName: string) => {
     const parsed = parseAssetRegister(text, fileName);
     if (!parsed.assets.length) {
-      Alert.alert('Nothing to import', parsed.warnings.join('\n\n') || 'The register had no rows.');
+      showAlert('Nothing to import', parsed.warnings.join('\n\n') || 'The register had no rows.');
       return;
     }
     const res = await importAssetRegister(parsed);
-    Alert.alert(
+    showAlert(
       `${parsed.systemLabel} imported`,
       [
         `${(res.assetsCreated + res.assetsUpdated).toLocaleString()} assets across ` +
@@ -173,7 +185,7 @@ export default function ImportScreen() {
     const targetSite = siteId ?? (await createSite({ name: parsed.siteName || fileName })).id;
     const res = await importParsedConfig(targetSite, parsed, 'config-import');
     const panel = parsed.panels[0];
-    Alert.alert(
+    showAlert(
       'Configuration imported',
       [
         `${res.pointCount.toLocaleString()} devices, ${res.zoneCount.toLocaleString()} zones`,
@@ -190,13 +202,13 @@ export default function ImportScreen() {
       const pack = decodePack(bytes);
       const targetSite = siteId ?? (await createSite({ name: pack.meta.siteName || name })).id;
       const res = await importParsedConfig(targetSite, pack.config, 'shared-pack');
-      Alert.alert(
+      showAlert(
         'Pack imported',
         `${res.pointCount.toLocaleString()} points and ${res.zoneCount} zones across ${res.panelIds.length} panel${res.panelIds.length === 1 ? '' : 's'}.`,
       );
       router.replace({ pathname: '/site/[id]', params: { id: targetSite } });
     } catch (e) {
-      Alert.alert(
+      showAlert(
         'Could not open the pack',
         e instanceof PackError ? e.message : e instanceof Error ? e.message : String(e),
       );
@@ -210,7 +222,7 @@ export default function ImportScreen() {
       let target = siteId;
       if (!target) {
         if (!newSiteName.trim()) {
-          Alert.alert('Which site?', 'Pick an existing site, or give the new one a name.');
+          showAlert('Which site?', 'Pick an existing site, or give the new one a name.');
           return;
         }
         target = (await createSite({ name: newSiteName.trim() })).id;
@@ -225,13 +237,13 @@ export default function ImportScreen() {
 
       const res = await importParsedConfig(target, parsed, 'tabular-import');
       const warnings = parsed.warnings.length ? `\n\n${parsed.warnings.join('\n')}` : '';
-      Alert.alert(
+      showAlert(
         'Imported',
         `${res.pointCount.toLocaleString()} points and ${res.zoneCount} zones.${warnings}`,
       );
       router.replace({ pathname: '/site/[id]', params: { id: target } });
     } catch (e) {
-      Alert.alert('Import failed', e instanceof Error ? e.message : String(e));
+      showAlert('Import failed', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }

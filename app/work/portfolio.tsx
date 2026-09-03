@@ -14,6 +14,7 @@ import {
 import { assetTypeById } from '@/seed/assetTypes';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
+import { describeLoadFailure } from '@/domain/loadFailure';
 import {
   Banner, Button, Card, Chip, Divider, EmptyState, H2, Label, ResultBlock, Rowed, Screen, Segmented,
   StatTile, Txt,
@@ -60,11 +61,19 @@ export default function PortfolioScreen() {
   const t = useTheme();
   const [data, setData] = useState<Loaded | undefined>();
   const [loading, setLoading] = useState(true);
+  /*
+   * The book is built out of five reads, and a throw in any of them left this
+   * screen on "Nothing loaded — the portfolio could not be built from what is
+   * in the app", which blames the data for a failure of the database. What
+   * actually happened is now on the screen.
+   */
+  const [failed, setFailed] = useState<string | null>(null);
   const [tab, setTab] = useState<'risk' | 'concentration' | 'unjudged'>('risk');
   const [openSite, setOpenSite] = useState<string | undefined>();
 
   const load = useCallback(async () => {
     setLoading(true);
+    setFailed(null);
     try {
       const [sites, runs, defects, assets, statements] = await Promise.all([
         listSites(),
@@ -158,6 +167,9 @@ export default function PortfolioScreen() {
       }
 
       setData({ portfolio, rejectedRuns: folded.rejected.length, truncated });
+    } catch (e) {
+      setData(undefined);
+      setFailed(describeLoadFailure(e, 'the book of sites'));
     } finally {
       setLoading(false);
     }
@@ -189,8 +201,9 @@ export default function PortfolioScreen() {
         <Stack.Screen options={{ title: 'Portfolio' }} />
         <Screen>
           <EmptyState
-            title="Nothing loaded"
-            body="The portfolio could not be built from what is in the app."
+            icon={failed ? 'database-alert-outline' : undefined}
+            title={failed ? 'The book could not be read' : 'Nothing loaded'}
+            body={failed ?? 'The portfolio could not be built from what is in the app.'}
             action={<Button title="Try again" onPress={() => void load()} />}
           />
         </Screen>

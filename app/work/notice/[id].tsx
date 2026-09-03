@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Alert, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getDefect, getSite, updateDefect } from '@/db/repo';
@@ -10,6 +10,7 @@ import {
 } from '@/domain/qldCompliance';
 import { criticalDefectNoticeHtml } from '@/export/criticalDefectNotice';
 import { shareFile, writePdf } from '@/export/files';
+import { notSharedNotice } from '@/export/shareOutcome';
 import { formatAuDate } from '@/export/sheets';
 import { qldMoment } from '@/domain/qldTime';
 import { loadPrefs } from '@/app-prefs';
@@ -19,6 +20,8 @@ import {
   Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { describeLoadFailure } from '@/domain/loadFailure';
+import { showAlert } from '@/components/alert';
 
 /**
  * Critical defect notice.
@@ -33,21 +36,28 @@ export default function NoticeScreen() {
   const [defect, setDefect] = useState<Defect | null>(null);
   // Loaded-and-absent is not the same as still loading. See RecordGate.
   const [missing, setMissing] = useState(false);
+  // And a read that threw is neither. See RecordGate.
+  const [failed, setFailed] = useState<string | null>(null);
   const [site, setSite] = useState<Site | null>(null);
   const [occupier, setOccupier] = useState('');
   const [busy, setBusy] = useState(false);
   const [, tick] = useState(0);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!id) return;
-    void (async () => {
+    setFailed(null);
+    try {
       const d = await getDefect(id);
       setDefect(d);
       setMissing(!d);
       setOccupier(d?.noticeRecipient ?? '');
       if (d) setSite(await getSite(d.siteId));
-    })();
+    } catch (e) {
+      setFailed(describeLoadFailure(e, 'this defect'));
+    }
   }, [id]);
+
+  useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
     if (defect?.noticeIssuedAt) return;
@@ -64,7 +74,7 @@ export default function NoticeScreen() {
     });
   };
 
-  if (!defect) return <RecordGate missing={missing} what="defect notice" />;
+  if (!defect) return <RecordGate missing={missing} what="defect notice" failed={failed} onRetry={() => { void load(); }} />;
 
   const isCritical = isQldCriticalDefect(!!defect.qldLimbInoperable, !!defect.qldLimbAdverseImpact);
   const dueAt = criticalNoticeDueAt(defect.raisedAt);
@@ -95,27 +105,39 @@ export default function NoticeScreen() {
       const file = await writePdf(`Critical Defect Notice - ${site.name}`, html);
       const shared = await shareFile(file, 'Critical defect notice');
 
-      // Only record it as issued once it has actually been handed over.
-      if (shared) {
-        const recipient = occupier.trim() || undefined;
-        /*
-         * The first hand-over is the statutory event, and whether the notice
-         * was given inside the 24 hours is judged against it — so a reissue
-         * does not write over that date. It is still a fact worth keeping, so
-         * it goes in the notes.
-         */
-        const reissue = defect.noticeIssuedAt
-          ? `Notice reissued ${qldMoment(now) ?? now}${recipient ? ` to ${recipient}` : ''}.`
-          : undefined;
-        update({
-          noticeIssuedAt: defect.noticeIssuedAt ?? now,
-          noticeRecipient: recipient,
-          rectificationDueAt: rectifyBy,
-          ...(reissue ? { notes: [defect.notes?.trim(), reissue].filter(Boolean).join('\n') } : {}),
-        });
+      /*
+       * Only record it as issued once it has actually been handed over — and
+       * say so when it was not. This branch used to end here: no share sheet
+       * meant no notice, no record and not a word, on the one document in the
+       * app that has twenty-four hours on it.
+       */
+      if (!shared) {
+        const notice = notSharedNotice(file.name, 'notice');
+        showAlert(
+          notice.title,
+          `${notice.body}\n\nNothing has been recorded as issued, because nobody has been given it yet.`,
+        );
+        return;
       }
+
+      const recipient = occupier.trim() || undefined;
+      /*
+       * The first hand-over is the statutory event, and whether the notice
+       * was given inside the 24 hours is judged against it — so a reissue
+       * does not write over that date. It is still a fact worth keeping, so
+       * it goes in the notes.
+       */
+      const reissue = defect.noticeIssuedAt
+        ? `Notice reissued ${qldMoment(now) ?? now}${recipient ? ` to ${recipient}` : ''}.`
+        : undefined;
+      update({
+        noticeIssuedAt: defect.noticeIssuedAt ?? now,
+        noticeRecipient: recipient,
+        rectificationDueAt: rectifyBy,
+        ...(reissue ? { notes: [defect.notes?.trim(), reissue].filter(Boolean).join('\n') } : {}),
+      });
     } catch (e) {
-      Alert.alert('Could not create the notice', e instanceof Error ? e.message : String(e));
+      showAlert('Could not create the notice', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
