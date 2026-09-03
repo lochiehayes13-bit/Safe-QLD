@@ -8,6 +8,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { listMatchCustomers, loadMapData, type MapData, type MapSiteRow } from '@/db/mapRepo';
 import { customerStats, siteStats, type CustomerStats } from '@/db/mirrorRepo';
 import { locateSites, type LocateProgress, type LocateResult } from '@/geo/geocode';
+import { GEOCODE_PROVIDER, geocodeNote } from '@/geo/platformGeocode';
 import { searchPlaces, type Place } from '@/geo/places';
 import { readPlacesKey } from '@/geo/placesKey';
 import {
@@ -63,8 +64,6 @@ import { MapCanvas, type MapCanvasHandle, type MapCanvasMessage } from '@/compon
 /** Brisbane, for a map with nothing on it yet. */
 const BRISBANE: LatLng = { latitude: -27.47, longitude: 153.02 };
 const DEFAULT_ZOOM = 9;
-/** Addresses geocoded per opening. See geo/geocode.ts for why it is a drip. */
-const GEOCODE_BUDGET = 200;
 /** The floating tab bar's height plus the gap the card keeps above it. See components/TabBar. */
 const TAB_BAR_CLEARANCE = 80;
 /**
@@ -149,8 +148,10 @@ export default function MapScreen() {
         setLocating(true);
         setProgress(null);
         setLocateFault(null);
+        // No budget: how many addresses one opening may look up is the
+        // platform's to say — two hundred on a phone, ten in a browser, and
+        // for reasons that belong next to each geocoder rather than here.
         const result = await locateSites(loaded.sites, {
-          budget: GEOCODE_BUDGET,
           located: new Set(loaded.positions.keys()),
           shouldStop: () => stopRef.current,
           onProgress: (p) => { if (active) setProgress(p); },
@@ -436,6 +437,10 @@ export default function MapScreen() {
     } else if (locateFault) {
       line += ' · not locating';
     }
+    // Where the coordinates come from and how fast, where the platform has
+    // anything to say about it. In a browser that is most of the story.
+    const pace = geocodeNote(data.sites.length - built.pins.length);
+    if (pace) line += ` · ${pace}`;
     if (shown.length !== built.pins.length) line += ` · ${formatCount(shown.length)} shown`;
     if (searching) line += ' · searching…';
     return line;
@@ -448,7 +453,7 @@ export default function MapScreen() {
     ?? (locateFault?.faultKind === 'permission'
       ? { text: 'Location is off for Safe QLD, so the sites cannot be placed on the map. Allow it to place them.', action: 'ask' }
       : locateFault?.fault
-        ? { text: `The phone’s geocoder stopped: ${locateFault.fault}`, action: 'none' }
+        ? { text: `${GEOCODE_PROVIDER} stopped: ${locateFault.fault}`, action: 'none' }
         : null);
   const onNoteAction = () => {
     if (note?.action === 'settings') void Linking.openSettings().catch(() => undefined);
@@ -565,7 +570,8 @@ export default function MapScreen() {
 
           <View style={{ alignSelf: 'flex-start', maxWidth: '100%' }}>
             <View style={{ ...floating, borderRadius: t.radius.pill, paddingHorizontal: t.space(2.5), paddingVertical: t.space(1) }}>
-              <Txt size="xs" tone={placeError ? 'warn' : 'muted'} numberOfLines={1}>{placeError ?? status}</Txt>
+              {/* Two lines: in a browser the status carries the geocoder's pace as well as the count. */}
+              <Txt size="xs" tone={placeError ? 'warn' : 'muted'} numberOfLines={2}>{placeError ?? status}</Txt>
             </View>
           </View>
 

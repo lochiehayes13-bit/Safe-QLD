@@ -3,18 +3,21 @@ import * as Location from 'expo-location';
 import { pendingKeys, readPositions, writeFailure, writePosition } from '@/db/geocodeRepo';
 import type { LatLng, MapSite } from '@/domain/mapPins';
 import { siteAddressKey, type AddressParts } from './geocodeKey';
+import { GEOCODE_BATCH, GEOCODE_SOURCE, geocodeAddress } from './platformGeocode';
 
 export { siteAddressKey } from './geocodeKey';
 
 /**
  * Finding out where the sites are.
  *
- * The phone's own geocoder, one address at a time, with a pause between. It is
- * a shared platform service with no contract about volume — Apple throttles
- * hard and Android's Geocoder is a black box — so this is deliberately a slow
- * drip that runs while the map is open and stops when it closes. Three
- * thousand sites take a fortnight of openings to fill in, and the map is
- * useful from the first two hundred.
+ * One address at a time, with a pause between, from whichever geocoder the
+ * platform has — see `platformGeocode.ts` and its `.web.ts` twin. It is a
+ * shared service with no contract about volume whichever it is, so this is
+ * deliberately a slow drip that runs while the map is open and stops when it
+ * closes. Three thousand sites take a fortnight of openings to fill in on a
+ * phone, and the map is useful from the first two hundred. A browser is
+ * slower still and says so on the screen: it is asking OpenStreetMap, ten a
+ * visit, and the phone app is the tool for a whole site list.
  *
  * On Android the geocoder refuses to answer without the foreground location
  * permission (checked in expo-location's LocationModule.kt, not documented on
@@ -26,8 +29,6 @@ export { siteAddressKey } from './geocodeKey';
  * misses that would not be retried for a month.
  */
 
-const SOURCE = 'device';
-
 export interface LocateProgress {
   done: number;
   total: number;
@@ -35,7 +36,7 @@ export interface LocateProgress {
 }
 
 export interface LocateOptions {
-  /** Addresses to attempt this run. Defaults to 200. */
+  /** Addresses to attempt this run. Defaults to the platform's batch: 200 on a phone, 10 in a browser. */
   budget?: number;
   /** Pause between geocoder calls, in milliseconds. Defaults to 400. */
   delayMs?: number;
@@ -127,7 +128,7 @@ async function ensurePermission(): Promise<boolean> {
  * doubles, and after a few in a row the run gives up until next time.
  */
 export async function locateSites(sites: readonly MapSite[], options: LocateOptions = {}): Promise<LocateResult> {
-  const budget = options.budget ?? 200;
+  const budget = options.budget ?? GEOCODE_BATCH;
   const baseDelay = options.delayMs ?? 400;
   const result: LocateResult = { attempted: 0, hits: 0, misses: 0, stopped: false };
 
@@ -162,13 +163,12 @@ export async function locateSites(sites: readonly MapSite[], options: LocateOpti
     }
     const key = queue[i]!;
     try {
-      const answers = await Location.geocodeAsync(key);
-      const first = answers[0];
+      const found = await geocodeAddress(key);
       result.attempted += 1;
       consecutiveFaults = 0;
       delay = baseDelay;
-      if (first && Number.isFinite(first.latitude) && Number.isFinite(first.longitude)) {
-        await writePosition(key, first.latitude, first.longitude, SOURCE);
+      if (found) {
+        await writePosition(key, found.lat, found.lng, GEOCODE_SOURCE);
         result.hits += 1;
       } else {
         await writeFailure(key);

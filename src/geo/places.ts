@@ -84,7 +84,15 @@ export function createPacer(
   };
 }
 
-const defaultPacer = createPacer();
+/**
+ * The app's one OpenStreetMap pacer.
+ *
+ * Exported because the site geocoder in the browser goes to the same service
+ * (see geo/platformGeocode.web.ts) and the policy is one request a second per
+ * application. Two pacers, one per feature, would each wait a second and
+ * together send two a second — politely, and against the rule.
+ */
+export const OSM_PACER = createPacer();
 
 // ---------------------------------------------------------------------------
 // Nominatim
@@ -271,7 +279,7 @@ export async function searchPlaces(query: string, options: SearchPlacesOptions):
     return mapGooglePlaces(await response.json());
   }
 
-  await (options.pacer ?? defaultPacer).wait();
+  await (options.pacer ?? OSM_PACER).wait();
   const response = await options.fetch(nominatimUrl(q, limit), {
     method: 'GET',
     headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
