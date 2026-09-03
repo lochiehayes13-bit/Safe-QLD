@@ -1,4 +1,3 @@
-import { Platform } from 'react-native';
 import { Directory, File, Paths } from 'expo-file-system';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -6,31 +5,22 @@ import { buildXlsx } from './xlsx';
 import type { Sheet } from './xlsx';
 import { isPdfName, mimeTypeFor, safeFileName } from './fileNames';
 import { toCsv } from '@/parsers/csv';
-import { filesNeedThePhone } from './shareOutcome';
 
 /**
- * Writing and sharing generated files.
+ * Writing and sharing generated files, on a phone.
  *
  * Everything lands in a Safe QLD folder inside the cache directory: the OS can
  * reclaim it under storage pressure, which is the right trade for exports the
  * tech has already sent on. Anything that must survive lives in SQLite.
+ *
+ * A browser has no file system to write into and no share sheet to open, so it
+ * has its own half of this — `files.web.ts` — where a spreadsheet is handed to
+ * the browser's downloads and a report is handed to its printer, which on an
+ * iPhone is how a PDF reaches Files or a mail. The screens import from here and
+ * the bundler picks the right one; neither knows which platform it is on.
  */
 
 const EXPORT_DIR = 'exports';
-
-/**
- * Refuses, in words, where the platform has no file system to write to.
- *
- * `expo-file-system` on web is a set of stubs that warn to the console and then
- * fail somewhere inside themselves, so without this every export on the browser
- * build ended as `this.validatePath is not a function` in front of a
- * technician. Checked here rather than at each of the twenty screens that
- * export something, because a screen cannot be expected to know which of the
- * platform's modules is real.
- */
-function requireFiles(what: string): void {
-  if (Platform.OS === 'web') throw filesNeedThePhone(what);
-}
 
 function exportDir(): Directory {
   const dir = new Directory(Paths.cache, EXPORT_DIR);
@@ -42,10 +32,14 @@ export interface WrittenFile {
   uri: string;
   name: string;
   size: number;
+  /**
+   * Set only by the web build, where a PDF is printed rather than written.
+   * Declared here so the two builds hand the screens the same shape.
+   */
+  printed?: boolean;
 }
 
 function writeBytes(fileName: string, bytes: Uint8Array): WrittenFile {
-  requireFiles('Producing this file');
   const file = new File(exportDir(), fileName);
   if (file.exists) file.delete();
   file.create();
@@ -54,7 +48,6 @@ function writeBytes(fileName: string, bytes: Uint8Array): WrittenFile {
 }
 
 function writeText(fileName: string, text: string): WrittenFile {
-  requireFiles('Producing this file');
   const file = new File(exportDir(), fileName);
   if (file.exists) file.delete();
   file.create();
@@ -80,7 +73,6 @@ export function writePack(baseName: string, bytes: Uint8Array): WrittenFile {
 
 /** Renders HTML to a PDF and moves it to a meaningful filename. */
 export async function writePdf(baseName: string, html: string): Promise<WrittenFile> {
-  requireFiles('Producing a PDF');
   const { uri } = await Print.printToFileAsync({ html, base64: false });
   const src = new File(uri);
   const target = new File(exportDir(), `${safeFileName(baseName)}.pdf`);

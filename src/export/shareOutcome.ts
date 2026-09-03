@@ -19,25 +19,24 @@
  */
 
 /**
- * Why a file cannot be produced at all in a browser.
+ * Why something cannot be produced at all in a browser.
  *
- * `expo-file-system`'s web module is stubs — its own words are "expo-file-system
- * is not supported on web" — and `expo-print`'s `printToFileAsync` calls
- * `window.print()` and returns nothing. So on the build that reaches an iPhone,
- * every spreadsheet, every PDF and every share pack fails, and until this was
- * written it failed with `this.validatePath is not a function` or `Cannot
- * destructure property 'uri' of undefined`. Both are true and neither is
- * something to read on a roof.
+ * Kept, and no longer used by the file layer: exports do work in a browser now
+ * (`files.web.ts` — a spreadsheet goes to the downloads, a report goes to the
+ * printer, which on an iPhone is how a PDF reaches Files or a mail). This is
+ * for the things that genuinely cannot be done in a page — the mail composer,
+ * the camera, the document picker — where the honest answer is still that the
+ * phone app is needed.
  *
  * The sentence says the two things that matter: nothing was produced, and
  * nothing typed in was lost. The records live in the app's database, which does
- * work in a browser — it is the file layer that does not.
+ * work in a browser.
  */
 export function filesNeedThePhone(what: string): Error {
   return new Error(
-    `${what} needs the phone app. A browser gives a page no way to write a file, print one or `
-    + 'open a share sheet, so nothing was produced. Nothing has been lost — everything on this '
-    + 'screen is saved, and the same screen in the phone app will produce it.',
+    `${what} needs the phone app. A browser gives a page no way to do it, so nothing was `
+    + 'produced. Nothing has been lost — everything on this screen is saved, and the same screen '
+    + 'in the phone app will produce it.',
   );
 }
 
