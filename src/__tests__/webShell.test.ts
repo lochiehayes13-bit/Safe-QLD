@@ -60,6 +60,15 @@ describe('the web shell', () => {
     expect(injectShell(shell)).toBe(shell);
   });
 
+  it('registers the worker from where the app lives, not from the page that is open', () => {
+    // './sw.js' on /work/timesheets asks the host for /work/sw.js, which is
+    // not there, and the registration fails silently — leaving the app
+    // online-only for exactly the person who followed a link to a screen.
+    expect(shell).toContain('_expo/static/js/web/');
+    expect(shell).toContain("register(root + 'sw.js'");
+    expect(shell).not.toContain("register('./sw.js')");
+  });
+
   it('refuses a page it cannot write into rather than returning it unchanged', () => {
     expect(() => injectShell('<html><body>no head here</body></html>')).toThrow(/no <\/head>/);
   });
@@ -103,4 +112,6 @@ describe('the service worker', () => {
   it('survives one file failing to cache, rather than installing nothing', () => {
     expect(source).toContain('cache.add(f).catch(() => {})');
   });
+
+
 });

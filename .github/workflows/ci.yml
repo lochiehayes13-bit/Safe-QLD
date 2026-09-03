@@ -87,6 +87,26 @@ jobs:
       - name: Stamp the build
         run: echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
 
+      # A GitHub project page is served from /<repo>/, not from the root of the
+      # domain, and the export writes its asset paths from the root — so on a
+      # project page every one of them is a 404 and the page is blank. Expo
+      # takes the prefix from app.json rather than a flag, so it is written in
+      # before the export when WEB_BASE_URL says the app will live under a
+      # path. Netlify, Cloudflare and a <name>.github.io repository all serve
+      # at the root, and there the variable is left unset.
+      - name: Point the build at where it will be served
+        if: vars.WEB_BASE_URL != ''
+        run: |
+          node -e '
+            const fs = require("fs");
+            const app = JSON.parse(fs.readFileSync("app.json", "utf8"));
+            app.expo.experiments = { ...app.expo.experiments, baseUrl: process.env.BASE };
+            fs.writeFileSync("app.json", JSON.stringify(app, null, 2) + "\n");
+            console.log("baseUrl set to " + process.env.BASE);
+          '
+        env:
+          BASE: ${{ vars.WEB_BASE_URL }}
+
       - name: Export for the web
         env:
           EXPO_PUBLIC_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -119,6 +139,10 @@ jobs:
       #      WEB_REPO holding that name. The RELEASES_TOKEN secret the APK
       #      mirror uses is reused, so its fine-grained token needs Contents:
       #      read and write on that repository too.
+      #   3. A project page is served from /<repo>/, so add WEB_BASE_URL
+      #      holding that same path with slashes either side, e.g.
+      #      /safe-qld-app/. Leave it unset for anything served at the root of
+      #      a domain.
       #
       # Until both are set this step says so and exits clean; the build above
       # is still downloadable from the run.

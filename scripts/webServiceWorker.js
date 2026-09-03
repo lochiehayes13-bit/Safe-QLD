@@ -83,12 +83,28 @@ self.addEventListener('fetch', (event) => {
 }
 
 /** The line the page runs to install it. Kept here so the shell and the worker cannot drift. */
+/**
+ * The line the page runs to install it. Kept here so the shell and the worker
+ * cannot drift.
+ *
+ * The path is worked out from the bundle's own `<script>` rather than written
+ * as `./sw.js`, because a relative path is relative to the page: opened at a
+ * deep link like /work/timesheets it asks the host for /work/sw.js, which is
+ * not there, and the registration fails silently — leaving the app online-only
+ * for exactly the person who followed a link to a screen. The bundle always
+ * sits under `_expo/`, so everything before that is where the app lives,
+ * whether it is served from a domain root or a project sub-path.
+ */
 const REGISTRATION = `
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', function () {
-          navigator.serviceWorker.register('./sw.js').catch(function () { /* a browser that refuses it still runs the app online */ });
+          var bundle = document.querySelector('script[src*="_expo/static/js/web/"]');
+          var src = bundle ? bundle.getAttribute('src') : '';
+          var root = src.indexOf('_expo/') >= 0 ? src.slice(0, src.indexOf('_expo/')) : './';
+          navigator.serviceWorker.register(root + 'sw.js', { scope: root })
+            .catch(function () { /* a browser that refuses it still runs the app online */ });
         });
       }
-`;
+`
 
 module.exports = { serviceWorkerSource, REGISTRATION, SKIP };
