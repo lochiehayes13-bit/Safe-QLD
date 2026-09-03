@@ -1,0 +1,96 @@
+name: Web app on Pages
+
+# The link anybody can open. The APK cannot be installed on an iPhone and the
+# App Store wants a developer account and a review, so the browser build is how
+# this app reaches everyone else — and a page needs somewhere public to live.
+#
+# What is published is the built app and nothing else: the JavaScript bundle,
+# the fonts and the icon. No source, no history, no configuration. The site is
+# rebuilt from the branch on every push.
+on:
+  push:
+    branches: [claude/android-app-creation-r4w42g, main]
+  workflow_dispatch:
+
+# Pages takes one deployment at a time; a newer push should win rather than
+# queue behind a build nobody is waiting for any more.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  publish:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Turns Pages on for this repository if it is not on already, and tells
+      # the build what path the site will be served from.
+      - name: Set up Pages
+        id: pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Install
+        run: npm ci --legacy-peer-deps
+
+      - name: Stamp the build
+        run: echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      # A project page is served from /<repo>/, not from the root of the domain,
+      # and the export writes its asset paths from the root — so without this
+      # every one of them is a 404 and the page is blank. Expo takes the prefix
+      # from app.json rather than a flag, so it goes in before the export.
+      - name: Point the build at the site's own path
+        env:
+          BASE: ${{ steps.pages.outputs.base_path }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const app = JSON.parse(fs.readFileSync("app.json", "utf8"));
+            const base = (process.env.BASE || "").replace(/\/*$/, "/") || "/";
+            app.expo.experiments = { ...app.expo.experiments, baseUrl: base === "/" ? "" : base.replace(/\/$/, "") };
+            fs.writeFileSync("app.json", JSON.stringify(app, null, 2) + "\n");
+            console.log("baseUrl: " + JSON.stringify(app.expo.experiments.baseUrl));
+          '
+
+      - name: Export for the web
+        env:
+          EXPO_PUBLIC_BUILD_SHA: ${{ github.sha }}
+          EXPO_PUBLIC_BUILD_TIME: ${{ env.BUILD_TIME }}
+          EXPO_PUBLIC_UPDATES_REPO: ${{ vars.RELEASES_REPO || github.repository }}
+        run: npx expo export --platform web --output-dir web-build
+
+      # The head tags that make it an app on a home screen rather than a browser
+      # tab, the offline copy, and 404.html — a static host has no router, so a
+      # deep link is a miss and the 404 page is what hands it to the app.
+      - name: Finish the web shell
+        run: node scripts/webShell.js web-build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web-build
+
+      - name: Deploy
+        id: deploy
+        uses: actions/deploy-pages@v4
+
+      - name: Say where it is
+        run: echo "The app is at ${{ steps.deploy.outputs.page_url }}"
