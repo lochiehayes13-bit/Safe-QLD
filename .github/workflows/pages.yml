@@ -11,6 +11,12 @@ on:
   push:
     branches: [claude/android-app-creation-r4w42g, main]
   workflow_dispatch:
+  # Pages has to be switched on by hand once — the token this runs as is
+  # refused it. Rather than leaving the site waiting for whoever notices, this
+  # looks once an hour: while the switch is off the job takes about ten seconds
+  # and does nothing, and the hour it goes on, the app publishes itself.
+  schedule:
+    - cron: '17 * * * *'
 
 # Pages takes one deployment at a time; a newer push should win rather than
 # queue behind a build nobody is waiting for any more.
