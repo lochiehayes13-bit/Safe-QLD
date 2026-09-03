@@ -1,4 +1,6 @@
-import { SCHEDULE_COLUMNS, mapSchedule, scheduleDateFilter, type RawSchedule } from '@/simpro/resources';
+import {
+  SCHEDULE_COLUMNS, mapSchedule, rejectedTheDateRange, scheduleDateFilter, type RawSchedule,
+} from '@/simpro/resources';
 
 /**
  * The diary read, against the shapes the live build actually returns.
@@ -116,5 +118,30 @@ describe('the date filter', () => {
     // of 4,422 blocks, so the filter is applied server-side rather than
     // ignored — which is the difference between one read and twenty-eight.
     expect(scheduleDateFilter('2026-09-01', '2026-09-30')).toBe('between(2026-09-01,2026-09-30)');
+  });
+});
+
+describe('what the fallback to a day at a time is for', () => {
+  const columns = '{"errors":[{"path":null,"message":"Invalid columns found.","value":"Job"}]}';
+
+  it('does not blame the date range for a refused column', () => {
+    // This is the bug that made the original failure unreadable: the sync
+    // said the date filter had been rejected, retried a day at a time with
+    // the same bad column, and reported the day reads' failure. Somebody
+    // reading the notes was told the wrong cause.
+    expect(rejectedTheDateRange(422, columns)).toBe(false);
+  });
+
+  it('falls back when the build will not take between()', () => {
+    expect(rejectedTheDateRange(422, '{"errors":[{"message":"Invalid filter value for Date."}]}')).toBe(true);
+    expect(rejectedTheDateRange(400, 'Bad Request')).toBe(true);
+  });
+
+  it('does not fall back on anything that is not a refusal', () => {
+    // A 500 or a dropped connection is not the build declining the range,
+    // and reading two days instead would quietly halve the diary.
+    expect(rejectedTheDateRange(500, 'Internal Server Error')).toBe(false);
+    expect(rejectedTheDateRange(undefined, 'The network dropped')).toBe(false);
+    expect(rejectedTheDateRange(401, 'Unauthorized')).toBe(false);
   });
 });

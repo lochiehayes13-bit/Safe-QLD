@@ -180,6 +180,27 @@ export function scheduleDateFilter(from: string, to: string): string {
 }
 
 /**
+ * Whether a rejected schedules read was rejected over the date range.
+ *
+ * The sync answers a refused range by reading today and tomorrow one day at
+ * a time, so a technician still gets the two days that matter. That fallback
+ * is right for a build that will not take `between(...)` and wrong for
+ * everything else — and for a while it was reached on the one refusal it
+ * could not help with. The build answered
+ * `422 Invalid columns found` about a column, the sync said the date filter
+ * had been rejected, retried a day at a time with the same bad column, and
+ * reported the day reads' failure. The words in the notes named the wrong
+ * cause on a screen somebody was meant to act on.
+ *
+ * So the message is read. A refusal that names a column is not the range's,
+ * and is re-thrown to be reported as itself.
+ */
+export function rejectedTheDateRange(status: number | undefined, message: string): boolean {
+  if (status !== 400 && status !== 422) return false;
+  return !/invalid\s+column|unknown\s+column|column.*not\s+(found|valid)/i.test(message);
+}
+
+/**
  * One schedule row, however it was asked for.
  *
  * A block can be split across the day — two hours in the morning and two

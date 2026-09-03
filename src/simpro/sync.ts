@@ -1,5 +1,5 @@
 import { SimproClient, SimproError, type SimproConfig } from './client';
-import { SimproResources, scheduleDateFilter, type SimproSite } from './resources';
+import { SimproResources, rejectedTheDateRange, scheduleDateFilter, type SimproSite } from './resources';
 import {
   SimproMirror, dateSinceFilter, invoiceWindowStart, type PagedRead, type SimproCustomer, type SimproInvoice,
 } from './mirrorResources';
@@ -636,7 +636,7 @@ export async function pullFromSimpro(
     try {
       blocks = await api.schedulesBetween(window.from, window.to);
     } catch (e) {
-      const rejectedFilter = e instanceof SimproError && (e.status === 400 || e.status === 422);
+      const rejectedFilter = e instanceof SimproError && rejectedTheDateRange(e.status, e.message);
       if (!rejectedFilter) throw e;
       result.notes.push(
         `Simpro rejected the schedule date filter Date=${scheduleDateFilter(window.from, window.to)} `
