@@ -20,6 +20,18 @@ const fs = require('fs');
 const path = require('path');
 
 const { injectShell } = require('./webShellHtml');
+const { serviceWorkerSource } = require('./webServiceWorker');
+
+/** Every file in the export, as paths the server will serve. */
+function listFiles(root, prefix = '') {
+  const out = [];
+  for (const entry of fs.readdirSync(path.join(root, prefix), { withFileTypes: true })) {
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) out.push(...listFiles(root, rel));
+    else out.push(rel);
+  }
+  return out;
+}
 
 const dir = process.argv[2];
 if (!dir) {
@@ -36,4 +48,10 @@ fs.writeFileSync(path.join(dir, '404.html'), finished);
 // hides every directory whose name starts with an underscore — which is where
 // the entire bundle lives.
 fs.writeFileSync(path.join(dir, '.nojekyll'), '');
-console.log(`web shell written into ${indexPath}, copied to 404.html`);
+
+// The service worker is written from the finished export, so its list names
+// the files that are actually there, hashed names and all.
+const worker = serviceWorkerSource(listFiles(dir));
+fs.writeFileSync(path.join(dir, 'sw.js'), worker);
+
+console.log(`web shell written into ${indexPath}, copied to 404.html; sw.js caches ${listFiles(dir).length - 3} files`);

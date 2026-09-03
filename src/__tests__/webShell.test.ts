@@ -8,6 +8,10 @@
 const { injectShell, GROUND } = require('../../scripts/webShellHtml') as {
   injectShell: (html: string) => string; GROUND: string;
 };
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { serviceWorkerSource } = require('../../scripts/webServiceWorker') as {
+  serviceWorkerSource: (files: string[]) => string;
+};
 
 /** What `npx expo export --platform web` actually writes, trimmed. */
 const EXPORTED = [
@@ -58,5 +62,45 @@ describe('the web shell', () => {
 
   it('refuses a page it cannot write into rather than returning it unchanged', () => {
     expect(() => injectShell('<html><body>no head here</body></html>')).toThrow(/no <\/head>/);
+  });
+});
+
+/**
+ * A browser with no signal is no use in a plant room, so the web build carries
+ * its own copy. The worker that does it is generated from the export, because
+ * every build hashes its own file names.
+ */
+describe('the service worker', () => {
+  const files = ['index.html', '404.html', 'sw.js', 'icon.png', '_expo/static/js/web/index-abc.js', 'assets/font-1.ttf'];
+  const source = serviceWorkerSource(files);
+
+  it('caches the app and its assets', () => {
+    expect(source).toContain('"./index.html"');
+    expect(source).toContain('"./_expo/static/js/web/index-abc.js"');
+    expect(source).toContain('"./assets/font-1.ttf"');
+  });
+
+  it('does not try to cache itself or the fallback copy of the page', () => {
+    expect(source).not.toContain('"./sw.js"');
+    expect(source).not.toContain('"./404.html"');
+  });
+
+  it('answers a deep link with the app, because a static host has no router', () => {
+    expect(source).toContain("request.mode === 'navigate'");
+    expect(source).toContain("cache.match('./index.html')");
+  });
+
+  it('names its cache after the build, and throws the last one away', () => {
+    expect(source).toMatch(/const CACHE = 'safeqld-[0-9a-f]{12}'/);
+    expect(source).toContain('caches.delete(key)');
+  });
+
+  it('gives the same build the same cache name, and a changed build a new one', () => {
+    expect(serviceWorkerSource([...files].reverse())).toBe(source);
+    expect(serviceWorkerSource([...files, 'assets/font-2.ttf'])).not.toBe(source);
+  });
+
+  it('survives one file failing to cache, rather than installing nothing', () => {
+    expect(source).toContain('cache.add(f).catch(() => {})');
   });
 });

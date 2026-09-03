@@ -7,6 +7,8 @@
 /** The dark ground of the app, so a slow first load is not a white flash. */
 const GROUND = '#0B0D10';
 
+const { REGISTRATION } = require('./webServiceWorker');
+
 const TAGS = `
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, shrink-to-fit=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -21,6 +23,7 @@ const TAGS = `
       html, body { background-color: ${GROUND}; }
       body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
     </style>
+    <script>${REGISTRATION}    </script>
 `;
 
 /**
