@@ -4,10 +4,10 @@ import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as MailComposer from 'expo-mail-composer';
 import { getTimesheet, listTimesheets, saveTimesheet } from '@/db/timesheetRepo';
-import { openJobPicks, type JobPick } from '@/db/opsRepo';
+import { jobCount, openJobPicks, searchJobPicks, type JobPick } from '@/db/opsRepo';
 import {
   DEFAULT_EXTRAS, LEAVE_KINDS, LEAVE_LABEL, STANDARD_DAY_HOURS,
-  blankEntry, copyDay, dayName, dayWorkedHours, entryHours, filterJobOptions, jobOptions,
+  blankEntry, copyDay, dayName, dayWorkedHours, entryHours, filterJobOptions, jobOptions, mergeJobOptions,
   leaveOf, previousDayWithEntries, setLeave, timesheetTotals, toggleExtra, usualTimes, weekDates,
   type HourKind, type JobOption, type LeaveKind, type Timesheet, type TimesheetEntry,
 } from '@/domain/timesheet';
@@ -53,6 +53,7 @@ export default function TimesheetScreen() {
   const [history, setHistory] = useState<Timesheet[]>([]);
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState<{ date: string } | null>(null);
+  const [heldJobs, setHeldJobs] = useState<number | null>(null);
 
   /*
    * One read, not three. The week, the job list and the history each used to be
@@ -64,17 +65,23 @@ export default function TimesheetScreen() {
     if (!id) return;
     setFailed(null);
     try {
-      const [found, jobList, past] = await Promise.all([
+      const [found, jobList, past, jobsHeld] = await Promise.all([
         // Four columns of the open jobs, not four hundred whole job rows —
         // description, office notes, contact, contract and tags included —
         // read to offer a list of job numbers and site names and then have
         // every complete one thrown away.
         getTimesheet(id), openJobPicks(400), listTimesheets(),
+        // How many jobs this device holds at all, so the picker can tell a
+        // search that found nothing from a device that has never been
+        // connected to the office — which is most of a first run, and reads
+        // as the app being broken when it says "nothing matches".
+        jobCount(),
       ]);
       setSheet(found);
       setMissing(!found);
       setJobs(jobList);
       setHistory(past);
+      setHeldJobs(jobsHeld);
     } catch (e) {
       setFailed(describeLoadFailure(e, 'this timesheet'));
     }
@@ -262,6 +269,7 @@ export default function TimesheetScreen() {
       <JobPicker
         visible={picking !== null}
         options={options}
+        held={heldJobs}
         theme={t}
         onPick={(opt) => picking && addJob(picking.date, opt)}
         onBlank={() => picking && addJob(picking.date, null)}
@@ -435,14 +443,71 @@ function LeavePicker({
   );
 }
 
+/**
+ * Picking the job an hour was worked on.
+ *
+ * This used to hold a list and filter it in the screen — and the list was the
+ * first sixty open jobs, so typing a client's name found nothing unless that
+ * client happened to be among the sixty. On a phone holding four and a half
+ * thousand jobs that is a search that mostly says no, which is exactly what
+ * the office system does not do.
+ *
+ * So anything typed goes to the database, over every job, matching the job
+ * number, the site, the client, the office's order number and the title. The
+ * days already worked are still offered first and still say so; they come from
+ * this person's own timesheets, which the database does not know about.
+ */
 function JobPicker({
-  visible, options, theme: t, onPick, onBlank, onClose,
+  visible, options, held, theme: t, onPick, onBlank, onClose,
 }: {
-  visible: boolean; options: JobOption[]; theme: Theme;
+  visible: boolean; options: JobOption[]; held: number | null; theme: Theme;
   onPick: (opt: JobOption) => void; onBlank: () => void; onClose: () => void;
 }) {
   const [q, setQ] = useState('');
-  const filtered = useMemo(() => filterJobOptions(options, q), [options, q]);
+  const [found, setFound] = useState<JobOption[] | null>(null);
+  const [searching, setSearching] = useState(false);
+
+  // A search per keystroke over four thousand rows would fight the keyboard,
+  // and a search that lands after the next one would show the wrong answer —
+  // so it waits for a pause, and a stale reply is dropped.
+  useEffect(() => {
+    const typed = q.trim();
+    if (!typed) { setFound(null); setSearching(false); return; }
+    let current = true;
+    const timer = setTimeout(() => {
+      void (async () => {
+        // The spinner goes up with the search rather than with the keystroke:
+        // it belongs to the read, and so does turning it off again, which is
+        // what keeps "Looking…" from being left on screen by a read that
+        // failed.
+        setSearching(true);
+        try {
+          const rows = await searchJobPicks(typed, 60);
+          if (!current) return;
+          setFound(rows.filter((r) => r.externalId).map((r) => ({
+            jobNumber: r.externalId ?? '',
+            siteName: r.siteName ?? '',
+            siteId: r.siteId,
+            customerName: r.customerName,
+            source: 'simpro' as const,
+          })));
+        } catch {
+          // A search that could not run is not a job that does not exist, so
+          // the list empties and the line below says what to do about it —
+          // "Type it myself" is always there and always works.
+          if (current) setFound([]);
+        } finally {
+          if (current) setSearching(false);
+        }
+      })();
+    }, 180);
+    return () => { current = false; clearTimeout(timer); };
+  }, [q]);
+
+  const filtered = useMemo(
+    () => mergeJobOptions(filterJobOptions(options, q), found ?? []),
+    [options, q, found],
+  );
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
       <View style={{ flex: 1, backgroundColor: t.color.bg }}>
@@ -453,7 +518,7 @@ function JobPicker({
         <View style={{ paddingHorizontal: t.space(4) }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.space(2), backgroundColor: t.color.surface, borderWidth: 1, borderColor: t.color.border, borderRadius: t.radius.pill, paddingHorizontal: t.space(4), minHeight: t.touch }}>
             <MaterialCommunityIcons name="magnify" size={20} color={t.color.textFaint} />
-            <TextInput value={q} onChangeText={setQ} placeholder="Job number or site" placeholderTextColor={t.color.textFaint} autoFocus style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md }} />
+            <TextInput value={q} onChangeText={setQ} placeholder="Job number, site or client" placeholderTextColor={t.color.textFaint} autoFocus style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md }} />
           </View>
         </View>
         <ScrollView contentContainerStyle={{ padding: t.space(4), gap: t.space(2) }}>
@@ -470,13 +535,22 @@ function JobPicker({
               <Rowed gap={2}>
                 <View style={{ flex: 1 }}>
                   <Txt weight="700" numberOfLines={1}>{o.siteName || `Job ${o.jobNumber}`}</Txt>
-                  <Txt size="xs" tone="faint">{o.jobNumber ? `Job ${o.jobNumber}` : 'No job number'} · {o.source === 'recent' ? 'you worked this recently' : 'open in Simpro'}</Txt>
+                  {o.customerName ? <Txt size="xs" tone="muted" numberOfLines={1}>{o.customerName}</Txt> : null}
+                  <Txt size="xs" tone="faint">{o.jobNumber ? `Job ${o.jobNumber}` : 'No job number'} · {o.source === 'recent' ? 'you worked this recently' : 'from the office'}</Txt>
                 </View>
                 <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
               </Rowed>
             </Pressable>
           ))}
-          {filtered.length === 0 ? <Txt tone="muted" style={{ textAlign: 'center', marginTop: t.space(4) }}>Nothing matches. Tap “Type it myself”.</Txt> : null}
+          {filtered.length === 0 ? (
+            <Txt tone="muted" style={{ textAlign: 'center', marginTop: t.space(4) }}>
+              {searching
+                ? 'Looking…'
+                : held === 0
+                  ? 'This device has no jobs on it yet. Connect to the office in Settings, or tap “Type it myself”.'
+                  : 'Nothing matches. Tap “Type it myself”.'}
+            </Txt>
+          ) : null}
         </ScrollView>
       </View>
     </Modal>

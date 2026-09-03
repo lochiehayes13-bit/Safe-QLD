@@ -1,6 +1,8 @@
 import {
   failedSync, forgetSync, getJob, jobSummariesByExternalIds, listJobPage, listJobSummaries, listJobs,
   openJobPicks, setJobStatus, upsertJob,
+  searchJobPicks,
+  jobCount,
 } from '@/db/opsRepo';
 import { scheduledJobExternalIds } from '@/db/mirrorRepo';
 import { applyJobFilter, type JobListFilter } from '@/domain/jobPresentation';
@@ -461,11 +463,60 @@ describe('the job list as a query', () => {
     expect(forCustomer.rows.map((j) => j.id)).toEqual(['j-site']);
   });
 
+
+  it('searches every job the way the office system does, not a slice of the newest', async () => {
+    // The fault this replaces: the picker held the first sixty open jobs and
+    // filtered them in the screen, so a client's name found nothing unless
+    // that client happened to be in the sixty.
+    await upsertJob({ id: 'j-ymca', externalId: '44432', title: 'Annual Portables September 2026', siteName: 'YMCA - Bowen Hills', customerName: 'YMCA Brisbane', status: 'scheduled' });
+    await upsertJob({ id: 'j-old', externalId: '41000', title: 'Monthly HYD', siteName: 'Fictional Tower', customerName: 'Fictional Holdings', status: 'complete' });
+    await upsertJob({ id: 'j-order', externalId: '41001', title: 'Repairs', siteName: 'Somewhere Else', orderNo: 'PO-8891', status: 'scheduled' });
+
+    const bySite = await searchJobPicks('ymca');
+    expect(bySite.map((p) => p.externalId)).toContain('44432');
+
+    const byCustomer = await searchJobPicks('brisbane');
+    expect(byCustomer.map((p) => p.externalId)).toContain('44432');
+
+    const byNumber = await searchJobPicks('4443');
+    expect(byNumber.map((p) => p.externalId)).toContain('44432');
+
+    const byOrder = await searchJobPicks('PO-8891');
+    expect(byOrder.map((p) => p.externalId)).toContain('41001');
+
+    const byTitle = await searchJobPicks('portables');
+    expect(byTitle.map((p) => p.externalId)).toContain('44432');
+  });
+
+  it('still finds a job that is finished, because Friday is filled in on Monday', async () => {
+    await upsertJob({ id: 'j-done', externalId: '40999', title: 'Last visit', siteName: 'Closed Site', status: 'complete' });
+    const found = await searchJobPicks('closed site');
+    expect(found.map((p) => p.externalId)).toContain('40999');
+  });
+
+  it('puts open work first, since a timesheet is usually about this week', async () => {
+    await upsertJob({ id: 'j-shut', externalId: '40001', title: 'Finished', siteName: 'Same Name Site', status: 'complete' });
+    await upsertJob({ id: 'j-live', externalId: '40002', title: 'Still on', siteName: 'Same Name Site', status: 'scheduled' });
+    const found = await searchJobPicks('same name site');
+    expect(found[0]!.externalId).toBe('40002');
+  });
+
+  it('counts what the device holds, so a picker can tell "none here" from "no match"', async () => {
+    // A browser or a fresh install starts with nothing, and "nothing matches"
+    // reads as a broken search rather than a device that was never connected.
+    expect(await jobCount()).toBe(0);
+    await upsertJob({ id: 'j-count', externalId: '40100', title: 'Something', siteName: 'A Site', status: 'scheduled' });
+    expect(await jobCount()).toBe(1);
+  });
+
   it('offers a picker the open jobs with an office number, and only four columns of them', async () => {
     await book();
     const picks = await openJobPicks(50);
     expect(picks.map((p) => p.externalId)).toEqual(['43747', '43751', '43750', '43748']);
-    expect(Object.keys(picks[0]!).sort()).toEqual(['externalId', 'siteId', 'siteName', 'status']);
+    // Six columns, not the forty a whole job row carries: the picker shows the
+    // site, the client under it and the job number, and needs nothing else.
+    expect(Object.keys(picks[0]!).sort())
+      .toEqual(['customerName', 'externalId', 'siteId', 'siteName', 'status', 'title']);
   });
 
   it('resolves the schedule’s job numbers straight, however old the jobs are', async () => {

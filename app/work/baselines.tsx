@@ -10,6 +10,9 @@ import { useTheme } from '@/theme';
 import { Banner, Button, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
 import { describeLoadFailure } from '@/domain/loadFailure';
 import { showAlert } from '@/components/alert';
+import { needsSiteState } from '@/domain/deviceData';
+import { loadPrefs } from '@/app-prefs';
+import { everSynced } from '@/simpro/watermark';
 
 /** Baseline data records across every site. */
 export default function BaselinesScreen() {
@@ -36,7 +39,18 @@ export default function BaselinesScreen() {
   const create = async () => {
     const all = await listSites();
     if (!all.length) {
-      showAlert('No sites yet', 'Add a site first — baseline data belongs to a building.');
+      // Not "add a site first": on a device that has never been connected —
+      // a browser, a new handset — the office's three thousand buildings are
+      // one sync away, and telling somebody to type one in sends them the
+      // wrong way. `needsSiteState` decides which of the two it is.
+      const prefs = await loadPrefs();
+      const words = needsSiteState(
+        { held: 0, connected: Boolean(prefs.simproClientId && prefs.simproCompanyId), everSynced: await everSynced() },
+        'Baseline data',
+      );
+      showAlert(words.title, words.body, words.action
+        ? [{ text: words.action.label, onPress: () => router.push(words.action!.route) }, { text: 'Not now', style: 'cancel' }]
+        : undefined);
       return;
     }
     if (all.length === 1) {

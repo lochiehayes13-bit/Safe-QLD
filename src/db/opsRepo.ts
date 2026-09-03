@@ -356,7 +356,8 @@ async function countJobs(
 }
 
 /** The little a picker needs off a job: the office's number, where it is, and whether it is still on. */
-export type JobPick = Pick<JobRecord, 'externalId' | 'siteName' | 'siteId' | 'status'>;
+export type JobPick = Pick<JobRecord, 'externalId' | 'siteName' | 'siteId' | 'status'>
+  & { customerName?: string; title?: string };
 
 /**
  * The open jobs a picker offers, newest first.
@@ -369,11 +370,53 @@ export type JobPick = Pick<JobRecord, 'externalId' | 'siteName' | 'siteId' | 'st
 export async function openJobPicks(limit = 400): Promise<JobPick[]> {
   const db = await getDb();
   return db.getAllAsync<JobPick>(
-    `SELECT externalId, siteName, siteId, status FROM job
+    `SELECT externalId, siteName, siteId, status, customerName, title FROM job
      WHERE ${JOB_IS_OPEN} AND externalId IS NOT NULL
      ${JOB_LIST_ORDER} LIMIT ?`,
     limit,
   );
+}
+
+/**
+ * Searching every job on the phone the way the office system searches.
+ *
+ * The picker used to hold a list and filter it in the screen, and the list was
+ * the first sixty open jobs — so typing a client's name found nothing unless
+ * that client happened to be in the sixty, and a job finished last month could
+ * not be found at all. On a phone holding four and a half thousand jobs that
+ * is a search that mostly says no.
+ *
+ * This asks the database instead, over every job, matching the things a
+ * technician actually types: the job number, the site, the customer, the
+ * office's own order number and the job's title. Open work sorts first, since
+ * that is what a timesheet is usually about, but a finished job is still
+ * findable — people fill Friday's timesheet in on Monday.
+ */
+export async function searchJobPicks(query: string, limit = 50): Promise<JobPick[]> {
+  const q = query.trim().toLowerCase();
+  if (!q) return openJobPicks(limit);
+  const db = await getDb();
+  const like = `%${q}%`;
+  return db.getAllAsync<JobPick>(
+    `SELECT externalId, siteName, siteId, status, customerName, title FROM job
+     WHERE externalId IS NOT NULL
+       AND (LOWER(externalId) LIKE ?
+         OR LOWER(COALESCE(siteName, '')) LIKE ?
+         OR LOWER(COALESCE(customerName, '')) LIKE ?
+         OR LOWER(COALESCE(orderNo, '')) LIKE ?
+         OR LOWER(COALESCE(title, '')) LIKE ?)
+     ORDER BY CASE WHEN ${JOB_IS_OPEN} THEN 0 ELSE 1 END,
+              COALESCE(dateModified, scheduledFor, '') DESC
+     LIMIT ?`,
+    like, like, like, like, like, limit,
+  );
+}
+
+/** How many jobs the device holds at all, so a picker can tell "none here" from "no match". */
+export async function jobCount(): Promise<number> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM job');
+  return row?.n ?? 0;
 }
 
 /**

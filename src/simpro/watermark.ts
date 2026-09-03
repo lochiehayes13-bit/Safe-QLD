@@ -57,3 +57,16 @@ export async function readAllSyncState(): Promise<SyncState[]> {
   ];
   return Promise.all(resources.map(readSyncState));
 }
+
+/**
+ * Whether anything has ever been pulled onto this device.
+ *
+ * An empty screen has two very different causes — a device nobody connected,
+ * and a device that is connected and simply has nothing yet — and until this
+ * existed every screen said the same thing about both, which is how a browser
+ * with an empty database read as an app that does not work.
+ */
+export async function everSynced(): Promise<boolean> {
+  const states = await readAllSyncState();
+  return states.some((s) => Boolean(s.lastSyncedAt));
+}

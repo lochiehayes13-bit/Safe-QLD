@@ -393,6 +393,8 @@ export interface JobOption {
   jobNumber: string;
   siteName: string;
   siteId?: string;
+  /** The client, where the office knows it: Simpro's own search leads with it. */
+  customerName?: string;
   /** Where the option came from, so the list can say. */
   source: 'recent' | 'simpro';
 }
@@ -407,8 +409,8 @@ export interface JobOption {
  */
 export function jobOptions(
   recentSheets: Timesheet[],
-  simproJobs: { externalId?: string; siteName: string; siteId?: string; status: string }[],
-  limit = 60,
+  simproJobs: { externalId?: string; siteName: string; siteId?: string; status: string; customerName?: string }[],
+  limit = 200,
 ): JobOption[] {
   const out: JobOption[] = [];
   const seen = new Set<string>();
@@ -434,16 +436,48 @@ export function jobOptions(
     const key = keyOf(number, j.siteName);
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ jobNumber: number, siteName: j.siteName, siteId: j.siteId, source: 'simpro' });
+    out.push({ jobNumber: number, siteName: j.siteName, siteId: j.siteId, customerName: j.customerName, source: 'simpro' });
   }
   return out.slice(0, limit);
 }
 
 /** Case-insensitive filter of job options by number or site. */
+/**
+ * Narrowing the offered list to what was typed.
+ *
+ * Matches the client as well as the job number and the site, because that is
+ * what a technician types: they know they were at the YMCA, not that it was
+ * job 44432. Only ever used on the handful of options the screen already
+ * holds — searching the whole book is the database's job, not this one's.
+ */
 export function filterJobOptions(options: JobOption[], query: string): JobOption[] {
   const q = query.trim().toLowerCase();
   if (!q) return options;
-  return options.filter((o) => o.jobNumber.includes(q) || o.siteName.toLowerCase().includes(q));
+  return options.filter((o) => (
+    o.jobNumber.toLowerCase().includes(q)
+    || o.siteName.toLowerCase().includes(q)
+    || (o.customerName ?? '').toLowerCase().includes(q)
+  ));
+}
+
+/**
+ * One list from two sources, without the same job twice.
+ *
+ * The days a person has already worked come from their own timesheets and the
+ * rest from the office's jobs; a job in both is theirs, and keeps the "you
+ * worked this recently" line that makes it recognisable.
+ */
+export function mergeJobOptions(recent: JobOption[], found: JobOption[], limit = 60): JobOption[] {
+  const out: JobOption[] = [];
+  const seen = new Set<string>();
+  for (const option of [...recent, ...found]) {
+    const key = option.jobNumber.trim() || `site:${option.siteName.trim().toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(option);
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 /**

@@ -7,6 +7,9 @@ import { useTheme } from '@/theme';
 import { Button, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
 import { Reveal, Skeleton } from '@/components/motion';
 import { disambiguator } from '@/domain/siteNames';
+import { officeEmptyState, type EmptyStateWords } from '@/domain/deviceData';
+import { loadPrefs } from '@/app-prefs';
+import { everSynced } from '@/simpro/watermark';
 
 /**
  * Site list. A technician's mental model is "which job am I on", so sites lead.
@@ -25,6 +28,12 @@ export default function SitesScreen() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
+  // What an empty list means here: a device nobody connected to the office is
+  // not the same as one with nothing in it, and saying "add your first site"
+  // to the first sends a person to type in a building the office already has.
+  const [empty, setEmpty] = useState<EmptyStateWords>(
+    { title: 'No sites yet', body: 'Add a site by hand, or import a device list exported from any panel programming tool. Both work offline.' },
+  );
 
   // The search is a query now, so it waits for the typing to stop.
   useEffect(() => {
@@ -33,7 +42,15 @@ export default function SitesScreen() {
   }, [search]);
 
   const load = useCallback(async () => {
-    setPage(await listSiteSummaries({ query, limit: PAGE }));
+    const found = await listSiteSummaries({ query, limit: PAGE });
+    setPage(found);
+    if (!found.rows.length && !query.trim()) {
+      const prefs = await loadPrefs();
+      setEmpty(officeEmptyState(
+        { held: 0, connected: Boolean(prefs.simproClientId && prefs.simproCompanyId), everSynced: await everSynced() },
+        'sites',
+      ));
+    }
     setLoading(false);
   }, [query]);
 
@@ -111,9 +128,14 @@ export default function SitesScreen() {
           ) : (
             <EmptyState
               icon={search ? 'map-search-outline' : 'office-building-marker-outline'}
-              title={search ? 'Nothing matched' : 'No sites yet'}
-              body={search ? 'Try a shorter search.' : 'Add a site by hand, or import a device list exported from any panel programming tool. Both work offline.'}
-              action={search ? undefined : <Button title="Add your first site" onPress={() => router.push('/site/new')} />}
+              title={search ? 'Nothing matched' : empty.title}
+              body={search ? 'Try a shorter search.' : empty.body}
+              action={search ? undefined : (
+                <Rowed gap={2} wrap>
+                  {empty.action ? <Button title={empty.action.label} onPress={() => router.push(empty.action!.route)} /> : null}
+                  <Button title="Add a site by hand" variant="ghost" onPress={() => router.push('/site/new')} />
+                </Rowed>
+              )}
             />
           )
         }
