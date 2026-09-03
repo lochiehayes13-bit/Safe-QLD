@@ -1,7 +1,8 @@
 import React, { useCallback, useState } from 'react';
 import { FlatList, View } from 'react-native';
-import { Stack, useFocusEffect } from 'expo-router';
+import { Stack, router, useFocusEffect } from 'expo-router';
 import { listPurchaseRequests, setPurchaseStatus, type PurchaseRequest } from '@/db/opsRepo';
+import { openNeedsCount } from '@/db/needsRepo';
 import { queuePurchaseOrder } from '@/simpro/sync';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
@@ -17,6 +18,15 @@ export default function PurchasesScreen() {
   // "Nothing on order" is a statement somebody restocks a van on.
   const [failed, setFailed] = useState<string | null>(null);
 
+  /**
+   * How many things are on the technician's own list next door.
+   *
+   * Read separately and allowed to fail on its own: it is a number on a link
+   * to another screen, and a list of purchase requests that reads perfectly
+   * should not be replaced by an error because a count did not.
+   */
+  const [needs, setNeeds] = useState<number | null>(null);
+
   const load = useCallback(async () => {
     setFailed(null);
     try {
@@ -24,6 +34,11 @@ export default function PurchasesScreen() {
     } catch (e) {
       setItems([]);
       setFailed(describeLoadFailure(e, 'the purchase requests on this device'));
+    }
+    try {
+      setNeeds(await openNeedsCount());
+    } catch {
+      setNeeds(null);
     }
   }, []);
   useFocusEffect(useCallback(() => { void load(); }, [load]));
@@ -70,7 +85,28 @@ export default function PurchasesScreen() {
           data={items}
           keyExtractor={(p) => p.id}
           contentContainerStyle={{ padding: t.space(4), gap: t.space(3), paddingBottom: t.space(20) }}
-          ListHeaderComponent={failed ? <Banner tone="fail" title="This list could not be read" body={failed} /> : null}
+          ListHeaderComponent={(
+            <View style={{ gap: t.space(3) }}>
+              {failed ? <Banner tone="fail" title="This list could not be read" body={failed} /> : null}
+              {/*
+                * The neighbour, not the same thing. This screen is the document
+                * the office turns into an order; the list next door is the
+                * running note of what a technician needs, which is where a line
+                * starts long before anybody knows a part number for it.
+                */}
+              <Card onPress={() => router.push('/work/needs')}>
+                <Rowed gap={2}>
+                  <View style={{ flex: 1 }}>
+                    <Txt weight="600">Things I need</Txt>
+                    <Txt size="sm" tone="muted">
+                      Your own running list, for now and for work that is still coming.
+                    </Txt>
+                  </View>
+                  {needs ? <Chip label={String(needs)} tone="warn" /> : null}
+                </Rowed>
+              </Card>
+            </View>
+          )}
           ListEmptyComponent={failed ? null : (
             <EmptyState
               title="Nothing on order"

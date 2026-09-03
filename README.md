@@ -83,6 +83,15 @@ order a supplier has to fill — and part numbers are never invented, because th
 right detector head depends on the panel and the protocol. Submitting queues it
 for Simpro rather than sending, so a basement with no signal cannot lose it.
 
+**Things I need.** The parts note that currently lives on a dashboard or in
+somebody's phone: what to grab now, and what has to be on hand before work that
+has not come around yet. A line needs three words — "flow meter" is a complete
+one — and a count, a building and a catalogue part number are read out of the
+line or offered underneath it, never required. Ticking a line marks it got and
+keeps it, so a tick on the wrong row is one tap to undo. The lines wanted now go
+to the office on the existing purchase request, and the whole list exports as a
+spreadsheet rather than being read out over the phone.
+
 **Routing.** The day's jobs ordered by proximity, urgent work first regardless
 of distance, handing off to the phone's maps app for the actual navigation.
 Distances are straight-line and the screen says so.

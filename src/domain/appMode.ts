@@ -831,8 +831,18 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['stock', 'van', 'restock', 'inventory', 'spares'],
   },
   {
+    route: '/work/needs', file: 'app/work/needs.tsx', tab: 'work', section: 'Parts and stock',
+    label: 'Things I need', modes: BOTH, openedFrom: ['/work', '/shortcuts', '/work/purchases'],
+    blurb: 'The running list of parts to get, split into what is wanted now and what is for work still coming.',
+    terms: ['need', 'needs', 'parts', 'order', 'shopping list', 'to get', 'checklist', 'flow meter'],
+    keptBecause:
+      'A list of parts to buy reads as office work and is not: it is written on site by the person '
+      + 'who found the thing missing, and every one of these lines currently lives on a dashboard or '
+      + 'in somebody\'s phone until it is forgotten.',
+  },
+  {
     route: '/work/purchases', file: 'app/work/purchases.tsx', tab: 'work', section: 'Parts and stock',
-    label: 'Purchase requests', modes: OFFICE, openedFrom: ['/work', '/work/stock'],
+    label: 'Purchase requests', modes: OFFICE, openedFrom: ['/work', '/work/stock', '/work/needs'],
     // Raising a restock lands on this screen, and it does that in Technician
     // mode too — hiding the row must not break the middle of that action.
     stillOpenedFrom: '/work/stock',

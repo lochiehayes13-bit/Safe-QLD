@@ -72,6 +72,9 @@ export const MODULES: AppModule[] = [
   { href: '/work/outbound', label: 'Waiting to send', icon: 'cloud-upload-outline', group: 'Every day',
     blurb: 'What is queued for the office. It goes up on its own when there is signal.',
     keywords: ['queue', 'sync', 'offline'] },
+  { href: '/work/needs', label: 'Things I need', icon: 'format-list-checks', group: 'Every day',
+    blurb: 'Parts to get: an extinguisher now, a flow meter before the March annuals.',
+    keywords: ['parts', 'order', 'shopping list', 'to get', 'extinguisher', 'flow meter', 'checklist'] },
 
   // -- Learn ---------------------------------------------------------------
   { href: '/library', label: 'Standards library', icon: 'bookshelf', group: 'Learn',
