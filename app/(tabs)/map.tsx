@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import * as Location from 'expo-location';
 import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -26,6 +25,7 @@ import { formatAuDate } from '@/export/sheets';
 import { company } from '@/theme/brand';
 import { useTheme } from '@/theme';
 import { Button, Rowed, Screen, StatusPill, Txt } from '@/components/ui';
+import { MapCanvas, type MapCanvasHandle, type MapCanvasMessage } from '@/components/MapCanvas';
 
 /**
  * The map tab.
@@ -40,12 +40,13 @@ import { Button, Rowed, Screen, StatusPill, Txt } from '@/components/ui';
  * that comes next: is this a customer of ours, what have we done for them,
  * who do we ring, and how do we get there.
  *
- * The map itself is a Leaflet page inside a WebView, built once per data
- * load. Toggling a legend chip, typing, a search result or a selection does
- * not rebuild it — that would throw away wherever the technician had panned
- * and zoomed to — it pushes a small script into the page instead. The page
- * is only rebuilt when the data changes: on focus, and once more after the
- * background geocoder has found some new sites. The page reports every pan
+ * The map itself is a Leaflet page inside a MapCanvas — a WebView on a
+ * phone, an iframe in a browser — built once per data load. Toggling a
+ * legend chip, typing, a search result or a selection does not rebuild it —
+ * that would throw away wherever the technician had panned and zoomed to —
+ * it pushes a small script into the page instead. The page is only rebuilt
+ * when the data changes: on focus, and once more after the background
+ * geocoder has found some new sites. The page reports every pan
  * and zoom back, and a rebuilt page opens on the last one, so the rebuild
  * after the geocoder's run does not snap a technician planning tomorrow on
  * the Sunshine Coast back to the whole of the south-east.
@@ -107,7 +108,7 @@ interface CardModel {
 export default function MapScreen() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
-  const webRef = useRef<WebView>(null);
+  const webRef = useRef<MapCanvasHandle>(null);
   const stopRef = useRef(false);
 
   const [data, setData] = useState<MapData | null>(null);
@@ -225,7 +226,7 @@ export default function MapScreen() {
     return place ? { placeId: place.id } : null;
   }, [card, places]);
 
-  const inject = (script: string) => { webRef.current?.injectJavaScript(script); };
+  const inject = (script: string) => { webRef.current?.inject(script); };
 
   // Each piece of state the page mirrors is pushed as it changes, and all of
   // it again when the page reloads, since a rebuilt page starts from nothing.
@@ -305,7 +306,7 @@ export default function MapScreen() {
     });
   };
 
-  const onMessage = (event: WebViewMessageEvent) => {
+  const onMessage = (event: MapCanvasMessage) => {
     const msg = parseMapMessage(event.nativeEvent.data);
     if (!msg) return;
     if (msg.type === 'select') {
@@ -328,11 +329,11 @@ export default function MapScreen() {
   };
 
   /**
-   * Navigations out of the page go to the phone's browser and never into
-   * the WebView, which has no back button and would otherwise show the
-   * OpenStreetMap copyright page under the search box with no way home.
-   * The page itself loads as about:blank; the stylesheet, the script and
-   * the tiles are sub-resources and never come through here.
+   * Navigations out of the page go to the phone's browser — a new tab, on
+   * the web — and never into the map, which has no back button and would
+   * otherwise show the OpenStreetMap copyright page under the search box
+   * with no way home. The page itself loads as about:blank; the stylesheet,
+   * the script and the tiles are sub-resources and never come through here.
    */
   const onShouldStartLoad = ({ url }: { url: string }): boolean => {
     if (url.startsWith('about:')) return true;
@@ -466,7 +467,7 @@ export default function MapScreen() {
     <Screen scroll={false} padded={false}>
       <View style={{ flex: 1, backgroundColor: t.color.bg }}>
         {data && html ? (
-          <WebView
+          <MapCanvas
             ref={webRef}
             style={{ flex: 1, backgroundColor: t.color.bg }}
             source={{ html }}
@@ -475,7 +476,9 @@ export default function MapScreen() {
             setSupportMultipleWindows={false}
             // OpenStreetMap's tile policy: every request names the app and
             // somebody to write to. Appended to the browser's own string on
-            // both platforms; see mapUserAgent for why it is not replaced.
+            // both phone platforms; see mapUserAgent for why it is not
+            // replaced, and MapCanvas.web.tsx for what a browser can do
+            // instead, which is not this.
             applicationNameForUserAgent={mapUserAgent(company.email)}
             onShouldStartLoadWithRequest={onShouldStartLoad}
             onMessage={onMessage}
