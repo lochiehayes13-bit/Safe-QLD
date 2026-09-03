@@ -195,6 +195,45 @@ const WRITE_PAGE = 250;
  * rest of its page still lands, since a failed statement inside a
  * transaction fails alone.
  */
+/** How many of the missing sites are named before the note gives up listing them. */
+const NAMED_MISSING_SITES = 5;
+
+/**
+ * Says which buildings the skipped assets belonged to, and why they are gone.
+ *
+ * The note this feeds used to read "their Simpro site is not held on this
+ * device. Pull sites first, or run a forced sync" — advice that cannot work,
+ * because the site list is where the site is missing from. On the office
+ * build the whole of it is one archived site carrying fifteen assets: the
+ * sites endpoint does not return an archived site, the assets endpoint
+ * happily returns its assets, and nothing about pulling again changes that.
+ *
+ * So each site is looked up by id, which is a handful of single reads and
+ * only ever runs when something was skipped. An archived site is named as
+ * archived, because that is the whole answer and the reader can stop. A site
+ * that reads back as live is a real gap and says so. One that cannot be read
+ * at all is reported as its bare id rather than guessed at.
+ */
+export async function describeMissingSites(
+  mirror: Pick<SimproMirror, 'siteDetail'>,
+  ids: ReadonlySet<string>,
+): Promise<string> {
+  const named = [...ids].slice(0, NAMED_MISSING_SITES);
+  const described: string[] = [];
+  for (const id of named) {
+    try {
+      const site = await mirror.siteDetail(id);
+      described.push(site.archived
+        ? `${site.name} is archived in Simpro, so it is not on the site list`
+        : `${site.name} is on the office's books but did not come down with the sites`);
+    } catch {
+      described.push(`site ${id} could not be read`);
+    }
+  }
+  const rest = ids.size - named.length;
+  return `${described.join('; ')}${rest > 0 ? `; and ${rest} more` : ''}.`;
+}
+
 async function inPages<T>(items: readonly T[], each: (item: T, index: number) => Promise<void>): Promise<void> {
   for (let start = 0; start < items.length; start += WRITE_PAGE) {
     const page = items.slice(start, start + WRITE_PAGE);
@@ -476,6 +515,9 @@ export async function pullFromSimpro(
 
     const known = await findByExternalIds(SIMPRO_ASSET_SOURCE, remoteAssets.map((a) => a.id));
 
+    /* The office sites these assets name, which this device does not hold.
+     * Kept so the note can say which building rather than only how many. */
+    const missingSites = new Set<string>();
     await inPages(remoteAssets, async (remote, i) => {
       if (i % 100 === 0) progress('Assets', i, remoteAssets.length);
       try {
@@ -487,6 +529,7 @@ export async function pullFromSimpro(
         const siteId = mapped.remoteSiteId ? siteIdByRemote.get(mapped.remoteSiteId) : undefined;
         if (!siteId) {
           result.assetsWithoutSite++;
+          if (mapped.remoteSiteId) missingSites.add(mapped.remoteSiteId);
           return;
         }
         const match = known.get(remote.id);
@@ -532,7 +575,7 @@ export async function pullFromSimpro(
     if (result.assetsWithoutSite) {
       result.notes.push(
         `${result.assetsWithoutSite} assets were skipped because their Simpro site is not held on `
-        + 'this device. Pull sites first, or run a forced sync.',
+        + `this device: ${await describeMissingSites(mirror, missingSites)}`,
       );
     }
 
