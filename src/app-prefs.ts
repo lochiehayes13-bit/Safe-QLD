@@ -1,0 +1,160 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DEFAULT_SHORTCUTS, migrateShortcuts } from '@/domain/modules';
+import { company } from '@/theme/brand';
+
+/**
+ * Technician preferences.
+ *
+ * Held here rather than in the Settings route so any screen can read them
+ * without importing a tab screen.
+ */
+
+const PREFS_KEY = 'safeqld.prefs';
+
+export interface Prefs {
+  /**
+   * Which half of the app this device shows.
+   *
+   * Held as a plain string rather than the AppMode union so an older build
+   * reading a value a newer one wrote does not fail to parse its whole
+   * settings blob over one field. `readMode` in @/domain/appMode turns it into
+   * a mode and says when it did not recognise what it found.
+   */
+  appMode: string;
+  technicianName: string;
+  /**
+   * Which Simpro employee this phone belongs to, and their address there.
+   *
+   * Simpro's own id rather than a name, because the id is what a schedule
+   * block carries and what survives a rename. Blank until somebody picks
+   * themselves from the synced staff list or signs in with their Simpro
+   * login. The display name above is seeded from it only where it was blank
+   * and stays the technician's to edit — it is what goes on a report.
+   */
+  simproEmployeeId: string;
+  simproEmployeeEmail: string;
+  technicianLicence: string;
+  vehicleRego: string;
+  companyName: string;
+  simproDomain: string;
+  simproCompanyId: string;
+  simproClientId: string;
+  simproProxyUrl: string;
+  /**
+   * Whether a completed test is written back onto the asset in Simpro.
+   *
+   * Off until someone turns it on, and deliberately so. Every other outbound
+   * kind appends — a note, an order — and the worst a bad one does is add
+   * something to delete. This one edits a record the office schedules from,
+   * across 12,546 live assets, and the endpoint it uses could not be verified
+   * without writing to that live register. Prove it on one asset first.
+   */
+  simproWriteAssetTests: boolean;
+  /**
+   * Whether defect photographs go onto the Simpro job as attachments.
+   *
+   * On by default, unlike the asset-test switch above: an attachment is
+   * appended, never overwrites anything, and a photograph beside the note
+   * that describes the fault is what the office asked for. Off keeps them on
+   * the phone and in the report, and the notes say so.
+   */
+  simproSendPhotos: boolean;
+  /**
+   * Whether the office copy is kept current without anybody pressing anything.
+   *
+   * On by default, because "I'm sick of syncing" was the whole brief: changes
+   * come down every half hour and everything once a day, and queued work goes
+   * up the moment there is signal. Sync now in Settings works either way.
+   */
+  autoSync: boolean;
+  /**
+   * The technician's own home screen, as a list of routes.
+   *
+   * Routes rather than labels, because a route is the stable identity — a
+   * screen gets renamed far more often than it gets moved.
+   */
+  shortcuts: string[];
+  /**
+   * Where a request for information and a leave request go.
+   *
+   * Starts as the company's service inbox rather than blank, because a blank
+   * default would leave the Ask the office button dead on every phone until
+   * somebody typed an address into each one. The office changes it once here
+   * if a supervisor would rather have it direct.
+   */
+  supervisorEmail: string;
+  /** Where a suggestion about the app itself goes. Same reasoning. */
+  suggestionsEmail: string;
+  /**
+   * Charge-out rates, in whole cents excluding GST.
+   *
+   * Held here rather than shipped in the repository: these are commercial terms
+   * including cost, and therefore margin. Zero means not set, and the app says
+   * so rather than quoting at nothing.
+   */
+  normalHoursSellCents: number;
+  afterHoursSellCents: number;
+  attendanceNormalCents: number;
+  attendanceNormalMinutes: number;
+  attendanceAfterHoursCents: number;
+  attendanceAfterHoursMinutes: number;
+}
+
+export const DEFAULT_PREFS: Prefs = {
+  // Technician, because most installs are a phone in a van and a mode switch
+  // that starts by showing everything would only ever be found by the people
+  // who did not need it.
+  appMode: 'technician',
+  technicianName: '',
+  simproEmployeeId: '',
+  simproEmployeeEmail: '',
+  technicianLicence: '',
+  vehicleRego: '',
+  companyName: 'Safe QLD Pty Ltd',
+  // Everything about the Safe QLD build except the secret, so setting the app
+  // up is one paste and one tap rather than four fields typed off a phone.
+  //
+  // These three are identifiers, not credentials: the client ID authenticates
+  // nothing on its own, and the company ID is 0 on this build — which is why it
+  // is a string. Left as a number it would be falsy, and every "is this
+  // configured yet" check in the app would read a correctly configured install
+  // as blank.
+  //
+  // The client secret is deliberately absent. Anything committed here is bundled
+  // into the APK and ships to every phone, so a secret placed here would be
+  // readable by anyone holding the file. It is pasted once into the platform
+  // keystore instead, or removed from devices entirely by setting `simproProxyUrl`.
+  simproDomain: 'safeqld.simprosuite.com',
+  simproCompanyId: '0',
+  simproClientId: '6564738df3bba3cd587e3dacb58a1d',
+  simproProxyUrl: '',
+  simproWriteAssetTests: false,
+  simproSendPhotos: true,
+  autoSync: true,
+  shortcuts: DEFAULT_SHORTCUTS,
+  supervisorEmail: company.email,
+  suggestionsEmail: company.email,
+  normalHoursSellCents: 0,
+  afterHoursSellCents: 0,
+  attendanceNormalCents: 0,
+  attendanceNormalMinutes: 120,
+  attendanceAfterHoursCents: 0,
+  attendanceAfterHoursMinutes: 180,
+};
+
+export async function loadPrefs(): Promise<Prefs> {
+  try {
+    const raw = await AsyncStorage.getItem(PREFS_KEY);
+    if (!raw) return DEFAULT_PREFS;
+    const saved = JSON.parse(raw) as Partial<Prefs>;
+    // A home screen nobody chose gets the current defaults; one somebody
+    // edited is theirs and stays. See migrateShortcuts.
+    return { ...DEFAULT_PREFS, ...saved, shortcuts: migrateShortcuts(saved.shortcuts) };
+  } catch {
+    return DEFAULT_PREFS;
+  }
+}
+
+export async function savePrefs(prefs: Prefs): Promise<void> {
+  await AsyncStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+}
