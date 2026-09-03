@@ -39,14 +39,16 @@ interface RawSite {
   Archived?: boolean;
   DateModified?: string;
 }
-interface RawSchedule {
+export interface RawSchedule {
   ID?: number;
   Type?: string;
   Reference?: string;
   Staff?: RawRef;
   Date?: string;
   Blocks?: { StartTime?: string; EndTime?: string }[];
-  Job?: RawRef;
+  /** Where the job id lives: `{ProjectID, SectionID, CostCenterID}` on a job
+   *  block, and the empty string on an activity — leave, training, a day off. */
+  Project?: { ProjectID?: number } | string;
 }
 interface RawEmployee { ID?: number; Name?: string; Position?: string; PrimaryContact?: RawContact; Archived?: boolean }
 interface RawCustomerAsset {
@@ -153,7 +155,18 @@ const str = (v: unknown): string | undefined => {
   return s === '' ? undefined : s;
 };
 
-const SCHEDULE_COLUMNS = 'ID,Type,Reference,Staff,Date,Blocks,Job';
+/*
+ * The schedule columns this build honours.
+ *
+ * `Job` is not one of them. Asking for it returned 422 "Invalid columns
+ * found" and took the whole schedules stage down with it, so a sync that
+ * read four and a half thousand jobs still showed an empty diary. The job a
+ * block belongs to arrives under `Project` instead — `{ProjectID,
+ * SectionID, CostCenterID}` — which is the same number the jobs endpoint
+ * calls `ID`. `JobID` is accepted by the build but comes back empty, which
+ * is worse than a refusal: it fails silently.
+ */
+export const SCHEDULE_COLUMNS = 'ID,Type,Reference,Staff,Date,Blocks,Project';
 
 /**
  * Simpro's range filter for a date column, from its API documentation.
@@ -173,11 +186,30 @@ export function scheduleDateFilter(from: string, to: string): string {
  * after another site — so the start is the first block's and the end is the
  * last's. Anything between is the same job and does not need saying.
  */
-function mapSchedule(s: RawSchedule, fallbackDate: string): SimproScheduleBlock {
+/**
+ * The job a schedule block belongs to, or nothing if it is not on a job.
+ *
+ * Two shapes come back from the one field. A block on a job carries
+ * `Project: {ProjectID: 41801, ...}`, and 41801 is the job's own id. A block
+ * on an activity — annual leave, a training day — carries `Project: ""`, and
+ * has no job at all. The `Reference` on a job block reads "41801-11950",
+ * which is that same id with the cost centre after it, and is the fallback
+ * for a build that returns the reference but not the object.
+ */
+function scheduleJobId(s: RawSchedule): string | undefined {
+  const project = s.Project;
+  if (project && typeof project === 'object' && project.ProjectID !== undefined) {
+    return String(project.ProjectID);
+  }
+  const fromReference = /^(\d+)-\d+$/.exec(str(s.Reference) ?? '');
+  return fromReference ? fromReference[1] : undefined;
+}
+
+export function mapSchedule(s: RawSchedule, fallbackDate: string): SimproScheduleBlock {
   const blocks = s.Blocks ?? [];
   return {
     id: String(s.ID ?? ''),
-    jobId: s.Job?.ID !== undefined ? String(s.Job.ID) : undefined,
+    jobId: scheduleJobId(s),
     reference: str(s.Reference),
     staffId: s.Staff?.ID !== undefined ? String(s.Staff.ID) : undefined,
     staffName: str(s.Staff?.Name),
