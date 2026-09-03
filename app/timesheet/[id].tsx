@@ -80,6 +80,19 @@ export default function TimesheetScreen() {
   );
   const times = useMemo(() => usualTimes(history), [history]);
 
+  /** The tick boxes: the standard set, plus anything this person has added before. */
+  const extraChoices = useMemo(() => {
+    const used = new Set<string>();
+    for (const h of history) for (const e of h.entries) for (const x of e.extras ?? []) used.add(x);
+    const out = [...DEFAULT_EXTRAS];
+    for (const x of used) if (!out.some((y) => y.toLowerCase() === x.toLowerCase())) out.push(x);
+    return out;
+  }, [history]);
+
+  // Every hook this screen has must run before the gate below: on the first
+  // render there is no sheet yet, and a hook that only runs once the record
+  // arrives changes the hook count between renders, which React answers by
+  // throwing — a blank screen where the week should be.
   if (!sheet || !totals) return <RecordGate missing={missing} what="timesheet" />;
 
   const addJob = (date: string, opt: JobOption | null) => {
@@ -135,13 +148,6 @@ export default function TimesheetScreen() {
     } finally { setBusy(false); }
   };
 
-  const extraChoices = useMemo(() => {
-    const used = new Set<string>();
-    for (const h of history) for (const e of h.entries) for (const x of e.extras ?? []) used.add(x);
-    const out = [...DEFAULT_EXTRAS];
-    for (const x of used) if (!out.some((y) => y.toLowerCase() === x.toLowerCase())) out.push(x);
-    return out;
-  }, [history]);
 
   return (
     <>

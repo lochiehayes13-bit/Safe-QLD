@@ -33,7 +33,7 @@ function routeFiles(): string[] {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
-      else if (entry.name.endsWith('.tsx') && entry.name !== '_layout.tsx') {
+      else if (entry.name.endsWith('.tsx') && entry.name !== '_layout.tsx' && !entry.name.startsWith('+')) {
         out.push(relative(root, full).split(sep).join('/'));
       }
     }
@@ -76,8 +76,8 @@ describe('the manifest', () => {
     expect(audit.ok).toBe(false);
   });
 
-  it('ignores layouts, which are not destinations anyone navigates to', () => {
-    const audit = auditManifest([...routeFiles(), 'app/_layout.tsx', 'app/(tabs)/_layout.tsx']);
+  it('ignores layouts and expo-router\'s own + files, which are not destinations anyone navigates to', () => {
+    const audit = auditManifest([...routeFiles(), 'app/_layout.tsx', 'app/(tabs)/_layout.tsx', 'app/+html.tsx', 'app/+not-found.tsx']);
     expect(audit.missingFromManifest).toEqual([]);
   });
 });

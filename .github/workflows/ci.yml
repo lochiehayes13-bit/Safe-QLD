@@ -56,6 +56,92 @@ jobs:
           EXPO_PUBLIC_UPDATES_REPO: ${{ vars.RELEASES_REPO || github.repository }}
         run: npx expo export --platform android --output-dir dist
 
+  # ---------------------------------------------------------------- web build
+  #
+  # The APK cannot be installed on an iPhone, and the App Store needs an Apple
+  # developer account and a review. The same app also builds for the browser,
+  # which is a link anybody can open and add to their home screen — and the one
+  # way to put it in front of an iPhone today.
+  #
+  # What a browser cannot do, and the app says so where it matters: the phone's
+  # hardware keystore (keys are held in ordinary browser storage instead),
+  # background sync while the tab is closed, the camera roll and the mail app.
+  # Everything else — the sites, the jobs, the forms, the calculators, the
+  # standards library, the map — works, and the database is the browser's own,
+  # so what a person enters stays on their device.
+  web:
+    name: Web app
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci --legacy-peer-deps
+
+      - name: Stamp the build
+        run: echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Export for the web
+        env:
+          EXPO_PUBLIC_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EXPO_PUBLIC_BUILD_TIME: ${{ env.BUILD_TIME }}
+          EXPO_PUBLIC_UPDATES_REPO: ${{ vars.RELEASES_REPO || github.repository }}
+        run: npx expo export --platform web --output-dir web-build
+
+      # Adds the head tags that make it an app on an iPhone home screen rather
+      # than a browser tab, and writes 404.html — a static host has no router,
+      # so a deep link like /work/timesheets is a miss, and the 404 page is
+      # what hands the path to the app's own router.
+      - name: Finish the web shell
+        run: node scripts/webShell.js web-build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-app
+          path: web-build
+          retention-days: 14
+
+      # This repository is private, so a page served from it would ask everyone
+      # for a GitHub login. The built app — JavaScript and assets, no source —
+      # is pushed to a public repository whose only job is to serve it.
+      #
+      # Two things to do once, by hand:
+      #   1. Create a public repository for it, e.g.
+      #      lochiehayes13-bit/safe-qld-app, and turn on Pages
+      #      (Settings -> Pages -> Deploy from a branch -> main / root).
+      #   2. Here (Settings -> Secrets and variables -> Actions) add a variable
+      #      WEB_REPO holding that name. The RELEASES_TOKEN secret the APK
+      #      mirror uses is reused, so its fine-grained token needs Contents:
+      #      read and write on that repository too.
+      #
+      # Until both are set this step says so and exits clean; the build above
+      # is still downloadable from the run.
+      - name: Publish to the public web repository
+        env:
+          WEB_REPO: ${{ vars.WEB_REPO }}
+          TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          if [ -z "$WEB_REPO" ] || [ -z "$TOKEN" ]; then
+            echo "skipped: WEB_REPO and RELEASES_TOKEN are not both set"
+            exit 0
+          fi
+          cd web-build
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Safe QLD web app from ${{ github.event.pull_request.head.sha || github.sha }}"
+          # Force, because this repository holds one thing: the current build.
+          # Its history is of no use to anybody and a year of 11 MB bundles is.
+          git push -q --force "https://x-access-token:$TOKEN@github.com/$WEB_REPO.git" HEAD:main
+          echo "published to https://$(echo "$WEB_REPO" | cut -d/ -f1).github.io/$(echo "$WEB_REPO" | cut -d/ -f2)/"
+
   apk:
     name: Android APK
     runs-on: ubuntu-latest

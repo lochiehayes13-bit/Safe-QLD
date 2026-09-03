@@ -1230,7 +1230,11 @@ export function auditManifest(routeFiles: readonly string[]): ManifestAudit {
   const real = new Set(
     routeFiles
       .map((f) => f.replace(/^\.\//, ''))
-      .filter((f) => f.endsWith('.tsx') && !f.endsWith('_layout.tsx')),
+      // A layout is not a destination, and neither is a file whose name starts
+      // with `+`: those are expo-router's own hooks — `+html` is the page shell
+      // the web build wraps everything in, `+not-found` the fallback. Nothing
+      // navigates to them, so the manifest neither lists nor promises them.
+      .filter((f) => f.endsWith('.tsx') && !f.endsWith('_layout.tsx') && !/(^|\/)\+[^/]*$/.test(f)),
   );
   const listed = new Set(DESTINATIONS.map((d) => d.file));
   const missingFromApp = [...listed].filter((f) => !real.has(f)).sort();
