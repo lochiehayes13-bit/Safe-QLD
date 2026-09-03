@@ -8,8 +8,8 @@ import {
   listCheckRows, listDefects, listTestRows, queryPoints, recordTestRowOnAsset, setTestResult, updateCheckRow,
   updateReport, updateTestRow,
 } from '@/db/repo';
-import { queryAssets, type AssetRecord } from '@/db/assetRepo';
-import { getCustomer, listJobsFor, readJobJson } from '@/db/mirrorRepo';
+import { queryAssets, setTestSheetEventDetail, type AssetRecord } from '@/db/assetRepo';
+import { getCustomer, listJobsFor, readJobJson, scheduledJobExternalIds } from '@/db/mirrorRepo';
 import type { JobRecord } from '@/db/opsRepo';
 import type { CheckRow, Defect, Panel, ServiceReport, Site, TestResult, TestRow } from '@/domain/types';
 import { isServiceable, testRowsFromAssets } from '@/domain/formsFromAssets';
@@ -81,7 +81,8 @@ export default function ReportScreen() {
     const found = await getReport(id);
     setMissing(!found);
     if (!found) { setReport(null); return; }
-    const [s, p, tr, cr, df, prefs, siteAssets, siteJobs] = await Promise.all([
+    const today = qldIsoDay(nowIso()) ?? '';
+    const [s, p, tr, cr, df, prefs, siteAssets, siteJobs, onSchedule] = await Promise.all([
       getSite(found.siteId),
       found.panelId ? getPanel(found.panelId) : Promise.resolve(null),
       listTestRows(found.id),
@@ -90,6 +91,9 @@ export default function ReportScreen() {
       loadPrefs(),
       queryAssets({ siteId: found.siteId, limit: 5000 }),
       listJobsFor({ siteId: found.siteId, limit: 200 }),
+      // Today's booked jobs, from the schedule and for anyone: the job
+      // record's own date is the day the office issued it, not the booking.
+      scheduledJobExternalIds({ from: today, to: today }),
     ]);
 
     /*
@@ -123,7 +127,7 @@ export default function ReportScreen() {
     setAssets(siteAssets);
     setJobs(siteJobs);
     setTechnician(r.technicianName ?? prefs.technicianName);
-    setOffer(jobToOffer(siteJobs, { siteId: r.siteId, today: qldIsoDay(nowIso()) ?? '' }));
+    setOffer(jobToOffer(siteJobs, { siteId: r.siteId, today, scheduledToday: new Set(onSchedule) }));
   }, [id]);
 
   useEffect(() => { void load(); }, [load]);
@@ -147,6 +151,9 @@ export default function ReportScreen() {
   }, [assets, rows]);
 
   const mark = async (row: TestRow, result: TestResult) => {
+    // A second tap on the result already marked is a glove, not a decision:
+    // re-writing it would only move the row's tested time.
+    if (row.result === result) return;
     void Haptics.impactAsync(
       result === 'fail' ? Haptics.ImpactFeedbackStyle.Heavy : Haptics.ImpactFeedbackStyle.Light,
     );
@@ -161,6 +168,9 @@ export default function ReportScreen() {
   const comment = async (row: TestRow, text: string) => {
     setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, comment: text } : r)));
     await updateTestRow(row.id, { comment: text });
+    // The reason is typed after the tap that wrote the asset's event, so it
+    // follows the comment onto the timeline rather than staying blank there.
+    if (row.assetId && row.result !== 'untested') await setTestSheetEventDetail(row.assetId, row.reportId, text);
   };
 
   /**
@@ -249,6 +259,12 @@ export default function ReportScreen() {
    * corporate's building can be serviced under a managing agent's job, and it
    * is the job's customer who receives the report. The site contact on the
    * job is the person the office booked it with.
+   *
+   * But a name already on the report may be one the technician typed — the
+   * person they actually met on site — and by now it cannot be told from the
+   * one the site prefilled. So where the job would replace a name that is
+   * there and different, the change is put to the technician first, and
+   * "keep" takes the number alone.
    */
   const acceptJob = async () => {
     if (!report || !offer.jobNumber) return;
@@ -264,7 +280,30 @@ export default function ReportScreen() {
       if (customer?.name) patch.customerName = customer.name;
       else if (job.customerName) patch.customerName = job.customerName;
     }
-    patchReport(patch);
+
+    const differs = (was: string | undefined, now: string | undefined): boolean =>
+      Boolean(was?.trim()) && Boolean(now?.trim()) && was!.trim() !== now!.trim();
+    const changes: string[] = [];
+    if (differs(report.customerName, patch.customerName)) changes.push(`Customer: "${report.customerName}" to "${patch.customerName}"`);
+    if (differs(report.siteContactName, patch.siteContactName)) {
+      changes.push(`Site contact: "${report.siteContactName}" to "${patch.siteContactName}"`);
+    } else if (differs(report.siteContactPhone, patch.siteContactPhone)) {
+      changes.push(`Site contact phone: "${report.siteContactPhone}" to "${patch.siteContactPhone}"`);
+    }
+    if (!changes.length) { patchReport(patch); return; }
+
+    Alert.alert(
+      `Use job ${offer.jobNumber}`,
+      `The job would change what is on the report:\n\n${changes.join('\n')}`,
+      [
+        {
+          text: 'Keep what is typed',
+          onPress: () => patchReport({ jobNumber: offer.jobNumber }),
+        },
+        { text: 'Take the job\'s', onPress: () => patchReport(patch) },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
   };
 
   /**
@@ -498,8 +537,10 @@ export default function ReportScreen() {
                 </Txt>
                 <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
                   {offered.basis === 'today'
-                    ? 'The one job scheduled at this site today.'
-                    : 'Nothing is scheduled here today; this is the only open job at the site.'}
+                    ? 'The one job on today\'s schedule at this site.'
+                    : offered.scheduleKnown
+                      ? 'Nothing on today\'s schedule is at this site; this is the only open job here.'
+                      : 'The schedule has nothing for today, or has not synced yet; this is the only open job at the site.'}
                   {' '}Accepting it puts the number on the report and takes the customer and site contact from the job.
                 </Txt>
                 <Button title={`Use job ${offered.jobNumber}`} variant="secondary" compact onPress={() => void acceptJob()} />

@@ -1,4 +1,4 @@
-import { getDb, nowIso } from '@/db';
+import { getDb, inTransaction, nowIso } from '@/db';
 import type { HoursBand, LabourRate, ServiceFee } from '@/domain/rates';
 
 /**
@@ -31,7 +31,7 @@ export async function saveRateCard(
 ): Promise<void> {
   const db = await getDb();
   const at = nowIso();
-  await db.withTransactionAsync(async () => {
+  await inTransaction(db, async () => {
     await db.runAsync('DELETE FROM labour_rate WHERE source = ?', [source]);
     await db.runAsync('DELETE FROM service_fee WHERE source = ?', [source]);
 

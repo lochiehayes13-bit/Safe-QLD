@@ -1,4 +1,4 @@
-import { getDb, nowIso } from './index';
+import { getDb, inTransaction, nowIso } from './index';
 
 /**
  * The office's staff list, as of the last sync.
@@ -44,7 +44,7 @@ export async function replaceEmployees(
   const db = await getDb();
   const at = nowIso();
   let written = 0;
-  await db.withTransactionAsync(async () => {
+  await inTransaction(db, async () => {
     await db.runAsync('DELETE FROM employee');
     for (const p of people) {
       if (!p.id) continue;

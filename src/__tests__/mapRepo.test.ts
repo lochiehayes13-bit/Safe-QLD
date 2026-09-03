@@ -39,6 +39,14 @@ async function seedSite(id: string, name: string, fields: Record<string, string 
   );
 }
 
+/** A schedule block: the office's booking of a job number on a day. Made-up staff. */
+async function seedBlock(id: string, jobId: string, date: string): Promise<void> {
+  await db.runAsync(
+    'INSERT INTO schedule (id, jobId, staffId, staffName, date, startTime, endTime, type, syncedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    id, jobId, '7', 'Sam Tech', date, '07:30', '11:30', 'Job', AT,
+  );
+}
+
 const HARBOURLINE = {
   address: '12 Example St', suburb: 'Springfield', state: 'QLD', postcode: '4300',
   clientName: 'Harbourline Body Corporate', contactName: 'Dana Reyes', contactMobile: '0400 000 000',
@@ -77,6 +85,17 @@ async function seedEverything(): Promise<void> {
     id: 'local-4', siteId: 'site-2', siteName: 'Depot Nine', title: 'Callout', status: 'in-progress',
     latitude: -27.9, longitude: 153.3,
   });
+  // One the office issued last week and has booked for next week. The
+  // booking is on the schedule, against the job number, not on the job.
+  await upsertJob({
+    id: 'simpro-1004', externalId: '1004', siteId: 'site-1', siteName: 'Harbourline Apartments', title: 'Hydrant flow test',
+    stage: 'Pending', stageRaw: 'Pending', status: 'scheduled', scheduledFor: '2026-08-25',
+    customerExternalId: '812', customerName: 'Harbourline Body Corporate', dateModified: '2026-08-26T09:00:00+10:00',
+  });
+  await seedBlock('blk-1', '1004', '2026-09-12');
+  await seedBlock('blk-2', '1004', '2026-09-10');
+  // A block already behind us says nothing about where the job is going.
+  await seedBlock('blk-3', '1001', '2026-08-30');
 
   await upsertInvoice({
     id: '9001', customerId: '812', customerName: 'Harbourline Body Corporate', jobs: [{ id: '1002' }, { id: '1001' }],
@@ -124,7 +143,7 @@ describe('the map read', () => {
       clientName: 'Harbourline Body Corporate',
       contactName: 'Dana Reyes',
       contactMobile: '0400 000 000',
-      jobsTotal: 3,
+      jobsTotal: 4,
       lastJobAt: '2026-08-28',
       quotesOpen: 1,
       invoicesRecent: 1,
@@ -142,9 +161,46 @@ describe('the map read', () => {
   it('reads only the jobs that can colour a dot', async () => {
     await seedEverything();
     const data = await loadMapData(NOW);
-    expect(data.jobs.map((j) => j.id).sort()).toEqual(['local-4', 'simpro-1001', 'simpro-1002']);
+    expect(data.jobs.map((j) => j.id).sort()).toEqual(['local-4', 'simpro-1001', 'simpro-1002', 'simpro-1004']);
     const invoiced = data.jobs.find((j) => j.id === 'simpro-1002')!;
     expect(invoiced).toMatchObject({ externalId: '1002', stage: 'Invoiced', status: 'complete', completedDate: '2026-08-01' });
+  });
+
+  it('carries the earliest booking from today on, off the schedule, and not one behind us', async () => {
+    await seedEverything();
+    const data = await loadMapData(NOW);
+    // Two blocks ahead: the sooner one is the booking. The issue date stays
+    // where it was, for the site's last-job figure.
+    expect(data.jobs.find((j) => j.id === 'simpro-1004')).toMatchObject({ scheduledFor: '2026-08-25', scheduledDay: '2026-09-10' });
+    // A block last week is not a booking, and a job with none has none.
+    expect(data.jobs.find((j) => j.id === 'simpro-1001')?.scheduledDay).toBeUndefined();
+    expect(data.jobs.find((j) => j.id === 'local-4')?.scheduledDay).toBeUndefined();
+  });
+
+  it('counts "today" on the Queensland calendar when reading the bookings', async () => {
+    await seedSite('site-1', 'Harbourline Apartments', HARBOURLINE);
+    await db.runAsync(
+      "INSERT INTO geocode (key, latitude, longitude, source, attemptedAt, failed) VALUES (?, -27.6, 152.9, 'device', ?, 0)",
+      siteAddressKey(HARBOURLINE), AT,
+    );
+    await upsertJob({
+      id: 'simpro-1005', externalId: '1005', siteId: 'site-1', siteName: 'Harbourline Apartments', title: 'Routine',
+      stage: 'Pending', stageRaw: 'Pending', status: 'scheduled', scheduledFor: '2026-08-25',
+    });
+    await seedBlock('blk-a', '1005', '2026-09-02');
+    await seedBlock('blk-b', '1005', '2026-09-03');
+    const pinAt = async (now: number) => {
+      const data = await loadMapData(now);
+      return { day: data.jobs[0]?.scheduledDay, kind: buildPins({ sites: data.sites, jobs: data.jobs, positions: data.positions, now }).pins[0]?.kind };
+    };
+    // Six in the morning on 2 September in Brisbane is still 1 September in
+    // UTC; the block on the 2nd is today's, and the job is on now.
+    expect(await pinAt(Date.parse('2026-09-01T20:00:00.000Z'))).toEqual({ day: '2026-09-02', kind: 'open' });
+    // Half past midnight on the 3rd, Brisbane: the 2nd is behind us and the
+    // 3rd is today's booking, so the job is still on now rather than upcoming.
+    expect(await pinAt(Date.parse('2026-09-02T14:30:00.000Z'))).toEqual({ day: '2026-09-03', kind: 'open' });
+    // And from the 4th the job has no booking the phone knows about.
+    expect(await pinAt(Date.parse('2026-09-03T14:30:00.000Z'))).toEqual({ day: undefined, kind: 'open' });
   });
 
   it('reads only the open quotes with a local site', async () => {
@@ -161,15 +217,17 @@ describe('the map read', () => {
     const built = buildPins({ sites: data.sites, jobs: data.jobs, quotes: data.quotes, positions: data.positions, now: data.loadedAt });
     expect(built.unlocated).toBe(1);
     const byId = new Map(built.pins.map((p) => [p.siteId, p]));
-    expect(byId.get('site-1')?.kinds).toEqual(['open', 'recent', 'quote', 'site']);
-    expect(byId.get('site-1')?.refs).toEqual(['1001', '1002', '555']);
+    expect(byId.get('site-1')?.kinds).toEqual(['open', 'upcoming', 'recent', 'quote', 'site']);
+    expect(byId.get('site-1')?.refs).toEqual(['1001', '1004', '1002', '555']);
+    // The booked job's line carries the day it is booked for, not the day
+    // the office issued it.
     expect(byId.get('site-1')?.lines).toEqual([
       'Six monthly routine · 28/08/2026',
+      'Hydrant flow test · 10/09/2026',
       'Annual service · 01/08/2026',
-      'Invoiced · 05/08/2026',
     ]);
     expect(byId.get('site-2')?.kinds).toEqual(['open', 'site']);
-    expect(built.counts).toEqual({ open: 2, upcoming: 0, recent: 1, quote: 1, site: 2 });
+    expect(built.counts).toEqual({ open: 2, upcoming: 1, recent: 1, quote: 1, site: 2 });
     // And a job number finds its site.
     const all = new Set<PinKind>(PIN_KINDS);
     expect(filterPins(built.pins, { kinds: all, query: '1002' }).map((p) => p.siteId)).toEqual(['site-1']);

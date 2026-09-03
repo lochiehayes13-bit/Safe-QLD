@@ -1,4 +1,4 @@
-import { getDb, newId, nowIso } from '@/db';
+import { getDb, inTransaction, newId, nowIso } from '@/db';
 import { readPdf, isPdf, PdfError } from '@/parsers/pdfText';
 import { searchPages, type PageHit, type SearchablePage } from '@/domain/docSearch';
 
@@ -101,7 +101,7 @@ export async function importPdf(input: {
   };
 
   const db = await getDb();
-  await db.withTransactionAsync(async () => {
+  await inTransaction(db, async () => {
     await db.runAsync(
       `INSERT INTO library_doc
          (id, title, fileName, sourceNote, standardId, pageCount, wordCount, warnings, importedAt, updatedAt)

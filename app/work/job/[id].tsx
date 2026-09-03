@@ -11,14 +11,16 @@ import { assetCountsBySystem } from '@/db/assetRepo';
 import type { Defect, Site } from '@/domain/types';
 import type { SimproCostCenter, SimproItem, SimproSection } from '@/simpro/mirrorResources';
 import {
-  attachmentIcon, contactActions, formatFileSize, formatQty, invoiceState, itemHeading, itemPrice, jobDates, jobStatusWord,
-  relativeQldTime, sectionLineCount, sellTotalLine, stageLabel, statusSwatch, taskState, technicianLine,
+  attachmentIcon, contactActions, discountLabel, formatFileSize, formatQty, invoiceState, itemHeading, itemPrice, jobDates,
+  jobStatusWord, localStateWord, qldClock, relativeQldTime, sectionLineCount, sellTotalLine, stageLabel, statusSwatch, taskState,
+  technicianLine,
 } from '@/domain/jobPresentation';
 import { qldIsoDay, qldMoment } from '@/domain/qldTime';
 import { formatCents } from '@/domain/rates';
 import { formatAuDate } from '@/export/sheets';
 import { simproConfigFromPrefs } from '@/simpro/config';
 import { syncJobDetail } from '@/simpro/sync';
+import { readUserSession } from '@/simpro/userSession';
 import { describeOpenOutcome, openAttachment } from '@/services/simproAttachments';
 import { useTheme } from '@/theme';
 import { animateNextLayout } from '@/components/motion';
@@ -61,6 +63,10 @@ export default function JobScreen() {
   const [refresh, setRefresh] = useState<Refresh>({ state: 'idle' });
   const [opening, setOpening] = useState<string | null>(null);
   const [showAllTimeline, setShowAllTimeline] = useState(false);
+  // Set on the way into complete on this screen: the note to the office is
+  // queued by the status write, and the person who pressed the button is
+  // told so here, once, rather than left to find it on the outbound screen.
+  const [noteQueued, setNoteQueued] = useState(false);
   const refreshing = useRef(false);
 
   const load = useCallback(async () => {
@@ -121,13 +127,37 @@ export default function JobScreen() {
     return () => { cancelled = true; };
   }, [load, refreshFromOffice]));
 
-  useEffect(() => { setShowAllTimeline(false); }, [id]);
+  useEffect(() => { setShowAllTimeline(false); setNoteQueued(false); }, [id]);
+
+  /**
+   * The phone's own status on the job, then the row read back.
+   *
+   * Read back rather than patched in memory, because the write stamps
+   * startedAt or completedAt and queues the note to the office, and the
+   * screen shows both. The name on the note is whoever is signed in to
+   * Simpro on this phone, else the technician name in Settings; the job's
+   * technician field is everyone the office booked, which is not who
+   * pressed the button.
+   */
+  const setStatus = async (jobId: string, status: 'in-progress' | 'complete') => {
+    const [prefs, session] = await Promise.all([loadPrefs(), readUserSession()]);
+    const completedBy = session?.label?.trim() || prefs.technicianName.trim() || undefined;
+    await setJobStatus(jobId, status, { completedBy });
+    const f = await load();
+    if (status === 'complete' && f?.job.externalId) setNoteQueued(true);
+  };
 
   if (!full) return <RecordGate missing={missing} what="job" />;
 
   const { job } = full;
   const critical = defects.filter((d) => d.severity === 'critical');
   const status = jobStatusWord(job);
+  // What the phone did that the office's pill does not say. The pill keeps
+  // the office's word, so after Start job or Mark complete this is the only
+  // thing on screen that says the button worked.
+  const local = localStateWord(job);
+  const localAt = job.status === 'complete' ? job.completedAt : job.status === 'in-progress' ? job.startedAt : undefined;
+  const localClock = qldClock(localAt);
   const swatch = statusSwatch(job.statusColor, t.color.surface);
   const stage = stageLabel(job.stageRaw ?? job.stage);
   const isSimpro = !!job.externalId;
@@ -170,6 +200,7 @@ export default function JobScreen() {
                 <StatusPill label={status.label} tone={status.tone} />
               )}
               {stage && stage !== status.label ? <Chip label={stage} /> : null}
+              {local ? <Chip label={localClock ? `${local.label} ${localClock}` : local.label} tone={local.tone === 'muted' || local.tone === 'info' ? 'default' : local.tone} /> : null}
               {job.jobTypeRaw ?? job.jobType ? <Chip label={(job.jobTypeRaw ?? job.jobType)!} /> : null}
               {job.priority === 'urgent' ? <Chip label="Urgent" tone="fail" /> : null}
             </Rowed>
@@ -325,7 +356,15 @@ export default function JobScreen() {
                   ))}
                 </View>
                 {full.timeline.length > timeline.length || showAllTimeline ? (
-                  <Pressable onPress={() => { animateNextLayout(); setShowAllTimeline((v) => !v); }} hitSlop={6} style={{ marginTop: t.space(3) }}>
+                  // Tall enough for a glove: a tap that lands on the last
+                  // row instead of a line of text expands nothing, and reads
+                  // as the rest of the activity never having synced.
+                  <Pressable
+                    onPress={() => { animateNextLayout(); setShowAllTimeline((v) => !v); }}
+                    hitSlop={6}
+                    accessibilityRole="button"
+                    style={{ marginTop: t.space(2), minHeight: 44, justifyContent: 'center' }}
+                  >
                     <Txt size="sm" tone="accent" weight="700">
                       {showAllTimeline ? 'Show less' : `Show all ${full.timeline.length}`}
                     </Txt>
@@ -447,13 +486,7 @@ export default function JobScreen() {
         {/* -- What to do ---------------------------------------------------- */}
         <H2>Do</H2>
         {job.status !== 'in-progress' && job.status !== 'complete' ? (
-          <Button
-            title="Start job"
-            onPress={async () => {
-              await setJobStatus(job.id, 'in-progress');
-              setFull({ ...full, job: { ...job, status: 'in-progress' } });
-            }}
-          />
+          <Button title="Start job" onPress={() => void setStatus(job.id, 'in-progress')} />
         ) : null}
         {job.status === 'in-progress' ? (
           <Button
@@ -461,16 +494,37 @@ export default function JobScreen() {
             onPress={() => {
               Alert.alert('Complete this job?', 'Check the test sheet, defects and photos are done first — anything missing is harder to add later.', [
                 { text: 'Not yet', style: 'cancel' },
-                {
-                  text: 'Complete',
-                  onPress: async () => {
-                    await setJobStatus(job.id, 'complete');
-                    setFull({ ...full, job: { ...job, status: 'complete' } });
-                  },
-                },
+                { text: 'Complete', onPress: () => void setStatus(job.id, 'complete') },
               ]);
             }}
           />
+        ) : null}
+        {local ? (
+          <Card>
+            <Rowed gap={2} align="flex-start">
+              <MaterialCommunityIcons
+                name={job.status === 'complete' ? 'check-circle-outline' : job.status === 'blocked' ? 'alert-circle-outline' : 'progress-clock'}
+                size={20}
+                color={job.status === 'complete' ? t.color.pass : job.status === 'blocked' ? t.color.fail : t.color.warn}
+              />
+              <View style={{ flex: 1 }}>
+                <Txt weight="700" size="sm">
+                  {local.label}{localAt ? ` at ${qldMoment(localAt) ?? formatAuDate(localAt)}` : ''}
+                </Txt>
+                {isSimpro && job.status === 'complete' ? (
+                  <Txt size="xs" tone="muted" style={{ marginTop: 2, lineHeight: 17 }}>
+                    {noteQueued
+                      ? 'Work-completed note queued for the office. It goes with the next send, and the office moves the job on from there.'
+                      : "The office's record moves on when the scheduler reads the completion note and closes the job at their end."}
+                  </Txt>
+                ) : isSimpro ? (
+                  <Txt size="xs" tone="muted" style={{ marginTop: 2, lineHeight: 17 }}>
+                    The office's status above is theirs; this is what happened on this phone.
+                  </Txt>
+                ) : null}
+              </View>
+            </Rowed>
+          </Card>
         ) : null}
 
         <Rowed gap={2}>
@@ -644,7 +698,7 @@ function ItemRow({ item }: { item: SimproItem }) {
       <View style={{ flex: 1 }}>
         <Txt size="sm">{itemHeading(item)}</Txt>
         <Txt size="xs" tone="faint">
-          {[item.partNo && item.partNo !== item.description ? item.partNo : undefined, price.unit, item.billableStatus, item.discountPercent ? `${item.discountPercent}% off` : undefined]
+          {[item.partNo && item.partNo !== item.description ? item.partNo : undefined, price.unit, item.billableStatus, discountLabel(item)]
             .filter(Boolean).join(' · ')}
         </Txt>
       </View>

@@ -18,7 +18,7 @@ import { chargeForAttendance } from '@/domain/rates';
  */
 
 const rate = (over: Partial<RawLabourRate>): RawLabourRate => ({
-  ID: 1, Name: 'Normal Hours Labour', CostRate: 110, Markup: 18.181818, ...over,
+  ID: 1, Name: 'Normal Hours Labour', CostRate: 100, Markup: 30, ...over,
 });
 
 const fee = (over: Partial<RawServiceFee>): RawServiceFee => ({
@@ -73,21 +73,41 @@ describe('customerFromName', () => {
 
 describe('sellCentsFor', () => {
   it('works the sell rate out of cost plus markup, and says it did', () => {
-    const r = sellCentsFor(rate({ CostRate: 110, Markup: 18.181818 }));
+    const r = sellCentsFor(rate({ CostRate: 100, Markup: 30 }));
     expect(r.sellCents).toBe(13_000);
     expect(r.note).toContain('worked out from cost plus');
   });
 
+  it('says it derived the rate without saying what from', () => {
+    /*
+     * The note is shown beside the sell rate it explains. A markup percentage
+     * there is the cost rate one division away, on a technician's phone, and
+     * the cost rate is the one figure the pull exists to leave in the office.
+     */
+    const r = sellCentsFor(rate({ CostRate: 100, Markup: 30 }));
+    expect(r.note).not.toMatch(/%/);
+    expect(r.note).not.toMatch(/\b30\b|\b100\b/);
+  });
+
   it('prefers a sell rate Simpro gave outright, with nothing to explain', () => {
-    const r = sellCentsFor(rate({ SellRate: 130, CostRate: 110, Markup: 18.181818 }));
+    const r = sellCentsFor(rate({ SellRate: 130, CostRate: 100, Markup: 30 }));
     expect(r.sellCents).toBe(13_000);
     expect(r.note).toBeUndefined();
   });
 
   it('reports a disagreement rather than splitting the difference', () => {
-    const r = sellCentsFor(rate({ Name: 'Odd rate', SellRate: 130, CostRate: 110, Markup: 50 }));
+    const r = sellCentsFor(rate({ Name: 'Odd rate', SellRate: 130, CostRate: 100, Markup: 50 }));
     expect(r.sellCents).toBe(13_000);
     expect(r.note).toContain('disagree');
+  });
+
+  it('names only the sell rate it used in a disagreement, never the figure it did not', () => {
+    // The other figure is cost plus markup, and beside the sell rate it gives
+    // the markup away.
+    const r = sellCentsFor(rate({ Name: 'Odd rate', SellRate: 130, CostRate: 100, Markup: 50 }));
+    expect(r.note).toContain('130.00');
+    expect(r.note).not.toContain('150');
+    expect(r.note).not.toMatch(/%/);
   });
 
   it('applies a multiplier and names it', () => {
@@ -112,9 +132,20 @@ describe('mapLabourRates', () => {
     expect(rates[0]!.sellCentsPerHour).toBe(13_000);
   });
 
-  it('still reports the margin once, for the office to check the pull', () => {
-    const { margins } = mapLabourRates([rate({ Name: 'After Hours Labour', CostRate: 110, SellRate: 185 })]);
-    expect(margins).toEqual([{ name: 'After Hours Labour', percent: 40.5 }]);
+  it('hands back nothing a margin could be worked out from', () => {
+    /*
+     * A margin used to be computed here "for the office to sanity-check the
+     * pull" and rendered in Settings. Settings is on the phone. Whatever the
+     * office wants to check belongs in the office toolkit, so the card carries
+     * no margin, no markup and no percentage of any kind.
+     */
+    const out = mapLabourRates([
+      rate({ Name: 'After Hours Labour', CostRate: 100, SellRate: 185 }),
+      rate({ ID: 2, Name: 'Normal Hours Labour', CostRate: 100, Markup: 30 }),
+    ]);
+    expect(out).not.toHaveProperty('margins');
+    expect(out.notes.join(' ')).not.toMatch(/%|margin/i);
+    expect(out.rates.every((r) => r.costCentsPerHour === 0)).toBe(true);
   });
 
   it('skips a rate it cannot price rather than pricing it at nothing', () => {
@@ -190,10 +221,10 @@ describe('buildRateCard', () => {
   it('builds a card shaped like the real one', () => {
     const card = buildRateCard(
       [
-        rate({ ID: 1, Name: 'Normal Hours Labour', CostRate: 110, SellRate: 130 }),
-        rate({ ID: 2, Name: 'After Hours Labour', CostRate: 110, SellRate: 185 }),
-        rate({ ID: 3, Name: 'Vaxxas Normal Hours Labour', CostRate: 136.88, SellRate: 125 }),
-        rate({ ID: 4, Name: 'Vaxxas After Hours Callout', CostRate: 136.88, SellRate: 480 }),
+        rate({ ID: 1, Name: 'Normal Hours Labour', CostRate: 100, SellRate: 130 }),
+        rate({ ID: 2, Name: 'After Hours Labour', CostRate: 100, SellRate: 185 }),
+        rate({ ID: 3, Name: 'Vaxxas Normal Hours Labour', CostRate: 140, SellRate: 125 }),
+        rate({ ID: 4, Name: 'Vaxxas After Hours Callout', CostRate: 140, SellRate: 480 }),
       ],
       [
         fee({ ID: 1, Name: 'Site Attendance Normal Hours', Amount: 300, IncludedLabourTime: 120 }),

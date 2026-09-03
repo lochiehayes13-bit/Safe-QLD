@@ -12,8 +12,15 @@ import * as SecureStore from 'expo-secure-store';
 
 const KEY_SLOT = 'safeqld.google.places';
 
+/**
+ * Readable only while the phone is unlocked, and never carried to another
+ * device by a backup or a keychain sync: the same terms the Simpro secret is
+ * held on. A key that pays per call is a key somebody else would like.
+ */
+const OPTIONS = { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY };
+
 export async function storePlacesKey(key: string): Promise<void> {
-  await SecureStore.setItemAsync(KEY_SLOT, key.trim());
+  await SecureStore.setItemAsync(KEY_SLOT, key.trim(), OPTIONS);
 }
 
 export async function readPlacesKey(): Promise<string | undefined> {

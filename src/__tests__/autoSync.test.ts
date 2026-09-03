@@ -176,7 +176,8 @@ describe('when only changes are fetched', () => {
   });
 
   it('pulls rather than only sending when a queued item finds a pull due', () => {
-    // The flush runs after every pull, so the note still goes.
+    // The queue is sent ahead of the pull in runAutoSync, so the note goes
+    // first and the pull follows; a pull that is due is not skipped for it.
     const d = decideAutoSync(input({ trigger: 'queued', syncState: [state('sites', minutesAgo(45))] }));
     expect(d.action).toBe('incremental');
   });
@@ -332,10 +333,15 @@ describe('summarising a run', () => {
     expect(summariseRun('flush-only', null, { sent: 0, failed: 0, remaining: 0 })).toBe('Nothing was waiting to send.');
   });
 
+  it('says why the send stopped, since the rows it left are still waiting', () => {
+    expect(summariseRun('flush-only', null, { sent: 1, failed: 0, remaining: 3, stopped: { reason: 'Simpro rate limit reached.' } }))
+      .toBe('Sent 1 to the office. Sending stopped: Simpro rate limit reached.');
+  });
+
   it('counts the problems rather than hiding them', () => {
     // "Fetched everything" with three errors in it is not fetched everything.
     const line = summariseRun('incremental', { ...pull, errors: ['a', 'b', 'c'] }, { sent: 0, failed: 1, remaining: 1 });
-    expect(line).toBe('Fetched changes: 3 sites, 7 jobs and 1 asset changed here. 3 problems on the way. 1 could not be sent and will be retried.');
+    expect(line).toBe('Fetched changes: 3 sites, 7 jobs and 1 asset changed here. 3 problems on the way. 1 could not be sent; see Send to the office.');
   });
 });
 

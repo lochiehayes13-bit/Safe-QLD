@@ -1,5 +1,5 @@
 import { File } from 'expo-file-system';
-import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
+import { ImageManipulator, SaveFormat, type ImageRef } from 'expo-image-manipulator';
 import { photoUri } from '@/export/photoFiles';
 import type { OutboundAttachment, OutboundPhoto } from '@/domain/outboundWork';
 import { shrinkForUpload } from './attachments';
@@ -68,15 +68,29 @@ export async function readAttachmentForUpload(payload: AttachmentToRead): Promis
 
   const plan = shrinkForUpload(sizeBytes);
   if (plan) {
+    /*
+     * Decoded once. The pixels have to be known before the resize can keep
+     * the aspect ratio, and the only way this module can learn them is to
+     * render the file — a full-size bitmap held natively. Rendering the file
+     * a second time for the resize is what a first version did, and a
+     * twelve-megapixel photograph decoded twice over is what makes a phone
+     * drop the app mid-upload. So the decoded image itself is handed to the
+     * resize, which reads the bitmap rather than the file, and the big one
+     * is let go the moment the smaller one exists.
+     */
+    let decoded: ImageRef | undefined;
+    let resized: ImageRef | undefined;
     try {
-      // Rendered once to learn the pixels, then again with the resize — the
-      // manipulator only preserves the aspect ratio when it knows both.
-      const probe = await ImageManipulator.manipulate(file.uri).renderAsync();
-      const sized = shrinkForUpload(sizeBytes, probe.width, probe.height) ?? plan;
-      let context = ImageManipulator.manipulate(file.uri);
-      if (sized.resize) context = context.resize(sized.resize);
-      const rendered = await context.renderAsync();
-      const saved = await rendered.saveAsync({ compress: sized.quality, format: SaveFormat.JPEG, base64: true });
+      decoded = await ImageManipulator.manipulate(file.uri).renderAsync();
+      const sized = shrinkForUpload(sizeBytes, decoded.width, decoded.height) ?? plan;
+      let image = decoded;
+      if (sized.resize) {
+        resized = await ImageManipulator.manipulate(decoded).resize(sized.resize).renderAsync();
+        release(decoded);
+        decoded = undefined;
+        image = resized;
+      }
+      const saved = await image.saveAsync({ compress: sized.quality, format: SaveFormat.JPEG, base64: true });
       if (saved.base64) {
         const smaller = new File(saved.uri);
         const out: ReadAttachment = {
@@ -92,6 +106,9 @@ export async function readAttachmentForUpload(payload: AttachmentToRead): Promis
       }
     } catch {
       // Fall through to the original.
+    } finally {
+      release(resized);
+      release(decoded);
     }
   }
 
@@ -102,6 +119,15 @@ export async function readAttachmentForUpload(payload: AttachmentToRead): Promis
     sizeBytes,
     downscaled: false,
   };
+}
+
+/** Lets a native bitmap go. Older module builds have no release; the OS reclaims it later. */
+function release(image: { release?: () => void } | undefined): void {
+  try {
+    image?.release?.();
+  } catch {
+    // Already released, or a build without it. Nothing to do about either.
+  }
 }
 
 /** A defect's photographs with their sizes on disk, for the plan. Missing files carry no size. */

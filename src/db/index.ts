@@ -30,6 +30,49 @@ export function resetDbHandle(): void {
   dbPromise = null;
 }
 
+/** The one call a transaction needs from a connection. */
+export interface TransactionalDb {
+  withTransactionAsync(work: () => Promise<void>): Promise<void>;
+}
+
+/** Connections with a transaction open right now. See inTransaction. */
+const open = new WeakSet<object>();
+
+/**
+ * Runs work inside a transaction, or inside the one already open.
+ *
+ * expo-sqlite's withTransactionAsync is a bare BEGIN and COMMIT on the single
+ * shared connection: a second BEGIN while one is open throws "cannot start a
+ * transaction within a transaction", and the loser's ROLLBACK undoes the
+ * winner's work so far. Two callers overlap in ordinary use — the pull's
+ * detail prefetch and the job screen's own read of the same job, or a
+ * technician's save landing mid-pull — so every multi-statement write goes
+ * through here rather than opening one itself. While a transaction is open
+ * on the connection the work simply joins it: it commits or rolls back with
+ * the one already running, which is what SQLite would have done had the two
+ * been written as one, and nothing is thrown.
+ *
+ * Tracked per connection so the test double, which has its own connection,
+ * gets the same rule.
+ */
+export async function inTransaction(db: TransactionalDb, work: () => Promise<void>): Promise<void> {
+  if (open.has(db)) {
+    await work();
+    return;
+  }
+  open.add(db);
+  try {
+    await db.withTransactionAsync(work);
+  } finally {
+    open.delete(db);
+  }
+}
+
+/** Whether a transaction is open on the connection right now. */
+export function transactionIsOpen(db: TransactionalDb): boolean {
+  return open.has(db);
+}
+
 /** RFC4122-ish v4 id. Not cryptographic — just needs to be unique on-device. */
 export function newId(): string {
   const hex = '0123456789abcdef';

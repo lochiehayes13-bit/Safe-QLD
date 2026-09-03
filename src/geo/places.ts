@@ -122,6 +122,13 @@ function isRecord(v: unknown): v is Record<string, unknown> {
  * is not printed twice, and the country off the end because every answer is
  * in Australia by construction. The region and state stay: "Springfield"
  * alone does not say which one.
+ *
+ * A plain address has no name, and its chain starts with the house number
+ * on its own: "40, Fictional Parade, Springfield, …". The card is titled
+ * with the number and the street together, the way a person says an
+ * address, and the address keeps the number — it is what the matcher reads
+ * the street number from, and an address handed over without its number
+ * matches no site of ours.
  */
 export function mapNominatim(body: unknown): Place[] {
   if (!Array.isArray(body)) return [];
@@ -134,11 +141,15 @@ export function mapNominatim(body: unknown): Place[] {
     if (latitude === 0 && longitude === 0) continue;
     const display = asString(row.display_name);
     const segments = display.split(',').map((s) => s.trim()).filter(Boolean);
-    let name = asString(row.name);
-    if (!name) name = segments[0] ?? '';
-    if (!name) continue;
+    const rawName = asString(row.name);
+    let name = rawName;
     let addressParts = segments;
-    if (segments[0] && segments[0].toLowerCase() === name.toLowerCase()) addressParts = segments.slice(1);
+    if (rawName) {
+      if (segments[0] && segments[0].toLowerCase() === rawName.toLowerCase()) addressParts = segments.slice(1);
+    } else if (segments[0]) {
+      name = /^\d/.test(segments[0]) && segments[1] ? `${segments[0]} ${segments[1]}` : segments[0];
+    }
+    if (!name) continue;
     if (addressParts.length && addressParts[addressParts.length - 1]!.toLowerCase() === 'australia') {
       addressParts = addressParts.slice(0, -1);
     }
@@ -164,8 +175,23 @@ export const GOOGLE_FIELD_MASK = 'places.id,places.displayName,places.formattedA
 
 export interface GoogleSearchOptions {
   limit?: number;
-  /** Bias results towards here, within a generous radius. */
+  /** Bias results towards here, within a generous radius. Coarsened before it is sent; see `coarsePosition`. */
   near?: { latitude: number; longitude: number };
+}
+
+/**
+ * A position rounded to about a kilometre: two decimal places of a degree.
+ *
+ * The bias only has to say which part of the state the technician is in, so
+ * that "Bunnings" finds the nearest one and not the first alphabetically.
+ * The exact fix would say which driveway they are parked in, and that goes
+ * to a third party with every search, so it is blurred here before it
+ * leaves the phone. The bias radius is fifty kilometres; a kilometre of
+ * blur changes nothing about the answer.
+ */
+export function coarsePosition(at: { latitude: number; longitude: number }): { latitude: number; longitude: number } {
+  const round = (v: number) => Math.round(v * 100) / 100;
+  return { latitude: round(at.latitude), longitude: round(at.longitude) };
 }
 
 /** The request body for the text search, so a test can see exactly what goes over the wire. */
@@ -177,8 +203,9 @@ export function googlePlacesBody(query: string, options: GoogleSearchOptions = {
     maxResultCount: Math.max(1, Math.min(20, Math.trunc(options.limit ?? DEFAULT_LIMIT))),
   };
   if (options.near) {
+    const near = coarsePosition(options.near);
     body.locationBias = {
-      circle: { center: { latitude: options.near.latitude, longitude: options.near.longitude }, radius: 50000 },
+      circle: { center: { latitude: near.latitude, longitude: near.longitude }, radius: 50000 },
     };
   }
   return body;

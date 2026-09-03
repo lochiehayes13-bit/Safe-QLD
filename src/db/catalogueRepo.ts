@@ -1,4 +1,4 @@
-import { getDb, newId } from './index';
+import { getDb, inTransaction, newId } from './index';
 import { CATEGORY_LABEL } from '@/seed/catalogueCategories';
 
 export { CATEGORY_LABEL };
@@ -73,7 +73,7 @@ export async function seedCatalogue(items: CatalogueSeedItem[]): Promise<number>
   const db = await getDb();
   let written = 0;
 
-  await db.withTransactionAsync(async () => {
+  await inTransaction(db, async () => {
     for (const item of items) {
       if (!item.partNumber?.trim() || !item.brand?.trim()) continue;
       await db.runAsync(

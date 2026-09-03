@@ -222,7 +222,9 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/work/jobs', file: 'app/work/jobs.tsx', tab: 'today', section: 'The day',
-    label: 'Jobs', modes: BOTH, openedFrom: ['/work', '/shortcuts'],
+    // A site and a customer open it scoped to their own jobs — the way in a
+    // technician on site actually uses.
+    label: 'Jobs', modes: BOTH, openedFrom: ['/work', '/shortcuts', '/site/[id]', '/customer/[id]'],
     blurb: 'Scheduled and outstanding work, urgent first.',
     terms: ['job', 'jobs', 'work order', 'scheduled', 'urgent'],
   },
@@ -372,7 +374,7 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/site/[id]', file: 'app/site/[id].tsx', tab: 'sites', section: 'Your sites',
     label: 'Site', needsContext: true, modes: BOTH,
-    openedFrom: ['/sites', '/work/job/[id]', '/customer/[id]', '/quotes/simpro/[id]'],
+    openedFrom: ['/sites', '/work/job/[id]', '/customer/[id]', '/quotes/simpro/[id]', '/quotes'],
     blurb: 'One site: its systems, its history, its paperwork, and the pack that hands it to another technician.',
     terms: ['site', 'building', 'pack'],
   },

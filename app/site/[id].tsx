@@ -1,5 +1,8 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { qldIsoDay } from '@/domain/qldTime';
+import { loadPrefs } from '@/app-prefs';
+import { simproConfigFromPrefs } from '@/simpro/config';
+import { syncSiteDetail } from '@/simpro/sync';
 import { Alert, Linking, Pressable, View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -14,7 +17,6 @@ import { encodePack, formatBytes } from '@/share/pack';
 import { shareFile, writePack, writePdf } from '@/export/files';
 import { formatAuDate } from '@/export/sheets';
 import { buildRoutineReport } from '@/db/routineReportRepo';
-import { listJobs } from '@/db/opsRepo';
 import { listJobsFor, listQuotes, siteStats, type CustomerStats } from '@/db/mirrorRepo';
 import { contactActions } from '@/domain/jobPresentation';
 import { formatCents } from '@/domain/rates';
@@ -74,10 +76,45 @@ export default function SiteScreen() {
     setOffice({ stats, quoteCount: quotes.length, customers: siteCustomers(jobs, quotes) });
   }, [id]);
 
+  /**
+   * The office's own record of the site, read in the background.
+   *
+   * The site list may not carry the public notes or the customer number —
+   * the build refuses those columns on the list — so they come from the
+   * site's own record the first time it is opened with signal, and again
+   * after a quarter hour, the same rule as a job. Never blocks the screen:
+   * what the phone holds is up first and the refreshed copy replaces it.
+   */
+  const refreshing = useRef(false);
+  const [officeError, setOfficeError] = useState<string | null>(null);
+  const refreshFromOffice = useCallback(async (siteId: string) => {
+    if (refreshing.current) return;
+    refreshing.current = true;
+    try {
+      const prefs = await loadPrefs();
+      const outcome = await syncSiteDetail(simproConfigFromPrefs(prefs), siteId);
+      if (outcome.status === 'synced') {
+        setOfficeError(null);
+        await load();
+      } else if (outcome.status === 'failed') {
+        setOfficeError(outcome.error);
+      }
+    } catch (e) {
+      setOfficeError(e instanceof Error ? e.message : String(e));
+    } finally {
+      refreshing.current = false;
+    }
+  }, [load]);
+
   useFocusEffect(
     useCallback(() => {
-      void load();
-    }, [load]),
+      let cancelled = false;
+      void (async () => {
+        await load();
+        if (!cancelled && id) void refreshFromOffice(id);
+      })();
+      return () => { cancelled = true; };
+    }, [id, load, refreshFromOffice]),
   );
 
   const startReport = async () => {
@@ -158,8 +195,15 @@ export default function SiteScreen() {
        * putting the wrong number on a service report files it against somebody
        * else's work — and says so below, where the technician sees it before
        * the document leaves the phone.
+       *
+       * The candidates are this site's own jobs, newest change first. They
+       * used to be the first five hundred jobs on the phone, which was fine
+       * while the phone held five hundred; it holds every job on the books
+       * now, and the five hundred oldest open ones never include the job
+       * issued this fortnight — so the report left with no number and no
+       * word about why.
        */
-      const job = jobNumberForReport(await listJobs({ limit: 500 }), {
+      const job = jobNumberForReport(await listJobsFor({ siteId: site.id, limit: 500 }), {
         siteId: site.id,
         from: from.toISOString(),
         to: to.toISOString(),
@@ -341,6 +385,23 @@ export default function SiteScreen() {
                   <Txt size="sm" tone="faint" style={{ marginTop: 4 }}>The office lists no contact for this site.</Txt>
                 )}
               </View>
+
+              {/*
+                * What the office wrote on the site for the person on the
+                * doorstep: where to park, who to sign in with, where the
+                * panel is. Only shown where there is something to show.
+                */}
+              {site.publicNotes ? (
+                <View style={{ marginTop: t.space(3) }}>
+                  <Label>Notes from the office</Label>
+                  <Txt style={{ marginTop: 4 }}>{site.publicNotes}</Txt>
+                </View>
+              ) : null}
+              {officeError ? (
+                <Txt size="xs" tone="faint" style={{ marginTop: t.space(2) }}>
+                  Showing what the phone holds. Could not refresh: {officeError}
+                </Txt>
+              ) : null}
             </Card>
             {office ? (
               <>

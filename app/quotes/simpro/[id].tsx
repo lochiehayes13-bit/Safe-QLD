@@ -7,8 +7,8 @@ import { getQuoteFull, localJobId, type AttachmentRecord, type QuoteFull } from 
 import { getJob } from '@/db/opsRepo';
 import type { SimproCostCenter, SimproItem, SimproSection } from '@/simpro/mirrorResources';
 import {
-  attachmentIcon, contactActions, formatFileSize, formatQty, itemHeading, itemPrice, quoteState, relativeQldTime,
-  sectionLineCount, sellTotalLine, stageLabel, statusSwatch, technicianLine,
+  attachmentIcon, contactActions, discountLabel, formatFileSize, formatQty, itemHeading, itemPrice, quoteState,
+  relativeQldTime, sectionLineCount, sellTotalLine, stageLabel, statusSwatch, technicianLine,
 } from '@/domain/jobPresentation';
 import { qldMoment } from '@/domain/qldTime';
 import { formatCents } from '@/domain/rates';
@@ -392,7 +392,7 @@ function ItemRow({ item }: { item: SimproItem }) {
       <View style={{ flex: 1 }}>
         <Txt size="sm">{itemHeading(item)}</Txt>
         <Txt size="xs" tone="faint">
-          {[item.partNo && item.partNo !== item.description ? item.partNo : undefined, price.unit, item.billableStatus, item.discountPercent ? `${item.discountPercent}% off` : undefined]
+          {[item.partNo && item.partNo !== item.description ? item.partNo : undefined, price.unit, item.billableStatus, discountLabel(item)]
             .filter(Boolean).join(' · ')}
         </Txt>
       </View>

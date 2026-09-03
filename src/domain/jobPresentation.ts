@@ -102,6 +102,49 @@ function localStatusTone(status: string): Tone {
   return LOCAL_STATUS[status]?.tone ?? 'muted';
 }
 
+/** The office's stages under which a job is still work to be done. */
+const OPEN_STAGES = new Set(['pending', 'progress']);
+
+/**
+ * Whether a job is still open: neither side has closed it.
+ *
+ * A job has two hands on it. The office moves the stage — Pending, Progress,
+ * then Complete, Invoiced, Archived — and the technician sets a status on
+ * the phone, which the sync keeps over the office's. A job is open only
+ * while the office still has it under Pending or Progress AND the phone has
+ * not marked it complete; a job added by hand has no stage, so the phone's
+ * status is all there is. One rule, used by the list's Open and Mine
+ * filters and mirrored in SQL by the site and customer counts, so the
+ * number on a card and the rows it opens onto never disagree.
+ */
+export function jobIsOpen(job: { status: string; stage?: string; stageRaw?: string }): boolean {
+  if (job.status === 'complete') return false;
+  const stage = (job.stageRaw ?? job.stage ?? '').trim().toLowerCase();
+  return !stage || OPEN_STAGES.has(stage);
+}
+
+/**
+ * What the phone did to a job that the office's pill does not say.
+ *
+ * The pill carries the office's word, because that is the word the
+ * scheduler uses on the phone. After "Start job" or "Mark complete" that
+ * word does not change, so without this the only sign the button worked
+ * was the button going away. Undefined where the pill already reads the
+ * phone's own state — a job added by hand has nothing else — and where the
+ * office has already closed the job, so a finished job does not wear two
+ * pills saying the same thing.
+ */
+export function localStateWord(job: { status: string; statusName?: string; stage?: string; stageRaw?: string }): StateWord | undefined {
+  const stage = (job.stageRaw ?? job.stage ?? '').trim().toLowerCase();
+  if (!job.statusName?.trim() && !stage) return undefined;
+  switch (job.status) {
+    case 'in-progress': return { label: 'Started on this phone', tone: 'warn' };
+    case 'blocked': return { label: 'Blocked on this phone', tone: 'fail' };
+    case 'complete': return !stage || OPEN_STAGES.has(stage) ? { label: 'Completed on this phone', tone: 'pass' } : undefined;
+    default: return undefined;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // The office's status colour, made safe on our surfaces
 // ---------------------------------------------------------------------------
@@ -245,17 +288,20 @@ export interface JobFilterContext {
  * work whatever the job's issue date says — and the issue date second, for a
  * phone that has no schedule synced. Mine is the open jobs booked to this
  * person: the closed ones are history, and history for a technician who has
- * been here five years is three thousand rows.
+ * been here five years is three thousand rows. Open is jobIsOpen's word —
+ * neither the office nor this phone has closed it — and Today has no status
+ * condition at all, because a job finished at ten this morning is still
+ * today's work.
  */
 export function applyJobFilter<T extends {
   externalId?: string; siteName: string; customerName?: string; title: string; address?: string; orderNo?: string;
-  status: string; scheduledFor?: string; techniciansJson?: string; technician?: string;
+  status: string; stage?: string; stageRaw?: string; scheduledFor?: string; techniciansJson?: string; technician?: string;
 }>(jobs: readonly T[], ctx: JobFilterContext): T[] {
   return jobs.filter((j) => {
     if (!jobMatchesQuery(j, ctx.query)) return false;
     switch (ctx.filter) {
-      case 'open': return j.status !== 'complete';
-      case 'mine': return j.status !== 'complete' && jobIsMine(j, ctx.who);
+      case 'open': return jobIsOpen(j);
+      case 'mine': return jobIsOpen(j) && jobIsMine(j, ctx.who);
       case 'today':
         return (!!j.externalId && ctx.scheduledToday.has(j.externalId)) || qldIsoDay(j.scheduledFor) === ctx.today;
       default: return true;
@@ -286,6 +332,11 @@ export function qldClock(iso: string | undefined): string | undefined {
  * the date past that. "3 h ago" at eight in the morning is this morning's
  * note, and only the Queensland day can say whether a note at 23:50 is
  * yesterday's — its UTC day is the day before.
+ *
+ * The days are calendar days, counted between the two Queensland dates, not
+ * the elapsed time floored: a note at eleven on Sunday night read at seven
+ * on Tuesday morning is thirty-two hours old and two days ago, and "1 days
+ * ago" dated the office's instruction a day late.
  */
 export function relativeQldTime(at: string | undefined, nowIso: string): string {
   if (!at) return '';
@@ -302,9 +353,16 @@ export function relativeQldTime(at: string | undefined, nowIso: string): string 
     if (dayAt === dayNow) return `${Math.floor(diff / 3_600_000)} h ago`;
     if (dayAt === addDays(dayNow, -1)) return `Yesterday ${qldClock(at) ?? ''}`.trim();
   }
-  const days = Math.floor(diff / 86_400_000);
-  if (days < 7) return `${days} days ago`;
+  const days = dayAt && dayNow ? calendarDaysBetween(dayAt, dayNow) : Math.floor(diff / 86_400_000);
+  if (days < 7) return days === 1 ? '1 day ago' : `${days} days ago`;
   return auDate(at);
+}
+
+/** Whole calendar days from one yyyy-mm-dd to a later one. */
+function calendarDaysBetween(from: string, to: string): number {
+  const a = Date.parse(`${from}T00:00:00Z`);
+  const b = Date.parse(`${to}T00:00:00Z`);
+  return Math.round((b - a) / 86_400_000);
 }
 
 /** The dates on a job's header, in the order they happen, only where the office set them. */
@@ -380,6 +438,17 @@ export function itemPrice(item: Pick<SimproItem, 'qty' | 'unitSellExTaxCents' | 
   if (line !== undefined) out.line = formatCents(line);
   if (item.unitSellExTaxCents !== undefined && item.qty !== 1) out.unit = `${formatCents(item.unitSellExTaxCents)} each`;
   return out;
+}
+
+/**
+ * A line's discount as a word: "10% off", or "10% surcharge" for a negative
+ * one, which is how Simpro writes a surcharge. Left as the office's figure
+ * either way; the sign is the reading, and "-10% off" read as a discount.
+ */
+export function discountLabel(item: Pick<SimproItem, 'discountPercent'>): string | undefined {
+  const d = item.discountPercent;
+  if (d === undefined || !Number.isFinite(d) || d === 0) return undefined;
+  return d > 0 ? `${formatNumber(d)}% off` : `${formatNumber(-d)}% surcharge`;
 }
 
 /** How many lines sit under a section, across its cost centres, for the collapsed heading. */

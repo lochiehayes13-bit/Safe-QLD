@@ -1,6 +1,8 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
-import { getDb, newId, nowIso } from './index';
-import { addAssetEvent, updateAsset, type AssetEventKind } from './assetRepo';
+import { getDb, inTransaction, newId, nowIso } from './index';
+import {
+  addAssetEvent, clearTestSheetEvents, TEST_SHEET_EVENT, updateAsset, type AssetEventKind,
+} from './assetRepo';
 import type { AssetTestRow } from '@/domain/formsFromAssets';
 import type {
   CauseEffect,
@@ -266,7 +268,7 @@ export async function importParsedConfig(
   let pointCount = 0;
   let zoneCount = 0;
 
-  await db.withTransactionAsync(async () => {
+  await inTransaction(db, async () => {
     for (const pp of parsed.panels) {
       const panelId = newId();
       panelIds.push(panelId);
@@ -420,7 +422,7 @@ export async function addPointsToReport(reportId: string, points: Point[]): Prom
     p.zoneNumber ?? null, p.zoneText ?? null, p.text, p.deviceType, 'untested', null, null, null, idx++,
   ]);
 
-  await db.withTransactionAsync(async () => {
+  await inTransaction(db, async () => {
     await insertMany(db, 'test_row',
       ['id', 'reportId', 'pointId', 'pointRef', 'loopNumber', 'address', 'zoneNumber', 'zoneText',
         'deviceText', 'deviceType', 'result', 'method', 'comment', 'testedAt', 'sortIndex'],
@@ -455,7 +457,7 @@ export async function addAssetRowsToReport(reportId: string, rows: readonly Asse
       r.result, r.method ?? null, r.comment ?? null, null, idx++,
     ]);
 
-  await db.withTransactionAsync(async () => {
+  await inTransaction(db, async () => {
     await insertMany(db, 'test_row',
       ['id', 'reportId', 'assetId', 'assetType', 'pointRef', 'zoneNumber', 'zoneText',
         'deviceText', 'deviceType', 'result', 'method', 'comment', 'testedAt', 'sortIndex'],
@@ -482,6 +484,14 @@ export async function assetIdsOnReport(reportId: string): Promise<Set<string>> {
  * true. An N/A is written as a plain tested event and leaves the last result
  * alone — nothing was serviced. Putting a row back to untested writes
  * nothing: history is not unmade, and the sheet is what says the row is open.
+ *
+ * One event per asset per sheet. A gloved thumb taps Fail twice, or Pass and
+ * then Fail on second thought, and each tap used to append another event —
+ * so one visit read as two failures and the recurring-failure analysis
+ * promoted the asset on the strength of a double tap. The sheet's earlier
+ * event for this report is replaced rather than joined; a routine run's or a
+ * defect's event on the same asset carries a different summary and is left
+ * alone.
  */
 export async function recordTestRowOnAsset(
   row: Pick<TestRow, 'assetId' | 'reportId' | 'deviceText' | 'comment'>,
@@ -490,20 +500,25 @@ export async function recordTestRowOnAsset(
   at: string = nowIso(),
 ): Promise<void> {
   if (!row.assetId || result === 'untested') return;
+  const assetId = row.assetId;
   const kind: AssetEventKind = result === 'pass' ? 'passed' : result === 'fail' ? 'failed' : 'tested';
   const said = result === 'pass' ? 'passed' : result === 'fail' ? 'failed' : 'not applicable';
-  await addAssetEvent({
-    assetId: row.assetId,
-    kind,
-    occurredAt: at,
-    technician: technician?.trim() || undefined,
-    reportId: row.reportId,
-    summary: `Test sheet — ${said}`,
-    detail: row.comment?.trim() || undefined,
+  const db = await getDb();
+  await inTransaction(db, async () => {
+    await clearTestSheetEvents(assetId, row.reportId);
+    await addAssetEvent({
+      assetId,
+      kind,
+      occurredAt: at,
+      technician: technician?.trim() || undefined,
+      reportId: row.reportId,
+      summary: `${TEST_SHEET_EVENT} ${said}`,
+      detail: row.comment?.trim() || undefined,
+    });
+    if (result === 'pass' || result === 'fail') {
+      await updateAsset(assetId, { lastServicedAt: at, lastResult: result });
+    }
   });
-  if (result === 'pass' || result === 'fail') {
-    await updateAsset(row.assetId, { lastServicedAt: at, lastResult: result });
-  }
 }
 
 export async function setTestResult(rowId: string, result: TestRow['result'], comment?: string): Promise<void> {
@@ -538,7 +553,7 @@ export async function listCheckRows(reportId: string): Promise<CheckRow[]> {
 
 export async function addCheckRows(reportId: string, rows: Omit<CheckRow, 'id' | 'reportId'>[]): Promise<void> {
   const db = await getDb();
-  await db.withTransactionAsync(async () => {
+  await inTransaction(db, async () => {
     await insertMany(db, 'check_row', ['id', 'reportId', 'section', 'label', 'result', 'value', 'unit', 'comment', 'sortIndex'],
       rows.map((r) => [newId(), reportId, r.section, r.label, r.result, r.value ?? null, r.unit ?? null, r.comment ?? null, r.sortIndex]));
   });

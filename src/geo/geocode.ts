@@ -2,7 +2,7 @@ import { Platform } from 'react-native';
 import * as Location from 'expo-location';
 import { pendingKeys, readPositions, writeFailure, writePosition } from '@/db/geocodeRepo';
 import type { LatLng, MapSite } from '@/domain/mapPins';
-import { siteAddressKey } from './geocodeKey';
+import { siteAddressKey, type AddressParts } from './geocodeKey';
 
 export { siteAddressKey } from './geocodeKey';
 
@@ -54,13 +54,38 @@ export interface LocateResult {
   stopped: boolean;
   /** Set when the platform, rather than an address, ended the run. */
   fault?: string;
+  /**
+   * What kind of fault: the location permission is missing, which the
+   * technician can fix in Settings, or the platform itself threw, which
+   * they cannot. The screen offers a button for one and not the other.
+   */
+  faultKind?: 'permission' | 'platform';
 }
 
 /** After this many geocoder throws in a row the platform is the problem, not the address. */
 const MAX_CONSECUTIVE_FAULTS = 3;
 
+/**
+ * Whether the permission has been declined since the app started. Asked once
+ * per run and not on every opening of the map: Android keeps answering "you
+ * may ask again" after the first refusal, and a dialog on every tab switch
+ * is how a person ends up refusing for good.
+ */
+let declinedThisRun = false;
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Puts a position the technician already has for an address into the cache,
+ * so a site created from a place found on the map lands where the place was
+ * rather than wherever the geocoder later reads the typed address to be.
+ */
+export async function rememberPosition(parts: AddressParts, at: LatLng): Promise<void> {
+  const key = siteAddressKey(parts);
+  if (!key || !Number.isFinite(at.latitude) || !Number.isFinite(at.longitude)) return;
+  await writePosition(key, at.latitude, at.longitude, 'place');
 }
 
 /** Site id → address key, for the sites that have a usable address. */
@@ -89,8 +114,9 @@ async function ensurePermission(): Promise<boolean> {
   if (Platform.OS !== 'android') return true;
   const current = await Location.getForegroundPermissionsAsync();
   if (current.granted) return true;
-  if (!current.canAskAgain) return false;
+  if (!current.canAskAgain || declinedThisRun) return false;
   const asked = await Location.requestForegroundPermissionsAsync();
+  if (!asked.granted) declinedThisRun = true;
   return asked.granted;
 }
 
@@ -120,6 +146,7 @@ export async function locateSites(sites: readonly MapSite[], options: LocateOpti
 
   if (!(await ensurePermission())) {
     result.fault = 'Location permission is needed to look up addresses on this phone.';
+    result.faultKind = 'permission';
     return result;
   }
 
@@ -151,6 +178,7 @@ export async function locateSites(sites: readonly MapSite[], options: LocateOpti
       consecutiveFaults += 1;
       if (consecutiveFaults >= MAX_CONSECUTIVE_FAULTS) {
         result.fault = e instanceof Error ? e.message : String(e);
+        result.faultKind = 'platform';
         result.stopped = true;
         break;
       }

@@ -5,10 +5,16 @@ import * as ImagePicker from 'expo-image-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { createDefect, listSites } from '@/db/repo';
 import { newId } from '@/db';
+import { listJobsFor } from '@/db/mirrorRepo';
+import type { JobRecord } from '@/db/opsRepo';
 import { CAPTURE_QUALITY } from '@/domain/photoStore';
+import { jobIsOpen } from '@/domain/jobPresentation';
+import { attachmentsForDefect } from '@/domain/outboundWork';
 import { shrinkForStorage } from '@/export/photoResize';
 import { keepPhoto } from '@/export/photoFiles';
 import { addAssetEvent } from '@/db/assetRepo';
+import { photosWithSizes } from '@/simpro/attachmentFiles';
+import { queueJobAttachment } from '@/simpro/sync';
 import { SYSTEM_LABELS, type SystemKind } from '@/seed/assetTypes';
 import {
   DEFECT_LIBRARY, SEVERITY_LABEL, defectComponents, defectsForSystem, searchDefects,
@@ -37,6 +43,17 @@ export default function NewDefectScreen() {
   const [component, setComponent] = useState<string | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
   const [saving, setSaving] = useState(false);
+  /**
+   * The office's open jobs at the chosen site, and which of them the
+   * photographs go to. A photograph of a defect belongs on the job the
+   * office raised for the visit, where the scheduler and the customer's
+   * report both find it; until now it stayed on the phone until a routine
+   * run was sent. Nothing is chosen by default where there is more than
+   * one open job, because the wrong job files the evidence against
+   * somebody else's work.
+   */
+  const [officeJobs, setOfficeJobs] = useState<JobRecord[]>([]);
+  const [attachTo, setAttachTo] = useState<string | null>(null);
 
   /**
    * Everything the user actually typed lives in a draft, so a lock screen, a
@@ -76,6 +93,18 @@ export default function NewDefectScreen() {
     });
     // Only runs once the draft has loaded, so a recovered site choice wins.
   }, [siteId, draft.ready]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    if (!siteId) { setOfficeJobs([]); setAttachTo(null); return; }
+    void listJobsFor({ siteId, limit: 50 }).then((rows) => {
+      if (cancelled) return;
+      const open = rows.filter((j) => j.externalId && jobIsOpen(j));
+      setOfficeJobs(open);
+      setAttachTo(open.length === 1 ? open[0]!.externalId! : null);
+    });
+    return () => { cancelled = true; };
+  }, [siteId]);
 
   const systems = useMemo(
     () => [...new Set(DEFECT_LIBRARY.map((d) => d.system))],
@@ -183,6 +212,46 @@ export default function NewDefectScreen() {
       }
 
       await draft.discard();
+
+      // The photographs to the office's job, queued rather than sent, after
+      // the defect is safely on the phone: a queue that cannot be written
+      // must not take the defect with it. The plan declines a photograph
+      // whose file has gone and the queue declines one it already holds,
+      // and both are said out loud rather than counted as sent.
+      const jobId = attachTo && officeJobs.some((j) => j.externalId === attachTo) ? attachTo : null;
+      if (jobId && defect.photos.length) {
+        const siteName = sites.find((s) => s.id === siteId)?.name ?? '';
+        try {
+          const plan = attachmentsForDefect(
+            { id: defect.id, location: defect.location, raisedAt: defect.raisedAt, photos: photosWithSizes(defect.photos) },
+            { jobId, siteName },
+          );
+          let queued = 0;
+          let duplicate = 0;
+          for (const item of plan.items) {
+            const row = await queueJobAttachment(item.payload);
+            if (row.duplicate) duplicate++; else queued++;
+          }
+          const plural = (n: number) => `${n} photo${n === 1 ? '' : 's'}`;
+          const lines = [
+            queued ? `${plural(queued)} queued for job #${jobId}. They go up with the next send.` : undefined,
+            duplicate ? `${plural(duplicate)} already queued or on the job, so not sent twice.` : undefined,
+            plan.missing ? `${plural(plan.missing)} could not be found on this device and stay with the defect only.` : undefined,
+          ].filter(Boolean);
+          await new Promise<void>((resolve) => {
+            Alert.alert(queued ? 'Photos queued for the office' : 'Nothing new to send', lines.join('\n'), [{ text: 'OK', onPress: () => resolve() }]);
+          });
+        } catch (e) {
+          await new Promise<void>((resolve) => {
+            Alert.alert(
+              'Defect saved, photos not queued',
+              `The defect is on the phone. Its photos could not be queued for job #${jobId}: ${e instanceof Error ? e.message : String(e)}`,
+              [{ text: 'OK', onPress: () => resolve() }],
+            );
+          });
+        }
+      }
+
       router.back();
     } catch (e) {
       Alert.alert('Could not save', e instanceof Error ? e.message : String(e));
@@ -339,6 +408,30 @@ export default function NewDefectScreen() {
               <Txt size="sm" tone="pass">{photos.length} photo{photos.length === 1 ? '' : 's'} attached</Txt>
             ) : selected.photoRequired ? (
               <Txt size="sm" tone="warn">This defect type needs photographic evidence.</Txt>
+            ) : null}
+
+            {photos.length && officeJobs.length ? (
+              <Card>
+                <Label>Send to the office</Label>
+                <Txt size="sm" style={{ marginTop: 4, lineHeight: 20 }}>
+                  {attachTo
+                    ? `Attach ${photos.length === 1 ? 'the photo' : `these ${photos.length} photos`} to job #${attachTo} in Simpro when the defect is saved.`
+                    : officeJobs.length === 1
+                      ? 'The photos stay on the phone with the defect.'
+                      : `The office has ${officeJobs.length} open jobs here. Pick the one this defect belongs to, or leave the photos on the phone.`}
+                </Txt>
+                <Rowed gap={2} wrap style={{ marginTop: t.space(2) }}>
+                  {officeJobs.map((j) => (
+                    <Chip
+                      key={j.id}
+                      label={`Job #${j.externalId}${j.title ? ` · ${j.title}` : ''}`}
+                      selected={attachTo === j.externalId}
+                      onPress={() => setAttachTo(attachTo === j.externalId ? null : j.externalId!)}
+                    />
+                  ))}
+                  <Chip label="Keep on the phone" selected={attachTo === null} onPress={() => setAttachTo(null)} />
+                </Rowed>
+              </Card>
             ) : null}
 
             <Button title="Save defect" onPress={save} loading={saving} />

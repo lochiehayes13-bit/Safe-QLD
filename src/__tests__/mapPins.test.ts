@@ -1,8 +1,9 @@
 import {
-  DEFAULT_KINDS, OSM_ATTRIBUTION, PIN_COLOUR, PIN_KINDS, PIN_LABEL, RECENT_DAYS,
-  buildPins, centreScript, classifyJob, filterPins, filterScript, formatCount, googleMapsUrl, isRecentDay,
-  jobPositions, jsLiteral, mapHtml, parseMapMessage, pinSearchText, placesScript, quoteIsOpen, recentSinceDay,
-  selectScript, siteAddressLine, visibleKind, wazeUrl,
+  DEFAULT_KINDS, LEAFLET_CSS_INTEGRITY, LEAFLET_CSS_URL, LEAFLET_JS_INTEGRITY, LEAFLET_JS_URL, LEAFLET_VERSION,
+  OSM_ATTRIBUTION, PIN_COLOUR, PIN_KINDS, PIN_LABEL, RECENT_DAYS,
+  buildPins, centreScript, classifyJob, filterPins, filterScript, formatCount, googleMapsUrl, hereScript, isRecentDay,
+  jobPositions, jsLiteral, mapHtml, mapUserAgent, parseMapMessage, pinSearchText, placesScript, quoteIsOpen,
+  recentSinceDay, selectScript, siteAddressLine, visibleKind, wazeUrl,
   type LatLng, type MapJob, type MapQuote, type MapSite, type PinKind,
 } from '@/domain/mapPins';
 
@@ -65,9 +66,19 @@ describe('classifying a job', () => {
   });
 
   it('drops a job completed before the window', () => {
-    const justOver = new Date(Date.parse(NOW) - RECENT_DAYS * DAY_MS - 1).toISOString();
-    expect(classifyJob(job({ status: 'complete', completedAt: justOver }), NOW)).toBeNull();
     expect(classifyJob(job({ status: 'complete', completedAt: daysFromNow(-200) }), NOW)).toBeNull();
+  });
+
+  it('draws the boundary on the Queensland calendar, the way the invoice read and the repository do', () => {
+    // The window starts on 4 June. A job closed at one minute to midnight on
+    // 3 June, Brisbane time, is out; one closed at midnight is in, however
+    // early in UTC terms that is — and a completion day of the 4th is in
+    // outright, not out by the two hours between UTC midnight and now.
+    expect(recentSinceDay(NOW)).toBe('2026-06-04');
+    expect(classifyJob(job({ status: 'complete', completedAt: '2026-06-03T13:59:59.999Z' }), NOW)).toBeNull();
+    expect(classifyJob(job({ status: 'complete', completedAt: '2026-06-03T14:00:00.000Z' }), NOW)).toBe('recent');
+    expect(classifyJob(job({ stage: 'Invoiced', completedDate: '2026-06-04' }), NOW)).toBe('recent');
+    expect(classifyJob(job({ stage: 'Invoiced', completedDate: '2026-06-03' }), NOW)).toBeNull();
   });
 
   it('reads the office stage text case-insensitively as finished', () => {
@@ -92,6 +103,30 @@ describe('classifying a job', () => {
     expect(classifyJob(job({ scheduledFor: daysFromNow(3) }), NOW)).toBe('upcoming');
     expect(classifyJob(job({ scheduledFor: daysFromNow(-3) }), NOW)).toBe('open');
     expect(classifyJob(job({ scheduledFor: NOW }), NOW)).toBe('open');
+  });
+
+  it('is upcoming on the office’s booking, not on the day the job was issued', () => {
+    // The office's job record only carries the day it was issued, which the
+    // sync stores as scheduledFor; the booking is a block on the schedule.
+    // An open job issued last week and booked for next week is upcoming.
+    expect(classifyJob(job({ stage: 'Pending', scheduledFor: '2026-08-26', scheduledDay: '2026-09-10' }), NOW)).toBe('upcoming');
+    // Booked for today is on now, and so is an open job with no booking held.
+    expect(classifyJob(job({ stage: 'Pending', scheduledFor: '2026-08-26', scheduledDay: '2026-09-02' }), NOW)).toBe('open');
+    expect(classifyJob(job({ stage: 'Pending', scheduledFor: '2026-08-26' }), NOW)).toBe('open');
+    expect(classifyJob(job({ stage: 'Progress', scheduledFor: '2026-09-02' }), NOW)).toBe('open');
+  });
+
+  it('compares days on the Queensland calendar, so a job booked for today is on now from midnight', () => {
+    // Six in the morning on 2 September in Brisbane is still 1 September in
+    // UTC. A day-only date read as a UTC-midnight instant would put today's
+    // booking four hours in the future and colour it upcoming until ten.
+    const earlyMorning = '2026-09-01T20:00:00.000Z';
+    expect(classifyJob(job({ scheduledFor: '2026-09-02' }), earlyMorning)).toBe('open');
+    expect(classifyJob(job({ scheduledDay: '2026-09-02' }), earlyMorning)).toBe('open');
+    expect(classifyJob(job({ scheduledDay: '2026-09-03' }), earlyMorning)).toBe('upcoming');
+    // And a planned instant on the phone reads by its Queensland day too.
+    expect(classifyJob(job({ scheduledFor: '2026-09-02T22:00:00.000Z' }), earlyMorning)).toBe('upcoming');
+    expect(classifyJob(job({ scheduledFor: '2026-09-02T04:00:00.000Z' }), earlyMorning)).toBe('open');
   });
 
   it('treats in-progress, blocked and unscheduled work as on now', () => {
@@ -223,6 +258,16 @@ describe('building pins', () => {
     expect(pin.lines[2]).toMatch(/^Old invoice · \d\d\/\d\d\/\d{4}$/);
   });
 
+  it('dates a line by the booking where there is one, and orders the upcoming ones soonest first', () => {
+    const jobs = [
+      job({ siteId: 's1', title: 'Later routine', stage: 'Pending', scheduledFor: '2026-08-20', scheduledDay: '2026-09-20' }),
+      job({ siteId: 's1', title: 'Sooner routine', stage: 'Pending', scheduledFor: '2026-08-25', scheduledDay: '2026-09-10' }),
+    ];
+    const pin = buildPins({ sites: SITES, jobs, positions: POSITIONS, now: NOW }).pins.find((p) => p.siteId === 's1')!;
+    expect(pin.kind).toBe('upcoming');
+    expect(pin.lines).toEqual(['Sooner routine · 10/09/2026', 'Later routine · 20/09/2026']);
+  });
+
   it('uses the customer name where the site has no client', () => {
     const sites: MapSite[] = [{ ...SITES[0]!, clientName: undefined, customerName: 'Harbourline Body Corporate' }];
     const pin = buildPins({ sites, jobs: [], positions: POSITIONS, now: NOW }).pins[0]!;
@@ -318,6 +363,17 @@ describe('links out', () => {
     expect(parseMapMessage(JSON.stringify({ type: 'open', siteId: 's1' }))).toBeNull();
     expect(parseMapMessage('not json')).toBeNull();
   });
+
+  it('reads a tapped link only when it is a web address, and the view only when it is somewhere', () => {
+    expect(parseMapMessage(JSON.stringify({ type: 'link', url: 'https://www.openstreetmap.org/copyright' })))
+      .toEqual({ type: 'link', url: 'https://www.openstreetmap.org/copyright' });
+    expect(parseMapMessage(JSON.stringify({ type: 'link', url: 'javascript:alert(1)' }))).toBeNull();
+    expect(parseMapMessage(JSON.stringify({ type: 'link', url: 'about:blank#' }))).toBeNull();
+    expect(parseMapMessage(JSON.stringify({ type: 'view', lat: -27.5, lng: 153, zoom: 12 })))
+      .toEqual({ type: 'view', view: { centre: { latitude: -27.5, longitude: 153 }, zoom: 12 } });
+    expect(parseMapMessage(JSON.stringify({ type: 'view', lat: 0, lng: 0, zoom: 12 }))).toBeNull();
+    expect(parseMapMessage(JSON.stringify({ type: 'view', lat: -27.5, lng: 153 }))).toBeNull();
+  });
 });
 
 describe('the page', () => {
@@ -357,6 +413,55 @@ describe('the page', () => {
     expect(page).toContain('leaflet@1.9.4');
   });
 
+  it('loads Leaflet pinned to the byte, with an integrity hash on the script and the stylesheet', () => {
+    // A CDN answering with anything but these exact files gets a map that
+    // fails to draw, not a page that runs somebody else's script over the
+    // whole site list.
+    expect(LEAFLET_VERSION).toBe('1.9.4');
+    expect(LEAFLET_JS_INTEGRITY).toMatch(/^sha256-[A-Za-z0-9+/]{43}=$/);
+    expect(LEAFLET_CSS_INTEGRITY).toMatch(/^sha256-[A-Za-z0-9+/]{43}=$/);
+    expect(page).toContain(`<script src="${LEAFLET_JS_URL}" integrity="${LEAFLET_JS_INTEGRITY}" crossorigin="anonymous"></script>`);
+    expect(page).toContain(`<link rel="stylesheet" href="${LEAFLET_CSS_URL}" integrity="${LEAFLET_CSS_INTEGRITY}" crossorigin="anonymous">`);
+    // Nothing external without an integrity attribute.
+    for (const tag of page.match(/<(?:script|link)\b[^>]*https?:[^>]*>/g) ?? []) expect(tag).toContain('integrity="sha256-');
+  });
+
+  it('fetches tiles for the viewport only, once a pan has settled', () => {
+    expect(page).toContain('updateWhenIdle: true');
+    expect(page).toContain('updateWhenZooming: false');
+    expect(page).toContain('keepBuffer: 1');
+  });
+
+  it('names the app and a contact in what the WebView appends to its User-Agent', () => {
+    expect(mapUserAgent('service@example.com.au')).toBe('SafeQLD-FieldApp/1.0 (service map; service@example.com.au)');
+    expect(mapUserAgent('  ')).toBe('SafeQLD-FieldApp/1.0 (service map)');
+  });
+
+  it('hands every link in the page to the phone rather than following it', () => {
+    // The attribution is a link, and a WebView that follows it has no way
+    // back to the map. The page intercepts anchors and posts them instead.
+    expect(page).toContain("document.addEventListener('click'");
+    expect(page).toContain("post({ type: 'link', url: el.href })");
+    expect(page).toContain('e.preventDefault()');
+  });
+
+  it('keeps the attribution clear of the tab bar by whatever clearance the screen gives it', () => {
+    expect(page).toContain('.leaflet-bottom{bottom:96px}');
+    const tall = mapHtml(pins, { centre: { latitude: -27.47, longitude: 153.02 }, zoom: 9, dark: true, bottomClearancePx: 114 });
+    expect(tall).toContain('.leaflet-bottom{bottom:114px}');
+  });
+
+  it('opens on the saved view when it has one, and fits to the pins when it does not', () => {
+    expect(page).toContain('var VIEW = null;');
+    expect(page).toContain('if (VIEW) {');
+    const restored = mapHtml(pins, {
+      centre: { latitude: -27.47, longitude: 153.02 }, zoom: 9, dark: true,
+      view: { centre: { latitude: -26.65, longitude: 153.07 }, zoom: 12 },
+    });
+    expect(restored).toContain('var VIEW = [-26.65,153.07,12];');
+    expect(page).toContain("map.on('moveend', postView)");
+  });
+
   it('carries every kind’s colour, and the layers that start on', () => {
     for (const kind of PIN_KINDS) expect(page).toContain(PIN_COLOUR[kind]);
     expect(page).toContain(`var DEFAULT_KINDS = ${jsLiteral(DEFAULT_KINDS)};`);
@@ -383,6 +488,11 @@ describe('the page', () => {
     expect(page).toContain('window.__setPlaces = function');
     expect(page).toContain('window.__select = function');
     expect(page).toContain('window.__centre = function');
+    // Drawing the technician's dot and moving the map to it are separate
+    // hooks: only the button may move the map.
+    expect(page).toContain('window.__here = function');
+    expect(page).toContain('window.__here(lat, lng);\n  map.setView');
+    expect(hereScript(-27.5, 153.1)).toBe('window.__here && window.__here(-27.5, 153.1); true;');
     expect(filterScript(new Set<PinKind>(['open', 'site']), 'a<b')).toBe(
       'window.__setFilter && window.__setFilter(["open","site"], "a\\u003cb", false); true;',
     );

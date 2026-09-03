@@ -1,13 +1,15 @@
 import { getJob, listJobs, setJobStatus, upsertJob } from '@/db/opsRepo';
 import {
-  customerStats, getCustomer, getInvoice, getJobFull, getQuoteFull, heldJobExternalIds, jobDetailIsStale,
-  jobRowFromSimpro, jobsWantingDetail, listInvoices, listJobsFor, listQuotes, listTasks, localJobId,
+  customerStats, getCustomer, getInvoice, getJobFull, getQuoteFull, heldJobExternalIds, invoiceRowIsWhole, jobDetailIsStale,
+  jobRowFromSimpro, jobsWantingDetail, linkJobInvoice, listInvoices, listJobsFor, listQuotes, listTasks, localJobId,
   pruneCustomersNotSyncedAt, quotesWantingDetail, replaceJobChildren, replaceQuoteChildren, scheduledJobExternalIds,
   searchCustomers, setJobAttachmentLocalUri, siteStats, upsertCustomer, upsertInvoice, upsertQuote, upsertTasks,
+  withMirrorTransaction,
 } from '@/db/mirrorRepo';
 import type {
   SimproCustomer, SimproInvoice, SimproJob, SimproJobDetail, SimproQuote, SimproSection, SimproTask,
 } from '@/simpro/mirrorResources';
+import { applyJobFilter } from '@/domain/jobPresentation';
 import { openMigrated, type NodeSqliteDb } from './support/nodeSqlite';
 
 jest.mock('@/db/index', () => jest.requireActual('./support/nodeSqlite'));
@@ -326,6 +328,22 @@ describe('quotes', () => {
     expect((await listQuotes({ stage: 'InProgress', customerExternalId: '5' })).map((q) => q.externalId)).toEqual(['993']);
   });
 
+  it('lets the record clear what the office deleted, and follows a quote moved to another building', async () => {
+    await seedSite('site-1', 'Harbourline Apartments');
+    await upsertQuote({ ...quote(), notes: 'Approved by phone', customerContact: { name: 'Pat Singh' }, jobId: '43747' }, 'site-1', AT, { fromDetail: true });
+    await upsertQuote({ ...quote(), notes: undefined, customerContact: undefined, jobId: undefined }, 'site-1', AT, { fromDetail: true });
+    const held = (await listQuotes({ siteId: 'site-1' }))[0]!;
+    expect({ notes: held.notes, contact: held.customerContact, job: held.jobExternalId }).toEqual({ notes: undefined, contact: undefined, job: undefined });
+
+    // Same office site, no local match this run: the held site stands. Moved
+    // to a building the phone has no site for: it leaves site-1.
+    await upsertQuote(quote(), undefined, AT);
+    expect((await listQuotes({ siteId: 'site-1' })).map((q) => q.externalId)).toEqual(['990']);
+    await upsertQuote(quote({ siteId: '4000' }), undefined, AT);
+    expect(await listQuotes({ siteId: 'site-1' })).toEqual([]);
+    expect((await listQuotes({ siteExternalId: '4000' }))[0]!.siteId).toBeUndefined();
+  });
+
   it('names the quotes changed lately whose children have not been read', async () => {
     await upsertQuote(quote({ id: '1', DateModified: '2026-08-30T00:00:00+10:00' }), undefined, AT);
     await upsertQuote(quote({ id: '2', DateModified: '2026-08-01T00:00:00+10:00' }), undefined, AT);
@@ -358,6 +376,53 @@ describe('invoices', () => {
     expect((await listInvoices({ unpaidOnly: true })).map((i) => i.externalId)).toEqual(['7001']);
     expect((await listInvoices({ since: '2026-01-01' })).map((i) => i.externalId)).toEqual(['7001']);
     expect(await getInvoice('9')).toBeNull();
+  });
+
+  it('finds an invoice by what a person would type, past the page the screen holds', async () => {
+    await upsertInvoice(invoice(), AT);
+    await upsertInvoice(invoice({ id: '7002', customerName: 'Seaview Towers', orderNo: 'PO-9', description: 'Hydrant flow test', jobs: [{ id: '43748' }] }), AT);
+    const ids = async (query: string) => (await listInvoices({ query })).map((i) => i.externalId);
+    expect(await ids('7002')).toEqual(['7002']);
+    expect(await ids('#43747')).toEqual(['7001']);
+    expect(await ids('harbourline')).toEqual(['7001']);
+    expect(await ids('po-9')).toEqual(['7002']);
+    expect(await ids('hydrant flow')).toEqual(['7002']);
+    // Every word must land, on the invoice or on a job it bills.
+    expect(await ids('seaview 43747')).toEqual([]);
+    // Blank is no filter at all; newest first and the higher number first on a tie.
+    expect(await ids('  ')).toEqual(['7002', '7001']);
+  });
+
+  it('links a job to an invoice its own invoice list only mentioned, without overwriting the invoice', async () => {
+    // jobs/{id}/invoices/ falls back to id, description and total on this
+    // build. Written as the invoice, that made a mirrored invoice unpaid,
+    // customerless and unlinked.
+    await upsertInvoice(invoice(), AT);
+    const thin: SimproInvoice = { id: '7001', description: 'Six monthly', totalIncTaxCents: 167585, isPaid: false, jobs: [] };
+    expect(invoiceRowIsWhole(thin)).toBe(false);
+    expect(invoiceRowIsWhole(invoice())).toBe(true);
+    await linkJobInvoice('43748', thin, '2026-09-02T01:00:00.000Z');
+    const held = (await getInvoice('7001'))!;
+    expect(held).toMatchObject({ customerExternalId: '812', dateIssued: '2026-08-31', dueDate: '2026-09-30', syncedAt: AT });
+    expect(held.jobs.map((j) => j.id).sort()).toEqual(['43747', '43748']);
+
+    // An invoice not yet held gets a bare row the invoice list fills later.
+    await linkJobInvoice('43749', { ...thin, id: '7009' }, AT);
+    expect((await getInvoice('7009'))!).toMatchObject({ description: 'Six monthly', isPaid: false, customerExternalId: undefined });
+    expect((await listInvoices({ jobExternalId: '43749' })).map((i) => i.externalId)).toEqual(['7009']);
+  });
+
+  it('lists the invoices that bill any job filed under a site', async () => {
+    await seedSite('site-1', 'A');
+    await upsertJob(jobRowFromSimpro(job({ id: '1' }), 'site-1'));
+    await upsertJob(jobRowFromSimpro(job({ id: '2' }), 'site-1'));
+    await upsertJob(jobRowFromSimpro(job({ id: '3' }), undefined));
+    await upsertInvoice(invoice({ id: 'i1', jobs: [{ id: '1' }, { id: '2' }] }), AT);
+    await upsertInvoice(invoice({ id: 'i2', jobs: [{ id: '3' }] }), AT);
+    await upsertInvoice(invoice({ id: 'i3', jobs: [{ id: '2' }], isPaid: true }), AT);
+    expect((await listInvoices({ siteId: 'site-1' })).map((i) => i.externalId).sort()).toEqual(['i1', 'i3']);
+    expect((await listInvoices({ siteId: 'site-1', unpaidOnly: true })).map((i) => i.externalId)).toEqual(['i1']);
+    expect(await listInvoices({ siteId: 'site-9' })).toEqual([]);
   });
 
   it('re-points the job links when an invoice is re-issued against another job', async () => {
@@ -400,6 +465,23 @@ describe('customers', () => {
     });
     expect(held!.contacts).toEqual([{ id: '60', name: 'Pat Singh', email: 'pat@example.invalid' }]);
     expect(held!.sites).toEqual([{ id: '3021', name: 'Harbourline Apartments' }]);
+  });
+
+  it('lets the record clear a contact or note the office removed, and keeps archived where a row did not say', async () => {
+    await upsertCustomer(company({
+      notes: 'Call before attending', customerGroup: 'Strata', archived: true, tags: ['Key'],
+      contacts: [{ id: '60', name: 'Pat Singh' }],
+    }), AT, { fromDetail: true });
+    // A list row without the flag: not a row saying the customer is current.
+    await upsertCustomer(company({ archived: undefined }), AT);
+    expect(await getCustomer('812')).toMatchObject({ archived: true, notes: 'Call before attending', tags: ['Key'] });
+    expect((await getCustomer('812'))!.contacts).toHaveLength(1);
+    // The record again, with the contact, the note, the tags and the group gone.
+    await upsertCustomer(company({ archived: false }), AT, { fromDetail: true });
+    expect(await getCustomer('812')).toMatchObject({ archived: false, notes: undefined, customerGroup: undefined, tags: [], contacts: [] });
+    // The sites are on the list, so an empty list is the office's answer.
+    await upsertCustomer(company({ sites: [] }), AT);
+    expect((await getCustomer('812'))!.sites).toEqual([]);
   });
 
   it('finds customers by name, email or phone, current ones first', async () => {
@@ -451,6 +533,60 @@ describe('customers', () => {
     expect(await siteStats('site-1')).toEqual({
       jobsTotal: 2, jobsOpen: 1, lastJobAt: '2026-08-28', quotesOpen: 1, invoicesUnpaidCents: 10000,
     });
+  });
+
+  it('counts a job open by the Open tab\'s rule: closed when either the office or the phone closed it', async () => {
+    // The card on a site read "1 open" beside an Open tab that was empty,
+    // because the count asked only the office's stage and the technician
+    // had marked the job complete on the phone.
+    await seedSite('site-1', 'A');
+    await upsertJob(jobRowFromSimpro(job({ id: '1', stage: 'Progress' }), 'site-1'));
+    await setJobStatus(localJobId('1'), 'complete');
+    const ctx = { filter: 'open' as const, today: '2026-09-02', who: null, scheduledToday: new Set<string>(), query: '' };
+    expect((await siteStats('site-1')).jobsOpen).toBe(0);
+    expect((await siteStats('site-1')).jobsOpen).toBe(applyJobFilter(await listJobs({ limit: 100 }), ctx).length);
+
+    // The other way round: the office invoiced it while the phone still says in progress.
+    await upsertJob(jobRowFromSimpro(job({ id: '2', stage: 'Invoiced' }), 'site-1'));
+    await setJobStatus(localJobId('2'), 'in-progress');
+    expect((await siteStats('site-1')).jobsOpen).toBe(0);
+    expect(applyJobFilter(await listJobs({ limit: 100 }), ctx)).toHaveLength(0);
+
+    // A job added on the phone has no stage and counts by its status alone.
+    await upsertJob({ id: 'hand-1', siteId: 'site-1', siteName: 'A', title: 'Callout', priority: 'normal', status: 'scheduled', createdAt: AT, updatedAt: AT });
+    expect((await siteStats('site-1')).jobsOpen).toBe(1);
+    expect(applyJobFilter(await listJobs({ limit: 100 }), ctx)).toHaveLength(1);
+  });
+});
+
+describe('transactions', () => {
+  it('joins a transaction already open rather than failing to start a second', async () => {
+    // expo-sqlite's transaction is a bare BEGIN on one shared connection; a
+    // nested BEGIN throws and its ROLLBACK undoes the outer one's work.
+    await upsertJob(jobRowFromSimpro(job(), undefined));
+    const begin = db.withTransactionAsync.bind(db);
+    let begun = 0;
+    db.withTransactionAsync = async (work) => { begun++; await begin(work); };
+    await withMirrorTransaction(async () => {
+      await replaceJobChildren('simpro-43747', { sections: sections() }, AT);
+      await upsertTasks([{ id: 't9', subject: 'Inside', assignees: [] }], AT);
+      await replaceQuoteChildren('none', {}, AT);
+    });
+    const full = (await getJobFull('simpro-43747'))!;
+    expect({ sections: full.sections.length, detailSynced: full.detailSynced, tasks: (await listTasks()).length, begun })
+      .toEqual({ sections: 1, detailSynced: true, tasks: 1, begun: 1 });
+  });
+
+  it('rolls the joined work back with the transaction it joined', async () => {
+    await upsertJob(jobRowFromSimpro(job(), undefined));
+    await expect(withMirrorTransaction(async () => {
+      await replaceJobChildren('simpro-43747', { sections: sections() }, AT);
+      throw new Error('the outer caller failed after the inner replace');
+    })).rejects.toThrow('outer caller');
+    expect((await getJobFull('simpro-43747'))!.sections).toEqual([]);
+    // And the connection is free for the next transaction.
+    await replaceJobChildren('simpro-43747', { sections: sections() }, AT);
+    expect((await getJobFull('simpro-43747'))!.sections).toHaveLength(1);
   });
 });
 

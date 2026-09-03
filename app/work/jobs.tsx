@@ -1,21 +1,20 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { FlatList, StyleSheet, TextInput, View } from 'react-native';
+import { FlatList, StyleSheet, View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { loadPrefs } from '@/app-prefs';
 import { nowIso } from '@/db';
-import { listJobs, type JobRecord } from '@/db/opsRepo';
+import { listJobSummaries, type JobSummary } from '@/db/opsRepo';
 import { getCustomer, listJobsFor, scheduledJobExternalIds } from '@/db/mirrorRepo';
 import { getSite } from '@/db/repo';
 import {
-  applyJobFilter, jobStatusWord, stageLabel, statusSwatch, type JobListFilter,
+  applyJobFilter, jobStatusWord, localStateWord, stageLabel, statusSwatch, type JobListFilter,
 } from '@/domain/jobPresentation';
 import { whoseSchedule, type WhoseSchedule } from '@/domain/myDay';
 import { qldIsoDay } from '@/domain/qldTime';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
 import { Reveal } from '@/components/motion';
-import { Card, EmptyState, Rowed, Screen, Segmented, Txt } from '@/components/ui';
+import { Card, Chip, EmptyState, Rowed, Screen, SearchBox, Segmented, Txt } from '@/components/ui';
 
 /**
  * The job list.
@@ -33,7 +32,7 @@ import { Card, EmptyState, Rowed, Screen, Segmented, Txt } from '@/components/ui
 export default function JobsScreen() {
   const t = useTheme();
   const params = useLocalSearchParams<{ siteId?: string; customerId?: string }>();
-  const [jobs, setJobs] = useState<JobRecord[] | null>(null);
+  const [jobs, setJobs] = useState<JobSummary[] | null>(null);
   const [filter, setFilter] = useState<JobListFilter>('open');
   const [query, setQuery] = useState('');
   const [who, setWho] = useState<WhoseSchedule | null>(null);
@@ -60,7 +59,12 @@ export default function JobsScreen() {
       setJobs(rows);
       setScope(customer ? `for ${customer.name}` : 'for this customer');
     } else {
-      setJobs(await listJobs({ limit: 6000 }));
+      // Every job, re-read on every focus, because a status set on site in
+      // the job screen has to show here when the technician backs out. The
+      // whole set is what keeps the search and the "N of M" line instant;
+      // read as the list-shaped projection, since the row and the filter
+      // never look at the description, the notes or the JSON columns.
+      setJobs(await listJobSummaries({ limit: 6000 }));
       setScope(undefined);
     }
   }, [params.siteId, params.customerId, today]);
@@ -86,7 +90,7 @@ export default function JobsScreen() {
     }
     if (filter === 'mine') return { title: 'Nothing booked to you', body: `No open job lists ${who!.label} as a technician. Today's schedule is on My day.` };
     if (filter === 'today') return { title: 'Nothing on today', body: scheduledToday.size ? 'The schedule has nothing for today that matches.' : 'The schedule has nothing for today, or has not synced yet.' };
-    if (filter === 'open') return { title: 'Nothing open', body: 'Every job the phone holds is complete, invoiced or archived.' };
+    if (filter === 'open') return { title: 'Nothing open', body: 'Every job the phone holds is complete, invoiced or archived at the office, or has been completed on this phone.' };
     return { title: 'No jobs', body: '' };
   })();
 
@@ -132,16 +136,23 @@ export default function JobsScreen() {
   );
 }
 
-function JobRow({ job }: { job: JobRecord }) {
+function JobRow({ job }: { job: JobSummary }) {
   const t = useTheme();
   const status = jobStatusWord(job);
   const swatch = statusSwatch(job.statusColor, t.color.surface);
   const stage = stageLabel(job.stageRaw ?? job.stage);
   const tone = { pass: t.color.pass, fail: t.color.fail, warn: t.color.warn, info: t.color.info, muted: t.color.textMuted }[status.tone];
+  // What the phone did that the office's word does not say — started or
+  // completed here — so a job the technician just finished is recognisable
+  // under All rather than reading as merely issued.
+  const local = localStateWord(job);
+  // The office's completion day where it has one; the phone's completion
+  // where the office has not caught up yet, so a job completed here says so.
+  const done = job.completedDate ?? (job.status === 'complete' ? job.completedAt : undefined);
   const date = job.dueAt && job.status !== 'complete'
     ? `Due ${formatAuDate(job.dueAt)}`
-    : job.completedDate
-      ? `Done ${formatAuDate(job.completedDate)}`
+    : done
+      ? `Done ${formatAuDate(done)}`
       : job.scheduledFor ? `${job.externalId ? 'Issued' : 'Scheduled'} ${formatAuDate(job.scheduledFor)}` : undefined;
   return (
     <Card onPress={() => router.push({ pathname: '/work/job/[id]', params: { id: job.id } })}>
@@ -162,6 +173,11 @@ function JobRow({ job }: { job: JobRecord }) {
           <Txt weight="700" numberOfLines={1} style={{ marginTop: 3 }}>{job.siteName}</Txt>
           <Txt size="sm" tone="muted" numberOfLines={1}>{job.title}</Txt>
           {job.customerName ? <Txt size="sm" tone="faint" numberOfLines={1}>{job.customerName}</Txt> : null}
+          {local ? (
+            <Rowed gap={1.5} style={{ marginTop: 6 }}>
+              <Chip label={local.label} tone={local.tone === 'muted' || local.tone === 'info' ? 'default' : local.tone} />
+            </Rowed>
+          ) : null}
         </View>
         <View style={{ alignItems: 'flex-end', gap: 4 }}>
           {date ? <Txt size="xs" tone={job.dueAt && job.status !== 'complete' ? 'warn' : 'muted'} weight="700">{date}</Txt> : null}
@@ -170,35 +186,5 @@ function JobRow({ job }: { job: JobRecord }) {
         </View>
       </Rowed>
     </Card>
-  );
-}
-
-function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
-  const t = useTheme();
-  return (
-    <View
-      style={{
-        flexDirection: 'row', alignItems: 'center', gap: t.space(2),
-        backgroundColor: t.color.surfaceAlt, borderRadius: t.radius.md,
-        borderWidth: StyleSheet.hairlineWidth, borderColor: t.color.border,
-        paddingHorizontal: t.space(3), minHeight: t.touch,
-      }}
-    >
-      <MaterialCommunityIcons name="magnify" size={20} color={t.color.textFaint} />
-      <TextInput
-        value={value}
-        onChangeText={onChange}
-        placeholder={placeholder}
-        placeholderTextColor={t.color.textFaint}
-        autoCapitalize="none"
-        autoCorrect={false}
-        clearButtonMode="while-editing"
-        returnKeyType="search"
-        style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md, minHeight: t.touch }}
-      />
-      {value ? (
-        <MaterialCommunityIcons name="close-circle" size={20} color={t.color.textFaint} onPress={() => onChange('')} />
-      ) : null}
-    </View>
   );
 }

@@ -87,13 +87,16 @@ export default function OccupierStatementScreen() {
    * Fills the list from the site's own register and defect history.
    *
    * An installation is proposed as present when the register holds equipment
-   * for it and as not present when the register holds this site's equipment
-   * and none of it is that installation; a row the register cannot speak to —
-   * lifts, air handling, fire mains — is left as the occupier had it. The
-   * dates the register holds go on the row beside the answer, so the occupier
-   * is signing against a last-test date rather than a memory. A critical
-   * defect against a system inside the period marks the notice column.
-   * Nothing is ticked that the site's own data does not support.
+   * for it; a row the register cannot speak to — lifts, air handling, fire
+   * mains — is left as the occupier had it. So is a row the register holds
+   * nothing for: the register is the equipment Safe QLD services, not the
+   * building's installation list, and a panel another contractor maintains
+   * must not be struck from a statement to the Commissioner because it is
+   * not on our file. Those rows are named for checking instead. The dates
+   * the register holds go on the row beside the answer, so the occupier is
+   * signing against a last-test date rather than a memory. A critical defect
+   * against a system inside the period marks the notice column. Nothing is
+   * ticked that the site's own data does not support.
    */
   const prefill = async () => {
     if (!rec) return;
@@ -109,6 +112,10 @@ export default function OccupierStatementScreen() {
         evidence.installations.filter((e) => e.knowledge === 'present').map((e) => e.installation),
       );
       const absent = evidence.installations.filter((e) => e.knowledge === 'absent').map((e) => e.installation);
+      // Ticked by the occupier and not on our file: left ticked, and named,
+      // because it may well be another contractor's equipment.
+      const tickedNotHeld = absent.filter((name) => rec.rows.find((r) => r.installation === name)?.present);
+      const notHeld = absent.filter((name) => !tickedNotHeld.includes(name));
 
       const inPeriod = (iso?: string | null) => {
         // The Queensland day, not the UTC one: a notice given at eight on a
@@ -169,8 +176,12 @@ export default function OccupierStatementScreen() {
       setPrefilled(
         `${present.size} installation${present.size === 1 ? '' : 's'} found in the register` +
         (noticed.size ? `, ${noticed.size} with a critical defect notice this period.` : '.') +
-        (absent.length
-          ? `\n\nNot in the register, so proposed as not present: ${absent.join('; ')}.`
+        (tickedNotHeld.length
+          ? `\n\nTicked by the occupier but not in Safe QLD's register — left ticked, confirm with the occupier `
+            + `whether another contractor services ${tickedNotHeld.length === 1 ? 'it' : 'them'}: ${tickedNotHeld.join('; ')}.`
+          : '') +
+        (notHeld.length
+          ? `\n\nNot in Safe QLD's register — check these with the occupier: ${notHeld.join('; ')}.`
           : '') +
         (equipment.length
           ? `\n\nIn the register but not placed on a row, because the row depends on what it serves: `

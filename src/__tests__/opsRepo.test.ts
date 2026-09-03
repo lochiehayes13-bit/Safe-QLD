@@ -1,4 +1,4 @@
-import { getJob, setJobStatus, upsertJob } from '@/db/opsRepo';
+import { failedSync, forgetSync, getJob, listJobSummaries, listJobs, setJobStatus, upsertJob } from '@/db/opsRepo';
 import { flushSoon } from '@/simpro/flushSoon';
 import { openMigrated, type NodeSqliteDb } from './support/nodeSqlite';
 
@@ -27,7 +27,10 @@ afterEach(async () => {
   await db.closeAsync();
 });
 
-const fromOffice = (over: Partial<Parameters<typeof upsertJob>[0]> = {}) => upsertJob({
+const fromOffice = (
+  over: Partial<Parameters<typeof upsertJob>[0]> = {},
+  options: Parameters<typeof upsertJob>[1] = {},
+) => upsertJob({
   id: 'job-1',
   externalId: '43747',
   siteName: 'BRIC Housing Emsworth St',
@@ -35,7 +38,7 @@ const fromOffice = (over: Partial<Parameters<typeof upsertJob>[0]> = {}) => upse
   stage: 'Pending',
   status: 'scheduled',
   ...over,
-});
+}, options);
 
 describe('a job the office re-sends during the day', () => {
   it('keeps the status the technician set on site', async () => {
@@ -78,6 +81,39 @@ describe('a job the office re-sends during the day', () => {
     await fromOffice({ siteId: 'site-10' });
     expect((await getJob('job-1'))?.siteId).toBe('site-10');
   });
+
+  it('drops the held site when the office has moved the job to a site this phone does not hold', async () => {
+    await db.runAsync("INSERT INTO site (id,name,createdAt,updatedAt) VALUES ('site-9','A','','')");
+    await fromOffice({ siteId: 'site-9', siteExternalId: '3021' });
+    // Same office site, no local match this run: the held site stands.
+    await fromOffice({ siteId: undefined, siteExternalId: '3021' });
+    expect((await getJob('job-1'))?.siteId).toBe('site-9');
+    // Moved to another building the phone has no site for: filed under site A
+    // it would put the job at the wrong address.
+    await fromOffice({ siteId: undefined, siteExternalId: '4000' });
+    expect((await getJob('job-1'))).toMatchObject({ siteId: null, siteExternalId: '4000' });
+  });
+
+  it('reopens a job the pull itself closed when the office reopens it, but not one the technician closed', async () => {
+    // The pull files an invoiced job as complete. That is not the technician's
+    // status, and when the office moves the job back it has to move back here.
+    await fromOffice({ stage: 'Invoiced', status: 'complete' });
+    expect((await getJob('job-1'))?.status).toBe('complete');
+    await fromOffice({ stage: 'Progress', status: 'scheduled' });
+    expect((await getJob('job-1'))?.status).toBe('scheduled');
+
+    await setJobStatus('job-1', 'complete');
+    await fromOffice({ stage: 'Progress', status: 'scheduled' });
+    expect((await getJob('job-1'))?.status).toBe('complete');
+  });
+
+  it('lets the record clear a note the office deleted, and keeps it across a list row that never asked', async () => {
+    await fromOffice({ notesText: 'Gate code 1234', customerContractJson: '{"id":"7"}' }, { fromDetail: true });
+    await fromOffice({ notesText: undefined, customerContractJson: undefined });
+    expect(await getJob('job-1')).toMatchObject({ notesText: 'Gate code 1234', customerContractJson: '{"id":"7"}' });
+    await fromOffice({ notesText: undefined, customerContractJson: undefined }, { fromDetail: true });
+    expect(await getJob('job-1')).toMatchObject({ notesText: null, customerContractJson: null });
+  });
 });
 
 describe('the outbound queue', () => {
@@ -107,6 +143,49 @@ describe('the outbound queue', () => {
     await dismissSync(id);
     expect(await unknownSync()).toHaveLength(0);
     expect((await enqueueSync('job-note', { jobId: '2', subject: 'T', note: 'U' })).duplicate).toBe(true);
+  });
+
+  it('still lists what it gave up on, with the reason, so a person can send it again', async () => {
+    const { markSyncFailed, abandonSync, retrySync: retry } = jest.requireActual('@/db/opsRepo') as typeof import('@/db/opsRepo');
+    const note = await enqueueSync('job-note', { jobId: '3', subject: 'V', note: 'W' });
+    const photo = await enqueueSync('attachment', { jobId: '3', filename: 'a.jpg' });
+    for (let i = 0; i < 5; i++) await markSyncFailed(note.id, `attempt ${i + 1}`);
+    await abandonSync(photo.id, 'Simpro returned HTTP 422');
+    expect(await pendingSync()).toHaveLength(0);
+    expect((await failedSync()).map((f) => [f.id, f.lastError])).toEqual([[note.id, 'attempt 5'], [photo.id, 'Simpro returned HTTP 422']]);
+    await retry(note.id);
+    expect((await failedSync()).map((f) => f.id)).toEqual([photo.id]);
+    expect((await pendingSync()).map((f) => f.attempts)).toEqual([0]);
+  });
+
+  it('forgets a failed item outright, so a photograph is neither counted as uploaded nor kept off the job', async () => {
+    const { abandonSync, attachmentQueueSummary } = jest.requireActual('@/db/opsRepo') as typeof import('@/db/opsRepo');
+    const photo = await enqueueSync('attachment', { jobId: '4', filename: 'a.jpg' }, { contentKey: 'ATT-1' });
+    await abandonSync(photo.id, 'The photo file is no longer on this device');
+    await forgetSync(photo.id);
+    expect(await failedSync()).toHaveLength(0);
+    expect(await attachmentQueueSummary()).toEqual({ pending: 0, unknown: 0, failed: 0, sent: 0 });
+    // The same photograph can be queued again by the next send.
+    expect((await enqueueSync('attachment', { jobId: '4', filename: 'a.jpg' }, { contentKey: 'ATT-1' })).duplicate).toBe(false);
+    // Only a failed row goes: a pending one is still the queue's to send.
+    const live = await enqueueSync('job-note', { jobId: '4', subject: 'S', note: 'N' });
+    await forgetSync(live.id);
+    expect((await pendingSync()).map((e) => e.id)).toContain(live.id);
+  });
+});
+
+describe('the job list projection', () => {
+  it('reads the same rows in the same order as the full list, without the long columns', async () => {
+    await upsertJob({ id: 'j-1', siteName: 'A', title: 'Later', priority: 'normal', status: 'scheduled', scheduledFor: '2026-09-09', descriptionText: 'x'.repeat(5000), tagsJson: '["Strata"]' });
+    await upsertJob({ id: 'j-2', siteName: 'B', title: 'Soon', priority: 'urgent', status: 'scheduled', scheduledFor: '2026-09-03' });
+    await upsertJob({ id: 'j-3', siteName: 'C', title: 'Done', priority: 'normal', status: 'complete', scheduledFor: '2026-09-01' });
+    const full = await listJobs({ limit: 10 });
+    const summary = await listJobSummaries({ limit: 10 });
+    expect(summary.map((j) => j.id)).toEqual(full.map((j) => j.id));
+    expect(summary.map((j) => j.id)).toEqual(['j-2', 'j-1', 'j-3']);
+    expect(summary[1]).toMatchObject({ title: 'Later', siteName: 'A', priority: 'normal', scheduledFor: '2026-09-09' });
+    expect(Object.keys(summary[1]!)).not.toEqual(expect.arrayContaining(['descriptionText', 'tagsJson', 'notesText']));
+    expect((await listJobSummaries({ status: 'complete' })).map((j) => j.id)).toEqual(['j-3']);
   });
 });
 
@@ -147,6 +226,25 @@ describe('marking a job complete', () => {
     await setJobStatus('job-1', 'in-progress');
     await setJobStatus('job-1', 'complete');
     expect(await pendingSync()).toHaveLength(1);
+  });
+
+  it('names the person who completed it first, with the office\'s booking beside it', async () => {
+    // Two booked, one attended: the note says who was there, and keeps the
+    // roster in brackets so a completion from a swapped name does not read
+    // as a mistake to the scheduler reading it.
+    await fromOffice({ technician: 'A. Smith, B. Jones' });
+    await setJobStatus('job-1', 'complete', { completedBy: 'B. Jones' });
+    const [row] = await pendingSync();
+    const payload = JSON.parse(row!.payload) as { note: string };
+    expect(payload.note).toContain('Completed by: B. Jones (booked technician: A. Smith, B. Jones)');
+    expect(payload.note).not.toContain('Technician:');
+  });
+
+  it('falls back to the booking when nobody is signed in and no name is set', async () => {
+    await fromOffice({ technician: 'A. Smith' });
+    await setJobStatus('job-1', 'complete', { completedBy: '  ' });
+    const [row] = await pendingSync();
+    expect((JSON.parse(row!.payload) as { note: string }).note).toContain('Technician: A. Smith');
   });
 
   it('queues nothing for a job that did not come from the office', async () => {

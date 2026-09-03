@@ -1,8 +1,8 @@
 import {
-  applyJobFilter, applyQuoteFilter, attachmentIcon, contactActions, contrastRatio, formatAddress, formatFileSize, formatQty,
-  invoiceMatchesQuery, invoiceState, itemHeading, itemPrice, jobDates, jobIsMine, jobMatchesQuery, jobStatusWord,
-  orderInvoices, parseHexColor, quoteState, relativeQldTime, sectionLineCount, sellTotalLine, stageLabel, stageTone,
-  statusSwatch, sumExTax, taskState, technicianLine, telHref, mailHref,
+  applyJobFilter, applyQuoteFilter, attachmentIcon, contactActions, contrastRatio, discountLabel, formatAddress, formatFileSize,
+  formatQty, invoiceMatchesQuery, invoiceState, itemHeading, itemPrice, jobDates, jobIsMine, jobIsOpen, jobMatchesQuery,
+  jobStatusWord, localStateWord, orderInvoices, parseHexColor, quoteState, relativeQldTime, sectionLineCount, sellTotalLine,
+  stageLabel, stageTone, statusSwatch, sumExTax, taskState, technicianLine, telHref, mailHref,
 } from '@/domain/jobPresentation';
 
 /**
@@ -120,6 +120,47 @@ describe('the job list', () => {
     expect(applyJobFilter(rows, { filter: 'all', today: TODAY, who: null, scheduledToday: new Set(), query: 'beta' }).map((r) => r.externalId)).toEqual(['2']);
     expect(applyJobFilter(rows, { filter: 'open', today: TODAY, who: null, scheduledToday: new Set(), query: '' }).length).toBe(2);
   });
+
+  it('closes a job under Open when either the office or the phone has closed it', () => {
+    // The site card's "2 open" and the Open tab it opens onto must agree, so
+    // one rule: a job the technician completed on the phone is closed even
+    // while the office still has it under Progress, and a job the office has
+    // invoiced is closed even though the phone's status is stuck on
+    // in-progress. A job added by hand has no stage, so its status decides.
+    const rows = [
+      job('1', { stageRaw: 'Progress', status: 'complete' }),
+      job('2', { stageRaw: 'Invoiced', status: 'in-progress' }),
+      job('3', { stageRaw: 'Progress', status: 'in-progress' }),
+      job('4', { stage: 'Pending', status: 'scheduled' }),
+      { ...job('5', { status: 'scheduled' }), externalId: undefined },
+      { ...job('6', { status: 'complete' }), externalId: undefined },
+    ];
+    expect(jobIsOpen(rows[0]!)).toBe(false);
+    expect(jobIsOpen(rows[1]!)).toBe(false);
+    expect(jobIsOpen(rows[2]!)).toBe(true);
+    expect(jobIsOpen(rows[3]!)).toBe(true);
+    expect(jobIsOpen(rows[4]!)).toBe(true);
+    expect(jobIsOpen(rows[5]!)).toBe(false);
+    const ctx = { today: TODAY, who: { by: 'id' as const, staffId: '12', label: 'x' }, scheduledToday: new Set<string>(), query: '' };
+    expect(applyJobFilter(rows, { ...ctx, filter: 'open' }).map((r) => r.externalId)).toEqual(['3', '4', undefined]);
+    expect(applyJobFilter(rows, { ...ctx, filter: 'mine' }).map((r) => r.externalId)).toEqual(['3', '4', undefined]);
+    // Today never asks about status: a job finished this morning is still today's work.
+    expect(applyJobFilter([job('7', { status: 'complete', scheduledFor: TODAY })], { ...ctx, filter: 'today' }).length).toBe(1);
+  });
+
+  it("says what the phone did when the office's pill would not", () => {
+    // The pill keeps the office's word after Start job / Mark complete, so
+    // the phone's own state is a second chip — but not on a hand-added job,
+    // whose pill already reads the phone's state, and not once the office
+    // has closed the job, where two pills would say the same thing.
+    expect(localStateWord({ statusName: 'In Progress', stageRaw: 'Progress', status: 'in-progress' })).toEqual({ label: 'Started on this phone', tone: 'warn' });
+    expect(localStateWord({ stageRaw: 'Progress', status: 'complete' })).toEqual({ label: 'Completed on this phone', tone: 'pass' });
+    expect(localStateWord({ stageRaw: 'Pending', status: 'blocked' })).toEqual({ label: 'Blocked on this phone', tone: 'fail' });
+    expect(localStateWord({ stageRaw: 'Progress', status: 'scheduled' })).toBeUndefined();
+    expect(localStateWord({ stageRaw: 'Invoiced', status: 'complete' })).toBeUndefined();
+    expect(localStateWord({ status: 'in-progress' })).toBeUndefined();
+    expect(localStateWord({ status: 'complete' })).toBeUndefined();
+  });
 });
 
 describe('when something happened', () => {
@@ -139,6 +180,20 @@ describe('when something happened', () => {
     expect(relativeQldTime('2026-07-10T08:00:00+10:00', NOW)).toBe('10/07/2026');
     expect(relativeQldTime(undefined, NOW)).toBe('');
     expect(relativeQldTime('never', NOW)).toBe('never');
+  });
+
+  it('counts calendar days, not elapsed days floored, and never says "1 days"', () => {
+    // 07:00 Tuesday in Brisbane; a note at 23:00 on Sunday is thirty-two
+    // hours old, which floored to "1 days ago" — the wrong day and the wrong
+    // grammar. It was two calendar days ago.
+    const tuesdayMorning = '2026-09-07T21:00:00.000Z';
+    expect(relativeQldTime('2026-09-06T23:00:00+10:00', tuesdayMorning)).toBe('2 days ago');
+    // Twenty-six hours back on a Tuesday morning is Monday, which has a name.
+    expect(relativeQldTime('2026-09-07T05:00:00+10:00', tuesdayMorning)).toBe('Yesterday 05:00');
+    // Six calendar days back is still counted; seven is the date.
+    expect(relativeQldTime('2026-09-02T23:00:00+10:00', tuesdayMorning)).toBe('6 days ago');
+    expect(relativeQldTime('2026-09-01T23:00:00+10:00', tuesdayMorning)).toBe('01/09/2026');
+    expect(relativeQldTime('2026-09-05T01:00:00+10:00', '2026-09-06T23:30:00+10:00')).toBe('Yesterday 01:00');
   });
 
   it('lists a job’s dates in the order they happen, only where set', () => {
@@ -176,6 +231,14 @@ describe('money and lines', () => {
   it('counts lines across a section', () => {
     expect(sectionLineCount({ costCenters: [{ items: [1, 2] }, { items: [] }, { items: [3] }] })).toBe(3);
     expect(sumExTax([{ totalExTaxCents: 100 }, {}, { totalExTaxCents: 250 }])).toBe(350);
+  });
+
+  it('reads a negative discount as the surcharge Simpro means by it', () => {
+    expect(discountLabel({ discountPercent: 10 })).toBe('10% off');
+    expect(discountLabel({ discountPercent: -10 })).toBe('10% surcharge');
+    expect(discountLabel({ discountPercent: 12.5 })).toBe('12.5% off');
+    expect(discountLabel({ discountPercent: 0 })).toBeUndefined();
+    expect(discountLabel({})).toBeUndefined();
   });
 });
 

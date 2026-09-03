@@ -18,6 +18,7 @@ import { MIGRATION_V16 } from './schemaEmployees';
 import { MIGRATION_V17 } from './schemaV17';
 import { MIGRATION_V18 } from './schemaMirror';
 import { MIGRATION_V19 } from './schemaForms';
+import { MIGRATION_V20 } from './schemaSite';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -318,6 +319,10 @@ export const MIGRATIONS: string[] = [
   // customer and site contact on a report, so the forms work from the asset
   // register the office's sites actually have
   MIGRATION_V19,
+
+  // v20 — the office's public notes and customer number on the site itself,
+  // so a technician on the doorstep reads what the office wrote for them
+  MIGRATION_V20,
 ];
 
 /**

@@ -123,6 +123,33 @@ describe('the Queensland record of maintenance', () => {
 });
 
 describe('what the page says about the site and the work', () => {
+  it('prints the job number, the job\'s customer and the site contact', () => {
+    /*
+     * All three were stored on the report and shown on the screen and never
+     * on the page: the office got a document with no number to file it by,
+     * printing the site's client rather than the customer the technician had
+     * just accepted from the job. The job's customer outranks the site's, and
+     * it is printed once, so the document does not show two names.
+     */
+    const numbered: ServiceReport = {
+      ...report, jobNumber: '43747', customerName: 'Example Managing Agent',
+      siteContactName: 'A Manager', siteContactPhone: '0400 000 000',
+    };
+    const out = serviceReportHtml({ ...bundle([testRow('pass')]), report: numbered }, AT);
+    expect(out).toMatch(/Customer job no\.<\/td><td>43747/);
+    expect(out).toContain('Customer Job No. 43747');
+    expect(out).toMatch(/Client<\/td><td>Example Managing Agent/);
+    expect(out).not.toContain('Example Body Corporate');
+    expect(out).toMatch(/Site contact<\/td><td>A Manager · 0400 000 000/);
+  });
+
+  it('leaves the job number off rather than printing it blank, and falls back to the site\'s client', () => {
+    const out = serviceReportHtml(bundle([testRow('pass')]), AT);
+    expect(out).not.toContain('Customer job no.');
+    expect(out).not.toContain('Site contact');
+    expect(out).toMatch(/Client<\/td><td>Example Body Corporate/);
+  });
+
   it('dates the service in Australian order', () => {
     expect(serviceReportHtml(bundle([testRow('pass')]), AT)).toContain('03/07/2026');
   });

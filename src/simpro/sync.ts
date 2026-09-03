@@ -1,12 +1,14 @@
 import { SimproClient, SimproError, type SimproConfig } from './client';
-import { SimproResources, scheduleDateFilter } from './resources';
+import { SimproResources, scheduleDateFilter, type SimproSite } from './resources';
 import {
   SimproMirror, dateSinceFilter, invoiceWindowStart, type PagedRead, type SimproCustomer, type SimproInvoice,
 } from './mirrorResources';
 import { assessIncremental, nextWatermark, planIncremental, type SyncResource } from './incremental';
 import { readSyncState, writeSyncState } from './watermark';
 import { flushSoon } from './flushSoon';
-import { createSite, listSites, updateSite } from '@/db/repo';
+import { keysAlreadyOnJob } from './testResults';
+import { reachabilityFailure, sendFailure } from './sendOutcome';
+import { createSite, getSite, listSites, updateSite } from '@/db/repo';
 import { saveRateCard } from '@/db/rateCardRepo';
 import { replaceEmployees } from '@/db/employeeRepo';
 import { replaceScheduleWindow } from '@/db/scheduleRepo';
@@ -17,13 +19,16 @@ import {
   setPurchaseStatus, type JobRecord,
 } from '@/db/opsRepo';
 import {
-  getQuote, heldJobExternalIds, jobDetailIsStale, jobRowFromSimpro, jobsWantingDetail, pruneCustomersNotSyncedAt,
-  quotesWantingDetail, replaceJobChildren, replaceQuoteChildren, scheduledJobExternalIds, upsertCustomer, upsertInvoice,
-  upsertQuote, upsertTasks, type JobChildren, type QuoteChildren,
+  getQuote, heldJobExternalIds, invoiceRowIsWhole, jobDetailIsStale, jobRowFromSimpro, jobsWantingDetail,
+  linkJobInvoice, pruneCustomersNotSyncedAt, quotesWantingDetail, replaceJobChildren, replaceQuoteChildren,
+  scheduledJobExternalIds, setSiteOffice, upsertCustomer, upsertInvoice, upsertQuote, upsertTasks,
+  withMirrorTransaction, type JobChildren, type QuoteChildren,
 } from '@/db/mirrorRepo';
-import { withMarker } from '@/domain/queueKey';
+import { markerFor, withMarker } from '@/domain/queueKey';
 import { matchSiteByRefOrName } from '@/domain/siteNames';
-import { attachmentContentKey, type OutboundAssetTest, type OutboundAttachment } from '@/domain/outboundWork';
+import {
+  attachmentContentKey, keysInNoteText, type OutboundAssetTest, type OutboundAttachment,
+} from '@/domain/outboundWork';
 import { uploadJobAttachment } from './attachments';
 import { AttachmentFileMissing, readAttachmentForUpload, type ReadAttachment } from './attachmentFiles';
 import { createAsset, findByExternalIds, updateAsset, type AssetRecord } from '@/db/assetRepo';
@@ -164,11 +169,39 @@ function indexSitesByRemote(sites: readonly Site[], seed?: Map<string, string>):
   return map;
 }
 
-/** The note a stage adds when the build refused its column set and the thin list was read instead. */
-function columnsNote(what: string, read: PagedRead<unknown>): string | undefined {
+/**
+ * The error a stage records when the build refused its column set.
+ *
+ * The thin list the fallback read is ids and a name or two. Written over the
+ * mirror it would blank every quote's stage and site, mark every invoice
+ * unpaid and every customer current, and the pull would report success. So
+ * a thin read is a failed stage: nothing is written, the watermark stays,
+ * the last good mirror stands, and the refusal is in the notes in the
+ * server's words for whoever fixes the column set.
+ */
+function columnsRefused(what: string, read: PagedRead<unknown>): string | undefined {
   return read.columnsRejected
-    ? `Simpro refused the ${what} column set, so only the thin list was read — it said: ${read.columnsRejected}`
+    ? `Simpro refused the ${what} column set, so the ${what} list could not be read this run — it said: ${read.columnsRejected}`
     : undefined;
+}
+
+/** How many list-level rows are written per commit. See withMirrorTransaction. */
+const WRITE_PAGE = 250;
+
+/**
+ * Writes a list in pages, each page one transaction.
+ *
+ * `each` keeps its own try and catch: one bad row records its error and the
+ * rest of its page still lands, since a failed statement inside a
+ * transaction fails alone.
+ */
+async function inPages<T>(items: readonly T[], each: (item: T, index: number) => Promise<void>): Promise<void> {
+  for (let start = 0; start < items.length; start += WRITE_PAGE) {
+    const page = items.slice(start, start + WRITE_PAGE);
+    await withMirrorTransaction(async () => {
+      for (const [i, item] of page.entries()) await each(item, start + i);
+    });
+  }
 }
 
 export async function pullFromSimpro(
@@ -224,10 +257,26 @@ export async function pullFromSimpro(
   const siteState = await readSyncState('sites');
   const sitePlan = planIncremental('sites', siteState.lastChangeSeenAt, { force });
 
-  let remoteSites: Awaited<ReturnType<SimproResources['sites']>> = [];
+  let remoteSites: SimproSite[] = [];
   let siteMode: 'incremental' | 'full' = 'full';
+  let sitesTruncated = false;
+  // Set when the build refused the public-notes column: the notes are then
+  // unknown, not blank, and nothing already held is touched.
+  let siteNotesUnread = false;
   try {
-    remoteSites = await api.sites(undefined, sitePlan.query);
+    const read = await api.sitesPaged(undefined, sitePlan.query);
+    remoteSites = read.sites;
+    sitesTruncated = read.truncated;
+    siteNotesUnread = !!read.columnsRejected;
+    if (read.columnsRejected) {
+      result.notes.push(`Simpro refused the site public-notes column, so site notes were not read — it said: ${read.columnsRejected}`);
+    }
+    if (read.truncated) {
+      result.notes.push(
+        `The site read stopped at ${remoteSites.length} records before reaching the end. `
+        + 'The watermark was not moved, so the rest are still asked for next time.',
+      );
+    }
     const outcome = assessIncremental(remoteSites, sitePlan, siteState.lastRecordCount);
     siteMode = outcome.mode;
     result.modes.sites = outcome.mode;
@@ -240,7 +289,7 @@ export async function pullFromSimpro(
   // Keyed by external id so jobs can find the site they belong to.
   const siteIdByExternal = new Map<string, string>();
 
-  for (const [i, remote] of remoteSites.entries()) {
+  await inPages(remoteSites, async (remote, i) => {
     if (i % 25 === 0) progress('Sites', i, remoteSites.length);
     try {
       const { match, ambiguous } = matchSite(existing, remote.id, remote.name);
@@ -254,7 +303,9 @@ export async function pullFromSimpro(
           + 'separately. Set its reference on the right one to join them.',
         );
       }
+      let localId: string;
       if (match) {
+        localId = match.id;
         siteIdByExternal.set(remote.id, match.id);
         // Only fill what is blank locally. Someone on site knows better than
         // the office record, and overwriting their correction loses it.
@@ -294,14 +345,22 @@ export async function pullFromSimpro(
           externalId: remote.id,
           externalSource: SIMPRO_SOURCE,
         });
+        localId = created.id;
         siteIdByExternal.set(remote.id, created.id);
         existing.push(created);
         result.sitesAdded++;
       }
+      // The office's own words about the site, and whose it is. These are
+      // the office's outright — nobody corrects them on the doorstep — so
+      // they are written whole, blank included, where the list carried them.
+      await setSiteOffice(localId, {
+        publicNotes: siteNotesUnread ? undefined : (remote.publicNotes ?? null),
+        customerExternalId: remote.customerExternalId ?? null,
+      });
     } catch (e) {
       result.errors.push(describe(e, `site ${remote.name}`));
     }
-  }
+  });
 
   // The watermark is only written when the pull actually succeeded. Recording
   // one after a failure would make the next sync skip everything that changed
@@ -318,6 +377,7 @@ export async function pullFromSimpro(
         siteMode,
         startedAt,
         siteState,
+        sitesTruncated,
       ),
       mode: siteMode,
     }, startedAt);
@@ -352,7 +412,7 @@ export async function pullFromSimpro(
       );
     }
     const held = await heldJobExternalIds();
-    for (const [i, job] of remoteJobs.entries()) {
+    await inPages(remoteJobs, async (job, i) => {
       if (i % 25 === 0) progress('Jobs', i, remoteJobs.length);
       try {
         await upsertJob(jobRowFromSimpro(job, job.siteId ? siteIdByRemote.get(job.siteId) : undefined));
@@ -361,7 +421,7 @@ export async function pullFromSimpro(
       } catch (e) {
         result.errors.push(describe(e, `job ${job.id}`));
       }
-    }
+    });
     if (result.errors.length === errorsBeforeJobs) {
       await writeSyncState({
         resource: 'jobs',
@@ -416,18 +476,18 @@ export async function pullFromSimpro(
 
     const known = await findByExternalIds(SIMPRO_ASSET_SOURCE, remoteAssets.map((a) => a.id));
 
-    for (const [i, remote] of remoteAssets.entries()) {
+    await inPages(remoteAssets, async (remote, i) => {
       if (i % 100 === 0) progress('Assets', i, remoteAssets.length);
       try {
         const mapped = mapSimproAsset(remote);
-        if (mapped.unmappedType) {
-          unmappedTypes.add(mapped.unmappedType);
-          continue;
-        }
+        // Filed under the unknown type rather than skipped: equipment the
+        // app has no routine for is still on the site, and a form that
+        // counts the register must be able to say it was not placed.
+        if (mapped.unmappedType) unmappedTypes.add(mapped.unmappedType);
         const siteId = mapped.remoteSiteId ? siteIdByRemote.get(mapped.remoteSiteId) : undefined;
         if (!siteId) {
           result.assetsWithoutSite++;
-          continue;
+          return;
         }
         const match = known.get(remote.id);
         if (match) {
@@ -460,13 +520,13 @@ export async function pullFromSimpro(
       } catch (e) {
         result.errors.push(describe(e, `asset ${remote.id}`));
       }
-    }
+    });
 
     if (unmappedTypes.size) {
       result.notes.push(
         `${unmappedTypes.size} Simpro asset type${unmappedTypes.size === 1 ? '' : 's'} did not match `
-        + `anything this app knows about and ${unmappedTypes.size === 1 ? 'was' : 'were'} skipped: `
-        + `${[...unmappedTypes].join(', ')}.`,
+        + `anything this app knows about; ${unmappedTypes.size === 1 ? 'its' : 'their'} assets are held as `
+        + `unrecognised equipment with no service routine: ${[...unmappedTypes].join(', ')}.`,
       );
     }
     if (result.assetsWithoutSite) {
@@ -485,6 +545,7 @@ export async function pullFromSimpro(
           outcome.mode,
           startedAt,
           assetState,
+          truncated,
         ),
         mode: outcome.mode,
       }, startedAt);
@@ -619,25 +680,39 @@ export async function pullFromSimpro(
   const errorsBeforeCustomers = result.errors.length;
   try {
     const companies = await mirror.companiesPaged(customerPlan.query, CUSTOMER_CEILING);
-    const companiesNote = columnsNote('customer', companies);
-    if (companiesNote) result.notes.push(companiesNote);
-    let individuals: SimproCustomer[] = [];
+    const companiesRefused = columnsRefused('customer', companies);
+    if (companiesRefused) result.errors.push(companiesRefused);
+    /*
+     * The individuals are their own read and their own try, so the four
+     * rows on this build cannot cost the companies. But a read that failed
+     * or came back thin is not a read that saw nobody: the prune below
+     * deletes every customer the run did not stamp, and with the
+     * individuals unread that was every individual customer, every time
+     * the read failed. So the prune waits for both reads to come back
+     * whole and uncut.
+     */
+    let individuals: PagedRead<SimproCustomer> | undefined;
     try {
-      const read = await mirror.individualsPaged(customerPlan.query, CUSTOMER_CEILING);
-      const note = columnsNote('individual customer', read);
-      if (note) result.notes.push(note);
-      individuals = read.items;
+      individuals = await mirror.individualsPaged(customerPlan.query, CUSTOMER_CEILING);
+      const refused = columnsRefused('individual customer', individuals);
+      if (refused) result.errors.push(refused);
     } catch (e) {
       result.notes.push(`Individual customers were not read: ${describe(e, 'individuals')}`);
     }
-    const customers = [...companies.items, ...individuals];
+    const customers = [
+      ...(companiesRefused ? [] : companies.items),
+      ...(individuals && !individuals.columnsRejected ? individuals.items : []),
+    ];
     const outcome = assessIncremental(customers, customerPlan, customerState.lastRecordCount);
     result.modes.customers = outcome.mode;
     if (outcome.note) result.notes.push(outcome.note);
     if (companies.truncated) {
       result.notes.push(`The customer read stopped at ${companies.items.length} records before reaching the end.`);
     }
-    for (const [i, c] of customers.entries()) {
+    if (individuals?.truncated) {
+      result.notes.push(`The individual customer read stopped at ${individuals.items.length} records before reaching the end.`);
+    }
+    await inPages(customers, async (c, i) => {
       if (i % 100 === 0) progress('Customers', i, customers.length);
       try {
         if (c.id) await upsertCustomer(c, startedAt);
@@ -645,9 +720,10 @@ export async function pullFromSimpro(
       } catch (e) {
         result.errors.push(describe(e, `customer ${c.id}`));
       }
-    }
+    });
+    const sawEveryone = outcome.mode === 'full' && !companies.truncated && individuals !== undefined && !individuals.truncated;
     if (result.errors.length === errorsBeforeCustomers) {
-      if (outcome.mode === 'full' && !companies.truncated) {
+      if (sawEveryone) {
         const pruned = await pruneCustomersNotSyncedAt(startedAt);
         if (pruned) result.notes.push(`${pruned} ${pruned === 1 ? 'customer' : 'customers'} no longer in Simpro removed.`);
       }
@@ -655,7 +731,8 @@ export async function pullFromSimpro(
         resource: 'customers',
         lastSyncedAt: startedAt,
         ...nextWatermark(
-          customers as unknown as Record<string, unknown>[], outcome.mode, startedAt, customerState, companies.truncated,
+          customers as unknown as Record<string, unknown>[], outcome.mode, startedAt, customerState,
+          companies.truncated || !!individuals?.truncated,
         ),
         mode: outcome.mode,
       }, startedAt);
@@ -671,15 +748,15 @@ export async function pullFromSimpro(
   const errorsBeforeQuotes = result.errors.length;
   try {
     const read = await mirror.quotesPaged(quotePlan.query, QUOTE_CEILING);
-    const note = columnsNote('quote', read);
-    if (note) result.notes.push(note);
+    const refused = columnsRefused('quote', read);
+    if (refused) throw new Error(refused);
     const outcome = assessIncremental(read.items, quotePlan, quoteState.lastRecordCount);
     result.modes.quotes = outcome.mode;
     if (outcome.note) result.notes.push(outcome.note);
     if (read.truncated) {
       result.notes.push(`More than ${QUOTE_CEILING} quotes matched, so only the most recently changed were read.`);
     }
-    for (const [i, q] of read.items.entries()) {
+    await inPages(read.items, async (q, i) => {
       if (i % 50 === 0) progress('Quotes', i, read.items.length);
       try {
         if (q.id) await upsertQuote(q, q.siteId ? siteIdByRemote.get(q.siteId) : undefined, startedAt);
@@ -687,7 +764,7 @@ export async function pullFromSimpro(
       } catch (e) {
         result.errors.push(describe(e, `quote ${q.id}`));
       }
-    }
+    });
     if (result.errors.length === errorsBeforeQuotes) {
       await writeSyncState({
         resource: 'quotes',
@@ -716,15 +793,15 @@ export async function pullFromSimpro(
       ? { DateIssued: dateSinceFilter(invoiceWindowStart(startedAt)) }
       : invoicePlan.query;
     const read = await mirror.invoicesPaged(query, INVOICE_CEILING);
-    const note = columnsNote('invoice', read);
-    if (note) result.notes.push(note);
+    const refused = columnsRefused('invoice', read);
+    if (refused) throw new Error(refused);
     const outcome = assessIncremental(read.items, invoicePlan, invoiceState.lastRecordCount);
     result.modes.invoices = outcome.mode;
     if (outcome.note) result.notes.push(outcome.note);
     if (read.truncated) {
       result.notes.push(`More than ${INVOICE_CEILING} invoices matched, so only the most recently changed were read.`);
     }
-    for (const [i, inv] of read.items.entries()) {
+    await inPages(read.items, async (inv, i) => {
       if (i % 50 === 0) progress('Invoices', i, read.items.length);
       try {
         if (inv.id) await upsertInvoice(inv, startedAt);
@@ -732,7 +809,7 @@ export async function pullFromSimpro(
       } catch (e) {
         result.errors.push(describe(e, `invoice ${inv.id}`));
       }
-    }
+    });
     if (result.errors.length === errorsBeforeInvoices) {
       await writeSyncState({
         resource: 'invoices',
@@ -751,8 +828,8 @@ export async function pullFromSimpro(
   // the rows are upserted rather than replaced and keep the link a job read made.
   try {
     const read = await mirror.tasks();
-    const note = columnsNote('task', read);
-    if (note) result.notes.push(note);
+    const refused = columnsRefused('task', read);
+    if (refused) throw new Error(refused);
     result.tasksRead = await upsertTasks(read.items, startedAt);
     result.modes.tasks = 'full';
     await writeSyncState({
@@ -789,6 +866,14 @@ export async function pullFromSimpro(
       });
       const out = await readJobDetails(mirror, siteIdByRemote, wanted, (done, total) => progress('Job details', done, total));
       result.jobDetailsRead = out.read;
+      if (out.partial.length) {
+        // One line for the whole run, not one per job: a key that cannot
+        // read notes says so once, in the server's words.
+        result.notes.push(
+          `Some job records were read without every family under them: ${out.partial.slice(0, 3).join('; ')}`
+          + (out.partial.length > 3 ? '; …' : ''),
+        );
+      }
       if (out.failures.length) {
         result.notes.push(
           `${out.failures.length} of ${wanted.length} job records could not be read in full: `
@@ -861,8 +946,16 @@ export type JobDetailOutcome =
  * family — sections and lines, notes, attachments, the timeline, tasks,
  * invoices — is its own request and its own try: a key that cannot read
  * notes still gets the sections, and the family it could not read is left
- * as it was rather than wiped. The job is stamped read either way, so a
- * permission the office has not granted is not asked for every minute.
+ * as it was rather than wiped. The job is stamped read when at least one
+ * family came back, so a permission the office has not granted is not
+ * asked for every minute; a job where nothing under it could be read is a
+ * failed read and says so, rather than a fresh stamp over last week's
+ * children.
+ *
+ * The record is written as the record (`fromDetail`), so a note the office
+ * deleted leaves the phone. Invoices under the job are only linked, not
+ * written whole, unless the row plainly is the invoice — see
+ * linkJobInvoice for why.
  */
 async function readOneJobDetail(
   mirror: SimproMirror,
@@ -872,13 +965,15 @@ async function readOneJobDetail(
   const externalId = job.externalId!;
   const detail = await mirror.jobDetail(externalId);
   const siteId = detail.siteId ? siteIdByRemote.get(detail.siteId) : undefined;
-  await upsertJob({ ...jobRowFromSimpro(detail, siteId), id: job.id });
+  await upsertJob({ ...jobRowFromSimpro(detail, siteId), id: job.id }, { fromDetail: true });
 
   const partial: string[] = [];
+  let familiesRead = 0;
   const children: Partial<JobChildren> = {};
   const attempt = async <K extends keyof JobChildren>(key: K, what: string, read: () => Promise<JobChildren[K]>) => {
     try {
       children[key] = await read();
+      familiesRead++;
     } catch (e) {
       partial.push(`${what}: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -892,15 +987,24 @@ async function readOneJobDetail(
   let invoices: SimproInvoice[] = [];
   try {
     invoices = await mirror.jobInvoices(externalId);
+    familiesRead++;
   } catch (e) {
     partial.push(`invoices: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  const at = new Date().toISOString();
-  await replaceJobChildren(job.id, children, at);
-  for (const inv of invoices) {
-    if (inv.id) await upsertInvoice(inv, at);
+  if (!familiesRead) {
+    throw new Error(`nothing under the job could be read: ${partial.join('; ')}`);
   }
+
+  const at = new Date().toISOString();
+  await withMirrorTransaction(async () => {
+    await replaceJobChildren(job.id, children, at);
+    for (const inv of invoices) {
+      if (!inv.id) continue;
+      if (invoiceRowIsWhole(inv)) await upsertInvoice(inv, at);
+      else await linkJobInvoice(externalId, inv, at);
+    }
+  });
   return partial;
 }
 
@@ -909,19 +1013,25 @@ async function readJobDetails(
   siteIdByRemote: Map<string, string>,
   jobs: readonly { id: string; externalId: string }[],
   onProgress?: (done: number, total: number) => void,
-): Promise<{ read: number; failures: { externalId: string; error: string }[] }> {
+): Promise<{
+  read: number;
+  failures: { externalId: string; error: string }[];
+  /** The distinct family errors across the jobs that were read, for one note. */
+  partial: string[];
+}> {
   let read = 0;
   const failures: { externalId: string; error: string }[] = [];
+  const partial = new Set<string>();
   for (const [i, job] of jobs.entries()) {
     onProgress?.(i, jobs.length);
     try {
-      await readOneJobDetail(mirror, siteIdByRemote, job);
+      for (const p of await readOneJobDetail(mirror, siteIdByRemote, job)) partial.add(p);
       read++;
     } catch (e) {
       failures.push({ externalId: job.externalId, error: e instanceof Error ? e.message : String(e) });
     }
   }
-  return { read, failures };
+  return { read, failures, partial: [...partial] };
 }
 
 /**
@@ -1000,7 +1110,7 @@ export async function prefetchJobDetails(
 async function readQuoteDetail(mirror: SimproMirror, siteIdByRemote: Map<string, string>, externalId: string): Promise<string[]> {
   const detail = await mirror.quoteDetail(externalId);
   const at = new Date().toISOString();
-  await upsertQuote(detail, detail.siteId ? siteIdByRemote.get(detail.siteId) : undefined, at);
+  await upsertQuote(detail, detail.siteId ? siteIdByRemote.get(detail.siteId) : undefined, at, { fromDetail: true });
 
   const partial: string[] = [];
   const children: Partial<QuoteChildren> = {};
@@ -1044,6 +1154,52 @@ export async function syncQuoteDetail(
     return { status: 'synced', partial };
   } catch (e) {
     return { status: 'failed', error: describe(e, `quote ${quoteExternalId}`) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sites: the office's own record, on demand
+// ---------------------------------------------------------------------------
+
+export type SiteDetailOutcome =
+  | { status: 'synced' }
+  | { status: 'fresh' }
+  | { status: 'missing' }
+  | { status: 'not-simpro' }
+  | { status: 'failed'; error: string };
+
+/**
+ * Reads the office's own record of a site, for the screen that just opened
+ * it: the public notes and the customer number, which the site list may
+ * not carry. The same quarter-hour rule as a job. A site that did not come
+ * from the office has no record to read.
+ */
+export async function syncSiteDetail(
+  config: SimproConfig,
+  localSiteId: string,
+  options: { force?: boolean; maxAgeMs?: number } = {},
+): Promise<SiteDetailOutcome> {
+  const site = await getSite(localSiteId);
+  if (!site) return { status: 'missing' };
+  const externalId = site.externalSource === SIMPRO_SOURCE && site.externalId
+    ? site.externalId
+    : site.siteRef?.startsWith('SIMPRO:') ? site.siteRef.slice('SIMPRO:'.length) : undefined;
+  if (!externalId) return { status: 'not-simpro' };
+  if (!options.force && !jobDetailIsStale(site, options.maxAgeMs ?? DETAIL_FRESH_MS)) return { status: 'fresh' };
+
+  const missing = await SimproClient.missingCredentials(config);
+  if (missing) return { status: 'failed', error: missing };
+
+  try {
+    const detail = await new SimproMirror(new SimproClient(config)).siteDetail(externalId);
+    await setSiteOffice(localSiteId, {
+      publicNotes: detail.publicNotes ?? null,
+      customerExternalId: detail.customers[0]?.id ?? null,
+      detailSyncedAt: new Date().toISOString(),
+    });
+    return { status: 'synced' };
+  } catch (e) {
+    return { status: 'failed', error: describe(e, `site ${externalId}`) };
   }
 }
 
@@ -1130,27 +1286,86 @@ export interface FlushResult {
   sent: number;
   failed: number;
   remaining: number;
+  /**
+   * Set when the run stopped before the queue was through: the office could
+   * not be reached, the credentials were refused, the build is throttling,
+   * or the connection is not set up. The rows it did not reach are left
+   * pending with their attempts untouched, since nothing was their fault.
+   */
+  stopped?: { why: 'credentials' | 'throttled' | 'configuration' | 'offline'; reason: string };
+}
+
+/** The Simpro job an item is bound for, where it has one. */
+function jobIdOf(kind: string, payload: unknown): string | undefined {
+  if (kind === 'asset-test') return undefined;
+  const id = (payload as { jobId?: unknown } | null)?.jobId;
+  return typeof id === 'string' ? id : undefined;
 }
 
 /**
  * Sends whatever is queued.
  *
- * Stops on the first authentication or permission failure rather than burning
- * through the queue's retry counts against a problem that will not fix itself.
+ * Before the first item, one small read: if the office cannot be reached
+ * at all — no signal, no secret, a secret the office has regenerated —
+ * the run stops there with nothing touched. Without that the failure
+ * landed on the first item instead, where a token that never came back was
+ * indistinguishable from a request that never came back, and the item and
+ * every one after it were filed as unknown for a person to adjudicate.
+ *
+ * What to do with each failure after that is decided in ./sendOutcome. A
+ * stop leaves the rest pending; nothing after it would go either, and
+ * five failed attempts each would only spend the retries against a problem
+ * the office fixes.
  */
 export async function flushQueue(config: SimproConfig): Promise<FlushResult> {
+  const items = await pendingSync(50);
+  if (!items.length) return { sent: 0, failed: 0, remaining: 0 };
+
   const client = new SimproClient(config);
   const api = new SimproResources(client);
-  const items = await pendingSync(50);
   let sent = 0;
   let failed = 0;
+  let stopped: FlushResult['stopped'];
+
+  try {
+    await client.listCompanies();
+  } catch (e) {
+    const failure = reachabilityFailure(e);
+    if (failure) return { sent, failed, remaining: items.length, stopped: { why: failure.why, reason: failure.reason } };
+  }
 
   for (const item of items) {
     const key = item.contentKey ?? undefined;
+    let payload: unknown;
     try {
-      const payload: unknown = JSON.parse(item.payload);
+      payload = JSON.parse(item.payload);
+    } catch (e) {
+      // Not a send that failed: a row that cannot be read will never be
+      // sendable, so it is closed now with the reason on it.
+      failed++;
+      await abandonSync(item.id, `The queued item could not be read: ${e instanceof Error ? e.message : String(e)}`);
+      continue;
+    }
+    try {
       if (item.kind === 'job-note') {
         const p = payload as JobNotePayload;
+        /*
+         * A note keyed the way the service record is — a Safe QLD marker in
+         * the text — may already be on the job: another handset sent it, or
+         * this one did before a reinstall emptied the queue. The job's notes
+         * are the record that survives the phone, so they are read first,
+         * the way the service record's sender does. Where they cannot be
+         * read the note goes anyway; a duplicate is recoverable and a lost
+         * completion is not.
+         */
+        if (key && keysInNoteText(markerFor(key)).length) {
+          const onJob = await keysAlreadyOnJob(client, p.jobId);
+          if (onJob?.has(key)) {
+            await markSynced(item.id);
+            sent++;
+            continue;
+          }
+        }
         // The marker rides in the note itself, so the job carries the proof
         // that this was sent even if the phone that sent it is gone.
         await api.addJobNote(p.jobId, p.subject, key ? withMarker(p.note, key) : p.note);
@@ -1185,31 +1400,33 @@ export async function flushQueue(config: SimproConfig): Promise<FlushResult> {
       await markSynced(item.id);
       sent++;
     } catch (e) {
-      failed++;
-      const message = e instanceof Error ? e.message : String(e);
-      if (e instanceof SimproError && (e.status === 401 || e.status === 403)) {
-        // Nothing after this will go either, and five failed attempts each
-        // would only spend the retries against a problem the office fixes.
-        await markSyncFailed(item.id, message);
+      const failure = sendFailure({ kind: item.kind, jobId: jobIdOf(item.kind, payload) }, e);
+      if (failure.outcome === 'stop') {
+        stopped = { why: failure.why, reason: failure.reason };
         break;
       }
-      if (e instanceof SimproError && e.status !== undefined) {
+      failed++;
+      if (failure.outcome === 'abandon') {
+        // The server refused the body by name or by size; sending the same
+        // megabytes again would only be told the same thing.
+        await abandonSync(item.id, failure.reason);
+      } else if (failure.outcome === 'retry') {
         // The server answered, so it did not act: safe to try again.
-        await markSyncFailed(item.id, message);
-        continue;
+        await markSyncFailed(item.id, failure.reason);
+      } else {
+        /*
+         * No answer at all: the request may have arrived and been acted on
+         * before the connection died. A vendor order raised twice is real
+         * money and a note posted twice is a real duplicate, so this is not
+         * retried by the app. It waits for a person on Waiting to send, who
+         * can check Simpro for the marker and either send it again or let it
+         * go.
+         */
+        await markSyncUnknown(item.id, failure.reason);
       }
-      /*
-       * No answer at all: the request may have arrived and been acted on
-       * before the connection died. A vendor order raised twice is real
-       * money and a note posted twice is a real duplicate, so this is not
-       * retried by the app. It waits for a person on Waiting to send, who
-       * can check Simpro for the marker and either send it again or let it
-       * go.
-       */
-      await markSyncUnknown(item.id, message);
     }
   }
 
   const remaining = (await pendingSync(1000)).length;
-  return { sent, failed, remaining };
+  return stopped ? { sent, failed, remaining, stopped } : { sent, failed, remaining };
 }

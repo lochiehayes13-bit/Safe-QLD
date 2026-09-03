@@ -5,6 +5,7 @@ import {
   isPosition, recentSinceDay, type LatLng, type MapJob, type MapQuote, type MapSite,
 } from '@/domain/mapPins';
 import type { MatchCustomer } from '@/domain/customerMatch';
+import { qldIsoDay } from '@/domain/qldTime';
 
 /**
  * What the map reads, in as few statements as it can.
@@ -125,6 +126,7 @@ interface JobRow {
   stage: string | null;
   status: MapJob['status'];
   scheduledFor: string | null;
+  scheduledDay: string | null;
   dueAt: string | null;
   completedAt: string | null;
   completedDate: string | null;
@@ -137,12 +139,25 @@ interface JobRow {
  * job is read only where one of its dates falls inside the window. The bound
  * is a day, and an instant compares after its own day, so the boundary day
  * is inside the window whichever shape the date took.
+ *
+ * The booking comes from the schedule, not the job: the office's job record
+ * carries only the day it was issued, and the day a technician is actually
+ * going is a block on the schedule against the job number. The earliest
+ * block from today on is the one that decides whether the dot is "on now"
+ * or "upcoming"; a block already behind us says nothing about the future.
+ * The schedule is held for three weeks ahead (see domain/myDay), so a job
+ * booked beyond that has no block here and reads as open, which is the
+ * honest answer for a phone that does not hold the booking.
  */
-const JOBS_SQL = `SELECT id, externalId, siteId, title, stage, status, scheduledFor, dueAt, completedAt, completedDate, updatedAt
-FROM job
-WHERE siteId IS NOT NULL AND (
-  (status <> 'complete' AND LOWER(TRIM(COALESCE(stage, ''))) NOT IN ('complete', 'completed', 'invoiced'))
-  OR COALESCE(completedAt, completedDate, dueAt, scheduledFor) >= ?
+const JOBS_SQL = `SELECT j.id, j.externalId, j.siteId, j.title, j.stage, j.status, j.scheduledFor, b.scheduledDay,
+       j.dueAt, j.completedAt, j.completedDate, j.updatedAt
+FROM job j
+LEFT JOIN (
+  SELECT jobId, MIN(date) AS scheduledDay FROM schedule WHERE jobId IS NOT NULL AND date >= ? GROUP BY jobId
+) b ON b.jobId = j.externalId
+WHERE j.siteId IS NOT NULL AND (
+  (j.status <> 'complete' AND LOWER(TRIM(COALESCE(j.stage, ''))) NOT IN ('complete', 'completed', 'invoiced'))
+  OR COALESCE(j.completedAt, j.completedDate, j.dueAt, j.scheduledFor) >= ?
 )`;
 
 interface QuoteRow {
@@ -164,9 +179,12 @@ const orUndefined = <T>(v: T | null): T | undefined => (v === null ? undefined :
 export async function loadMapData(now: number = Date.now()): Promise<MapData> {
   const db = await getDb();
   const sinceDay = recentSinceDay(now);
+  // The Queensland day, so a booking for this morning is today's from
+  // midnight and not from ten o'clock, when the UTC date catches up.
+  const today = qldIsoDay(new Date(now).toISOString()) ?? '';
   const [siteRows, jobRows, quoteRows, cached] = await Promise.all([
     db.getAllAsync<SiteRow>(SITES_SQL, sinceDay),
-    db.getAllAsync<JobRow>(JOBS_SQL, sinceDay),
+    db.getAllAsync<JobRow>(JOBS_SQL, today, sinceDay),
     db.getAllAsync<QuoteRow>(QUOTES_SQL),
     readAllPositions(),
   ]);
@@ -213,6 +231,7 @@ export async function loadMapData(now: number = Date.now()): Promise<MapData> {
     stage: orUndefined(r.stage),
     status: r.status,
     scheduledFor: orUndefined(r.scheduledFor),
+    scheduledDay: orUndefined(r.scheduledDay),
     dueAt: orUndefined(r.dueAt),
     completedAt: orUndefined(r.completedAt),
     completedDate: orUndefined(r.completedDate),

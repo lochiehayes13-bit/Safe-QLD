@@ -227,7 +227,13 @@ function describe(e: unknown, action: 'add job notes' | 'read job notes' = 'add 
   if (status === 403) {
     return `This Simpro key is not permitted to ${action}. Note permissions are set per endpoint in Simpro.`;
   }
-  if (status === 401) return 'Simpro rejected the credentials. Check them in Settings.';
+  if (status === 401) {
+    // The client has already renewed the token once and been refused again
+    // by the time this is seen. With a person signed in the fix is to sign
+    // in again; the client ID and secret only come into it when nobody is.
+    return 'Simpro rejected the sign-in or token, even after renewing it. Sign in again, or check the client ID '
+      + 'and secret in Settings if nobody is signed in.';
+  }
   return e instanceof Error ? e.message : String(e);
 }
 

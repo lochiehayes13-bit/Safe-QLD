@@ -18,7 +18,7 @@ import { queueJobAttachment } from '@/simpro/sync';
 import { photosWithSizes } from '@/simpro/attachmentFiles';
 import { formatAuDate } from '@/export/sheets';
 import { loadPrefs } from '@/app-prefs';
-import { dismissSync, retrySync, unknownSync, type SyncEntry } from '@/db/opsRepo';
+import { dismissSync, failedSync, forgetSync, retrySync, unknownSync, type SyncEntry } from '@/db/opsRepo';
 import { flushSoon } from '@/simpro/flushSoon';
 import { markerFor } from '@/domain/queueKey';
 import type { Site } from '@/domain/types';
@@ -53,6 +53,12 @@ import {
  * Nothing sends without a job linked. A guessed job number posts a service
  * against somebody else's work, and there is no undo for that in Simpro.
  */
+
+/** A photograph whose file is gone from the phone; sending it again is refused before it leaves. See AttachmentFileMissing. */
+function fileIsGone(entry: SyncEntry): boolean {
+  return entry.kind === 'attachment' && (entry.lastError ?? '').includes('no longer on this device');
+}
+
 export default function OutboundScreen() {
   const t = useTheme();
   const [runs, setRuns] = useState<RoutineRun[]>([]);
@@ -98,7 +104,18 @@ export default function OutboundScreen() {
   useFocusEffect(useCallback(() => { void load(); }, [load]));
   /** Sends that went out and got no reply. A person decides these; see flushQueue. */
   const [unknown, setUnknown] = useState<SyncEntry[]>([]);
-  useFocusEffect(useCallback(() => { void unknownSync().then(setUnknown); }, []));
+  /**
+   * Sends the queue gave up on: five refusals, or a file gone from the phone.
+   * Read here because nowhere else lists them, and a note that stopped being
+   * retried without being shown is a technician's work silently dropped.
+   */
+  const [failed, setFailed] = useState<SyncEntry[]>([]);
+  const loadQueues = useCallback(async () => {
+    const [u, f] = await Promise.all([unknownSync(), failedSync()]);
+    setUnknown(u);
+    setFailed(f);
+  }, []);
+  useFocusEffect(useCallback(() => { void loadQueues(); }, [loadQueues]));
 
   const openRun = useCallback(async (run: RoutineRun) => {
     if (open === run.id) { setOpen(null); setPlan(null); setReport(null); return; }
@@ -287,16 +304,68 @@ export default function OutboundScreen() {
                   variant="secondary"
                   compact
                   style={{ flex: 1 }}
-                  onPress={() => { void dismissSync(u.id).then(() => unknownSync().then(setUnknown)); }}
+                  onPress={() => { void dismissSync(u.id).then(loadQueues); }}
                 />
                 <Button
                   title="Send again"
                   compact
                   style={{ flex: 1 }}
                   onPress={() => {
-                    void retrySync(u.id).then(() => { flushSoon(); return unknownSync().then(setUnknown); });
+                    void retrySync(u.id).then(() => { flushSoon(); return loadQueues(); });
                   }}
                 />
+              </Rowed>
+            </Card>
+          ))}
+        </>
+      ) : null}
+
+      {failed.length ? (
+        <>
+          <Divider />
+          <H2>Could not be sent</H2>
+          <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+            The app has stopped trying these on its own: Simpro refused them as many times as the
+            queue allows, or the photo file is no longer on this phone. Simpro's last words are under
+            each one. Try again starts the count over; Forget drops it here without sending, and a
+            photograph forgotten is offered again the next time its service is sent.
+          </Txt>
+          {failed.map((f) => (
+            <Card key={f.id}>
+              <Txt weight="700">{describeUnknown(f)}</Txt>
+              <Txt size="xs" tone="muted">
+                {formatAuDate(f.createdAt)} · {f.attempts} attempt{f.attempts === 1 ? '' : 's'}
+              </Txt>
+              {f.lastError ? (
+                <Txt size="sm" tone="fail" style={{ marginTop: 4, lineHeight: 19 }}>{f.lastError}</Txt>
+              ) : null}
+              {f.contentKey ? (
+                <Txt size="xs" tone="faint" style={{ marginTop: 4 }} mono>Reference {markerFor(f.contentKey)}</Txt>
+              ) : null}
+              <Rowed gap={2} style={{ marginTop: t.space(2.5) }}>
+                {/*
+                  * Forget, not dismiss: dismissing marks the row sent, which
+                  * would count a photograph as uploaded and keep it off the
+                  * job for good. A file gone from the phone gets no Try again
+                  * either — the next flush would only abandon it once more.
+                  */}
+                <Button
+                  title="Forget"
+                  variant="secondary"
+                  compact
+                  style={{ flex: 1 }}
+                  onPress={() => { void forgetSync(f.id).then(loadQueues); }}
+                />
+                {fileIsGone(f) ? null : (
+                  <Button
+                    title="Try again"
+                    compact
+                    style={{ flex: 1 }}
+                    onPress={() => {
+                      void retrySync(f.id).then(() => { flushSoon(); return loadQueues(); });
+                    }}
+                  />
+                )}
               </Rowed>
             </Card>
           ))}
@@ -326,7 +395,7 @@ export default function OutboundScreen() {
 }
 
 /**
- * One line for a queued send nobody can vouch for.
+ * One line for a queued send nobody can vouch for, or one the app gave up on.
  *
  * A photograph is named by its file, because that is what somebody searches
  * the job's attachments for; a note by its subject; an order by its lines. A

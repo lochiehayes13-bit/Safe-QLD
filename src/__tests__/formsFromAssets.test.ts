@@ -1,7 +1,7 @@
 import {
-  applyForm72Prefill, assetLocation, assetTag, assetTypeLabel, deviceTypeForAsset, form72FromAssets,
-  occupierEvidenceFromAssets, orderForWalk, prefillOccupierRows, registerSystemFor, testRowsFromAssets,
-  type RegisterAsset,
+  applyForm72Prefill, assetDescriptor, assetLocation, assetTag, assetTypeLabel, deviceTypeForAsset,
+  form72FromAssets, headingKey, occupierEvidenceFromAssets, orderForWalk, prefillOccupierRows,
+  registerSystemFor, testRowsFromAssets, type RegisterAsset,
 } from '@/domain/formsFromAssets';
 import { emptyForm72 } from '@/domain/form72';
 import { OCCUPIER_STATEMENT_INSTALLATIONS } from '@/domain/qldCompliance';
@@ -61,6 +61,23 @@ describe('reading an asset', () => {
     expect(assetTypeLabel(REGISTER[0]!)).toBe('Fire extinguisher — Wet chemical 7L');
     expect(assetTypeLabel(REGISTER[7]!)).toBe('Sprinkler valve set — Wet 100mm');
     expect(assetTypeLabel(asset({ id: 'a', assetTypeId: 'hydrant' }))).toBe('Fire hydrant');
+  });
+
+  it('finds the descriptor under the office\'s spelling of the heading', () => {
+    /*
+     * The Simpro sync keeps custom-field names verbatim and the office is not
+     * consistent about case, spacing or the ampersand; and the live asset
+     * types keep "Equipment Type" and "Battery Sizes" as two fields where the
+     * CSV register has one "Equipment Type & Batt Sizes" column, so a synced
+     * pumpset's own column found nothing.
+     */
+    expect(headingKey('Equipment Type & Size')).toBe(headingKey('equipment type and size'));
+    expect(headingKey('Equipment  Type&Size ')).toBe(headingKey('Equipment Type & Size'));
+    expect(assetDescriptor(asset({ id: 'a', assetTypeId: 'extinguisher', attributes: { 'extinguisher  type': 'CO2 3.5kg' } })))
+      .toBe('CO2 3.5kg');
+    expect(assetDescriptor(asset({ id: 'a', assetTypeId: 'fire-pump', attributes: { 'Equipment Type': 'Diesel', 'Battery Sizes': '2 x N70' } })))
+      .toBe('Diesel');
+    expect(assetDescriptor(asset({ id: 'a', assetTypeId: 'fire-pump' }))).toBeUndefined();
   });
 
   it('puts level and room in front of the place only where the name lacks them', () => {
@@ -174,8 +191,17 @@ describe('Form 72 from the register', () => {
     expect(patch.flowTest?.hydrantLocations).toEqual(prefill.hydrantLocations);
     expect(patch.flowTest?.onSitePumpSet).toBe(true);
     expect(patch.flowTest?.comment).toContain('Roof tank (60000 L)');
-    expect(patch.booster).toMatchObject({ requiredLps: 16, requiredKpa: 700 });
+    /*
+     * The pump's rated duty is named beside the pump and goes no further.
+     * Part E's required flow and pressure are the brigade booster inlet
+     * requirement, a design figure the register does not hold; the pump's
+     * discharge duty is a different quantity, and it was being written into
+     * the required fields for a licensee to sign as the requirement.
+     */
+    expect(patch.booster?.requiredLps).toBeUndefined();
+    expect(patch.booster?.requiredKpa).toBeUndefined();
     expect(patch.booster?.comments).toContain('Front fence booster cabinet');
+    expect(patch.booster?.comments).toContain('Pump room (pump rated 16 L/s at 700 kPa)');
     expect(patch.sprinklerFlow?.testPoints).toEqual([{ location: 'Basement valve room — Wet 100mm' }]);
 
     /*
@@ -226,6 +252,59 @@ describe('the occupier statement from the register', () => {
     expect(by('Fire mains')).toBeUndefined();
   });
 
+  it('never proposes a row no asset could have named as not present', () => {
+    /*
+     * "Smoke doorsets" was in the set of rows the register could name — the
+     * table it was read from covers the CSV importer's systems too — but no
+     * asset system ever produced it, so every site holding any equipment at
+     * all had it proposed as not present, including sites whose smoke doors
+     * were in the register under the shared door type.
+     */
+    expect(by('Smoke doorsets')).toBeUndefined();
+    expect(by('Fire doorsets')).toBeUndefined();
+  });
+
+  it('answers neither door row from a door, because the type does not say which it is', () => {
+    // The Smoke Doors register and Simpro's smoke-door type both create a
+    // 'fire-door' asset, so a door is evidence for one of two rows and the
+    // asset cannot say which. Both are left to the occupier, and the doors
+    // are named as unplaced.
+    const doors = occupierEvidenceFromAssets([
+      ...REGISTER,
+      asset({ id: 'door-1', assetTypeId: 'fire-door', name: 'Stair 1 L2' }),
+      asset({ id: 'door-2', assetTypeId: 'fire-door', name: 'Stair 1 L3' }),
+    ]);
+    const find = (name: string) => doors.installations.find((e) => e.installation === name);
+    expect(find('Fire doorsets')).toBeUndefined();
+    expect(find('Smoke doorsets')).toBeUndefined();
+    const unplaced = doors.unplaced.find((u) => u.label === 'Fire door');
+    expect(unplaced?.count).toBe(2);
+    expect(unplaced?.why).toContain('does not say which');
+
+    // Where the sync or import recorded which register the door came from,
+    // that row is present — and the other door row is still not struck.
+    const smoke = occupierEvidenceFromAssets([
+      ...REGISTER,
+      asset({ id: 'door-1', assetTypeId: 'fire-door', name: 'Stair 1 L2', attributes: { registerSystem: 'smoke-door' } }),
+    ]);
+    expect(smoke.installations.find((e) => e.installation === 'Smoke doorsets')).toMatchObject({ knowledge: 'present', assetCount: 1 });
+    expect(smoke.installations.find((e) => e.installation === 'Fire doorsets')).toBeUndefined();
+  });
+
+  it('does not count a fire blanket as a fire extinguisher', () => {
+    // A blanket is serviced under the extinguisher system but is not one of
+    // the twenty-one prescribed installations; a kitchen with two blankets
+    // and no extinguishers was prefilled "Fire extinguishers: present".
+    const kitchen = occupierEvidenceFromAssets([
+      asset({ id: 'fb-1', assetTypeId: 'fire-blanket', name: 'Kitchen', lastServicedAt: '2026-03-04' }),
+      asset({ id: 'fb-2', assetTypeId: 'fire-blanket', name: 'Servery' }),
+    ]);
+    expect(kitchen.installations.find((e) => e.installation === 'Fire extinguishers'))
+      .toMatchObject({ knowledge: 'absent' });
+    expect(kitchen.unplaced).toEqual([expect.objectContaining({ label: 'Fire blanket', count: 2 })]);
+    expect(kitchen.unplaced[0]!.why).toContain('Other features');
+  });
+
   it('carries the latest last-test and the soonest due date, as Queensland days', () => {
     // One extinguisher's last test is an instant stamped on the phone; the
     // other's is Simpro's day. Both are the fourth of March in Brisbane.
@@ -257,9 +336,16 @@ describe('the occupier statement from the register', () => {
     const filled = prefillOccupierRows(rows, evidence);
     const row = (name: string) => filled.find((r) => r.installation === name)!;
     expect(row('Fire extinguishers')).toMatchObject({ present: true, lastMaintainedDate: '2026-03-04', nextDueDate: '2026-09-04' });
-    // Ticked by the occupier, struck by the register: the register's answer
-    // is the proposal, and the screen says so.
-    expect(row('Fire hose reels').present).toBe(false);
+    /*
+     * Ticked by the occupier, not in the register: the tick stands. The
+     * register is the equipment Safe QLD services, not the building's
+     * installation list — the hose reels may be another contractor's — and
+     * un-ticking on our silence struck the row from a statement to the
+     * Commissioner. The screen names it for checking instead.
+     */
+    expect(row('Fire hose reels').present).toBe(true);
+    // An unanswered row the register holds nothing for stays unanswered.
+    expect(row('Emergency warning and intercommunication systems').present).toBe(false);
     // The register cannot speak to lifts, so the occupier's tick stands.
     expect(row('Emergency lifts').present).toBe(true);
     expect(filled).toHaveLength(OCCUPIER_STATEMENT_INSTALLATIONS.length);

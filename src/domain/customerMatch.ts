@@ -65,6 +65,8 @@ export interface PlaceMatch<S extends MatchSite = MatchSite, C extends MatchCust
   verdict: MatchVerdict;
   site?: S;
   customer?: C;
+  /** The customer's name where it is known without a mirrored customer record: the client on a site. */
+  customerName?: string;
   evidence: MatchEvidence[];
   /** Metres from the place to the matched site, where both have coordinates. */
   distanceM?: number;
@@ -73,10 +75,21 @@ export interface PlaceMatch<S extends MatchSite = MatchSite, C extends MatchCust
 export interface MatchOptions {
   /** Metres within which a located site is taken to be the place. Defaults to 60. */
   proximityM?: number;
+  /** Metres beyond which a site of the same name is taken to be a different premises. Defaults to 2000. */
+  samePremisesM?: number;
 }
 
 /** Sixty metres: the building, or the one sharing its car park. Not the one across the road. */
 export const PROXIMITY_M = 60;
+
+/**
+ * Two kilometres: the distance past which a site with the place's name is
+ * some other branch of the same chain, not this one. Generous on purpose —
+ * a site's position comes from a geocoder reading the office's address and
+ * can be a few hundred metres out, and a shopping centre is a few hundred
+ * metres across — but two stores of one chain are not two kilometres apart.
+ */
+export const SAME_PREMISES_M = 2000;
 
 // ---------------------------------------------------------------------------
 // Names
@@ -171,12 +184,21 @@ function normaliseStreet(words: string): string {
  * whatever follows it — in the same segment or the next.
  */
 export function parseStreet(address: string | null | undefined): ParsedStreet {
+  return readStreet(address).parsed;
+}
+
+/**
+ * The parse, plus the comma segments after the street: the suburb, the
+ * council, the state and the postcode, in whatever order and however many
+ * the writer used. The suburb check reads those and nothing before them.
+ */
+function readStreet(address: string | null | undefined): { parsed: ParsedStreet; tail: string[] } {
   const out: ParsedStreet = {};
-  if (!address) return out;
+  if (!address) return { parsed: out, tail: [] };
   const segments = address.split(',').map((s) => s.trim()).filter(Boolean);
 
   let index = segments.findIndex((s) => /^(?:(?:unit|u|shop|suite|level|lvl|apt|apartment|flat|lot|tenancy|t)\s*)?\d/i.test(s));
-  if (index < 0) return out;
+  if (index < 0) return { parsed: out, tail: [] };
 
   let rest = segments[index]!;
   const unit = rest.match(UNIT_WORDS);
@@ -201,7 +223,7 @@ export function parseStreet(address: string | null | undefined): ParsedStreet {
       index += 1;
       const next = segments[index];
       const again = next?.match(/^(\d+[a-z]?)(?:\s*[-–]\s*\d+[a-z]?)?\s*/i);
-      if (!next || !again) return out;
+      if (!next || !again) return { parsed: out, tail: [] };
       out.number = again[1]!.toLowerCase();
       rest = next.slice(again[0].length);
     }
@@ -215,10 +237,10 @@ export function parseStreet(address: string | null | undefined): ParsedStreet {
   const street = normaliseStreet(streetWords);
   if (street && !/^\d/.test(street)) out.street = street;
 
-  const tail = segments.slice(index + 1).join(' ');
-  const postcode = tail.match(/\b(\d{4})\b/);
+  const tail = segments.slice(index + 1);
+  const postcode = tail.join(' ').match(/\b(\d{4})\b/);
   if (postcode) out.postcode = postcode[1];
-  return out;
+  return { parsed: out, tail };
 }
 
 /** True when the word appears whole in the text, case-insensitively. */
@@ -227,6 +249,31 @@ function mentions(text: string | null | undefined, word: string | null | undefin
   if (!w || !text) return false;
   const hay = ` ${text.toLowerCase().replace(/[^a-z0-9]+/g, ' ')} `;
   return hay.includes(` ${w.replace(/[^a-z0-9]+/g, ' ')} `);
+}
+
+/** Lower case, punctuation as spaces, one space between words. */
+function words(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+}
+
+/**
+ * Whether one of the segments after the street is the suburb.
+ *
+ * Each segment is taken whole, with the state and postcode a one-line
+ * address hangs on the end of it taken off: "Sumner Park QLD 4074" is the
+ * suburb Sumner Park, and so is Nominatim's own "Sumner Park" segment. The
+ * council segment beside it — "Ipswich City", "Brisbane City" — is a whole
+ * segment too, so a site whose suburb is Ipswich does not match every street
+ * in the council of the same name, which is what searching the flattened
+ * address for the word did.
+ */
+function namesSuburb(tail: readonly string[], suburb: string): boolean {
+  const want = words(suburb);
+  if (!want) return false;
+  return tail.some((segment) => {
+    const locality = words(segment.replace(/\b(?:qld|queensland)\b\s*\d{0,4}\s*$/i, '').replace(/\b\d{4}\s*$/, ''));
+    return locality === want;
+  });
 }
 
 /** Two normalised streets that are the same street: equal, or one is the other with a suffix like "north". */
@@ -256,6 +303,12 @@ export interface AddressMatch {
  * suburbs. A site with neither suburb nor postcode on file is matched on the
  * street alone, which is the best that record allows.
  *
+ * Where both sides carry a postcode and they disagree, that settles it
+ * before the suburb is looked at: a postcode is a stronger word than a
+ * suburb name, and a geocoder's address names the council as well as the
+ * suburb, so a site in "Brisbane City" would otherwise match the same street
+ * number in every suburb of Brisbane's council.
+ *
  * A unit is a tenancy, not a building. Where both sides carry one and they
  * differ, it is a different shop in the same block and is not the site. Where
  * only one side carries one, the place is the building and the site is in it.
@@ -264,7 +317,7 @@ export function addressMatches(
   place: { address?: string | null },
   site: { address?: string | null; suburb?: string | null; postcode?: string | null },
 ): AddressMatch {
-  const p = parseStreet(place.address);
+  const { parsed: p, tail } = readStreet(place.address);
   const s = parseStreet(site.address);
   if (!p.number || !p.street || !s.number || !s.street) return { ok: false };
   if (p.number !== s.number) return { ok: false };
@@ -273,8 +326,12 @@ export function addressMatches(
 
   const suburb = (site.suburb ?? '').trim();
   const postcode = (site.postcode ?? '').trim();
+  if (postcode && p.postcode && p.postcode !== postcode) return { ok: false, reason: 'different suburb' };
   if (suburb || postcode) {
-    const inSuburb = suburb ? mentions(place.address, suburb) : false;
+    // An address written without commas has no segments after the street;
+    // the whole line is searched for the word then, since there is no
+    // council segment in it to be fooled by.
+    const inSuburb = suburb ? (tail.length ? namesSuburb(tail, suburb) : mentions(place.address, suburb)) : false;
     const inPostcode = postcode ? (p.postcode === postcode || mentions(place.address, postcode)) : false;
     if (!inSuburb && !inPostcode) return { ok: false, reason: 'different suburb' };
   }
@@ -336,6 +393,17 @@ function siteAddressLine(site: MatchSite | MatchCustomer): string {
  * has no site at that address yet, and that is worth knowing before knocking
  * — it is a quote, not a cold call. The site's client name counts the same
  * way, for the customers the sync has not mirrored.
+ *
+ * A name on its own is decisive unless something contradicts it. Chains are
+ * common in a fire-protection book — a dozen sites called the same thing —
+ * and the one with the place's name thirty kilometres away is a different
+ * store: its contact is the wrong person to ring and its jobs are somebody
+ * else's. So a site matched on name alone is set aside when the two are
+ * plainly not the same premises: both are positioned and far apart, or both
+ * have a street address and the addresses disagree. The place is then still
+ * a customer's, which is what the verdict says, with the site it was mistaken
+ * for named so the technician can see why. A place with no address and no
+ * position has nothing to contradict the name with, and is taken at its word.
  */
 export function matchPlace<S extends MatchSite, C extends MatchCustomer>(
   place: MatchPlace,
@@ -344,15 +412,20 @@ export function matchPlace<S extends MatchSite, C extends MatchCustomer>(
   options: MatchOptions = {},
 ): PlaceMatch<S, C> {
   const proximityM = options.proximityM ?? PROXIMITY_M;
+  const samePremisesM = options.samePremisesM ?? SAME_PREMISES_M;
   const name = normaliseName(place.name);
+  const placeStreet = parseStreet(place.address);
 
   let best: { site: S; score: number; evidence: MatchEvidence[]; distance?: number } | undefined;
+  /** The nearest same-named site the evidence said was somewhere else. */
+  let namesake: { site: S; distance?: number } | undefined;
   for (const site of sites) {
     const evidence: MatchEvidence[] = [];
     let score = 0;
     let distance: number | undefined;
 
-    if (name && normaliseName(site.name) === name) {
+    const sameName = !!name && normaliseName(site.name) === name;
+    if (sameName) {
       score += 4;
       evidence.push({ signal: 'name', detail: 'same name' });
     }
@@ -369,6 +442,18 @@ export function matchPlace<S extends MatchSite, C extends MatchCustomer>(
       }
     }
     if (score === 0) continue;
+
+    // Name alone: the address did not agree and the place is not within
+    // proximity. Is there anything that says it is not this site?
+    if (sameName && score === 4) {
+      const siteStreet = parseStreet(site.address);
+      const farApart = distance !== undefined && distance > samePremisesM;
+      const elsewhere = !!placeStreet.number && !!placeStreet.street && !!siteStreet.number && !!siteStreet.street;
+      if (farApart || elsewhere) {
+        if (!namesake || (distance ?? Infinity) < (namesake.distance ?? Infinity)) namesake = { site, distance };
+        continue;
+      }
+    }
     if (!best || score > best.score || (score === best.score && (distance ?? Infinity) < (best.distance ?? Infinity))) {
       best = { site, score, evidence, distance };
     }
@@ -380,6 +465,22 @@ export function matchPlace<S extends MatchSite, C extends MatchCustomer>(
       site: best.site,
       evidence: best.evidence,
       distanceM: best.distance,
+    };
+  }
+
+  if (namesake) {
+    const { site, distance } = namesake;
+    const clientName = normaliseName(site.clientName);
+    const customer = clientName ? customers.find((c) => normaliseName(c.name) === clientName) : undefined;
+    const where = distance !== undefined
+      ? `${formatDistance(distance)} away`
+      : `at ${siteAddressLine(site) || 'another address'}`;
+    return {
+      verdict: 'our customer, different site',
+      customer,
+      customerName: customer?.name ?? ((site.clientName ?? '').trim() || undefined),
+      evidence: [{ signal: 'name', detail: `same name as ${site.name}, ${where}` }],
+      distanceM: distance,
     };
   }
 
@@ -410,6 +511,7 @@ export function matchPlace<S extends MatchSite, C extends MatchCustomer>(
         return {
           verdict: 'our customer, different site',
           customer,
+          customerName: customer?.name ?? ((site.clientName ?? '').trim() || undefined),
           evidence: [{ signal: 'client name', detail: `the client on ${site.name}` }],
         };
       }

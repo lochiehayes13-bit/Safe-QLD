@@ -1,7 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { FlatList, StyleSheet, TextInput, View } from 'react-native';
+import { FlatList, StyleSheet, View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getCustomer, listQuotes, type QuoteRecord } from '@/db/mirrorRepo';
 import { getSite } from '@/db/repo';
 import { applyQuoteFilter, quoteState, statusSwatch, sumExTax, type QuoteListFilter } from '@/domain/jobPresentation';
@@ -9,7 +8,7 @@ import { formatCents } from '@/domain/rates';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
 import { Reveal } from '@/components/motion';
-import { Card, EmptyState, Rowed, Screen, Segmented, StatTile, Txt } from '@/components/ui';
+import { Card, EmptyState, Rowed, Screen, SearchBox, Segmented, StatTile, Txt } from '@/components/ui';
 
 /**
  * The office's quotes.
@@ -148,35 +147,5 @@ function QuoteRow({ quote: q }: { quote: QuoteRecord }) {
         </View>
       </Rowed>
     </Card>
-  );
-}
-
-function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
-  const t = useTheme();
-  return (
-    <View
-      style={{
-        flexDirection: 'row', alignItems: 'center', gap: t.space(2),
-        backgroundColor: t.color.surfaceAlt, borderRadius: t.radius.md,
-        borderWidth: StyleSheet.hairlineWidth, borderColor: t.color.border,
-        paddingHorizontal: t.space(3), minHeight: t.touch,
-      }}
-    >
-      <MaterialCommunityIcons name="magnify" size={20} color={t.color.textFaint} />
-      <TextInput
-        value={value}
-        onChangeText={onChange}
-        placeholder={placeholder}
-        placeholderTextColor={t.color.textFaint}
-        autoCapitalize="none"
-        autoCorrect={false}
-        clearButtonMode="while-editing"
-        returnKeyType="search"
-        style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md, minHeight: t.touch }}
-      />
-      {value ? (
-        <MaterialCommunityIcons name="close-circle" size={20} color={t.color.textFaint} onPress={() => onChange('')} />
-      ) : null}
-    </View>
   );
 }

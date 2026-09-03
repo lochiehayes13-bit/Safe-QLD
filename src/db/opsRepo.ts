@@ -111,6 +111,41 @@ export async function listJobs(filter: { status?: JobRecord['status']; onDate?: 
   );
 }
 
+/** The columns a job list reads: everything the row and the filter look at, none of the JSON or the long text. */
+const JOB_SUMMARY_COLUMNS = [
+  'id', 'externalId', 'siteId', 'siteName', 'customerName', 'customerExternalId', 'title', 'address', 'orderNo',
+  'status', 'statusName', 'statusColor', 'stage', 'stageRaw', 'jobType', 'jobTypeRaw', 'priority',
+  'scheduledFor', 'dueAt', 'completedDate', 'completedAt', 'startedAt', 'technician', 'techniciansJson',
+] as const;
+
+export type JobSummary = Pick<JobRecord, (typeof JOB_SUMMARY_COLUMNS)[number]>;
+
+/**
+ * The same rows as listJobs, in the same order, without the description,
+ * the office notes, the contact, the contract and the tags.
+ *
+ * The job list reads every job on the books on every focus so the search
+ * and the "N of M" line stay instant; with the JSON columns along for the
+ * ride that was most of the bytes for none of the pixels.
+ */
+export async function listJobSummaries(filter: { status?: JobRecord['status']; onDate?: string; limit?: number } = {}): Promise<JobSummary[]> {
+  const db = await getDb();
+  const where: string[] = [];
+  const args: (string | number)[] = [];
+  if (filter.status) { where.push('status = ?'); args.push(filter.status); }
+  if (filter.onDate) { where.push('substr(scheduledFor,1,10) = ?'); args.push(filter.onDate); }
+  args.push(filter.limit ?? 200);
+  return db.getAllAsync<JobSummary>(
+    `SELECT ${JOB_SUMMARY_COLUMNS.join(', ')} FROM job ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+     ORDER BY CASE WHEN status = 'complete' THEN 1 ELSE 0 END,
+              CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
+              CASE WHEN status = 'complete' THEN '' ELSE COALESCE(scheduledFor, '') END,
+              COALESCE(scheduledFor, '') DESC
+     LIMIT ?`,
+    ...args,
+  );
+}
+
 export async function getJob(id: string): Promise<JobRecord | null> {
   const db = await getDb();
   return (await db.getFirstAsync<JobRecord>('SELECT * FROM job WHERE id = ?', id)) ?? null;
@@ -124,10 +159,20 @@ export async function getJob(id: string): Promise<JobRecord | null> {
  * technician owns what they did with it: a status they set on site outranks
  * the office's, notes already on the job are kept, and a site the job was
  * matched to locally survives an office copy that has none.
+ *
+ * `fromDetail` says the row came from the job's own record rather than the
+ * list. The two fields only the record carries — the office's notes and the
+ * customer contract — are then written whole, blank included: a note the
+ * office deleted has to leave the phone, and a list-level write, which never
+ * asked for them, has nothing to say about them and leaves them alone.
  */
-export async function upsertJob(input: Partial<JobRecord> & { siteName: string; title: string }): Promise<JobRecord> {
+export async function upsertJob(
+  input: Partial<JobRecord> & { siteName: string; title: string },
+  options: { fromDetail?: boolean } = {},
+): Promise<JobRecord> {
   const db = await getDb();
   const now = nowIso();
+  const detail = options.fromDetail === true ? 1 : 0;
   const job: JobRecord = {
     id: input.id ?? newId(),
     priority: input.priority ?? 'normal',
@@ -142,6 +187,22 @@ export async function upsertJob(input: Partial<JobRecord> & { siteName: string; 
    * pull — except the three only a detail read fills (notesText,
    * customerContractJson, detailSyncedAt), which a list-level pull must not
    * blank: it did not ask for them, so it has nothing to say about them.
+   *
+   * Three rules in the conflict clause are worth reading twice.
+   *
+   * The site. A job keeps the local site it was matched to when the office
+   * copy has none — unless the office's own site id has changed, in which
+   * case the job has moved buildings and the old match is wrong, held site
+   * or not. Without that a job moved to a site the phone does not hold
+   * stayed filed under the one it left.
+   *
+   * The status. A status the technician set on site outranks the office's.
+   * Complete is the one the pull itself sets, for a job the office has
+   * closed — and that one is not the technician's, so when the office
+   * reopens the job it reopens here too. The technician's own completion is
+   * told apart by completedAt, which only the Complete button stamps.
+   *
+   * The detail-only fields, per the note on the function.
    */
   await db.runAsync(
     `INSERT INTO job (id,externalId,siteId,siteName,customerName,title,jobType,stage,priority,
@@ -151,12 +212,17 @@ export async function upsertJob(input: Partial<JobRecord> & { siteName: string; 
        totalExTaxCents,totalIncTaxCents,convertedFromQuoteId,customerContractJson,dateModified,detailSyncedAt)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET
-       siteId=COALESCE(excluded.siteId, job.siteId),
+       siteId=CASE
+         WHEN excluded.siteExternalId IS NOT NULL AND excluded.siteExternalId IS NOT job.siteExternalId THEN excluded.siteId
+         ELSE COALESCE(excluded.siteId, job.siteId) END,
        siteName=excluded.siteName, customerName=excluded.customerName, title=excluded.title,
        jobType=excluded.jobType, stage=excluded.stage, priority=excluded.priority,
        scheduledFor=excluded.scheduledFor, dueAt=excluded.dueAt, technician=excluded.technician,
        address=excluded.address,
-       status=CASE WHEN job.status IN ('in-progress','complete','blocked') THEN job.status ELSE excluded.status END,
+       status=CASE
+         WHEN job.status IN ('in-progress','blocked') THEN job.status
+         WHEN job.status = 'complete' AND job.completedAt IS NOT NULL THEN job.status
+         ELSE excluded.status END,
        notes=COALESCE(job.notes, excluded.notes),
        updatedAt=excluded.updatedAt,
        orderNo=excluded.orderNo, requestNo=excluded.requestNo,
@@ -167,11 +233,12 @@ export async function upsertJob(input: Partial<JobRecord> & { siteName: string; 
        siteContactJson=excluded.siteContactJson, techniciansJson=excluded.techniciansJson,
        tagsJson=excluded.tagsJson, projectManager=excluded.projectManager,
        descriptionText=excluded.descriptionText,
-       notesText=COALESCE(excluded.notesText, job.notesText),
+       notesText=CASE WHEN ? THEN excluded.notesText ELSE COALESCE(excluded.notesText, job.notesText) END,
        completedDate=excluded.completedDate,
        totalExTaxCents=excluded.totalExTaxCents, totalIncTaxCents=excluded.totalIncTaxCents,
        convertedFromQuoteId=excluded.convertedFromQuoteId,
-       customerContractJson=COALESCE(excluded.customerContractJson, job.customerContractJson),
+       customerContractJson=CASE WHEN ? THEN excluded.customerContractJson
+         ELSE COALESCE(excluded.customerContractJson, job.customerContractJson) END,
        dateModified=COALESCE(excluded.dateModified, job.dateModified),
        detailSyncedAt=COALESCE(excluded.detailSyncedAt, job.detailSyncedAt)`,
     job.id, job.externalId ?? null, job.siteId ?? null, job.siteName, job.customerName ?? null,
@@ -185,11 +252,26 @@ export async function upsertJob(input: Partial<JobRecord> & { siteName: string; 
     job.descriptionText ?? null, job.notesText ?? null, job.completedDate ?? null,
     job.totalExTaxCents ?? null, job.totalIncTaxCents ?? null, job.convertedFromQuoteId ?? null,
     job.customerContractJson ?? null, job.dateModified ?? null, job.detailSyncedAt ?? null,
+    // The two CASE WHEN flags in the conflict clause, in the order they appear.
+    detail, detail,
   );
   return job;
 }
 
-export async function setJobStatus(id: string, status: JobRecord['status']): Promise<void> {
+/**
+ * The technician's own status on a job.
+ *
+ * `completedBy` is who is pressing Complete — the signed-in Simpro user's
+ * name, else the technician name in Settings — and is what the note to the
+ * office names. The job's own technician field is the office's list of
+ * everyone booked to it, which is not the same thing: two people booked and
+ * one attending is the ordinary case.
+ */
+export async function setJobStatus(
+  id: string,
+  status: JobRecord['status'],
+  options: { completedBy?: string } = {},
+): Promise<void> {
   const db = await getDb();
   const before = await getJob(id);
   const stamp = status === 'in-progress' ? 'startedAt' : status === 'complete' ? 'completedAt' : null;
@@ -202,7 +284,7 @@ export async function setJobStatus(id: string, status: JobRecord['status']): Pro
   // screen re-saving what it has, not a second completion.
   if (status === 'complete' && before && before.status !== 'complete') {
     const after = await getJob(id);
-    if (after) await queueWorkCompletedNote(after);
+    if (after) await queueWorkCompletedNote(after, options);
   }
 }
 
@@ -218,8 +300,15 @@ export async function setJobStatus(id: string, status: JobRecord['status']): Pro
  * The routine run linked to this job, where there is one, is named in the
  * note so the office can find the service record beside it. Read with one
  * query here rather than through outboundRepo, which imports this module.
+ *
+ * The person named is whoever completed it on this phone, where the screen
+ * knows; the job's technician field is the office's list of everyone booked
+ * and only stands in when nobody is signed in and no name is set.
  */
-export async function queueWorkCompletedNote(job: JobRecord): Promise<{ queued: boolean; key?: string }> {
+export async function queueWorkCompletedNote(
+  job: JobRecord,
+  options: { completedBy?: string } = {},
+): Promise<{ queued: boolean; key?: string }> {
   const externalId = job.externalId?.trim();
   if (!externalId) return { queued: false };
   const db = await getDb();
@@ -237,6 +326,7 @@ export async function queueWorkCompletedNote(job: JobRecord): Promise<{ queued: 
     siteName: job.siteName,
     completedAt: job.completedAt ?? nowIso(),
     technician: job.technician,
+    completedBy: options.completedBy?.trim() || undefined,
     notes: job.notes,
     orderNo: job.orderNo,
   }, run ?? undefined);
@@ -636,6 +726,21 @@ export async function unknownSync(): Promise<SyncEntry[]> {
   return db.getAllAsync<SyncEntry>("SELECT * FROM sync_queue WHERE status = 'unknown' ORDER BY createdAt");
 }
 
+/**
+ * Sends the app has given up on, oldest first, with the last reason on each.
+ *
+ * Given up on is not gone. A note that failed five times in a bad afternoon
+ * of signal, or a photograph the server refused by name, is still the
+ * technician's work, and a queue that hides it once it stops trying has lost
+ * it as surely as a crash would. The outbound screen lists these beside the
+ * unknown ones so a person can send them again (retrySync) or forget them
+ * (forgetSync).
+ */
+export async function failedSync(): Promise<SyncEntry[]> {
+  const db = await getDb();
+  return db.getAllAsync<SyncEntry>("SELECT * FROM sync_queue WHERE status = 'failed' ORDER BY createdAt");
+}
+
 /** A send that went out and got no reply. Kept out of the retry loop; see SyncEntry.status. */
 export async function markSyncUnknown(id: string, error: string): Promise<void> {
   const db = await getDb();
@@ -652,6 +757,21 @@ export async function retrySync(id: string): Promise<void> {
 export async function dismissSync(id: string): Promise<void> {
   const db = await getDb();
   await db.runAsync("UPDATE sync_queue SET status = 'sent' WHERE id = ?", id);
+}
+
+/**
+ * A person has given up on a failed item, and it is gone.
+ *
+ * Not dismissSync: that marks the row sent, which is right for a note found
+ * in Simpro and wrong here — a photograph marked sent is counted as uploaded
+ * in Settings and kept off the job's plan for good, so the next send of the
+ * service would never offer it again. Deleted, the same photograph is
+ * planned afresh the next time the service is sent, and a note can be
+ * queued again by whatever queued it.
+ */
+export async function forgetSync(id: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync("DELETE FROM sync_queue WHERE id = ? AND status = 'failed'", id);
 }
 
 export async function markSynced(id: string): Promise<void> {

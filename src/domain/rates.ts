@@ -67,9 +67,11 @@ export function roundCents(value: number): number {
 /**
  * The margin on a rate, as a fraction of the sell price.
  *
- * Worth surfacing rather than leaving implicit: on a real card the same cost
- * carried a 15% margin at normal hours and 41% after hours, and a rate picked
- * by name alone can quietly be the wrong one of those.
+ * Kept as arithmetic, not as a figure: the same cost can carry a very
+ * different margin at normal and after hours, and a rate picked by name alone
+ * can quietly be the wrong one of those. Nothing on the phone holds a cost
+ * rate, so nothing on the phone can call this with a real one — the rate
+ * card arrives with cost at zero and a margin from that is not a margin.
  */
 export function marginFraction(rate: LabourRate): number | null {
   if (rate.sellCentsPerHour <= 0) return null;

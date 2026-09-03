@@ -72,6 +72,12 @@ export interface Site {
   externalId?: string;
   /** Which system that id belongs to, e.g. 'simpro'. */
   externalSource?: string;
+  /** The office's public notes on the site, plain text. Written for the person on the doorstep. */
+  publicNotes?: string;
+  /** Simpro's customer number for the site, from the office's own site record. */
+  customerExternalId?: string;
+  /** When the site's own office record was last read. Null until somebody opens it. */
+  detailSyncedAt?: string;
   createdAt: string;
   updatedAt: string;
 }

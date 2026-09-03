@@ -28,7 +28,14 @@ export interface ReportJobCandidate {
   /** The number the office system knows this job by. */
   externalId?: string;
   siteId?: string;
-  /** When the job was scheduled — an instant, as Simpro issues it. */
+  /**
+   * The job's own date, as an instant.
+   *
+   * On a job the Simpro mirror wrote this is the date the office *issued* the
+   * job, not the day it is booked for — the booking lives in the schedule
+   * table, and the test sheet asks for it separately (see jobToOffer). It is
+   * only ever a fallback for placing a job in a report's period.
+   */
   scheduledFor?: string;
   completedAt?: string;
   title?: string;
@@ -90,6 +97,15 @@ export function jobNumberForReport(
  * a job the office has completed, invoiced or archived is not the one being
  * worked, however recently it was scheduled.
  *
+ * "Today" is the schedule's word, and only the schedule's. The job record's
+ * own date is the day the office raised it, and reading that as the booking
+ * offered the job the office happened to convert from a quote this morning —
+ * with wording that said it was the one booked here today — while the job a
+ * technician had actually been sent to, issued three weeks ago, was never
+ * recognised. So the caller passes the office job numbers on today's schedule
+ * and nothing else counts as today; where the schedule has not synced the
+ * offer says so rather than pretending the site has nothing booked.
+ *
  * Offered rather than applied. The number goes on the report only when the
  * technician accepts it, because the same refusal applies as above: a wrong
  * number files this service against somebody else's work.
@@ -112,16 +128,32 @@ export interface JobOffer {
    * when nothing is scheduled today.
    */
   basis?: 'today' | 'only-open';
+  /**
+   * Whether the schedule had anything at all for today. False means the
+   * phone may simply not have synced it, so "nothing is booked here" is not
+   * a thing the offer can honestly say.
+   */
+  scheduleKnown?: boolean;
   /** Why nothing is offered when there were jobs to choose from. */
   reason?: string;
 }
 
-export function jobToOffer(
-  jobs: readonly OpenJobCandidate[],
-  where: { siteId: string; today: string },
-): JobOffer {
+export interface JobOfferContext {
+  siteId: string;
+  /** The Queensland day, or an instant to resolve into one. */
+  today: string;
+  /**
+   * Office job numbers on today's schedule, for anyone — a sheet filled in
+   * for a job booked to a colleague is still that job. From the schedule
+   * table, not from any date on the job record.
+   */
+  scheduledToday: ReadonlySet<string>;
+}
+
+export function jobToOffer(jobs: readonly OpenJobCandidate[], where: JobOfferContext): JobOffer {
   const today = qldIsoDay(where.today);
   if (!today) return {};
+  const scheduleKnown = where.scheduledToday.size > 0;
 
   const open = new Map<string, OpenJobCandidate>();
   for (const job of jobs) {
@@ -131,26 +163,33 @@ export function jobToOffer(
     open.set(number, job);
   }
 
-  const scheduledToday = [...open.values()].filter((j) => qldIsoDay(j.scheduledFor) === today);
+  // Intersected with the site's open jobs, so a job booked today at another
+  // site cannot put its number on this one's sheet.
+  const scheduledToday = [...open.entries()].filter(([number]) => where.scheduledToday.has(number)).map(([, j]) => j);
   if (scheduledToday.length === 1) {
-    return { jobNumber: scheduledToday[0]!.externalId!.trim(), job: scheduledToday[0], basis: 'today' };
+    return { jobNumber: scheduledToday[0]!.externalId!.trim(), job: scheduledToday[0], basis: 'today', scheduleKnown };
   }
   if (scheduledToday.length > 1) {
     const numbers = scheduledToday.map((j) => j.externalId!.trim()).sort();
     return {
+      scheduleKnown,
       reason: `${numbers.length} jobs are scheduled at this site today (${numbers.join(', ')}). Type the one this `
         + 'sheet belongs to rather than have the app guess.',
     };
   }
 
+  const nothingToday = scheduleKnown
+    ? 'Nothing on today\'s schedule is at this site'
+    : 'The schedule has nothing for today, or has not synced yet';
   if (open.size === 1) {
     const [number, job] = [...open.entries()][0]!;
-    return { jobNumber: number, job, basis: 'only-open' };
+    return { jobNumber: number, job, basis: 'only-open', scheduleKnown };
   }
   if (open.size > 1) {
     const numbers = [...open.keys()].sort();
     return {
-      reason: `Nothing is scheduled here today and ${numbers.length} jobs are open at this site `
+      scheduleKnown,
+      reason: `${nothingToday}, and ${numbers.length} jobs are open at this site `
         + `(${numbers.join(', ')}). Type the one this sheet belongs to.`,
     };
   }

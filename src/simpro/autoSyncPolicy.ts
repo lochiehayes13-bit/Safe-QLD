@@ -311,6 +311,8 @@ export interface FlushCounts {
   sent: number;
   failed: number;
   remaining: number;
+  /** Why the send stopped before the queue was through, where it did. */
+  stopped?: { reason: string };
 }
 
 /**
@@ -339,10 +341,13 @@ export function summariseRun(
   }
   if (flush) {
     if (flush.sent) parts.push(`Sent ${flush.sent} to the office.`);
-    if (flush.failed) parts.push(`${flush.failed} could not be sent and will be retried.`);
+    // Some of these the queue will try again; some it has given up on. The
+    // outbound screen tells them apart, so that is where the line points.
+    if (flush.failed) parts.push(`${flush.failed} could not be sent; see Send to the office.`);
     if (!flush.sent && !flush.failed) {
       parts.push(flush.remaining ? `${flush.remaining} still waiting to send.` : 'Nothing was waiting to send.');
     }
+    if (flush.stopped) parts.push(`Sending stopped: ${flush.stopped.reason}`);
   }
   return parts.join(' ');
 }

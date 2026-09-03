@@ -1,4 +1,4 @@
-import { getDb, nowIso } from './index';
+import { getDb, inTransaction, nowIso } from './index';
 import type { JobRecord } from './opsRepo';
 import type {
   SimproAddress, SimproAttachment, SimproContact, SimproContract, SimproCostCenter, SimproCustomer,
@@ -25,6 +25,14 @@ import type {
 
 const OPEN_STAGES = "('Pending','Progress')";
 
+/**
+ * A job still open, as the Open tab counts it: neither the office nor the
+ * technician has closed it. The same rule as jobPresentation.jobIsOpen, in
+ * SQL, so the count on a site or customer card equals the tab it opens. A
+ * job added on the phone has no stage and counts by its status alone.
+ */
+const JOB_IS_OPEN = `status <> 'complete' AND (COALESCE(stageRaw, stage) IS NULL OR COALESCE(stageRaw, stage) IN ${OPEN_STAGES})`;
+
 function parseJson<T>(s: string | null | undefined, fallback: T): T {
   if (!s) return fallback;
   try {
@@ -43,6 +51,20 @@ const optBool = (v: number | null | undefined): boolean | undefined =>
 /** The local id the sync gives a job from the office, so a re-pull updates rather than duplicates. */
 export function localJobId(externalId: string): string {
   return `simpro-${externalId}`;
+}
+
+/**
+ * Runs several mirror writes as one transaction, joining one already open.
+ *
+ * For the sync's list loops: a full pull writes some ten thousand rows, and
+ * each as its own autocommit is a disk sync per row — the better part of a
+ * second on a desktop and far longer on a phone. Two hundred and fifty at a
+ * time is one commit per page. See inTransaction for why joining, rather
+ * than nesting, is the rule.
+ */
+export async function withMirrorTransaction(work: () => Promise<void>): Promise<void> {
+  const db = await getDb();
+  await inTransaction(db, work);
 }
 
 // ---------------------------------------------------------------------------
@@ -446,7 +468,7 @@ async function readDocumentChildren(
  */
 export async function replaceJobChildren(localId: string, children: Partial<JobChildren>, at: string = nowIso()): Promise<void> {
   const db = await getDb();
-  await db.withTransactionAsync(async () => {
+  await inTransaction(db, async () => {
     await replaceDocumentChildren(JOB_CHILDREN, localId, children);
     if (children.timeline) {
       await db.runAsync('DELETE FROM job_timeline WHERE jobId = ?', localId);
@@ -685,11 +707,22 @@ const hydrateQuote = (r: QuoteRow): QuoteRecord => ({
  *
  * The three detail-only fields — notes, the customer contact, the contract
  * — survive a list-level write that did not ask for them, the same way a
- * job's do. Everything else is the office's and is taken whole.
+ * job's do; a write from the record itself (`fromDetail`) replaces them
+ * whole, blank included, so a note the office deleted leaves the phone. The
+ * job it became is taken whole from the record too, which is a superset of
+ * the list on that field. Everything else is the office's and is taken
+ * whole. The local site follows the office's site id: a quote moved to
+ * another building drops the site it was matched to here.
  */
-export async function upsertQuote(q: SimproQuote | SimproQuoteDetail, siteId: string | undefined, at: string = nowIso()): Promise<void> {
+export async function upsertQuote(
+  q: SimproQuote | SimproQuoteDetail,
+  siteId: string | undefined,
+  at: string = nowIso(),
+  options: { fromDetail?: boolean } = {},
+): Promise<void> {
   const db = await getDb();
   const detail = q as Partial<SimproQuoteDetail>;
+  const fromDetail = options.fromDetail === true ? 1 : 0;
   await db.runAsync(
     `INSERT INTO simpro_quote (externalId, name, descriptionText, notesText, customerExternalId, customerName,
        siteExternalId, siteId, siteName, siteContactJson, customerContactJson, customerContractJson,
@@ -699,17 +732,24 @@ export async function upsertQuote(q: SimproQuote | SimproQuoteDetail, siteId: st
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(externalId) DO UPDATE SET
        name = excluded.name, descriptionText = excluded.descriptionText,
-       notesText = COALESCE(excluded.notesText, simpro_quote.notesText),
+       notesText = CASE WHEN ?35 THEN excluded.notesText ELSE COALESCE(excluded.notesText, simpro_quote.notesText) END,
        customerExternalId = excluded.customerExternalId, customerName = excluded.customerName,
-       siteExternalId = excluded.siteExternalId, siteId = COALESCE(excluded.siteId, simpro_quote.siteId),
+       siteExternalId = excluded.siteExternalId,
+       siteId = CASE
+         WHEN excluded.siteExternalId IS NOT NULL AND excluded.siteExternalId IS NOT simpro_quote.siteExternalId THEN excluded.siteId
+         ELSE COALESCE(excluded.siteId, simpro_quote.siteId) END,
        siteName = excluded.siteName, siteContactJson = excluded.siteContactJson,
-       customerContactJson = COALESCE(excluded.customerContactJson, simpro_quote.customerContactJson),
-       customerContractJson = COALESCE(excluded.customerContractJson, simpro_quote.customerContractJson),
+       customerContactJson = CASE WHEN ?35 THEN excluded.customerContactJson
+         ELSE COALESCE(excluded.customerContactJson, simpro_quote.customerContactJson) END,
+       customerContractJson = CASE WHEN ?35 THEN excluded.customerContractJson
+         ELSE COALESCE(excluded.customerContractJson, simpro_quote.customerContractJson) END,
        stage = excluded.stage, customerStage = excluded.customerStage,
        statusName = excluded.statusName, statusColor = excluded.statusColor, quoteType = excluded.quoteType,
        dateIssued = excluded.dateIssued, dateApproved = excluded.dateApproved, dueDate = excluded.dueDate,
        validityDays = excluded.validityDays, orderNo = excluded.orderNo, requestNo = excluded.requestNo,
-       isClosed = excluded.isClosed, jobExternalId = COALESCE(excluded.jobExternalId, simpro_quote.jobExternalId),
+       isClosed = excluded.isClosed,
+       jobExternalId = CASE WHEN ?35 THEN excluded.jobExternalId
+         ELSE COALESCE(excluded.jobExternalId, simpro_quote.jobExternalId) END,
        totalExTaxCents = excluded.totalExTaxCents, totalIncTaxCents = excluded.totalIncTaxCents,
        techniciansJson = excluded.techniciansJson, salesperson = excluded.salesperson,
        projectManager = excluded.projectManager, tagsJson = excluded.tagsJson,
@@ -722,6 +762,8 @@ export async function upsertQuote(q: SimproQuote | SimproQuoteDetail, siteId: st
     orNull(q.orderNo), orNull(q.requestNo), q.isClosed ? 1 : 0, orNull(q.jobId), orNull(q.totalExTaxCents),
     orNull(q.totalIncTaxCents), JSON.stringify(q.technicians), orNull(q.salesperson), orNull(q.projectManager),
     JSON.stringify(q.tags), orNull(q.DateModified), null, at,
+    // ?35: whether this write is the record itself. Numbered so one flag serves every CASE.
+    fromDetail,
   );
 }
 
@@ -733,7 +775,7 @@ export interface QuoteChildren {
 
 export async function replaceQuoteChildren(externalId: string, children: Partial<QuoteChildren>, at: string = nowIso()): Promise<void> {
   const db = await getDb();
-  await db.withTransactionAsync(async () => {
+  await inTransaction(db, async () => {
     await replaceDocumentChildren(QUOTE_CHILDREN, externalId, children);
     await db.runAsync('UPDATE simpro_quote SET detailSyncedAt = ? WHERE externalId = ?', at, externalId);
   });
@@ -931,6 +973,42 @@ export async function upsertInvoice(inv: SimproInvoice, at: string = nowIso(), o
   }
 }
 
+/**
+ * Links a job to an invoice the job's own invoice list named, without
+ * treating that list as the invoice.
+ *
+ * `jobs/{id}/invoices/` on this build has not been seen with a record in it,
+ * and on a 422 it comes back as the thin list — an id, a description, a
+ * total. Written through upsertInvoice that would turn a mirrored invoice
+ * into an unpaid one with no customer and no due date, and replace its job
+ * links with none. So a row that does not carry the fields only a real
+ * invoice has is written as a link only: the invoice row is created bare if
+ * it is not held (the invoice list fills it on the next pull) and the job
+ * is added to its links. Nothing already held is overwritten.
+ */
+export async function linkJobInvoice(jobExternalId: string, inv: SimproInvoice, at: string = nowIso()): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `INSERT OR IGNORE INTO invoice (externalId, invoiceType, descriptionText, totalExTaxCents, totalIncTaxCents, syncedAt)
+     VALUES (?,?,?,?,?,?)`,
+    inv.id, orNull(inv.type), orNull(inv.description), orNull(inv.totalExTaxCents), orNull(inv.totalIncTaxCents), at,
+  );
+  const jobs = inv.jobs.some((j) => j.id === jobExternalId) ? inv.jobs : [...inv.jobs, { id: jobExternalId }];
+  for (const j of jobs) {
+    if (!j.id) continue;
+    await db.runAsync(
+      `INSERT OR IGNORE INTO invoice_job (invoiceExternalId, jobExternalId, jobType, description, totalExTaxCents, totalIncTaxCents)
+       VALUES (?,?,?,?,?,?)`,
+      inv.id, j.id, orNull(j.type), orNull(j.description), orNull(j.totalExTaxCents), orNull(j.totalIncTaxCents),
+    );
+  }
+}
+
+/** Whether an invoice row from a job's own invoice list is the invoice, or only a mention of it. */
+export function invoiceRowIsWhole(inv: Pick<SimproInvoice, 'customerId' | 'dateIssued'>): boolean {
+  return !!inv.customerId || !!inv.dateIssued;
+}
+
 export async function getInvoice(externalId: string): Promise<InvoiceRecord | null> {
   const db = await getDb();
   const row = await db.getFirstAsync<InvoiceRow>('SELECT * FROM invoice WHERE externalId = ?', externalId);
@@ -939,13 +1017,27 @@ export async function getInvoice(externalId: string): Promise<InvoiceRecord | nu
   return hydrateInvoice(row, jobs);
 }
 
+/** The search's words, a leading # dropped the way the in-memory match drops it. */
+function invoiceSearchWords(query: string | undefined): string[] {
+  return (query ?? '').trim().split(/\s+/).map((w) => w.replace(/^#/, '')).filter(Boolean);
+}
+
 export async function listInvoices(filter: {
   /** The office's job number, not the local job id. */
   jobExternalId?: string;
+  /** The local site: the invoices that bill any job filed under it. */
+  siteId?: string;
   customerExternalId?: string;
   unpaidOnly?: boolean;
   /** Issued on or after this day, yyyy-mm-dd. */
   since?: string;
+  /**
+   * Words typed into the search, matched against the invoice number, the
+   * customer, the order number, the description and the numbers of the jobs
+   * it bills — every word somewhere. Lets a search reach the invoices the
+   * screen's page did not, without reading two years of them to look.
+   */
+  query?: string;
   limit?: number;
 } = {}): Promise<InvoiceRecord[]> {
   const db = await getDb();
@@ -955,9 +1047,20 @@ export async function listInvoices(filter: {
     where.push('externalId IN (SELECT invoiceExternalId FROM invoice_job WHERE jobExternalId = ?)');
     args.push(filter.jobExternalId);
   }
+  if (filter.siteId) {
+    where.push(`externalId IN (
+      SELECT ij.invoiceExternalId FROM invoice_job ij JOIN job j ON j.externalId = ij.jobExternalId WHERE j.siteId = ?)`);
+    args.push(filter.siteId);
+  }
   if (filter.customerExternalId) { where.push('customerExternalId = ?'); args.push(filter.customerExternalId); }
   if (filter.unpaidOnly) where.push('isPaid = 0');
   if (filter.since) { where.push('dateIssued >= ?'); args.push(filter.since); }
+  for (const word of invoiceSearchWords(filter.query)) {
+    const like = `%${word}%`;
+    where.push(`(externalId LIKE ? OR customerName LIKE ? OR orderNo LIKE ? OR descriptionText LIKE ?
+      OR externalId IN (SELECT invoiceExternalId FROM invoice_job WHERE jobExternalId LIKE ?))`);
+    args.push(like, like, like, like, like);
+  }
   args.push(filter.limit ?? 200);
   const rows = await db.getAllAsync<InvoiceRow>(
     `SELECT * FROM invoice ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
@@ -1053,37 +1156,30 @@ const hydrateCustomer = (r: CustomerRow): CustomerRecord => ({
  *
  * The list does not carry contacts, notes, the group or the billing
  * address; a list-level write leaves whatever a detail read put there.
- * `fromDetail` says this write is the record itself, so it may replace
- * those and stamp detailSyncedAt.
+ * `fromDetail` says this write is the record itself, so it replaces every
+ * field whole — a contact the office removed leaves the phone — and stamps
+ * detailSyncedAt. The sites are on the list, so an empty list of them is
+ * the office's answer either way. Archived is kept where the row did not
+ * say: a row without the field is not a row saying the customer is current.
  */
 export async function upsertCustomer(c: SimproCustomer, at: string = nowIso(), options: { fromDetail?: boolean } = {}): Promise<void> {
   const db = await getDb();
   const detail = options.fromDetail === true;
+  const whole = (column: string) =>
+    `${column} = CASE WHEN ?29 THEN excluded.${column} ELSE COALESCE(excluded.${column}, customer.${column}) END`;
   await db.runAsync(
     `INSERT INTO customer (externalId, customerKind, name, givenName, familyName, phone, altPhone, email, website,
        address, suburb, state, postcode, country, billingAddress, billingSuburb, billingState, billingPostcode,
        customerType, customerGroup, archived, notes, tagsJson, sitesJson, contactsJson, dateModified, detailSyncedAt, syncedAt)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(?,0),?,?,?,?,?,?,?)
      ON CONFLICT(externalId) DO UPDATE SET
        customerKind = excluded.customerKind, name = excluded.name,
-       givenName = COALESCE(excluded.givenName, customer.givenName),
-       familyName = COALESCE(excluded.familyName, customer.familyName),
-       phone = COALESCE(excluded.phone, customer.phone), altPhone = COALESCE(excluded.altPhone, customer.altPhone),
-       email = COALESCE(excluded.email, customer.email), website = COALESCE(excluded.website, customer.website),
-       address = COALESCE(excluded.address, customer.address), suburb = COALESCE(excluded.suburb, customer.suburb),
-       state = COALESCE(excluded.state, customer.state), postcode = COALESCE(excluded.postcode, customer.postcode),
-       country = COALESCE(excluded.country, customer.country),
-       billingAddress = COALESCE(excluded.billingAddress, customer.billingAddress),
-       billingSuburb = COALESCE(excluded.billingSuburb, customer.billingSuburb),
-       billingState = COALESCE(excluded.billingState, customer.billingState),
-       billingPostcode = COALESCE(excluded.billingPostcode, customer.billingPostcode),
-       customerType = COALESCE(excluded.customerType, customer.customerType),
-       customerGroup = COALESCE(excluded.customerGroup, customer.customerGroup),
-       archived = excluded.archived,
-       notes = COALESCE(excluded.notes, customer.notes),
-       tagsJson = COALESCE(excluded.tagsJson, customer.tagsJson),
-       sitesJson = CASE WHEN excluded.sitesJson = '[]' THEN customer.sitesJson ELSE excluded.sitesJson END,
-       contactsJson = CASE WHEN excluded.contactsJson = '[]' THEN customer.contactsJson ELSE excluded.contactsJson END,
+       ${['givenName', 'familyName', 'phone', 'altPhone', 'email', 'website', 'address', 'suburb', 'state', 'postcode',
+    'country', 'billingAddress', 'billingSuburb', 'billingState', 'billingPostcode', 'customerType', 'customerGroup',
+    'notes', 'tagsJson'].map(whole).join(',\n       ')},
+       archived = CASE WHEN ?30 THEN excluded.archived ELSE customer.archived END,
+       sitesJson = excluded.sitesJson,
+       contactsJson = CASE WHEN ?29 THEN excluded.contactsJson ELSE customer.contactsJson END,
        dateModified = COALESCE(excluded.dateModified, customer.dateModified),
        detailSyncedAt = COALESCE(excluded.detailSyncedAt, customer.detailSyncedAt),
        syncedAt = excluded.syncedAt`,
@@ -1091,9 +1187,13 @@ export async function upsertCustomer(c: SimproCustomer, at: string = nowIso(), o
     orNull(c.website), orNull(c.address?.address), orNull(c.address?.suburb), orNull(c.address?.state),
     orNull(c.address?.postcode), orNull(c.address?.country), orNull(c.billingAddress?.address),
     orNull(c.billingAddress?.suburb), orNull(c.billingAddress?.state), orNull(c.billingAddress?.postcode),
-    orNull(c.customerType), orNull(c.customerGroup), c.archived ? 1 : 0, orNull(c.notes),
+    orNull(c.customerType), orNull(c.customerGroup), c.archived === undefined ? null : c.archived ? 1 : 0, orNull(c.notes),
     c.tags.length ? JSON.stringify(c.tags) : null, JSON.stringify(c.sites), JSON.stringify(c.contacts),
     orNull(c.DateModified), detail ? at : null, at,
+    // ?29: whether this write is the record itself. ?30: whether the row
+    // said anything about archived at all; a new customer it did not say
+    // about is filed as current, which is what the column's default says.
+    detail ? 1 : 0, c.archived === undefined ? 0 : 1,
   );
 }
 
@@ -1136,7 +1236,7 @@ export async function searchCustomers(query: string, limit = 30): Promise<Custom
 
 export interface CustomerStats {
   jobsTotal: number;
-  /** Pending or in progress at the office. */
+  /** Neither the office nor the technician has closed it; the Open tab's own rule. */
   jobsOpen: number;
   /** The most recent job's issue date, yyyy-mm-dd. A day, not an instant. */
   lastJobAt?: string;
@@ -1151,7 +1251,7 @@ export async function customerStats(externalId: string): Promise<CustomerStats> 
   const row = await db.getFirstAsync<{ jobsTotal: number; jobsOpen: number; lastJobAt: string | null; quotesOpen: number; invoicesUnpaidCents: number }>(
     `SELECT
        (SELECT COUNT(*) FROM job WHERE customerExternalId = ?) AS jobsTotal,
-       (SELECT COUNT(*) FROM job WHERE customerExternalId = ? AND COALESCE(stageRaw, stage) IN ${OPEN_STAGES}) AS jobsOpen,
+       (SELECT COUNT(*) FROM job WHERE customerExternalId = ? AND ${JOB_IS_OPEN}) AS jobsOpen,
        (SELECT MAX(scheduledFor) FROM job WHERE customerExternalId = ?) AS lastJobAt,
        (SELECT COUNT(*) FROM simpro_quote WHERE customerExternalId = ? AND isClosed = 0 AND jobExternalId IS NULL) AS quotesOpen,
        (SELECT COALESCE(SUM(balanceDueCents), 0) FROM invoice WHERE customerExternalId = ? AND isPaid = 0) AS invoicesUnpaidCents`,
@@ -1172,7 +1272,7 @@ export async function siteStats(siteId: string): Promise<CustomerStats> {
   const row = await db.getFirstAsync<{ jobsTotal: number; jobsOpen: number; lastJobAt: string | null; quotesOpen: number; invoicesUnpaidCents: number }>(
     `SELECT
        (SELECT COUNT(*) FROM job WHERE siteId = ?) AS jobsTotal,
-       (SELECT COUNT(*) FROM job WHERE siteId = ? AND COALESCE(stageRaw, stage) IN ${OPEN_STAGES}) AS jobsOpen,
+       (SELECT COUNT(*) FROM job WHERE siteId = ? AND ${JOB_IS_OPEN}) AS jobsOpen,
        (SELECT MAX(scheduledFor) FROM job WHERE siteId = ?) AS lastJobAt,
        (SELECT COUNT(*) FROM simpro_quote WHERE siteId = ? AND isClosed = 0 AND jobExternalId IS NULL) AS quotesOpen,
        (SELECT COALESCE(SUM(balanceDueCents), 0) FROM invoice WHERE isPaid = 0 AND externalId IN (
@@ -1187,6 +1287,38 @@ export async function siteStats(siteId: string): Promise<CustomerStats> {
     quotesOpen: row?.quotesOpen ?? 0,
     invoicesUnpaidCents: row?.invoicesUnpaidCents ?? 0,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Sites: what the office's own site record says
+// ---------------------------------------------------------------------------
+
+/**
+ * What the office's site record adds to a site held here (v20).
+ *
+ * `undefined` leaves a field as it is; `null` clears it. The sync passes
+ * undefined for the notes when the build refused the column, so a read that
+ * did not ask cannot blank what a read of the record wrote.
+ */
+export interface SiteOfficePatch {
+  publicNotes?: string | null;
+  customerExternalId?: string | null;
+  /** When the site's own record was read. Left alone by a list-level write. */
+  detailSyncedAt?: string | null;
+}
+
+export async function setSiteOffice(localSiteId: string, patch: SiteOfficePatch): Promise<void> {
+  const db = await getDb();
+  const sets: string[] = [];
+  const args: (string | null)[] = [];
+  for (const column of ['publicNotes', 'customerExternalId', 'detailSyncedAt'] as const) {
+    if (patch[column] !== undefined) {
+      sets.push(`${column} = ?`);
+      args.push(patch[column] ?? null);
+    }
+  }
+  if (!sets.length) return;
+  await db.runAsync(`UPDATE site SET ${sets.join(', ')} WHERE id = ?`, ...args, localSiteId);
 }
 
 // ---------------------------------------------------------------------------
@@ -1235,7 +1367,7 @@ async function writeTask(t: SimproTask, at: string, jobId: string | undefined): 
 export async function upsertTasks(tasks: readonly SimproTask[], at: string = nowIso()): Promise<number> {
   const db = await getDb();
   let written = 0;
-  await db.withTransactionAsync(async () => {
+  await inTransaction(db, async () => {
     for (const t of tasks) {
       if (!t.id) continue;
       await writeTask(t, at, undefined);

@@ -17,7 +17,7 @@ import {
  */
 
 const rate = (over: Partial<LabourRate> & Pick<LabourRate, 'id' | 'name'>): LabourRate => ({
-  costCentsPerHour: 11_000, sellCentsPerHour: 13_000, taxRate: 0.1,
+  costCentsPerHour: 10_000, sellCentsPerHour: 13_000, taxRate: 0.1,
   efficiencyMultiplier: 1, kind: 'labour', hours: 'normal', ...over,
 });
 
@@ -25,11 +25,11 @@ const RATES: LabourRate[] = [
   rate({ id: 'nh', name: 'Normal Hours Labour', sellCentsPerHour: 13_000 }),
   rate({ id: 'ah', name: 'After Hours Labour', hours: 'after-hours', sellCentsPerHour: 18_500 }),
   rate({ id: 'c-nh', name: 'Acme Normal Hours Labour', customerName: 'Acme',
-         costCentsPerHour: 13_688, sellCentsPerHour: 12_500 }),
+         costCentsPerHour: 14_200, sellCentsPerHour: 12_500 }),
   rate({ id: 'c-ah', name: 'Acme After Hours Labour', customerName: 'Acme', hours: 'after-hours',
-         costCentsPerHour: 13_688, sellCentsPerHour: 16_500 }),
+         costCentsPerHour: 14_200, sellCentsPerHour: 16_500 }),
   rate({ id: 'c-co', name: 'Acme Normal Hours Callout', customerName: 'Acme', kind: 'callout',
-         costCentsPerHour: 13_688, sellCentsPerHour: 22_500 }),
+         costCentsPerHour: 14_200, sellCentsPerHour: 22_500 }),
 ];
 
 const FEES: ServiceFee[] = [
@@ -114,8 +114,8 @@ describe('picking a rate', () => {
 
 describe('reporting margin', () => {
   it('computes it as a fraction of the sell price', () => {
-    expect(marginFraction(RATES[0]!)).toBeCloseTo(0.1538, 3);
-    expect(marginFraction(RATES[1]!)).toBeCloseTo(0.4054, 3);
+    expect(marginFraction(RATES[0]!)).toBeCloseTo(0.2308, 3);
+    expect(marginFraction(RATES[1]!)).toBeCloseTo(0.4595, 3);
   });
 
   it('reports a negative margin rather than hiding it', () => {

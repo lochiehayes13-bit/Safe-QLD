@@ -2,7 +2,10 @@ import {
   addAssetRowsToReport, assetIdsOnReport, createReport, createSite, getReport, listTestRows,
   recordTestRowOnAsset, setTestResult, updateReport,
 } from '@/db/repo';
-import { assetTimeline, createAsset, getAsset, seedReferenceData } from '@/db/assetRepo';
+import {
+  addAssetEvent, assetTimeline, createAsset, getAsset, queryAssets, recurringFailures, seedReferenceData,
+  setTestSheetEventDetail,
+} from '@/db/assetRepo';
 import { createForm72, getForm72 } from '@/db/form72Repo';
 import { testRowsFromAssets } from '@/domain/formsFromAssets';
 import type { ServiceReport } from '@/domain/types';
@@ -103,9 +106,60 @@ describe('rows from the register', () => {
     expect(await assetTimeline(hydrant!.id)).toHaveLength(1);
   });
 
+  it('write one event per asset per sheet, however many times the result is tapped', async () => {
+    /*
+     * A gloved thumb taps Fail twice, or Pass and then Fail on second
+     * thought, and each tap appended an event — so one visit read as two
+     * failures and the recurring-failure analysis promoted the asset on the
+     * strength of a double tap. The comment is typed after the tap, so it
+     * has to reach the event afterwards.
+     */
+    const { siteId, report, assetIds } = await siteWithRegister();
+    const rows = testRowsFromAssets((await Promise.all(assetIds.map((id) => getAsset(id)))).map((a) => a!));
+    await addAssetRowsToReport(report.id, rows);
+    const [hydrantRow] = await listTestRows(report.id);
+    const assetId = hydrantRow!.assetId!;
+
+    // Something else's event on the same asset, which the sheet must not touch.
+    await addAssetEvent({ assetId, kind: 'failed', occurredAt: '2025-09-02T00:00:00.000Z', summary: 'Routine run — failed' });
+
+    await recordTestRowOnAsset(hydrantRow!, 'pass', 'A Technician', '2026-09-02T00:30:00.000Z');
+    await recordTestRowOnAsset(hydrantRow!, 'fail', 'A Technician', '2026-09-02T00:31:00.000Z');
+    await recordTestRowOnAsset(hydrantRow!, 'fail', 'A Technician', '2026-09-02T00:32:00.000Z');
+    await setTestSheetEventDetail(assetId, report.id, 'No flow at the outlet');
+
+    const events = await assetTimeline(assetId);
+    const sheet = events.filter((e) => e.reportId === report.id);
+    expect(sheet).toHaveLength(1);
+    expect(sheet[0]).toMatchObject({ kind: 'failed', occurredAt: '2026-09-02T00:32:00.000Z', detail: 'No flow at the outlet' });
+    expect(events.find((e) => e.summary === 'Routine run — failed')).toBeDefined();
+    expect(await getAsset(assetId)).toMatchObject({ lastResult: 'fail' });
+    // One visit, one failure: last year's plus this sheet's is two, not four.
+    expect((await recurringFailures(siteId, 3)).map((f) => f.assetId)).not.toContain(assetId);
+    expect((await recurringFailures(siteId, 2)).map((f) => f.assetId)).toContain(assetId);
+  });
+
   it('do nothing for a row that came from a panel point', async () => {
     const { report } = await siteWithRegister();
     await expect(recordTestRowOnAsset({ reportId: report.id, deviceText: 'L1.001' }, 'pass')).resolves.toBeUndefined();
+  });
+});
+
+describe('an asset of a type the app does not know', () => {
+  it('is still in the register rather than silently dropped', async () => {
+    /*
+     * The register query joined the type table, so an asset filed under a
+     * type with no row was on no screen and no form — the sheet said every
+     * asset was already on it and the occupier prefill proposed the
+     * installation as not present, with nothing saying equipment had gone.
+     */
+    const site = await createSite({ name: 'Office-synced site' });
+    await createAsset({ siteId: site.id, assetTypeId: 'extinguisher', name: 'Foyer' });
+    await createAsset({ siteId: site.id, assetTypeId: 'unknown', name: 'Lay flat hose', code: 'X-1', attributes: { simproType: 'Delivery of Lay Flat Fire Hose' } });
+    const all = await queryAssets({ siteId: site.id });
+    expect(all.map((a) => a.assetTypeId)).toEqual(['extinguisher', 'unknown']);
+    // A filter on system still means a known system.
+    expect((await queryAssets({ siteId: site.id, system: 'extinguisher' })).map((a) => a.assetTypeId)).toEqual(['extinguisher']);
   });
 });
 

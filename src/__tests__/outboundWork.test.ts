@@ -1069,6 +1069,17 @@ describe('sendOutboundPlan', () => {
     expect(report.outcomes[1]!.status).toBe('not-attempted');
   });
 
+  it('sends a refused token to the sign-in, not to the client secret', async () => {
+    // The client renews the token once before this is seen, so a 401 here
+    // is a sign-in that no longer works. Telling the person to check the
+    // client ID sends them to the wrong setting when they are signed in.
+    const { client } = poster({ request: fail(401) });
+    const report = await sendOutboundPlan(client, criticalPlan(), { checkRemote: false });
+    expect(report.outcomes[0]!.error).toContain('Sign in again');
+    expect(report.outcomes[0]!.error).toContain('if nobody is signed in');
+    expect(report.outcomes[1]!.status).toBe('not-attempted');
+  });
+
   it('keeps trying after an ordinary network failure, because the next one may work', async () => {
     let calls = 0;
     const { client } = poster({
@@ -1389,8 +1400,134 @@ describe('planOutboundWork — photographs', () => {
     const declined = again.warnings.find((w) => w.code === 'already-sent');
     expect(declined?.message).toContain(a!.payload.filename);
     expect(declined?.message).toContain('already queued for, or on, job JOB-1');
-    // And the note counts only what is going this time.
-    expect(noteAt(again).payload.note).toContain('1 of 2 photos being sent');
+    // And the note says where the other one is: on the job, or queued for
+    // it, and not "held with the report", which sends the office to the
+    // wrong place for evidence that is already in the attachment list.
+    expect(noteAt(again).payload.note)
+      .toContain("1 of 2 photos being sent to this job's attachments; 1 is already queued for, or on, this job's attachments.");
+    expect(noteAt(again).payload.note).not.toContain('held with the report');
+  });
+
+  it('says the photographs are already on the job when an amended note goes out after they went', () => {
+    // Service sent with its photographs queued; a not-tested reason is then
+    // edited, so the note is composed again as an amendment. The old
+    // wording called the photographs "held with the report" although they
+    // were on the job's attachments the whole time.
+    const first = planOutboundWork(run(), [pass('1')], [defect({ severity: 'critical', photos: photos() })]);
+    const photoKeys = first.items.filter(isAttachmentItem).map((i) => i.key);
+    const amended = planOutboundWork(
+      run({ notes: 'Retest booked for the riser.' }), [pass('1')], [defect({ severity: 'critical', photos: photos() })],
+      { alreadySentKeys: [noteAt(first, 0).key, noteAt(first, 1).key, ...photoKeys] },
+    );
+    expect(amended.items.filter(isAttachmentItem)).toEqual([]);
+    // The critical notice is unchanged and already accepted, so the one note
+    // going is the amended service record, which repeats the critical block.
+    expect(amended.items.filter(isNoteItem).map((i) => i.urgency)).toEqual(['routine']);
+    const note = noteAt(amended).payload.note;
+    expect(note).toContain('AMENDED RECORD');
+    expect(note).toContain('2 photos already queued for, or on, this job\'s attachments as "An Example Building — Level 3 east — 03-07-2026.jpg"');
+    expect(note).not.toContain('not attached to this note');
+    expect(note).not.toContain('held with the report');
+  });
+
+  it('still names the one already on the job when the switch is off today', () => {
+    // Sent yesterday with photos on; the switch is off today and the record
+    // was amended. The photograph is on the job regardless of the switch.
+    const first = planOutboundWork(run(), [pass('1')], [defect({ photos: photos() })]);
+    const [a] = first.items.filter(isAttachmentItem);
+    const later = planOutboundWork(run(), [pass('1')], [defect({ photos: photos() })], {
+      sendPhotos: false, alreadySentKeys: [a!.key],
+    });
+    expect(later.items.filter(isAttachmentItem)).toEqual([]);
+    const warn = later.warnings.find((w) => w.code === 'photos-not-sent');
+    expect(warn?.message).toContain('1 photo of the defect at Level 3 east stay');
+    expect(warn?.message).toContain('1 photo already went to the job');
+    expect(noteAt(later).payload.note)
+      .toContain("1 of 2 photos already queued for, or on, this job's attachments; the other 1 is held with the report.");
+  });
+
+  it('still sends the photographs when only the service note is already accepted', () => {
+    // Sent once with the switch off, or a photograph added to the defect
+    // afterwards, or one the queue abandoned: pressing send again is how a
+    // person asks for the photographs to go, and the plan used to stop dead
+    // at "already sent" before it reached them.
+    const first = planOutboundWork(run(), [pass('1')], [defect({ photos: photos() })], { sendPhotos: false });
+    expect(first.items.filter(isAttachmentItem)).toEqual([]);
+    const again = planOutboundWork(run(), [pass('1')], [defect({ photos: photos() })], {
+      alreadySentKeys: [noteAt(first).key],
+    });
+    expect(again.items.map((i) => i.kind)).toEqual(['attachment', 'attachment']);
+    expect(again.items.filter(isNoteItem)).toEqual([]);
+    const declined = again.warnings.filter((w) => w.severity === 'declined');
+    expect(declined.map((w) => w.code)).toEqual(['already-sent']);
+    expect(declined[0]!.message).toContain('Any photographs not yet on the job still go');
+    // And the office is told why evidence is arriving with no note announcing it.
+    const after = again.warnings.find((w) => w.code === 'photos-after-note');
+    expect(after?.severity).toBe('caution');
+    expect(after?.message).toContain('2 photographs will arrive on job JOB-1 on their own');
+    // The note-only cautions belong to a note that is not going.
+    expect(again.warnings.map((w) => w.code)).not.toContain('amended-record');
+  });
+
+  it('plans nothing at all when the note and every photograph are already there', () => {
+    const first = planOutboundWork(run(), [pass('1')], [defect({ photos: photos() })]);
+    const again = planOutboundWork(run(), [pass('1')], [defect({ photos: photos() })], {
+      alreadySentKeys: first.items.map((i) => i.key),
+    });
+    expect(again.items).toEqual([]);
+    expect(again.warnings.map((w) => w.code)).not.toContain('photos-after-note');
+    expect(again.warnings.find((w) => w.code === 'already-sent' && w.message.includes('service record'))?.message)
+      .not.toContain('still go');
+  });
+
+  it('still sends the photographs with the switch on when the note is accepted and the critical notice is not', () => {
+    // The critical notice is composed on its own, ahead of everything, and
+    // is not caught by the service-note guard.
+    const first = planOutboundWork(run(), [pass('1')], [defect({ photos: photos() })]);
+    const again = planOutboundWork(run(), [pass('1')], [
+      defect({ photos: photos() }),
+      defect({ id: 'd-2', location: 'Plant room', description: 'Pump will not start.', severity: 'critical' }),
+    ], { alreadySentKeys: [noteAt(first).key] });
+    // The service key changed with the second defect, so this is an amendment, not a repeat.
+    expect(again.items.filter(isNoteItem).map((i) => i.urgency)).toEqual(['critical', 'routine']);
+  });
+
+  it('keeps the numbers already issued when a later defect at the same place is added', () => {
+    // Day 1: defect A in the plant room, two photographs, sent. Later that
+    // day defect B is raised at the same place. The defect list arrives
+    // newest first, and B used to take A's name and renumber A's files —
+    // new keys, so both uploaded again beside a second file with A's name.
+    const a = defect({
+      id: 'd-a', location: 'Plant room', raisedAt: '2026-07-03T01:00:00.000Z',
+      photos: [{ path: 'photos/a1.jpg', sizeBytes: 1000 }, { path: 'photos/a2.jpg', sizeBytes: 1001 }],
+    });
+    const b = defect({
+      id: 'd-b', location: 'Plant room', raisedAt: '2026-07-03T03:00:00.000Z', description: 'Second fault.',
+      photos: [{ path: 'photos/b1.jpg', sizeBytes: 2000 }],
+    });
+    const first = planOutboundWork(run(), [pass('1')], [a]);
+    const firstKeys = first.items.filter(isAttachmentItem).map((i) => i.key);
+    expect(first.items.filter(isAttachmentItem).map((i) => i.payload.filename)).toEqual([
+      'An Example Building — Plant room — 03-07-2026.jpg',
+      'An Example Building — Plant room — 03-07-2026 (2).jpg',
+    ]);
+
+    const second = planOutboundWork(run(), [pass('1')], [b, a], { alreadySentKeys: firstKeys });
+    const going = second.items.filter(isAttachmentItem);
+    expect(going.map((i) => i.payload.localUri)).toEqual(['photos/b1.jpg']);
+    expect(going[0]!.payload.filename).toBe('An Example Building — Plant room — 03-07-2026 (3).jpg');
+    // A's photographs are recognised as already there, under the names they went up as.
+    const declined = second.warnings.filter((w) => w.code === 'already-sent').map((w) => w.message);
+    expect(declined).toHaveLength(2);
+    expect(declined[0]).toContain('An Example Building — Plant room — 03-07-2026.jpg is already queued');
+    expect(declined[1]).toContain('An Example Building — Plant room — 03-07-2026 (2).jpg is already queued');
+  });
+
+  it('numbers by the order raised whichever order the defects arrive in', () => {
+    const a = defect({ id: 'd-a', location: 'Plant room', raisedAt: '2026-07-03T01:00:00.000Z', photos: [{ path: 'photos/a.jpg', sizeBytes: 1 }] });
+    const b = defect({ id: 'd-b', location: 'Plant room', raisedAt: '2026-07-03T03:00:00.000Z', photos: [{ path: 'photos/b.jpg', sizeBytes: 2 }] });
+    const names = (plan: OutboundPlan) => plan.items.filter(isAttachmentItem).map((i) => i.key);
+    expect(names(planOutboundWork(run(), [pass('1')], [b, a]))).toEqual(names(planOutboundWork(run(), [pass('1')], [a, b])));
   });
 
   it('leaves the photographs of a defect the office already holds where they are', () => {
@@ -1471,6 +1608,23 @@ describe('workCompletedNote', () => {
     expect(note.note).toContain('Technician: not recorded');
     expect(note.note).toContain('Order no: PO-77');
     expect(note.note).toContain('TECHNICIAN NOTES\nKey returned to reception.');
+  });
+
+  it('names the person who marked it complete ahead of whoever was booked', () => {
+    // The job row lists whoever the office rostered; the phone knows who
+    // actually pressed complete. The office reads the roster too, so a
+    // swap is said in so many words rather than left to look like an error.
+    const note = workCompletedNote({ ...job, technician: 'A Technician', completedBy: 'B Technician' });
+    expect(note.note).toContain('Completed by: B Technician (booked technician: A Technician)');
+    expect(note.note).not.toContain('Technician: A Technician');
+    // The same person under both names is one line, not a swap.
+    expect(workCompletedNote({ ...job, technician: 'a technician ', completedBy: 'A Technician' }).note)
+      .toContain('Completed by: A Technician\n');
+    // Nobody signed in and no name set: the booked technician stands, as before.
+    expect(workCompletedNote({ ...job, technician: 'A Technician' }).note).toContain('Technician: A Technician');
+    // Who completed it is part of the record, so a different person is a different note.
+    expect(workCompletedNote({ ...job, completedBy: 'B Technician' }).key)
+      .not.toBe(workCompletedNote({ ...job, completedBy: 'C Technician' }).key);
   });
 
   it('never states a price, and says so when the mapping is asked', () => {

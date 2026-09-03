@@ -81,7 +81,9 @@ async function remember(patch: Partial<UpdateCheckRecord>): Promise<void> {
 }
 
 export async function storeToken(token: string): Promise<void> {
-  await SecureStore.setItemAsync(TOKEN_SLOT, token.trim());
+  // Never leaves this device in a backup, and cannot be read while it is
+  // locked: the same terms the Simpro secret is kept on.
+  await SecureStore.setItemAsync(TOKEN_SLOT, token.trim(), { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
 }
 
 export async function hasToken(): Promise<boolean> {

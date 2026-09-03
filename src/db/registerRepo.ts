@@ -150,6 +150,9 @@ export async function importAssetRegister(parsed: ParsedRegister): Promise<Regis
     if (asset.assetNumber) attributes.assetNumber = asset.assetNumber;
     if (asset.lastOverhaul?.raw) attributes.lastOverhaul = asset.lastOverhaul.raw;
     for (const [k, v] of Object.entries(asset.extra)) attributes[k] = v;
+    // Fire and smoke doors share one asset type; only the register a door
+    // came from says which Schedule 2 row it answers, so that is kept.
+    if (parsed.system === 'smoke-door' || parsed.system === 'fire-door') attributes.registerSystem = parsed.system;
 
     const match = asset.externalId ? known.get(asset.externalId) : undefined;
     let assetId: string;

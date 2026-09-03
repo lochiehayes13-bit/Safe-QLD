@@ -441,6 +441,7 @@ export type OutboundWarningCode =
   | 'critical-not-verbally-notified'
   | 'critical-severity-disagrees'
   | 'photos-not-sent'
+  | 'photos-after-note'
   | 'photo-file-missing'
   | 'money-in-free-text'
   | 'asset-unidentified'
@@ -820,19 +821,45 @@ export function attachmentsForDefect(
   return { items, missing };
 }
 
-/** What a note says about a defect's photographs, given how many are going to the job. */
-function photoLine(defect: OutboundDefect, going: number, filename: string | undefined): string | undefined {
+/**
+ * What a note says about a defect's photographs.
+ *
+ * Three buckets, never two. A photograph that was queued on an earlier send
+ * is on the job, or about to be, and an amended note that called it "held
+ * with the report" sent the office to the wrong place — the evidence was in
+ * the attachment list the whole time. So the note counts what is going now,
+ * what is already queued for or on the job, and only the remainder — a
+ * missing file, the switch off, files not supplied — as held with the
+ * report. "Queued for, or on" rather than "on", because the queue holds a
+ * photograph until there is signal and the note must not claim more.
+ */
+function photoLine(
+  defect: OutboundDefect,
+  outcome: PhotoOutcome,
+  filename: string | undefined,
+): string | undefined {
   const total = Math.max(defect.photoCount ?? 0, defect.photos?.length ?? 0);
   if (!total) return undefined;
   const plural = (n: number) => `${n} photo${n === 1 ? '' : 's'}`;
-  if (going === total) {
-    return `${plural(total)} being sent to this job's attachments${filename ? ` as "${filename}"` : ''}.`;
+  const named = filename ? ` as "${filename}"` : '';
+  const going = Math.min(outcome.going, total);
+  const onJob = Math.min(outcome.alreadyOnJob, total - going);
+  const held = total - going - onJob;
+  const isAre = (n: number) => (n === 1 ? 'is' : 'are');
+
+  if (going === total) return `${plural(total)} being sent to this job's attachments${named}.`;
+  if (onJob === total) return `${plural(total)} already queued for, or on, this job's attachments${named}.`;
+  if (going === 0 && onJob === 0) return `${plural(total)} held with the report; photos are not attached to this note.`;
+
+  const parts: string[] = [];
+  if (going > 0) parts.push(`${going} of ${plural(total)} being sent to this job's attachments${named}`);
+  if (onJob > 0) {
+    parts.push(going > 0
+      ? `${onJob} ${isAre(onJob)} already queued for, or on, this job's attachments`
+      : `${onJob} of ${plural(total)} already queued for, or on, this job's attachments${named}`);
   }
-  if (going > 0) {
-    return `${going} of ${plural(total)} being sent to this job's attachments${filename ? ` as "${filename}"` : ''}; `
-      + `the other ${total - going} ${total - going === 1 ? 'is' : 'are'} held with the report.`;
-  }
-  return `${plural(total)} held with the report; photos are not attached to this note.`;
+  if (held > 0) parts.push(`the other ${held} ${isAre(held)} held with the report`);
+  return `${parts.join('; ')}.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1034,11 +1061,15 @@ function reasonsLine(summary: ServiceSummary): string | undefined {
   return `Not tested because: ${parts.join('; ')}${tail}.`;
 }
 
-/** How many of a defect's photographs are going to the job, and under what name. */
+/** How many of a defect's photographs are going to the job now, how many are already there, and under what name. */
 interface PhotoOutcome {
   going: number;
+  /** Queued on an earlier send, or accepted: on the job, or about to be, and not sent again. */
+  alreadyOnJob: number;
   filename?: string;
 }
+
+const NO_PHOTOS: PhotoOutcome = { going: 0, alreadyOnJob: 0 };
 
 function criticalBlock(defect: OutboundDefect, run: CompletedRoutineRun, photos: PhotoOutcome): string[] {
   const basis = criticalBasis(defect);
@@ -1081,7 +1112,7 @@ function criticalBlock(defect: OutboundDefect, run: CompletedRoutineRun, photos:
   if (rectifyDue) lines.push(`Rectification due by ${rectifyDue} (one month from the maintenance).`);
   if (defect.interimMeasures?.trim()) lines.push(`Interim measures: ${defect.interimMeasures.trim()}.`);
   if (defect.status !== 'open') lines.push(`Status recorded on site: ${defect.status}.`);
-  const photoNote = photoLine(defect, photos.going, photos.filename);
+  const photoNote = photoLine(defect, photos, photos.filename);
   if (photoNote) lines.push(photoNote);
   return lines;
 }
@@ -1112,7 +1143,7 @@ function composeSections(
   const sections: NoteSection[] = [];
   const criticals = defects.filter(isCriticalDefect);
   const others = defects.filter((d) => !isCriticalDefect(d));
-  const photosOf = (d: OutboundDefect): PhotoOutcome => photos.get(d.id) ?? { going: 0 };
+  const photosOf = (d: OutboundDefect): PhotoOutcome => photos.get(d.id) ?? NO_PHOTOS;
 
   const head = [
     `ROUTINE SERVICE - ${run.routineLabel} (${run.frequency}) - ${run.system}`,
@@ -1169,7 +1200,7 @@ function composeSections(
       const label = AS1851_CLASS_LABEL[defect.as1851Class ?? 'non-critical'];
       // The count and where the photographs are, but not the file name: a
       // list line is read at a glance and the name is in the attachment list.
-      const photoNote = photoLine(defect, photosOf(defect).going, undefined);
+      const photoNote = photoLine(defect, photosOf(defect), undefined);
       block.push(`- ${defect.location.trim() || 'location not recorded'}: ${defect.description.trim()} `
         + `[${label}, raised ${qldDay(defect.raisedAt) ?? 'date not readable'}, ${defect.status}]`
         + (photoNote ? ` - ${photoNote}` : ''));
@@ -1437,17 +1468,26 @@ export function planOutboundWork(
   const attachments: OutboundAttachmentItem[] = [];
   const sendPhotos = options.sendPhotos !== false;
   const usedNames = new Map<string, number>();
-  for (const defect of sendableDefects) {
+  /*
+   * Named in the order the defects were raised, not the order they were
+   * handed in. The sequence number is part of the file name and the name is
+   * part of the key, so the numbering has to come out the same on every
+   * send: the list arrives critical-first and newest-first, and a defect
+   * raised later at the same place on the same day would otherwise sort
+   * ahead of one already sent, take its name, and renumber it — the earlier
+   * photographs then go up a second time under new names beside a second
+   * file with the old one. A defect's raised instant never changes, so a
+   * later one can never overtake an earlier one and a number once issued
+   * stays put. The notes keep the critical-first order; only the naming
+   * pass runs on the sorted copy.
+   */
+  const byRaised = [...sendableDefects].sort((a, b) =>
+    a.raisedAt.localeCompare(b.raisedAt) || a.id.localeCompare(b.id));
+  for (const defect of byRaised) {
     const where = defect.location || 'an unrecorded location';
     const recorded = Math.max(defect.photoCount ?? 0, defect.photos?.length ?? 0);
     if (!recorded) continue;
     const plural = (n: number) => `${n} photo${n === 1 ? '' : 's'}`;
-    if (!sendPhotos) {
-      caution('photos-not-sent',
-        `${plural(recorded)} of the defect at ${where} stay on this phone and with the report: sending photos to `
-        + 'Simpro is switched off in Settings.');
-      continue;
-    }
     if (!defect.photos) {
       // The caller counted them and did not hand them over. Nothing to queue,
       // and the note must not read as though something was attached.
@@ -1457,6 +1497,23 @@ export function planOutboundWork(
       continue;
     }
     const planned = attachmentsForDefect(defect, { jobId, siteName: run.siteName, used: usedNames });
+    // Counted before the switch is consulted: a photograph that went up on an
+    // earlier send is on the job whether or not photos are being sent today,
+    // and the note must say so rather than read as though it were held back.
+    const onJob = planned.items.filter((item) => alreadySent.has(item.key));
+    if (!sendPhotos) {
+      const held = recorded - onJob.length;
+      if (held > 0) {
+        caution('photos-not-sent',
+          `${plural(held)} of the defect at ${where} stay on this phone and with the report: sending photos to `
+          + 'Simpro is switched off in Settings.'
+          + (onJob.length ? ` ${plural(onJob.length)} already went to the job on an earlier send.` : ''));
+      }
+      photoOutcomes.set(defect.id, {
+        going: 0, alreadyOnJob: onJob.length, filename: onJob[0]?.payload.filename,
+      });
+      continue;
+    }
     if (planned.missing) {
       decline('photo-file-missing',
         `${plural(planned.missing)} of the defect at ${where} ${planned.missing === 1 ? 'is' : 'are'} recorded but the `
@@ -1464,6 +1521,7 @@ export function planOutboundWork(
         + 'cannot be attached. The note says how many were taken.');
     }
     let going = 0;
+    let filename: string | undefined;
     for (const item of planned.items) {
       if (alreadySent.has(item.key)) {
         // The caller's list carries queued uploads as well as accepted ones,
@@ -1472,12 +1530,14 @@ export function planOutboundWork(
         decline('already-sent',
           `${item.payload.filename} is already queued for, or on, job ${jobId} in Simpro (${item.key}). `
           + 'It is not sent again.');
+        filename ??= item.payload.filename;
         continue;
       }
       attachments.push(item);
       going++;
+      filename ??= item.payload.filename;
     }
-    photoOutcomes.set(defect.id, { going, filename: planned.items[0]?.payload.filename });
+    photoOutcomes.set(defect.id, { going, alreadyOnJob: onJob.length, filename });
   }
 
   const fullRecordAt = options.fullRecordAt
@@ -1525,7 +1585,7 @@ export function planOutboundWork(
     }
 
     const body = [
-      ...criticalBlock(defect, run, photoOutcomes.get(defect.id) ?? { going: 0 }),
+      ...criticalBlock(defect, run, photoOutcomes.get(defect.id) ?? NO_PHOTOS),
       '',
       `Raised during ${run.routineLabel} at ${run.siteName}, `
         + `${qldDay(run.completedAt) ?? 'date not readable'}.`,
@@ -1589,81 +1649,99 @@ export function planOutboundWork(
   ];
   const serviceKey = outboundKey('SRV', serviceIdentity, serviceContent);
 
-  if (alreadySent.has(serviceKey)) {
+  /*
+   * A service record the office already holds is not composed again, but
+   * the photographs are still planned and still go. They are queued rather
+   * than posted, and the queue lets a failed one go on purpose so that
+   * pressing send again is how a person asks for another go; a plan that
+   * stopped here the moment the note was accepted would leave a photograph
+   * whose upload was abandoned, or one added after the send, or the lot of
+   * them if the switch was off that day, on the phone with no route to the
+   * job. So the note is declined and the plan carries on to the attachments.
+   */
+  const serviceAlreadySent = alreadySent.has(serviceKey);
+  if (serviceAlreadySent) {
     decline('already-sent',
       `This service record has already been accepted by the office (${serviceKey}). It is not sent again: a `
       + 'duplicated service record double-counts in the office\'s compliance reporting and nobody goes looking '
-      + 'for it.');
-    return { items, warnings, summary };
+      + 'for it.' + (attachments.length ? ' Any photographs not yet on the job still go.' : ''));
+    if (attachments.length) {
+      caution('photos-after-note',
+        `${attachments.length} photograph${attachments.length === 1 ? '' : 's'} will arrive on job ${jobId} on `
+        + 'their own: the service note was sent earlier and said they were held with the report. The file names '
+        + 'carry the site, the location and the date, which is how the office matches them to the defect.');
+    }
   }
-  const serviceAmended = sentIdentities.has(keyIdentity(serviceKey) ?? '');
-  if (serviceAmended) {
-    caution('amended-record',
-      'A service record for this attendance was already sent and the record has since changed. The new note is '
-      + 'marked as an amendment so the office knows which one stands.');
-  }
+  const serviceAmended = !serviceAlreadySent && sentIdentities.has(keyIdentity(serviceKey) ?? '');
+  if (!serviceAlreadySent) {
+    if (serviceAmended) {
+      caution('amended-record',
+        'A service record for this attendance was already sent and the record has since changed. The new note is '
+        + 'marked as an amendment so the office knows which one stands.');
+    }
 
-  if (summary.notTestedReasons.some((r) => r.unrecorded)) {
-    const bucket = summary.notTestedReasons.find((r) => r.unrecorded);
-    caution('not-tested-reason-missing',
-      `${bucket?.count ?? 0} asset${(bucket?.count ?? 0) === 1 ? '' : 's'} recorded as not tested with no reason. `
-      + 'The note says "reason not recorded", which is what an inspector will read it as.');
-  }
-  if (results.some((r) => !r.assetNumber && !r.name?.trim() && !r.location?.trim())) {
-    caution('asset-unidentified',
-      'Some assets have no tag number, name or location, so the note can only say "asset not identified". '
-      + 'The office cannot match those rows to their register.');
-  }
-  // Every free-text field that ends up in the note is scanned, not only the
-  // obvious ones. A price is typed into a not-tested reason ("no access, quoted
-  // $450 to open the ceiling") at least as often as into a defect description,
-  // and a warning that misses those is a rule nobody is actually keeping.
-  const freeText = [
-    run.notes,
-    ...results.map((r) => r.notes),
-    ...results.map((r) => r.notTestedReason),
-    ...sendableDefects.map((d) => d.description),
-    ...sendableDefects.map((d) => d.interimMeasures),
-  ].filter((t): t is string => !!t);
-  if (freeText.some((t) => MONEY_PATTERN.test(t))) {
-    caution('money-in-free-text',
-      'A price appears in typed notes. It is sent as written because dropping a technician\'s words silently is '
-      + 'worse, but money belongs on a quote in Simpro: a figure in a note is never reconciled.');
-  }
+    if (summary.notTestedReasons.some((r) => r.unrecorded)) {
+      const bucket = summary.notTestedReasons.find((r) => r.unrecorded);
+      caution('not-tested-reason-missing',
+        `${bucket?.count ?? 0} asset${(bucket?.count ?? 0) === 1 ? '' : 's'} recorded as not tested with no reason. `
+        + 'The note says "reason not recorded", which is what an inspector will read it as.');
+    }
+    if (results.some((r) => !r.assetNumber && !r.name?.trim() && !r.location?.trim())) {
+      caution('asset-unidentified',
+        'Some assets have no tag number, name or location, so the note can only say "asset not identified". '
+        + 'The office cannot match those rows to their register.');
+    }
+    // Every free-text field that ends up in the note is scanned, not only the
+    // obvious ones. A price is typed into a not-tested reason ("no access, quoted
+    // $450 to open the ceiling") at least as often as into a defect description,
+    // and a warning that misses those is a rule nobody is actually keeping.
+    const freeText = [
+      run.notes,
+      ...results.map((r) => r.notes),
+      ...results.map((r) => r.notTestedReason),
+      ...sendableDefects.map((d) => d.description),
+      ...sendableDefects.map((d) => d.interimMeasures),
+    ].filter((t): t is string => !!t);
+    if (freeText.some((t) => MONEY_PATTERN.test(t))) {
+      caution('money-in-free-text',
+        'A price appears in typed notes. It is sent as written because dropping a technician\'s words silently is '
+        + 'worse, but money belongs on a quote in Simpro: a figure in a note is never reconciled.');
+    }
 
-  const sections = composeSections(
-    run, summary, results, sendableDefects, serviceAmended, defects.length - sendableDefects.length, photoOutcomes,
-  );
-  const note = assemble(sections, serviceKey, fullRecordAt, bodyLimit);
-  if (note.truncated) {
-    caution('truncated',
-      `The service note was shortened to fit the note field: ${note.omittedChars} characters `
-      + `(${note.omittedSections.join(', ')}) are only in the full record. The note says so and points at it.`);
-  }
+    const sections = composeSections(
+      run, summary, results, sendableDefects, serviceAmended, defects.length - sendableDefects.length, photoOutcomes,
+    );
+    const note = assemble(sections, serviceKey, fullRecordAt, bodyLimit);
+    if (note.truncated) {
+      caution('truncated',
+        `The service note was shortened to fit the note field: ${note.omittedChars} characters `
+        + `(${note.omittedSections.join(', ')}) are only in the full record. The note says so and points at it.`);
+    }
 
-  const headline = summary.notTested > 0
-    ? `${summary.passed} passed, ${summary.failed} failed, ${summary.notTested} NOT TESTED`
-    : `${summary.passed} passed, ${summary.failed} failed`;
+    const headline = summary.notTested > 0
+      ? `${summary.passed} passed, ${summary.failed} failed, ${summary.notTested} NOT TESTED`
+      : `${summary.passed} passed, ${summary.failed} failed`;
 
-  items.push({
-    kind: 'job-note',
-    key: serviceKey,
-    urgency: 'routine',
-    description: `Service record - ${run.routineLabel} at ${run.siteName} - ${headline} (job ${jobId})`,
-    payload: {
-      jobId,
-      subject: subjectFor(
-        `${summary.criticalDefects ? 'CRITICAL DEFECT RAISED - ' : ''}`
-        + `Routine service ${qldDay(run.completedAt) ?? ''} - ${run.routineLabel} - ${headline}`,
-      ),
-      note: note.text,
+    items.push({
+      kind: 'job-note',
       key: serviceKey,
-      truncated: note.truncated,
-      omittedChars: note.omittedChars,
-      omittedSections: note.omittedSections,
-      fullRecordAt,
-    },
-  });
+      urgency: 'routine',
+      description: `Service record - ${run.routineLabel} at ${run.siteName} - ${headline} (job ${jobId})`,
+      payload: {
+        jobId,
+        subject: subjectFor(
+          `${summary.criticalDefects ? 'CRITICAL DEFECT RAISED - ' : ''}`
+          + `Routine service ${qldDay(run.completedAt) ?? ''} - ${run.routineLabel} - ${headline}`,
+        ),
+        note: note.text,
+        key: serviceKey,
+        truncated: note.truncated,
+        omittedChars: note.omittedChars,
+        omittedSections: note.omittedSections,
+        fullRecordAt,
+      },
+    });
+  }
 
   // Photographs last. The notes say they are coming, and a note that lands
   // after its evidence is easier to read than evidence that lands before
@@ -1685,7 +1763,16 @@ export interface WorkCompletedJob {
   siteName: string;
   /** ISO instant the technician marked it complete. */
   completedAt: string;
+  /** The technician the office booked on the job, as the job row holds it. */
   technician?: string;
+  /**
+   * The person who marked it complete on this phone — the signed-in Simpro
+   * user where there is one, otherwise the name in Settings. Preferred over
+   * the booked technician in the note: the office wants to know who did the
+   * work, and the job row lists whoever was rostered, which on a two-person
+   * job is only half the answer and on a swapped one is the wrong person.
+   */
+  completedBy?: string;
   /** The technician's own notes on the job, if any. */
   notes?: string;
   orderNo?: string;
@@ -1722,18 +1809,28 @@ export function workCompletedNote(job: WorkCompletedJob, run?: WorkCompletedRun)
   const jobId = job.externalId.trim();
   const day = qldIsoDay(job.completedAt);
   const identity = ['work-completed', jobId, day ?? job.completedAt];
+  const completedBy = job.completedBy?.trim() || undefined;
+  const technician = job.technician?.trim() || undefined;
   const content = [
-    job.title, job.technician, job.notes, job.orderNo,
+    job.title, technician, completedBy, job.notes, job.orderNo,
     run?.routineLabel, run?.frequency, run?.system,
     run?.checksPassed, run?.checksFailed, run?.checksNotTested, run?.defectsRaised,
   ];
   const key = outboundKey('SRV', identity, content);
 
+  // Who did it comes from the person holding the phone where the app knows;
+  // the booked technician is named too where it is somebody else, because
+  // the office reads the roster and a completion from an unlisted name
+  // otherwise looks like a mistake rather than a swap.
+  const who = completedBy
+    ? `Completed by: ${completedBy}`
+      + (technician && canonical(technician) !== canonical(completedBy) ? ` (booked technician: ${technician})` : '')
+    : technician ? `Technician: ${technician}` : 'Technician: not recorded';
   const lines = [
     `WORK COMPLETED - ${job.title.trim() || 'job'}`,
     `Site: ${job.siteName}`,
     `Completed: ${qldMoment(job.completedAt) ?? qldDay(job.completedAt) ?? 'date not readable'}`,
-    job.technician?.trim() ? `Technician: ${job.technician.trim()}` : 'Technician: not recorded',
+    who,
   ];
   if (job.orderNo?.trim()) lines.push(`Order no: ${job.orderNo.trim()}`);
   if (run) {

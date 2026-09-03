@@ -1,4 +1,4 @@
-import { getDb, newId, nowIso } from '@/db';
+import { getDb, inTransaction, newId, nowIso } from '@/db';
 import {
   DEFAULT_EXCLUSIONS, DEFAULT_VALIDITY_DAYS, canTransition, editRefusal, expiryFor, qldDate,
   type Confidence, type PriceSource, type Quote, type QuoteLine, type QuoteSection,
@@ -226,7 +226,7 @@ export async function createQuote(input: NewQuote): Promise<Quote> {
     ...input,
   };
 
-  await db.withTransactionAsync(async () => {
+  await inTransaction(db, async () => {
     await db.runAsync(
       `INSERT INTO quote
          (id, siteId, reference, jobReference, clientName, siteName, siteAddress, contactName,
@@ -376,7 +376,7 @@ export async function updateQuote(id: string, patch: QuotePatch): Promise<void> 
   if (patch.notes !== undefined) put('notes', patch.notes ?? '');
   if (patch.taxRate !== undefined) put('taxRate', patch.taxRate);
 
-  await db.withTransactionAsync(async () => {
+  await inTransaction(db, async () => {
     if (fields.length) {
       put('updatedAt', nowIso());
       await db.runAsync(`UPDATE quote SET ${fields.join(', ')} WHERE id = ?`, [...values, id]);
@@ -390,7 +390,7 @@ export async function updateQuote(id: string, patch: QuotePatch): Promise<void> 
 
 export async function deleteQuote(id: string): Promise<void> {
   const db = await getDb();
-  await db.withTransactionAsync(async () => {
+  await inTransaction(db, async () => {
     // Lines cascade, but foreign keys are not on in every build, so they go
     // explicitly rather than being left orphaned.
     await db.runAsync('DELETE FROM quote_line WHERE quoteId = ?', [id]);

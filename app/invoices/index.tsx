@@ -1,9 +1,8 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { FlatList, StyleSheet, TextInput, View } from 'react-native';
+import { FlatList, View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { nowIso } from '@/db';
-import { getCustomer, listInvoices, listJobsFor, type InvoiceRecord } from '@/db/mirrorRepo';
+import { getCustomer, listInvoices, type InvoiceRecord } from '@/db/mirrorRepo';
 import { getSite } from '@/db/repo';
 import { invoiceMatchesQuery, invoiceState, orderInvoices } from '@/domain/jobPresentation';
 import { qldIsoDay } from '@/domain/qldTime';
@@ -11,7 +10,17 @@ import { formatCents } from '@/domain/rates';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
 import { Reveal } from '@/components/motion';
-import { Card, EmptyState, Rowed, Screen, Segmented, StatTile, StatusPill, Txt } from '@/components/ui';
+import { Card, EmptyState, Rowed, Screen, SearchBox, Segmented, StatTile, StatusPill, Txt } from '@/components/ui';
+
+/**
+ * How many invoices the unscoped list reads at once.
+ *
+ * Two years of invoices is a couple of thousand rows, each hydrated with its
+ * job links, and the screen re-reads on every focus — every return from an
+ * invoice. The unpaid ones are the ones a technician is asked about and are
+ * few; the rest is a page of the newest, and the search narrows within it.
+ */
+const PAGE = 500;
 
 /**
  * The office's invoices, unpaid first.
@@ -25,6 +34,9 @@ export default function InvoicesScreen() {
   const t = useTheme();
   const params = useLocalSearchParams<{ siteId?: string; customerId?: string; jobExternalId?: string }>();
   const [invoices, setInvoices] = useState<InvoiceRecord[] | null>(null);
+  // The unpaid set on its own, read alongside a page of everything: the
+  // tiles count from it whichever page is on screen.
+  const [unpaid, setUnpaid] = useState<InvoiceRecord[] | null>(null);
   const [filter, setFilter] = useState<'unpaid' | 'all'>('unpaid');
   const [query, setQuery] = useState('');
   const [scope, setScope] = useState<string | undefined>(undefined);
@@ -33,7 +45,9 @@ export default function InvoicesScreen() {
 
   const load = useCallback(async () => {
     if (params.jobExternalId) {
-      setInvoices(await listInvoices({ jobExternalId: params.jobExternalId, limit: 500 }));
+      const rows = await listInvoices({ jobExternalId: params.jobExternalId, limit: 500 });
+      setInvoices(rows);
+      setUnpaid(rows.filter((inv) => !inv.isPaid));
       setScope(`for job ${params.jobExternalId}`);
     } else if (params.customerId) {
       const [rows, customer] = await Promise.all([
@@ -41,34 +55,47 @@ export default function InvoicesScreen() {
         getCustomer(params.customerId),
       ]);
       setInvoices(rows);
+      setUnpaid(rows.filter((inv) => !inv.isPaid));
       setScope(customer ? `for ${customer.name}` : 'for this customer');
     } else if (params.siteId) {
       // The mirror links an invoice to its jobs, and a job to its site, so a
-      // site's invoices are the ones billing any of its jobs.
-      const [jobs, all, site] = await Promise.all([
-        listJobsFor({ siteId: params.siteId, limit: 5000 }),
-        listInvoices({ limit: 10000 }),
+      // site's invoices are the ones billing any of its jobs — joined in SQL,
+      // not by reading every invoice on the phone to keep the handful.
+      const [rows, site] = await Promise.all([
+        listInvoices({ siteId: params.siteId, limit: 2000 }),
         getSite(params.siteId),
       ]);
-      const ids = new Set(jobs.map((j) => j.externalId).filter((x): x is string => !!x));
-      setInvoices(all.filter((inv) => inv.jobs.some((j) => ids.has(j.id))));
+      setInvoices(rows);
+      setUnpaid(rows.filter((inv) => !inv.isPaid));
       setScope(site ? `at ${site.name}` : 'at this site');
     } else {
-      setInvoices(await listInvoices({ limit: 10000 }));
+      // Bounded, both halves: every unpaid invoice up to the page, and the
+      // newest page of the rest for All. Never the whole two years. A search
+      // on All goes to the database with the words, so it reaches the
+      // invoices the page did not hold rather than only the newest so many;
+      // the unpaid set is read whole regardless, since the tiles count from it.
+      const [due, page] = await Promise.all([
+        listInvoices({ unpaidOnly: true, limit: PAGE }),
+        listInvoices({ limit: PAGE, query: query.trim() || undefined }),
+      ]);
+      setUnpaid(due);
+      setInvoices(page);
       setScope(undefined);
     }
-  }, [params.siteId, params.customerId, params.jobExternalId]);
+  }, [params.siteId, params.customerId, params.jobExternalId, query]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const shown = useMemo(() => {
-    const rows = (invoices ?? []).filter((inv) => (filter === 'all' || !inv.isPaid) && invoiceMatchesQuery(inv, query));
+    const rows = (filter === 'unpaid' ? (unpaid ?? []) : (invoices ?? [])).filter((inv) => invoiceMatchesQuery(inv, query));
     return orderInvoices(rows);
-  }, [invoices, filter, query]);
+  }, [invoices, unpaid, filter, query]);
 
-  const unpaid = (invoices ?? []).filter((inv) => !inv.isPaid);
-  const owed = unpaid.reduce((n, inv) => n + (inv.balanceDueCents ?? inv.totalIncTaxCents ?? 0), 0);
-  const overdue = unpaid.filter((inv) => inv.dueDate && inv.dueDate < today).length;
+  const owed = (unpaid ?? []).reduce((n, inv) => n + (inv.balanceDueCents ?? inv.totalIncTaxCents ?? 0), 0);
+  const overdue = (unpaid ?? []).filter((inv) => inv.dueDate && inv.dueDate < today).length;
+  const unpaidCount = unpaid?.length ?? 0;
+  // The unscoped All page is the newest so many; say so where it is cut.
+  const paged = !params.jobExternalId && !params.customerId && !params.siteId && filter === 'all' && (invoices?.length ?? 0) >= PAGE;
 
   const empty = (() => {
     if (invoices === null) return null;
@@ -78,7 +105,14 @@ export default function InvoicesScreen() {
         body: 'The last two years of invoices come down with a sync once Simpro is connected in Settings.',
       };
     }
-    if (query.trim()) return { title: 'Nothing matches', body: 'Try the invoice number, the job number it bills, or part of the customer.' };
+    if (query.trim()) {
+      return {
+        title: 'Nothing matches',
+        body: paged
+          ? `Try the invoice number, the job number it bills, or part of the customer. Only the newest ${PAGE} are searched here; a customer's or a site's own list reaches further back.`
+          : 'Try the invoice number, the job number it bills, or part of the customer.',
+      };
+    }
     if (filter === 'unpaid') return { title: 'Nothing unpaid', body: 'Every invoice the phone holds has been paid.' };
     return { title: 'No invoices', body: '' };
   })();
@@ -94,12 +128,15 @@ export default function InvoicesScreen() {
             onChange={setFilter}
             options={[{ value: 'unpaid', label: 'Unpaid' }, { value: 'all', label: 'All' }]}
           />
-          {invoices ? (
+          {invoices && unpaid ? (
             <Rowed gap={2}>
-              <StatTile label="Unpaid" value={unpaid.length} tone={unpaid.length ? 'warn' : 'muted'} />
+              <StatTile label="Unpaid" value={unpaidCount} tone={unpaidCount ? 'warn' : 'muted'} />
               <StatTile label="Overdue" value={overdue} tone={overdue ? 'fail' : 'muted'} />
               <StatTile label="Owed" value={formatCents(owed)} tone={owed ? 'default' : 'muted'} />
             </Rowed>
+          ) : null}
+          {paged ? (
+            <Txt size="xs" tone="faint">The newest {PAGE} invoices. A customer or a site opens its own full list.</Txt>
           ) : null}
         </View>
         <FlatList
@@ -143,35 +180,5 @@ function InvoiceRow({ invoice: inv, today }: { invoice: InvoiceRecord; today: st
         </View>
       </Rowed>
     </Card>
-  );
-}
-
-function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
-  const t = useTheme();
-  return (
-    <View
-      style={{
-        flexDirection: 'row', alignItems: 'center', gap: t.space(2),
-        backgroundColor: t.color.surfaceAlt, borderRadius: t.radius.md,
-        borderWidth: StyleSheet.hairlineWidth, borderColor: t.color.border,
-        paddingHorizontal: t.space(3), minHeight: t.touch,
-      }}
-    >
-      <MaterialCommunityIcons name="magnify" size={20} color={t.color.textFaint} />
-      <TextInput
-        value={value}
-        onChangeText={onChange}
-        placeholder={placeholder}
-        placeholderTextColor={t.color.textFaint}
-        autoCapitalize="none"
-        autoCorrect={false}
-        clearButtonMode="while-editing"
-        returnKeyType="search"
-        style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md, minHeight: t.touch }}
-      />
-      {value ? (
-        <MaterialCommunityIcons name="close-circle" size={20} color={t.color.textFaint} onPress={() => onChange('')} />
-      ) : null}
-    </View>
   );
 }

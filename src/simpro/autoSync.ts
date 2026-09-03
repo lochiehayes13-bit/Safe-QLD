@@ -149,16 +149,36 @@ export async function runAutoSync(trigger: AutoSyncTrigger): Promise<AutoSyncDec
     const startedAt = now.toISOString();
     let pull: SyncResult | null = null;
     let flush: FlushResult | null = null;
-    let error: string | null = null;
+    const errors: string[] = [];
+    /*
+     * The queue goes first. A note the technician just wrote is the thing
+     * they are waiting on, and behind a full pull it waited six minutes —
+     * or forever, if the van drove out of signal before the pull was done.
+     * Each half has its own try, so a flush that throws does not cost the
+     * pull and a pull that throws does not cost the flush; anything queued
+     * while the pull runs goes with the flush the queued trigger asks for
+     * afterwards (flushAgain).
+     */
     try {
-      if (decision.action !== 'flush-only') {
-        pull = await pullFromSimpro(config, undefined, { incremental: decision.action === 'incremental' });
-        if (pull.errors.length) error = pull.errors.slice(0, 3).join(' ');
-      }
       flush = await flushQueue(config);
+      if (flush.stopped) errors.push(flush.stopped.reason);
     } catch (e) {
-      error = message(e);
+      errors.push(message(e));
     }
+    if (decision.action !== 'flush-only') {
+      try {
+        pull = await pullFromSimpro(config, undefined, {
+          incremental: decision.action === 'incremental',
+          // A run asked for by a queued note reads the lists and leaves the
+          // dozen requests a job's children cost to the next foreground.
+          prefetchDetails: trigger !== 'queued',
+        });
+        if (pull.errors.length) errors.push(pull.errors.slice(0, 3).join(' '));
+      } catch (e) {
+        errors.push(message(e));
+      }
+    }
+    const error = errors.length ? errors.join(' ') : null;
     await remember({
       lastRunAt: startedAt,
       lastTrigger: trigger,

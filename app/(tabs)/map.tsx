@@ -8,20 +8,22 @@ import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { listMatchCustomers, loadMapData, type MapData, type MapSiteRow } from '@/db/mapRepo';
 import { customerStats, siteStats, type CustomerStats } from '@/db/mirrorRepo';
-import { locateSites, type LocateProgress } from '@/geo/geocode';
+import { locateSites, type LocateProgress, type LocateResult } from '@/geo/geocode';
 import { searchPlaces, type Place } from '@/geo/places';
 import { readPlacesKey } from '@/geo/placesKey';
 import {
-  distanceM, formatDistance, matchPlace, type MatchCustomer, type MatchSite, type MatchVerdict,
+  distanceM, formatDistance, matchPlace, parseStreet, type MatchCustomer, type MatchSite, type MatchVerdict,
 } from '@/domain/customerMatch';
 import {
   DEFAULT_KINDS, PIN_COLOUR, PIN_KINDS, PIN_LABEL, PIN_SHORT, buildPins, centreScript, filterPins, filterScript,
-  formatCount, googleMapsUrl, mapHtml, parseMapMessage, placesScript, selectScript, wazeUrl,
-  type LatLng, type MapPin, type MapSelection, type PinKind,
+  formatCount, googleMapsUrl, hereScript, mapHtml, mapUserAgent, parseMapMessage, placesScript, selectScript,
+  siteAddressLine, wazeUrl,
+  type LatLng, type MapPin, type MapSelection, type MapView, type PinKind,
 } from '@/domain/mapPins';
 import { telHref } from '@/domain/jobPresentation';
 import { formatCents } from '@/domain/rates';
 import { formatAuDate } from '@/export/sheets';
+import { company } from '@/theme/brand';
 import { useTheme } from '@/theme';
 import { Button, Rowed, Screen, StatusPill, Txt } from '@/components/ui';
 
@@ -43,12 +45,18 @@ import { Button, Rowed, Screen, StatusPill, Txt } from '@/components/ui';
  * not rebuild it — that would throw away wherever the technician had panned
  * and zoomed to — it pushes a small script into the page instead. The page
  * is only rebuilt when the data changes: on focus, and once more after the
- * background geocoder has found some new sites.
+ * background geocoder has found some new sites. The page reports every pan
+ * and zoom back, and a rebuilt page opens on the last one, so the rebuild
+ * after the geocoder's run does not snap a technician planning tomorrow on
+ * the Sunshine Coast back to the whole of the south-east.
  *
  * Positions come from the geocode cache, filled a couple of hundred
  * addresses at a time while this tab is open and stopped the moment it is
  * left. The status line says how far that has got, because a map showing
- * 800 of 3,000 sites must not be read as a map of 800 sites.
+ * 800 of 3,000 sites must not be read as a map of 800 sites — and when the
+ * geocoder could not run at all, it says why, because "0 of 3,059 located"
+ * with no reason is a map that looks broken rather than one asking for a
+ * permission.
  */
 
 /** Brisbane, for a map with nothing on it yet. */
@@ -58,8 +66,21 @@ const DEFAULT_ZOOM = 9;
 const GEOCODE_BUDGET = 200;
 /** The floating tab bar's height plus the gap the card keeps above it. See components/TabBar. */
 const TAB_BAR_CLEARANCE = 80;
+/**
+ * How old a remembered fix can be and still be drawn as "you are here". The
+ * last known position is whatever the phone last worked out for any app,
+ * and one from yesterday drawn as a blue dot is a lie with a location.
+ */
+const FIX_MAX_AGE_MS = 60 * 60 * 1000;
 
 type Card = { type: 'site'; siteId: string } | { type: 'place'; index: number };
+
+/** Why the phone's location is not available, and what the technician can do about it. */
+interface LocationNote {
+  text: string;
+  /** Re-ask; send them to the phone's settings when the OS will not ask again; or nothing, when nothing here can fix it. */
+  action: 'ask' | 'settings' | 'none';
+}
 
 interface CardModel {
   title: string;
@@ -73,6 +94,12 @@ interface CardModel {
   evidence: string[];
   customerExternalId?: string;
   customerName?: string;
+  /**
+   * For a search result matched to one of our sites: the office's address
+   * for that site and how far the pin is from it. Printed so that "same
+   * name" can be checked against where the site actually is.
+   */
+  matched?: { address: string; distanceM?: number };
   /** Which search result this is, for the arrows. */
   pager?: { index: number; total: number };
 }
@@ -90,6 +117,13 @@ export default function MapScreen() {
   const [progress, setProgress] = useState<LocateProgress | null>(null);
   const [finding, setFinding] = useState(false);
   const [me, setMe] = useState<LatLng | null>(null);
+  /** Whether `me` is fresh enough to draw. A stale fix still prints a distance; it does not get a dot. */
+  const [meFresh, setMeFresh] = useState(false);
+  const [locationNote, setLocationNote] = useState<LocationNote | null>(null);
+  /** Why the geocoder could not run this time, if it could not. */
+  const [locateFault, setLocateFault] = useState<Pick<LocateResult, 'fault' | 'faultKind'> | null>(null);
+  /** Where the technician has the map, as the page last reported it. Read when the page is rebuilt. */
+  const viewRef = useRef<MapView | null>(null);
   const [places, setPlaces] = useState<Place[]>([]);
   const [searching, setSearching] = useState(false);
   const [placeError, setPlaceError] = useState<string | null>(null);
@@ -113,6 +147,7 @@ export default function MapScreen() {
         if (!active || !loaded.sites.length) return;
         setLocating(true);
         setProgress(null);
+        setLocateFault(null);
         const result = await locateSites(loaded.sites, {
           budget: GEOCODE_BUDGET,
           located: new Set(loaded.positions.keys()),
@@ -121,19 +156,23 @@ export default function MapScreen() {
         });
         if (!active) return;
         setLocating(false);
+        if (result.fault) setLocateFault({ fault: result.fault, faultKind: result.faultKind });
         // One rebuild for the whole run rather than one per hit, so the page
         // reloads once at the end instead of two hundred times.
         if (result.hits > 0) await load();
       })();
-      // Where the phone last was, if it is already allowed to say. No prompt:
-      // the card only wants to print a distance, and a permission dialog is
-      // not the first thing a map should do.
+      // Where the phone last was, if it is already allowed to say. The
+      // geocoder above asks for the permission on Android, once; this does
+      // not ask again. The card wants a distance from it and the page a dot,
+      // and the dot only when the fix is recent enough to be where they are.
       void (async () => {
         try {
           const permission = await Location.getForegroundPermissionsAsync();
           if (!permission.granted) return;
           const last = await Location.getLastKnownPositionAsync();
-          if (last && active) setMe({ latitude: last.coords.latitude, longitude: last.coords.longitude });
+          if (!last || !active) return;
+          setMe({ latitude: last.coords.latitude, longitude: last.coords.longitude });
+          setMeFresh(Date.now() - last.timestamp <= FIX_MAX_AGE_MS);
         } catch {
           // The card just does not say how far.
         }
@@ -165,9 +204,18 @@ export default function MapScreen() {
     }),
     [data],
   );
+  // The tab bar floats over the bottom of the map; the attribution has to
+  // sit above it, and on a phone with a home indicator the bar sits higher.
+  const bottomClearance = Math.max(insets.bottom, t.space(2)) + TAB_BAR_CLEARANCE;
+  // The saved view is read here, at rebuild time, rather than listed as a
+  // dependency: every pan would otherwise rebuild the page, which is the one
+  // thing the saved view exists to avoid.
   const html = useMemo(
-    () => (built ? mapHtml(built.pins, { centre: BRISBANE, zoom: DEFAULT_ZOOM, dark: t.mode === 'dark', kinds: DEFAULT_KINDS }) : ''),
-    [built, t.mode],
+    () => (built ? mapHtml(built.pins, {
+      centre: BRISBANE, zoom: DEFAULT_ZOOM, dark: t.mode === 'dark', kinds: DEFAULT_KINDS,
+      view: viewRef.current, bottomClearancePx: bottomClearance,
+    }) : ''),
+    [built, t.mode, bottomClearance],
   );
 
   const selection = useMemo<MapSelection>(() => {
@@ -184,11 +232,14 @@ export default function MapScreen() {
   useEffect(() => { inject(filterScript(kinds, query)); }, [kinds, query]);
   useEffect(() => { inject(placesScript(places)); }, [places]);
   useEffect(() => { inject(selectScript(selection)); }, [selection]);
+  // The dot, never the view: a fix arriving after the page loaded draws
+  // where the technician is and leaves the map where they put it.
+  useEffect(() => { if (me && meFresh) inject(hereScript(me.latitude, me.longitude)); }, [me, meFresh]);
   const pushState = () => {
     inject(filterScript(kinds, query));
     inject(placesScript(places));
     inject(selectScript(selection));
-    if (me) inject(centreScript(me.latitude, me.longitude));
+    if (me && meFresh) inject(hereScript(me.latitude, me.longitude));
   };
 
   const model = useMemo<CardModel | null>(() => {
@@ -222,7 +273,8 @@ export default function MapScreen() {
       verdict: match.verdict,
       evidence: match.evidence.map((e) => e.detail),
       customerExternalId: match.customer?.externalId ?? site?.customerExternalId ?? undefined,
-      customerName: match.customer?.name ?? site?.customerName ?? site?.clientName ?? undefined,
+      customerName: match.customer?.name ?? match.customerName ?? site?.customerName ?? site?.clientName ?? undefined,
+      matched: site ? { address: siteAddressLine(site), distanceM: match.distanceM } : undefined,
       pager: { index: card.index, total: places.length },
     };
   }, [card, data, places, customers, matchSites, pinsById, sitesById]);
@@ -265,9 +317,27 @@ export default function MapScreen() {
         void Haptics.selectionAsync();
         setCard({ type: 'place', index });
       }
+    } else if (msg.type === 'link') {
+      // The attribution. The phone's browser opens it; the map stays put.
+      void Linking.openURL(msg.url).catch(() => undefined);
+    } else if (msg.type === 'view') {
+      viewRef.current = msg.view;
     } else {
       setCard(null);
     }
+  };
+
+  /**
+   * Navigations out of the page go to the phone's browser and never into
+   * the WebView, which has no back button and would otherwise show the
+   * OpenStreetMap copyright page under the search box with no way home.
+   * The page itself loads as about:blank; the stylesheet, the script and
+   * the tiles are sub-resources and never come through here.
+   */
+  const onShouldStartLoad = ({ url }: { url: string }): boolean => {
+    if (url.startsWith('about:')) return true;
+    void Linking.openURL(url).catch(() => undefined);
+    return false;
   };
 
   const submitSearch = async () => {
@@ -310,19 +380,43 @@ export default function MapScreen() {
   const findMe = async () => {
     if (finding) return;
     setFinding(true);
+    setLocationNote(null);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (!permission.granted) {
+        // Once the OS has stopped asking, the only way back on is Settings,
+        // and a button that spins and does nothing does not say so.
+        setLocationNote(permission.canAskAgain
+          ? { text: 'Location was declined, so the map cannot show where you are or place the sites.', action: 'ask' }
+          : { text: 'Location is off for Safe QLD. Turn it on in the phone’s settings to see where you are and to place the sites.', action: 'settings' });
+        return;
+      }
       // Balanced accuracy: this centres a map, and a high-accuracy fix costs
       // seconds and battery for a difference no map tile can show.
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       setMe({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+      setMeFresh(true);
       inject(centreScript(pos.coords.latitude, pos.coords.longitude));
-    } catch {
-      // Quietly: the map is still there, it just is not centred on the technician.
+    } catch (e) {
+      setLocationNote({ text: `Could not get a position (${e instanceof Error ? e.message : String(e)}).`, action: 'ask' });
     } finally {
       setFinding(false);
     }
+  };
+
+  /** Where the card's "add as a site" goes: the new-site form, with the place's name and address carried across. */
+  const addSite = (m: CardModel) => {
+    router.push({
+      pathname: '/site/new',
+      params: {
+        name: m.title,
+        address: m.address,
+        postcode: parseStreet(m.address).postcode ?? '',
+        client: m.verdict === 'our customer, different site' ? (m.customerName ?? '') : '',
+        latitude: String(m.position.latitude),
+        longitude: String(m.position.longitude),
+      },
+    });
   };
 
   const navigate = (app: 'waze' | 'google', at: LatLng) => {
@@ -338,11 +432,27 @@ export default function MapScreen() {
     let line = `${formatCount(built.pins.length)} of ${formatCount(data.sites.length)} sites located`;
     if (locating) {
       line += progress ? ` · locating ${progress.done} of ${progress.total}…` : ' · locating…';
+    } else if (locateFault) {
+      line += ' · not locating';
     }
     if (shown.length !== built.pins.length) line += ` · ${formatCount(shown.length)} shown`;
     if (searching) line += ' · searching…';
     return line;
   })();
+
+  // The note under the status: why the phone's location is off, or why the
+  // geocoder stopped. The count stays beside it — "800 of 3,000 located" is
+  // exactly the figure that matters when the reason is a missing permission.
+  const note: LocationNote | null = locationNote
+    ?? (locateFault?.faultKind === 'permission'
+      ? { text: 'Location is off for Safe QLD, so the sites cannot be placed on the map. Allow it to place them.', action: 'ask' }
+      : locateFault?.fault
+        ? { text: `The phone’s geocoder stopped: ${locateFault.fault}`, action: 'none' }
+        : null);
+  const onNoteAction = () => {
+    if (note?.action === 'settings') void Linking.openSettings().catch(() => undefined);
+    else void findMe();
+  };
 
   const floating = {
     backgroundColor: t.color.bgElevated,
@@ -359,11 +469,15 @@ export default function MapScreen() {
           <WebView
             ref={webRef}
             style={{ flex: 1, backgroundColor: t.color.bg }}
-            originWhitelist={['*']}
             source={{ html }}
             javaScriptEnabled
             domStorageEnabled
             setSupportMultipleWindows={false}
+            // OpenStreetMap's tile policy: every request names the app and
+            // somebody to write to. Appended to the browser's own string on
+            // both platforms; see mapUserAgent for why it is not replaced.
+            applicationNameForUserAgent={mapUserAgent(company.email)}
+            onShouldStartLoadWithRequest={onShouldStartLoad}
             onMessage={onMessage}
             // A rebuilt page starts with nothing selected and the default
             // layers; the current state is pushed back in once it has loaded.
@@ -451,6 +565,30 @@ export default function MapScreen() {
               <Txt size="xs" tone={placeError ? 'warn' : 'muted'} numberOfLines={1}>{placeError ?? status}</Txt>
             </View>
           </View>
+
+          {note ? (
+            <View
+              style={{
+                ...floating,
+                borderLeftWidth: 3,
+                borderLeftColor: t.color.warn,
+                padding: t.space(2.5),
+                gap: t.space(2),
+                flexDirection: 'row',
+                alignItems: 'center',
+              }}
+            >
+              <Txt size="xs" tone="warn" weight="700" style={{ flex: 1, lineHeight: 17 }}>{note.text}</Txt>
+              {note.action !== 'none' ? (
+                <Button
+                  title={note.action === 'settings' ? 'Settings' : 'Allow location'}
+                  variant="secondary"
+                  compact
+                  onPress={onNoteAction}
+                />
+              ) : null}
+            </View>
+          ) : null}
         </View>
 
         {model ? (
@@ -475,7 +613,7 @@ export default function MapScreen() {
               onOpenCustomer={model.customerExternalId
                 ? () => router.push({ pathname: '/customer/[id]', params: { id: model.customerExternalId! } })
                 : undefined}
-              onAddSite={() => router.push('/site/new')}
+              onAddSite={() => addSite(model)}
               onNavigate={(app) => navigate(app, model.position)}
             />
           </View>
@@ -571,6 +709,14 @@ function PlaceCard({
 
         {ours && site && site.name !== model.title ? (
           <Txt size="sm" tone="muted" numberOfLines={1}>Known to us as {site.name}</Txt>
+        ) : null}
+        {ours && model.matched ? (
+          // The site the office holds, beside the place that was searched
+          // for, so "same name" can be checked against where the site is.
+          <Txt size="sm" tone="muted" numberOfLines={2}>
+            Our record: {model.matched.address || 'no address on file'}
+            {model.matched.distanceM !== undefined ? ` · ${formatDistance(model.matched.distanceM)} from this pin` : ''}
+          </Txt>
         ) : null}
         {model.customerName ? (
           <Txt size="sm" tone="muted" numberOfLines={1}>Customer: {model.customerName}</Txt>

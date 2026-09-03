@@ -1,5 +1,5 @@
 import {
-  cents, customerDisplayName, mapAttachment, mapCustomer, mapInvoice, mapItem, mapJobDetail, mapJobRow, mapNote,
+  QUOTE_LIST_COLUMNS, cents, customerDisplayName, mapAttachment, mapCustomer, mapInvoice, mapItem, mapJobDetail, mapJobRow, mapNote,
   mapQuoteDetail, mapQuoteRow, mapSection, mapCostCenter, mapSiteDetail, mapTask, mapTimeline,
   type RawCompany, type RawInvoice, type RawJobDetail, type RawJobRow, type RawQuoteDetail,
 } from '@/simpro/mirrorResources';
@@ -210,8 +210,33 @@ describe('notes, attachments, the timeline and tasks', () => {
       DateAdded: '2026-08-29 08:00:00+10', AddedBy: { ID: 12, Name: 'Sam Okafor', Type: 'employee', TypeId: 12 }, Base64Data: 'AAAA',
     })).toEqual({
       id: 'a1b2', filename: 'panel.jpg', folder: undefined, mimeType: 'image/jpeg', sizeBytes: 20480,
-      dateAdded: '2026-08-29 08:00:00+10', addedBy: 'Sam Okafor', public: true, base64Data: 'AAAA',
+      // The build writes DateAdded with a space and a two-digit offset, which
+      // the phone's engine will not parse; it comes through as ISO.
+      dateAdded: '2026-08-29T08:00:00+10:00', addedBy: 'Sam Okafor', public: true, base64Data: 'AAAA',
     });
+  });
+
+  it('makes the instants the build writes with a space into ISO, and leaves ISO and bare days alone', () => {
+    expect(mapNote({ ID: 1, DateCreated: '2026-08-29 08:00:00+10' }).createdAt).toBe('2026-08-29T08:00:00+10:00');
+    expect(mapNote({ ID: 1, DateCreated: '2026-08-29T08:00:00+10:00' }).createdAt).toBe('2026-08-29T08:00:00+10:00');
+    expect(mapNote({ ID: 1, DateCreated: '2026-08-29 08:00:00+1000' }).createdAt).toBe('2026-08-29T08:00:00+10:00');
+    expect(mapNote({ ID: 1, DateCreated: '2026-08-28 22:00:00Z' }).createdAt).toBe('2026-08-28T22:00:00Z');
+    expect(mapNote({ ID: 1, DateCreated: '2026-08-29' }).createdAt).toBe('2026-08-29');
+    expect(mapNote({ ID: 1, DateCreated: '' }).createdAt).toBeUndefined();
+  });
+
+  it('keeps a customer\'s archived flag unknown when the row did not carry it', () => {
+    // The thin list has no Archived; a row without it must not read as current.
+    expect(mapCustomer({ ID: 1, CompanyName: 'A' }).archived).toBeUndefined();
+    expect(mapCustomer({ ID: 1, CompanyName: 'A', Archived: false }).archived).toBe(false);
+    expect(mapCustomer({ ID: 1, CompanyName: 'A', Archived: true }).archived).toBe(true);
+  });
+
+  it('asks the quote list for the two columns upsertQuote writes whole', () => {
+    // Without them every list pull nulled what the record read had set.
+    for (const column of ['ProjectManager', 'Tags']) {
+      expect({ column, asked: QUOTE_LIST_COLUMNS.split(',').includes(column) }).toEqual({ column, asked: true });
+    }
   });
 
   it('maps the activity feed', () => {
@@ -360,7 +385,7 @@ describe('a customer company', () => {
 
   it('maps an individual by given and family name', () => {
     const c = mapCustomer({ ID: 3, Type: 'Individual', GivenName: 'Ari', FamilyName: 'Nolan' });
-    expect(c).toMatchObject({ id: '3', type: 'Individual', name: 'Ari Nolan', sites: [], contacts: [], archived: false });
+    expect(c).toMatchObject({ id: '3', type: 'Individual', name: 'Ari Nolan', sites: [], contacts: [], archived: undefined });
   });
 });
 
@@ -394,5 +419,18 @@ describe('cents', () => {
     expect(cents(null)).toBeUndefined();
     expect(cents('')).toBeUndefined();
     expect(cents('n/a')).toBeUndefined();
+  });
+
+  it('rounds a three-decimal tie the way the office does: half away from zero', () => {
+    // 1.265 × 100 is 126.49999999999999 in a double; the office shows $1.27.
+    expect(cents(1.265)).toBe(127);
+    expect(cents('1.265')).toBe(127);
+    expect(cents(1.005)).toBe(101);
+    expect(cents(4.015)).toBe(402);
+    expect(cents(-12.345)).toBe(-1235);
+    expect(cents('.5')).toBe(50);
+    expect(cents('5.')).toBe(500);
+    expect(cents(1e-7)).toBe(0);
+    expect(Object.is(cents(0), 0)).toBe(true);
   });
 });

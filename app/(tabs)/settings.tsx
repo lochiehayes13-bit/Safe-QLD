@@ -16,7 +16,7 @@ import { listPhotoFiles } from '@/export/photoFiles';
 import { photoStorageReport } from '@/db/photoRepo';
 import { clearAllDrafts, listDrafts } from '@/hooks/useDraft';
 import type { StorageReport } from '@/domain/photoStore';
-import { attachmentQueueSummary, pendingSyncCount, type AttachmentQueueSummary } from '@/db/opsRepo';
+import { attachmentQueueSummary, failedSync, pendingSyncCount, type AttachmentQueueSummary } from '@/db/opsRepo';
 import { bundledCatalogueSize, startCatalogueSeed } from '@/seed/catalogueSeed';
 import { flushQueue, pullFromSimpro, type SyncProgress } from '@/simpro/sync';
 import { describeStaleness, type SyncState } from '@/simpro/incremental';
@@ -277,10 +277,24 @@ export default function SettingsScreen() {
       const r = await flushQueue(configFor());
       setPending(await pendingSyncCount());
       setAttachments(await attachmentQueueSummary());
-      Alert.alert(
-        'Queue sent',
-        `${r.sent} sent${r.failed ? `, ${r.failed} failed and will retry` : ''}. ${r.remaining} still waiting.`,
-      );
+      /*
+       * "Failed" covers two things the person needs to tell apart: a send
+       * the queue will try again on its own, and one it has given up on,
+       * which only the outbound screen can move. The result does not say
+       * which, so the given-up rows are counted from the queue afterwards.
+       * A run that stopped before the queue was through is neither — the
+       * rows it never reached are untouched, and the reason is the news.
+       */
+      const gaveUp = (await failedSync()).length;
+      const retrying = Math.max(0, r.failed - gaveUp);
+      const lines = [
+        `${r.sent} sent.`,
+        retrying ? `${retrying} will retry.` : null,
+        gaveUp ? `${gaveUp} could not be sent — see Send to the office.` : null,
+        r.stopped ? `Could not send: ${r.stopped.reason}` : null,
+        `${r.remaining} still waiting.`,
+      ].filter((line): line is string => !!line);
+      Alert.alert(r.stopped ? 'Sending stopped' : 'Queue sent', lines.join('\n'));
     } catch (e) {
       Alert.alert('Could not send', e instanceof Error ? e.message : String(e));
     } finally {
@@ -453,7 +467,9 @@ export default function SettingsScreen() {
         <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
           Searching the map for a place that is not one of our sites asks OpenStreetMap, which is free
           and knows every address. A Google Places key finds shops by name as well; each search then
-          costs the account the key belongs to a fraction of a cent.
+          costs the account the key belongs to a fraction of a cent, and the phone’s rough position —
+          to about a kilometre, never the exact spot — goes to Google with each search so the nearest
+          match comes first.
         </Txt>
         <View style={{ height: t.space(3) }} />
         {hasPlaces ? (
@@ -613,13 +629,6 @@ export default function SettingsScreen() {
                 {pullReport.notes.join(' ')}
               </Txt>
             ) : null}
-            {pullReport.margins.length ? (
-              <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
-                Margin at the moment of the pull, for a sanity check only —{' '}
-                {pullReport.margins.map((m) => `${m.name} ${m.percent}%`).join(', ')}. Not saved:
-                the cost rates it was worked out from are dropped on the way in.
-              </Txt>
-            ) : null}
           </>
         ) : null}
       </Card>
@@ -726,7 +735,7 @@ export default function SettingsScreen() {
                 ? `${attachments.pending} photo${attachments.pending === 1 ? '' : 's'} waiting to upload`
                 : 'No photos waiting to upload',
               attachments.unknown ? `${attachments.unknown} sent with no reply` : null,
-              attachments.failed ? `${attachments.failed} could not be sent` : null,
+              attachments.failed ? `${attachments.failed} could not be sent; see Send to the office` : null,
             ].filter(Boolean).join(' · ')}
             {attachments.sent ? ` · ${attachments.sent} uploaded` : ''}
           </Txt>

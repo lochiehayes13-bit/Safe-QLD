@@ -93,6 +93,24 @@ describe('the summary sheet on a service record', () => {
     expect(beside(clean, 'Not tested')).toMatchObject({ v: 0, style: 'default' });
   });
 
+  it('leads with the job number and prints the job\'s customer and the site contact', () => {
+    // Stored, shown on the screen, and never on the sheet the office files by.
+    const numbered: ServiceReport = {
+      ...report, jobNumber: '43747', customerName: 'Example Managing Agent',
+      siteContactName: 'A Manager', siteContactPhone: '0400 000 000',
+    };
+    const s = reportCoverSheet({ ...bundle([testRow('pass')]), report: numbered });
+    expect(beside(s, 'Customer job no.')).toBe('43747');
+    expect(beside(s, 'Client')).toBe('Example Managing Agent');
+    expect(beside(s, 'Site contact')).toBe('A Manager · 0400 000 000');
+    // Without a number the row is left off rather than printed blank, and the
+    // client is the site's.
+    const plain = reportCoverSheet(bundle([testRow('pass')]));
+    expect(beside(plain, 'Customer job no.')).toBeUndefined();
+    expect(beside(plain, 'Site contact')).toBeUndefined();
+    expect(beside(plain, 'Client')).toBe('Example Body Corporate');
+  });
+
   it('counts the critical defects apart from the rest', () => {
     /*
      * The figure on this sheet that decides whether anybody reads the rest of

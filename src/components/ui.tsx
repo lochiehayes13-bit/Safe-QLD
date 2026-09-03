@@ -676,6 +676,53 @@ export function SectionHeader({
 }
 
 /** A dot and a word: the state of a thing, readable in glare and by a colour-blind eye. */
+/**
+ * The search field the long lists share: jobs, quotes and invoices.
+ *
+ * One field in three places rather than three copies, so the clear target
+ * and the hit slop cannot drift apart. The clear control is a full-height
+ * square, not a 20 dp glyph: a gloved thumb that misses the glyph lands in
+ * the field and raises the keyboard instead. The negative margin lets the
+ * square reach the box's edge without widening the row.
+ */
+export function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+  const t = useTheme();
+  return (
+    <View
+      style={{
+        flexDirection: 'row', alignItems: 'center', gap: t.space(2),
+        backgroundColor: t.color.surfaceAlt, borderRadius: t.radius.md,
+        borderWidth: StyleSheet.hairlineWidth, borderColor: t.color.border,
+        paddingHorizontal: t.space(3), minHeight: t.touch,
+      }}
+    >
+      <MaterialCommunityIcons name="magnify" size={20} color={t.color.textFaint} />
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        placeholder={placeholder}
+        placeholderTextColor={t.color.textFaint}
+        autoCapitalize="none"
+        autoCorrect={false}
+        clearButtonMode="while-editing"
+        returnKeyType="search"
+        style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md, minHeight: t.touch }}
+      />
+      {value ? (
+        <Pressable
+          onPress={() => onChange('')}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Clear search"
+          style={{ minWidth: t.touch, minHeight: t.touch, alignItems: 'center', justifyContent: 'center', marginRight: -t.space(3) }}
+        >
+          <MaterialCommunityIcons name="close-circle" size={20} color={t.color.textFaint} />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 export function StatusPill({ label, tone }: { label: string; tone: 'pass' | 'fail' | 'warn' | 'info' | 'muted' }) {
   const t = useTheme();
   const fg = { pass: t.color.pass, fail: t.color.fail, warn: t.color.warn, info: t.color.info, muted: t.color.textMuted }[tone];

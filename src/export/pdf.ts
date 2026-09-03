@@ -1,6 +1,6 @@
 import type { CauseEffectRule, Panel, TestRow } from '@/domain/types';
 import { DEVICE_TYPE_LABEL } from '@/parsers/deviceType';
-import { formatAuDate, matrixColumns, type ReportBundle } from './sheets';
+import { formatAuDate, matrixColumns, reportCustomer, reportSiteContact, type ReportBundle } from './sheets';
 
 /**
  * HTML report templates rendered to PDF by expo-print.
@@ -142,6 +142,10 @@ export function serviceReportHtml(
   const untested = testRows.filter((r) => r.result === 'untested').length;
 
   const siteAddress = [site.address, site.suburb, site.state, site.postcode].filter(Boolean).join(' ');
+  // What the office files the document by, and who it goes to. Both were on
+  // the report and on the screen and never on the page.
+  const jobNumber = report.jobNumber?.trim();
+  const siteContact = reportSiteContact(b);
 
   const checksBySection = new Map<string, typeof checkRows>();
   for (const c of checkRows) {
@@ -153,14 +157,16 @@ export function serviceReportHtml(
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${BASE_CSS}</style></head><body>
 <div class="brandbar"></div>
 <h1>${esc(report.title)}</h1>
-<div class="sub">${esc(site.name)}${siteAddress ? ` &middot; ${esc(siteAddress)}` : ''}</div>
+<div class="sub">${jobNumber ? `Customer Job No. ${esc(jobNumber)} &middot; ` : ''}${esc(site.name)}${siteAddress ? ` &middot; ${esc(siteAddress)}` : ''}</div>
 
 <table class="meta">
+  ${jobNumber ? `<tr><td>Customer job no.</td><td>${esc(jobNumber)}</td></tr>` : ''}
   <tr><td>Service type</td><td>${esc(report.frequency)}</td></tr>
   <tr><td>Service date</td><td>${esc(formatAuDate(report.serviceDate))}</td></tr>
   <tr><td>Panel</td><td>${esc(panel ? `${panel.name}${panel.model ? ` (${panel.model})` : ''}` : 'All panels on site')}</td></tr>
-  <tr><td>Client</td><td>${esc(site.clientName)}</td></tr>
+  <tr><td>Client</td><td>${esc(reportCustomer(b))}</td></tr>
   <tr><td>Site reference</td><td>${esc(site.siteRef)}</td></tr>
+  ${siteContact ? `<tr><td>Site contact</td><td>${esc(siteContact)}</td></tr>` : ''}
   <tr><td>Technician</td><td>${esc(report.technicianName)}${report.technicianLicence ? ` &middot; Licence ${esc(report.technicianLicence)}` : ''}</td></tr>
   <tr><td>Company</td><td>${esc(report.companyName)}</td></tr>
 </table>

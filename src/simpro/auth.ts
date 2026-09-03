@@ -102,7 +102,13 @@ export async function signInInBrowser(config: SimproConfig): Promise<CurrentUser
     );
   }
   if (!redirect.code) {
-    throw new SimproError(`Simpro came back without a login code. The browser returned: ${result.url}`);
+    // The parameter names only, never the URL itself: whatever the build put
+    // in it — a token, a session id — would otherwise be printed on screen.
+    const carried = Object.keys(redirect).join(', ') || 'no parameters';
+    throw new SimproError(
+      `Simpro came back without a login code (the redirect carried ${carried}). `
+      + `Check the Redirect URI on the API application in Simpro is exactly ${REDIRECT_URI}.`,
+    );
   }
   if (redirect.state !== state) {
     // A code this app did not ask for is not one it will exchange.

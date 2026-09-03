@@ -134,3 +134,31 @@ export function newId(): string {
 export function nowIso(): string {
   return new Date().toISOString();
 }
+
+/**
+ * The same rule as inTransaction in src/db/index.ts, which cannot be
+ * imported here because that file opens expo-sqlite at load: work joins a
+ * transaction already open on the connection rather than opening a second.
+ */
+export interface TransactionalDb {
+  withTransactionAsync(work: () => Promise<void>): Promise<void>;
+}
+
+const open = new WeakSet<object>();
+
+export async function inTransaction(db: TransactionalDb, work: () => Promise<void>): Promise<void> {
+  if (open.has(db)) {
+    await work();
+    return;
+  }
+  open.add(db);
+  try {
+    await db.withTransactionAsync(work);
+  } finally {
+    open.delete(db);
+  }
+}
+
+export function transactionIsOpen(db: TransactionalDb): boolean {
+  return open.has(db);
+}

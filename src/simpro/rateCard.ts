@@ -10,16 +10,17 @@
  *  - Simpro has no normal/after-hours flag on a rate. The band lives in the
  *    rate's name, which means reading it is an inference, not a fact. Every
  *    inference is reported alongside the rate it was made about.
- *  - Cost rates are deliberately dropped on the way in. A phone that never
- *    holds a cost rate cannot leak a margin, and a technician has no use for
- *    one. The margin is computed once here so the pull can be sanity-checked,
- *    and is not stored.
+ *  - Cost rates and markups are deliberately dropped on the way in, and no
+ *    figure worked out from them — a margin, a percentage — leaves this
+ *    module either, not even in a note. A phone that never holds any of
+ *    them cannot show one, and a technician has no use for one. What the
+ *    office wants to sanity-check belongs in the office toolkit.
  *
  * Nothing here calls the network. It takes the JSON and returns the card.
  */
 
 import {
-  GST, marginFraction, suspectRateNames,
+  GST, suspectRateNames,
   type HoursBand, type LabourRate, type ServiceFee,
 } from '@/domain/rates';
 
@@ -72,8 +73,6 @@ export interface RateCardImport {
    * to the card so nothing derived is mistaken for something Simpro said.
    */
   notes: string[];
-  /** Margin per rate at the moment of the pull, for a sanity check. Not stored. */
-  margins: { name: string; percent: number }[];
   /** Rate names carrying a customer the app has never heard of. */
   suspect: string[];
   /** Records that could not be turned into a rate or a fee, and why. */
@@ -159,6 +158,11 @@ function withinOneEdit(a: string, b: string): boolean {
  * the product. Where a build also returns a sell rate outright it wins, and a
  * disagreement between the two is reported rather than averaged — a quote is a
  * document someone signs, and two answers means one of them is wrong.
+ *
+ * The notes say that a figure was derived and never what from. A markup
+ * percentage beside the sell rate it produced is the cost rate one division
+ * away, on a screen a technician reads in a customer's plant room; the
+ * multiplier is named because it is neither cost nor markup.
  */
 export function sellCentsFor(raw: RawLabourRate): { sellCents?: number; note?: string } {
   const explicit = num(raw.SellRate);
@@ -178,8 +182,8 @@ export function sellCentsFor(raw: RawLabourRate): { sellCents?: number; note?: s
     if (Math.abs(a - b) > 1) {
       return {
         sellCents: a,
-        note: `${raw.Name ?? 'A rate'}: Simpro's sell rate and its cost-plus-markup disagree ` +
-          `(${(a / 100).toFixed(2)} against ${(b / 100).toFixed(2)}). The sell rate is used.`,
+        note: `${raw.Name ?? 'A rate'}: Simpro's sell rate and its cost-plus-markup disagree; ` +
+          `the sell rate (${(a / 100).toFixed(2)}) is used.`,
       };
     }
     return { sellCents: a };
@@ -189,7 +193,7 @@ export function sellCentsFor(raw: RawLabourRate): { sellCents?: number; note?: s
     const mult = multiplier !== undefined && multiplier !== 1 ? ` and a ${multiplier}× multiplier` : '';
     return {
       sellCents: cents(derived),
-      note: `${raw.Name ?? 'A rate'}: sell rate worked out from cost plus ${markup}% markup${mult}, ` +
+      note: `${raw.Name ?? 'A rate'}: sell rate worked out from cost plus markup${mult}, ` +
         'because Simpro did not give one outright.',
     };
   }
@@ -207,10 +211,9 @@ const taxFraction = (raw: { TaxCode?: { Rate?: number | string } }): number => {
 export function mapLabourRates(
   raw: readonly RawLabourRate[],
   customers: readonly string[] = [],
-): Pick<RateCardImport, 'rates' | 'notes' | 'margins' | 'suspect' | 'skipped'> {
+): Pick<RateCardImport, 'rates' | 'notes' | 'suspect' | 'skipped'> {
   const rates: LabourRate[] = [];
   const notes: string[] = [];
-  const margins: { name: string; percent: number }[] = [];
   const skipped: { name: string; reason: string }[] = [];
 
   for (const r of raw) {
@@ -231,17 +234,6 @@ export function mapLabourRates(
     const band = bandFromName(name);
     const kind = kindFromName(name);
     const customerName = customerFromName(name, customers);
-
-    // Computed here and thrown away with the cost rate: the office can check
-    // the pull once, and the device never holds enough to reveal a margin.
-    const cost = num(r.CostRate);
-    if (cost !== undefined && cost > 0) {
-      const m = marginFraction({
-        id: '', name, costCentsPerHour: cents(cost), sellCentsPerHour: sellCents,
-        taxRate: GST, efficiencyMultiplier: 1, kind, hours: band,
-      });
-      if (m !== null) margins.push({ name, percent: Math.round(m * 1000) / 10 });
-    }
 
     rates.push({
       id: String(r.ID ?? name),
@@ -267,7 +259,7 @@ export function mapLabourRates(
   }
 
   const suspect = suspectRateNames(rates, [...customers]);
-  return { rates, notes, margins, suspect, skipped };
+  return { rates, notes, suspect, skipped };
 }
 
 const feeCharge = (f: RawServiceFee): number | undefined =>
@@ -347,7 +339,6 @@ export function buildRateCard(
     rates: labour.rates,
     fees: fee.fees,
     notes,
-    margins: labour.margins,
     suspect: labour.suspect,
     skipped: [...labour.skipped, ...fee.skipped],
   };

@@ -1,6 +1,8 @@
 import type { SimproClient } from './client';
 import { buildRateCard, type RateCardImport, type RawLabourRate, type RawServiceFee } from './rateCard';
 import { JOB_LIST_COLUMNS, SIMPRO_PATHS, mapJobRow, type RawJobRow, type SimproJob } from './mirrorResources';
+import { htmlToText } from '@/domain/simproText';
+import { qldIsoDay } from '@/domain/qldTime';
 
 /**
  * The job shape now lives with the rest of the mirror in ./mirrorResources;
@@ -33,6 +35,7 @@ interface RawSite {
   Address?: { Address?: string; City?: string; State?: string; PostalCode?: string };
   Customers?: RawRef[];
   PrimaryContact?: RawContact;
+  PublicNotes?: string;
   Archived?: boolean;
   DateModified?: string;
 }
@@ -86,6 +89,10 @@ export interface SimproSite {
   contactEmail?: string;
   contactWorkPhone?: string;
   contactMobile?: string;
+  /** Simpro's customer number for the site, off the list's Customers. */
+  customerExternalId?: string;
+  /** The office's public notes, plain text. Undefined where the list did not carry them. */
+  publicNotes?: string;
   archived?: boolean;
 }
 
@@ -203,18 +210,35 @@ export class SimproResources {
     return (await this.sitesPaged(maxRecords, query)).sites;
   }
 
-  /** The same read, saying whether the ceiling cut it short. */
+  /**
+   * The same read, saying whether the ceiling cut it short.
+   *
+   * The public notes are asked for with the rest, and asked for again
+   * without them if the build refuses the column: the notes are worth a
+   * second first page, and not worth the whole site list. `columnsRejected`
+   * carries the refusal in the server's words, and the notes are then
+   * absent from every row rather than blank — the sync must not clear what
+   * a read of the site's own record put there.
+   */
   async sitesPaged(
     maxRecords = 20000,
     query: Record<string, string> = {},
-  ): Promise<{ sites: SimproSite[]; truncated: boolean }> {
-    const { items, truncated } = await this.client.listAllPaged<RawSite>(
-      'sites/',
-      { columns: 'ID,Name,Address,Customers,PrimaryContact,Archived,DateModified', ...query },
-      maxRecords,
-    );
+  ): Promise<{ sites: SimproSite[]; truncated: boolean; columnsRejected?: string }> {
+    const verified = 'ID,Name,Address,Customers,PrimaryContact,Archived,DateModified';
+    let columnsRejected: string | undefined;
+    let read: { items: RawSite[]; truncated: boolean };
+    try {
+      read = await this.client.listAllPaged<RawSite>('sites/', { columns: `${verified},PublicNotes`, ...query }, maxRecords);
+    } catch (e) {
+      const status = (e as { status?: unknown } | null)?.status;
+      if (status !== 422) throw e;
+      columnsRejected = e instanceof Error ? e.message : String(e);
+      read = await this.client.listAllPaged<RawSite>('sites/', { columns: verified, ...query }, maxRecords);
+    }
+    const { items, truncated } = read;
     return {
       truncated,
+      columnsRejected,
       sites: items.map((s) => {
         const c = s.PrimaryContact;
         const contactName = [str(c?.GivenName), str(c?.FamilyName)].filter(Boolean).join(' ');
@@ -226,6 +250,8 @@ export class SimproResources {
           state: str(s.Address?.State) ?? 'QLD',
           postcode: str(s.Address?.PostalCode),
           customerName: str(s.Customers?.[0]?.Name),
+          customerExternalId: s.Customers?.[0]?.ID !== undefined ? String(s.Customers[0].ID) : undefined,
+          publicNotes: columnsRejected ? undefined : htmlToText(s.PublicNotes) || undefined,
           contactName: contactName || undefined,
           contactEmail: str(c?.Email),
           contactWorkPhone: str(c?.WorkPhone),
@@ -400,7 +426,9 @@ export class SimproResources {
       body: {
         LastTest: {
           Result: result,
-          Date: dateIso.slice(0, 10),
+          // The Queensland day, not the UTC one: before ten in the morning
+          // those differ, and this company starts at seven.
+          Date: qldIsoDay(dateIso) ?? dateIso,
           ServiceLevel: { ID: Number(serviceLevelId) },
         },
       },
@@ -434,7 +462,9 @@ export class SimproResources {
         })),
       },
     });
-    return { id: data.ID !== undefined ? String(data.ID) : undefined };
+    // A 204, or a 2xx with nothing in it, resolves with no body at all: the
+    // order was raised, its number just was not handed back.
+    return { id: data?.ID !== undefined ? String(data.ID) : undefined };
   }
 
   /**

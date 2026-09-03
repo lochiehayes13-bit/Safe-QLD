@@ -1,8 +1,11 @@
+import * as SecureStore from 'expo-secure-store';
 import {
   GOOGLE_FIELD_MASK, GOOGLE_PLACES_URL, NOMINATIM_MIN_GAP_MS, NOMINATIM_URL, USER_AGENT,
-  createPacer, googlePlacesBody, mapGooglePlaces, mapNominatim, nominatimUrl, searchPlaces,
+  coarsePosition, createPacer, googlePlacesBody, mapGooglePlaces, mapNominatim, nominatimUrl, searchPlaces,
   type FetchLike, type FetchResponse,
 } from '@/geo/places';
+import { readPlacesKey, storePlacesKey } from '@/geo/placesKey';
+import { addressMatches, matchPlace } from '@/domain/customerMatch';
 
 /**
  * The place search.
@@ -95,13 +98,25 @@ describe('the Nominatim request', () => {
       },
       {
         id: 'osm:123457',
-        name: '40',
-        address: 'Fictional Parade, Springfield, Ipswich City, Queensland, 4300',
+        name: '40 Fictional Parade',
+        address: '40, Fictional Parade, Springfield, Ipswich City, Queensland, 4300',
         latitude: -27.66,
         longitude: 152.92,
         source: 'osm',
       },
     ]);
+  });
+
+  it('keeps the house number on an unnamed address, so it still matches a site of ours', () => {
+    // An address a caller read out has no name, and Nominatim's chain
+    // starts with the number on its own. Taken off as if it were the name,
+    // the matcher was handed a street with no number and matched nothing.
+    const place = mapNominatim(NOMINATIM_ROWS).find((p) => p.id === 'osm:123457')!;
+    const site = { id: 's', name: 'Riverbend Plaza', address: '40 Fictional Pde', suburb: 'Springfield', postcode: '4300' };
+    expect(addressMatches(place, site)).toEqual({ ok: true });
+    const m = matchPlace(place, [site]);
+    expect(m.verdict).toBe('our site');
+    expect(m.evidence).toEqual([{ signal: 'address', detail: '40 Fictional Pde, Springfield 4300' }]);
   });
 
   it('is an empty list for an answer that is not a list', () => {
@@ -173,6 +188,23 @@ describe('the Google Places request', () => {
 
   it('leaves the bias out when the phone does not know where it is', () => {
     expect(googlePlacesBody('x')).toEqual({ textQuery: 'x', regionCode: 'AU', languageCode: 'en-AU', maxResultCount: 5 });
+  });
+
+  it('blurs the bias to about a kilometre before it leaves the phone', () => {
+    // The exact fix says which driveway the technician is parked in; two
+    // decimals of a degree say which suburb, which is all a bias needs.
+    expect(coarsePosition({ latitude: -27.471234, longitude: 153.023456 })).toEqual({ latitude: -27.47, longitude: 153.02 });
+    const body = googlePlacesBody('x', { near: { latitude: -27.471234, longitude: 153.023456 } });
+    expect(body.locationBias).toEqual({ circle: { center: { latitude: -27.47, longitude: 153.02 }, radius: 50000 } });
+    expect(JSON.stringify(body)).not.toContain('27.471234');
+  });
+
+  it('keeps the key on device-only, unlocked-only terms in the keystore', async () => {
+    const spy = jest.spyOn(SecureStore, 'setItemAsync');
+    await storePlacesKey('  test-key  ');
+    expect(spy).toHaveBeenCalledWith('safeqld.google.places', 'test-key', { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
+    expect(await readPlacesKey()).toBe('test-key');
+    spy.mockRestore();
   });
 
   it('maps the places and drops one with no location', () => {

@@ -36,18 +36,31 @@ export function decodeEntities(text: string): string {
   });
 }
 
+/**
+ * The tags the office's editor writes, and the few a pasted page might add.
+ *
+ * Named rather than matched as "any word in angle brackets", because a
+ * technician's plain text has angle brackets in it too — "Zone 4 <fault>:
+ * replace detector" — and treating that as markup deleted the word.
+ */
+const KNOWN_TAG = /<\/?(?:p|div|br|li|ul|ol|span|strong|b|i|em|u|a|font|table|tbody|thead|tr|td|th|h[1-6]|blockquote|pre|script|style|section|article|header|footer)\b[^>]*>/i;
+
 /** Whether a string carries markup at all, so plain text is not run through the stripper needlessly. */
 export function looksLikeHtml(text: string): boolean {
-  return /<[a-z!/][^>]*>/i.test(text) || /&(?:#\d+|#x[0-9a-f]+|[a-z]+);/i.test(text);
+  return KNOWN_TAG.test(text) || /<!--/.test(text) || /&(?:#\d+|#x[0-9a-f]+|[a-z]+);/i.test(text);
 }
 
 /**
  * Plain text out of Simpro's HTML.
  *
  * Block closes and `<br>` become newlines, list items get a dash, every other
- * tag is dropped, entities are decoded, and whitespace is tidied: runs of
- * spaces collapse, more than one blank line collapses to one, and each line is
- * trimmed. Text with no markup comes back trimmed and otherwise untouched.
+ * known tag is dropped, entities are decoded, and whitespace is tidied: runs
+ * of spaces collapse, more than one blank line collapses to one, and each
+ * line is trimmed. Text with no markup comes back trimmed and otherwise
+ * untouched, angle brackets included.
+ *
+ * Block ends go before list items so a nested list — `</li></ul>` between
+ * two items — does not leave a blank line and a stray dash between them.
  */
 export function htmlToText(html: string | null | undefined): string {
   if (!html) return '';
@@ -59,9 +72,9 @@ export function htmlToText(html: string | null | undefined): string {
     // Script and style bodies are not prose, whatever the box did.
     .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
     .replace(LINE_BREAK, '\n')
-    .replace(LIST_ITEM, '\n- ')
     .replace(BLOCK_END, '\n')
-    .replace(ANY_TAG, '');
+    .replace(LIST_ITEM, '\n- ')
+    .replace(ANY_TAG, (tag) => (KNOWN_TAG.test(tag) || /^<!--/.test(tag) ? '' : tag));
 
   return decodeEntities(withBreaks)
     // A non-breaking space is a space to a phone screen.
@@ -70,6 +83,8 @@ export function htmlToText(html: string | null | undefined): string {
     .map((line) => line.replace(/[ \t]+/g, ' ').trim())
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
+    // A list item after a block end is one line down, not two.
+    .replace(/\n\n- /g, '\n- ')
     .trim();
 }
 

@@ -2,8 +2,8 @@ import type { DeviceType, TestRow } from '@/domain/types';
 import type { BoosterTest, FlowTest, Form72, SprinklerFlowTest } from '@/domain/form72';
 import { SECTION_ORDER, SYSTEM_FOR_TYPE } from '@/domain/reportSections';
 import { SYSTEM_COLUMNS, SYSTEM_LABEL, type RegisterSystem } from '@/parsers/assetRegister';
-import { assetTypeById, type SystemKind } from '@/seed/assetTypes';
-import { SYSTEM_TO_INSTALLATION, installationForSystem } from '@/domain/statementEvidence';
+import { SYSTEM_LABELS, assetTypeById, type SystemKind } from '@/seed/assetTypes';
+import { installationForSystem } from '@/domain/statementEvidence';
 import { qldIsoDay } from '@/domain/qldTime';
 
 /**
@@ -94,16 +94,39 @@ export function assetTag(asset: RegisterAsset): string | undefined {
   return str(asset.attributes['assetNumber']) ?? str(asset.attributes['tag']) ?? str(asset.code);
 }
 
-/** Case-insensitive lookup, because the office's headings are not consistent about case. */
+/**
+ * A heading reduced to what two people typing it would agree on: case,
+ * spacing and punctuation dropped, "&" read as "and". The Simpro sync keeps
+ * the office's custom-field names verbatim, and the office is not consistent
+ * about "Equipment Type & Size" against "Equipment type and size".
+ */
+export function headingKey(heading: string): string {
+  return heading.toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+/** Lookup by heading, tolerant of case, spacing and punctuation. */
 function attribute(asset: RegisterAsset, key: string): string | undefined {
   const direct = str(asset.attributes[key]);
   if (direct) return direct;
-  const wanted = key.toLowerCase();
+  const wanted = headingKey(key);
   for (const [k, v] of Object.entries(asset.attributes)) {
-    if (k.toLowerCase() === wanted) return str(v);
+    if (headingKey(k) === wanted) return str(v);
   }
   return undefined;
 }
+
+/**
+ * Headings the office has used for the type-and-size descriptor, tried in
+ * turn when the system's own column is not on the asset. The live Simpro
+ * asset types keep "Equipment Type" and "Battery Sizes" as two fields where
+ * the CSV register has one "Equipment Type & Batt Sizes" column, so the
+ * system's column alone found nothing on a synced pumpset.
+ */
+const DESCRIPTOR_HEADINGS = [
+  'Extinguisher Type', 'Blanket Type & Size', 'Emergency Light Type & Size', 'Equipment Type & Size',
+  'Equipment Type & Batt Sizes', 'Equipment Type & Batt Type', 'Equipment Type', 'Type & Size',
+  'Size mm RG / QRT', 'EWIS Brand', 'Dimensions, Lockset, Closer', 'Doorset', 'Type',
+];
 
 /**
  * The type-and-size descriptor: "ABE 4.5kg", "Wet 100mm", "2 x 18W".
@@ -113,7 +136,13 @@ function attribute(asset: RegisterAsset, key: string): string | undefined {
  * register's report columns already know.
  */
 export function assetDescriptor(asset: RegisterAsset, system: RegisterSystem = registerSystemFor(asset.assetTypeId)): string | undefined {
-  return attribute(asset, 'descriptor') ?? attribute(asset, SYSTEM_COLUMNS[system].descriptor);
+  const own = attribute(asset, 'descriptor') ?? attribute(asset, SYSTEM_COLUMNS[system].descriptor);
+  if (own) return own;
+  for (const heading of DESCRIPTOR_HEADINGS) {
+    const found = attribute(asset, heading);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 /** The register's label for the type, with the descriptor where it has one. */
@@ -389,6 +418,15 @@ export function form72FromAssets(assets: readonly RegisterAsset[]): Form72Prefil
   return prefill;
 }
 
+/** "Pump room (rated 16 L/s at 700 kPa)" — the duty named as the pump's, not as the system's requirement. */
+function pumpLine(p: Form72Pump): string {
+  const duty = [
+    p.ratedFlowLps !== undefined ? `${p.ratedFlowLps} L/s` : undefined,
+    p.ratedPressureKpa !== undefined ? `${p.ratedPressureKpa} kPa` : undefined,
+  ].filter(Boolean).join(' at ');
+  return duty ? `${p.location} (pump rated ${duty})` : p.location;
+}
+
 /** The parts of a Form 72 the register can fill. Structurally a Form72Patch. */
 export type Form72PrefillPatch = {
   systemLabel?: string;
@@ -430,24 +468,22 @@ export function applyForm72Prefill(
   }
   if (flowChanged) patch.flowTest = flow;
 
+  /*
+   * The pump's rated duty goes into the comments, beside the pump, and no
+   * further. Part E's required flow and pressure are the brigade booster
+   * inlet requirement for the system, which is a design figure the register
+   * does not hold; the pump's discharge duty is a different quantity, and
+   * writing it into the required fields had the booster test judged against
+   * the wrong number under a licensee's signature.
+   */
   const booster: BoosterTest = { ...form.booster };
-  let boosterChanged = false;
   if (!booster.comments?.trim() && (prefill.boosterLocations.length || prefill.pumps.length)) {
     const lines: string[] = [];
     if (prefill.boosterLocations.length) lines.push(`Booster assembly: ${prefill.boosterLocations.join('; ')}`);
-    if (prefill.pumps.length) lines.push(`Fire pump: ${prefill.pumps.map((p) => p.location).join('; ')}`);
+    if (prefill.pumps.length) lines.push(`Fire pump: ${prefill.pumps.map(pumpLine).join('; ')}`);
     booster.comments = lines.join('\n');
-    boosterChanged = true;
+    patch.booster = booster;
   }
-  // The duty is only taken where one pump states it. Two pumps with two duties
-  // is a question for the technician, not an average.
-  const dutied = prefill.pumps.filter((p) => p.ratedFlowLps !== undefined && p.ratedPressureKpa !== undefined);
-  if (dutied.length === 1 && booster.requiredLps === undefined && booster.requiredKpa === undefined) {
-    booster.requiredLps = dutied[0]!.ratedFlowLps;
-    booster.requiredKpa = dutied[0]!.ratedPressureKpa;
-    boosterChanged = true;
-  }
-  if (boosterChanged) patch.booster = booster;
 
   if (!form.sprinklerFlow.testPoints.length && prefill.sprinklerTestPoints.length) {
     patch.sprinklerFlow = {
@@ -492,8 +528,55 @@ export interface RegisterEvidence {
   total: number;
 }
 
-/** The installations the register is able to name at all. */
-const NAMEABLE = new Set(Object.values(SYSTEM_TO_INSTALLATION).filter((v): v is string => Boolean(v)));
+/**
+ * The register's own system for an asset, where one was recorded.
+ *
+ * Fire and smoke doors share one asset type, and the type alone cannot say
+ * which row a door belongs on. A sync or import that knows the register it
+ * read from can leave it here; nothing is assumed where it did not.
+ */
+function recordedRegisterSystem(asset: RegisterAsset): RegisterSystem | undefined {
+  const v = str(asset.attributes['registerSystem']);
+  return v === 'smoke-door' || v === 'fire-door' ? v : undefined;
+}
+
+/**
+ * The Schedule 2 row an asset speaks for, or why it does not.
+ *
+ * Two types are handled before the broad system is asked. A fire blanket is
+ * filed under the extinguisher system for servicing but is not one of the
+ * twenty-one prescribed installations, and counting it made a kitchen with
+ * two blankets and no extinguishers read "Fire extinguishers: present". A
+ * door is either a fire doorset or a smoke doorset and the asset type does
+ * not say which — both registers create the same type — so a door answers
+ * neither row unless the register it came from was recorded on it.
+ */
+function installationForAsset(asset: RegisterAsset, system: SystemKind): ReturnType<typeof installationForSystem> {
+  if (asset.assetTypeId === 'fire-blanket') return installationForSystem('fire-blanket');
+  if (system === 'door') {
+    const recorded = recordedRegisterSystem(asset);
+    if (recorded) return installationForSystem(recorded);
+    return {
+      why: 'fire doorsets and smoke doorsets share one asset type and the register does not say which '
+        + 'this door is, so neither row can be answered from it',
+    };
+  }
+  return installationForSystem(system);
+}
+
+/**
+ * The installations the register is able to name at all — those some asset
+ * system reaches through installationForAsset. Only these can be proposed as
+ * not present: a row no asset could ever have hit, "Smoke doorsets" being the
+ * one that bit, was being struck off every site that held any equipment.
+ * Doors are left out because a door cannot answer either door row.
+ */
+const NAMEABLE: ReadonlySet<string> = new Set(
+  (Object.keys(SYSTEM_LABELS) as SystemKind[])
+    .filter((kind) => kind !== 'door')
+    .map((kind) => installationForSystem(kind).installation)
+    .filter((v): v is string => Boolean(v)),
+);
 
 /**
  * What the register says about each prescribed installation.
@@ -502,7 +585,10 @@ const NAMEABLE = new Set(Object.values(SYSTEM_TO_INSTALLATION).filter((v): v is 
  * register holds this site's equipment and none of it is that installation —
  * and only for installations the register could have named, so "Emergency
  * lifts" stays unanswered rather than being struck off a form on the strength
- * of a register that never lists lifts.
+ * of a register that never lists lifts. And absent is a note for the
+ * summary, not an answer: the register is Safe QLD's serviced-equipment
+ * list, not the building's, and a row another contractor maintains is not
+ * struck because it is not on our file.
  */
 export function occupierEvidenceFromAssets(assets: readonly RegisterAsset[]): RegisterEvidence {
   const counts = new Map<string, InstallationEvidence>();
@@ -516,7 +602,7 @@ export function occupierEvidenceFromAssets(assets: readonly RegisterAsset[]): Re
     if (!type) { unrecognised++; continue; }
     if (!isServiceable(asset)) continue;
     total++;
-    const where = installationForSystem(type.system);
+    const where = installationForAsset(asset, type.system);
     if (!where.installation) {
       const entry = unplaced.get(type.label) ?? { label: type.label, count: 0, why: where.why ?? '' };
       entry.count++;
@@ -541,6 +627,10 @@ export function occupierEvidenceFromAssets(assets: readonly RegisterAsset[]): Re
     if (found) installations.push(found);
     else if (total > 0) installations.push({ installation: name, knowledge: 'absent', assetCount: 0 });
   }
+  // A door row a recorded register system did name: present, never absent.
+  for (const [name, found] of counts) {
+    if (!NAMEABLE.has(name)) installations.push(found);
+  }
 
   return {
     installations,
@@ -561,10 +651,15 @@ export interface OccupierRowLike {
 /**
  * Lays the register's evidence onto the statement's rows.
  *
- * A row the register can speak to is answered from it — present or not — and
- * carries the dates the register holds. A row it cannot speak to is left
- * exactly as the occupier had it. The statement stays theirs: every answer
- * here is a proposal they can change on the screen.
+ * A row the register holds equipment for is ticked and carries the dates
+ * the register holds. A row it holds nothing for is left as the occupier had
+ * it: the register is the equipment Safe QLD services, not everything in the
+ * building, and a fire indicator panel another company maintains is still
+ * there. Lowering a tick on the strength of our silence struck it from a
+ * statement that goes to the Commissioner — so the prefill only ever raises,
+ * and the screen names the rows we hold nothing for so they are checked.
+ * The statement stays theirs: every answer here is a proposal they can
+ * change on the screen.
  */
 export function prefillOccupierRows<R extends OccupierRowLike>(rows: readonly R[], evidence: RegisterEvidence): R[] {
   const byName = new Map(evidence.installations.map((e) => [e.installation, e]));
@@ -573,7 +668,7 @@ export function prefillOccupierRows<R extends OccupierRowLike>(rows: readonly R[
     if (!found || found.knowledge === 'unknown') return row;
     return {
       ...row,
-      present: found.knowledge === 'present',
+      present: row.present || found.knowledge === 'present',
       lastMaintainedDate: found.lastMaintainedDate ?? row.lastMaintainedDate,
       nextDueDate: found.nextDueDate ?? row.nextDueDate,
     };

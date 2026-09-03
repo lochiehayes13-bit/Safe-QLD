@@ -1,4 +1,4 @@
-import { getDb, newId, nowIso } from './index';
+import { getDb, inTransaction, newId, nowIso } from './index';
 import { ASSET_TYPES, type SystemKind } from '@/seed/assetTypes';
 import { DEFECT_LIBRARY } from '@/seed/defectLibrary';
 
@@ -99,7 +99,7 @@ const hydrateEvent = (r: EventRow): AssetEvent => ({
  */
 export async function seedReferenceData(): Promise<void> {
   const db = await getDb();
-  await db.withTransactionAsync(async () => {
+  await inTransaction(db, async () => {
     for (const [i, t] of ASSET_TYPES.entries()) {
       await db.runAsync(
         `INSERT INTO asset_type (id,label,system,icon,attributes,container,sortIndex)
@@ -162,10 +162,16 @@ export async function queryAssets(q: AssetQuery): Promise<AssetRecord[]> {
   }
 
   args.push(q.limit ?? 2000);
+  // An outer join, so an asset whose type the app does not know is still in
+  // the register. With an inner join such an asset was on no screen and no
+  // form: the test sheet said every asset was already on it, Form 72 said
+  // "none in the register", and the occupier prefill proposed the
+  // installation as not present, with nothing anywhere saying equipment had
+  // been dropped. Unknown types sort last.
   const rows = await db.getAllAsync<AssetRow>(
-    `SELECT a.* FROM asset a JOIN asset_type t ON a.assetTypeId = t.id
+    `SELECT a.* FROM asset a LEFT JOIN asset_type t ON a.assetTypeId = t.id
      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-     ORDER BY t.sortIndex, a.level, a.room, a.name LIMIT ?`,
+     ORDER BY COALESCE(t.sortIndex, 100000), a.level, a.room, a.name LIMIT ?`,
     ...args,
   );
   return rows.map(hydrate);
@@ -349,9 +355,9 @@ export async function deleteAsset(id: string): Promise<void> {
 export async function assetCountsBySystem(siteId: string): Promise<{ system: string; count: number }[]> {
   const db = await getDb();
   return db.getAllAsync<{ system: string; count: number }>(
-    `SELECT t.system AS system, COUNT(*) AS count
-     FROM asset a JOIN asset_type t ON a.assetTypeId = t.id
-     WHERE a.siteId = ? GROUP BY t.system ORDER BY count DESC`,
+    `SELECT COALESCE(t.system, 'unknown') AS system, COUNT(*) AS count
+     FROM asset a LEFT JOIN asset_type t ON a.assetTypeId = t.id
+     WHERE a.siteId = ? GROUP BY COALESCE(t.system, 'unknown') ORDER BY count DESC`,
     siteId,
   );
 }
@@ -374,6 +380,43 @@ export async function addAssetEvent(e: Omit<AssetEvent, 'id' | 'photos' | 'measu
     JSON.stringify(e.photos ?? []), JSON.stringify(e.measurements ?? {}),
   );
   return id;
+}
+
+/**
+ * The summary every test-sheet event starts with, which is what marks it as
+ * the sheet's rather than a routine run's or a defect's.
+ */
+export const TEST_SHEET_EVENT = 'Test sheet —';
+
+/**
+ * Removes the test-sheet events one report wrote on an asset, so a result
+ * re-marked on the sheet replaces its earlier event instead of joining it.
+ * Scoped to the report and to the sheet's own summary: a routine run's or a
+ * defect's event on the same asset is not the sheet's to remove.
+ */
+export async function clearTestSheetEvents(assetId: string, reportId: string | undefined): Promise<void> {
+  if (!reportId) return;
+  const db = await getDb();
+  await db.runAsync(
+    'DELETE FROM asset_event WHERE assetId = ? AND reportId = ? AND summary LIKE ?',
+    assetId, reportId, `${TEST_SHEET_EVENT}%`,
+  );
+}
+
+/**
+ * Puts the failure comment on the sheet's event for this asset and report.
+ *
+ * The comment is typed after the result is tapped — the field only appears
+ * once a row is marked fail — so the event written at the tap has no detail.
+ * Rather than write a second event, the one already there is given the text.
+ */
+export async function setTestSheetEventDetail(assetId: string, reportId: string | undefined, detail: string | undefined): Promise<void> {
+  if (!reportId) return;
+  const db = await getDb();
+  await db.runAsync(
+    'UPDATE asset_event SET detail = ? WHERE assetId = ? AND reportId = ? AND summary LIKE ?',
+    detail?.trim() || null, assetId, reportId, `${TEST_SHEET_EVENT}%`,
+  );
 }
 
 export async function assetTimeline(assetId: string, limit = 200): Promise<AssetEvent[]> {

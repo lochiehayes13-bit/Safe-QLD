@@ -124,6 +124,10 @@ describe('the job number a report carries', () => {
  * job here today; a job the office has completed is not the one being worked,
  * however recently it was scheduled. The number is offered rather than
  * applied, and where the app would have to guess it says so instead.
+ *
+ * "Today" comes from the schedule table alone. The job record's own date is
+ * the day the office issued it, and reading that as the booking offered the
+ * job raised this morning over the one the technician was sent to.
  */
 import { jobToOffer, type OpenJobCandidate } from '@/domain/reportJobMatch';
 
@@ -132,17 +136,33 @@ const open = (over: Partial<OpenJobCandidate> = {}): OpenJobCandidate => ({
   externalId: '43747',
   siteId: 's1',
   status: 'scheduled',
-  // Nine in the morning in Brisbane on the second of September, which is
-  // still the first in UTC — the day has to be resolved in Queensland.
-  scheduledFor: '2026-09-01T23:00:00.000Z',
+  // Issued three weeks ago, which is the normal state of the job a technician
+  // is standing on site for: it must not count against being today's job.
+  scheduledFor: '2026-08-12T23:00:00.000Z',
   ...over,
 });
 
-const TODAY = { siteId: 's1', today: '2026-09-02' };
+const TODAY = { siteId: 's1', today: '2026-09-02', scheduledToday: new Set(['43747']) };
+const NO_SCHEDULE = { ...TODAY, scheduledToday: new Set<string>() };
 
 describe('the job offered to a test sheet', () => {
-  it('is the one open job scheduled at the site today', () => {
+  it('is the one open job on today\'s schedule at the site', () => {
     expect(jobToOffer([open()], TODAY)).toMatchObject({ jobNumber: '43747', basis: 'today' });
+  });
+
+  it('never reads the date the office issued the job as the booking', () => {
+    /*
+     * The office converts a defect quote into job B this morning, so B's
+     * issue date is today; job A, issued three weeks ago, is the one on
+     * today's schedule. A is the job. Before the schedule was consulted the
+     * sheet offered B as "the one job scheduled at this site today".
+     */
+    const a = open();
+    const b = open({ id: 'j2', externalId: '43999', scheduledFor: '2026-09-01T23:00:00.000Z' });
+    expect(jobToOffer([a, b], TODAY)).toMatchObject({ jobNumber: '43747', basis: 'today' });
+    // And with no schedule at all, an issue date of today still does not
+    // make B today's job: two open jobs is a question for the technician.
+    expect(jobToOffer([a, b], NO_SCHEDULE).jobNumber).toBeUndefined();
   });
 
   it('ignores a job the office has already completed, and one at another site', () => {
@@ -150,25 +170,35 @@ describe('the job offered to a test sheet', () => {
     expect(jobToOffer([open({ siteId: 's2' })], TODAY)).toEqual({});
   });
 
-  it('falls back to the only open job at the site when nothing is booked today', () => {
-    const out = jobToOffer([open({ scheduledFor: '2026-08-20T00:00:00.000Z' })], TODAY);
+  it('does not let a job booked today at another site claim this one\'s sheet', () => {
+    const elsewhere = open({ id: 'j2', externalId: '43999', siteId: 's2' });
+    const out = jobToOffer([open({ scheduledFor: undefined }), elsewhere], { ...TODAY, scheduledToday: new Set(['43999']) });
     expect(out).toMatchObject({ jobNumber: '43747', basis: 'only-open' });
   });
 
+  it('falls back to the only open job at the site when nothing is booked today', () => {
+    const out = jobToOffer([open()], { ...TODAY, scheduledToday: new Set(['11111']) });
+    expect(out).toMatchObject({ jobNumber: '43747', basis: 'only-open', scheduleKnown: true });
+  });
+
   it('refuses to choose between two jobs today, and says which', () => {
-    const out = jobToOffer([open(), open({ id: 'j2', externalId: '43999' })], TODAY);
+    const out = jobToOffer([open(), open({ id: 'j2', externalId: '43999' })], { ...TODAY, scheduledToday: new Set(['43747', '43999']) });
     expect(out.jobNumber).toBeUndefined();
     expect(out.reason).toContain('2 jobs are scheduled at this site today');
     expect(out.reason).toContain('43747, 43999');
   });
 
   it('refuses to choose between two open jobs when nothing is booked today', () => {
-    const out = jobToOffer([
-      open({ scheduledFor: '2026-08-20T00:00:00.000Z' }),
-      open({ id: 'j2', externalId: '43999', scheduledFor: undefined }),
-    ], TODAY);
-    expect(out.jobNumber).toBeUndefined();
-    expect(out.reason).toContain('2 jobs are open at this site');
+    const jobs = [open(), open({ id: 'j2', externalId: '43999', scheduledFor: undefined })];
+    const known = jobToOffer(jobs, { ...TODAY, scheduledToday: new Set(['11111']) });
+    expect(known.jobNumber).toBeUndefined();
+    expect(known.reason).toContain('Nothing on today\'s schedule is at this site');
+    expect(known.reason).toContain('2 jobs are open at this site');
+    // An empty schedule may be an unsynced phone, and the sheet must not
+    // tell a technician standing on a booked job that nothing is booked.
+    const unsynced = jobToOffer(jobs, NO_SCHEDULE);
+    expect(unsynced.reason).toContain('or has not synced yet');
+    expect(unsynced.scheduleKnown).toBe(false);
   });
 
   it('counts a job re-synced twice as one job', () => {
@@ -176,6 +206,6 @@ describe('the job offered to a test sheet', () => {
   });
 
   it('offers nothing where today cannot be read', () => {
-    expect(jobToOffer([open()], { siteId: 's1', today: 'yesterday' })).toEqual({});
+    expect(jobToOffer([open()], { ...TODAY, today: 'yesterday' })).toEqual({});
   });
 });

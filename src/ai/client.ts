@@ -24,7 +24,9 @@ const MODEL = 'claude-sonnet-5';
 const MAX_TOKENS = 400;
 
 export async function storeKey(key: string): Promise<void> {
-  await SecureStore.setItemAsync(KEY_SLOT, key.trim());
+  // Never leaves this device in a backup, and cannot be read while it is
+  // locked: the same terms the Simpro secret is kept on.
+  await SecureStore.setItemAsync(KEY_SLOT, key.trim(), { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
 }
 
 export async function hasKey(): Promise<boolean> {

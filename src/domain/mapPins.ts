@@ -102,7 +102,19 @@ export interface MapJob {
   title: string;
   stage?: string | null;
   status: 'scheduled' | 'in-progress' | 'complete' | 'blocked';
+  /**
+   * When the job was planned. For a job raised on the phone this is the
+   * instant the planner set; for a job from the office it is the day the job
+   * was issued, which is the only date the job record carries.
+   */
   scheduledFor?: string | null;
+  /**
+   * The office's booking, yyyy-mm-dd: the earliest day on the schedule, today
+   * or later, that this job is rostered on. The office keeps its bookings on
+   * the schedule and not on the job, and the phone holds three weeks of that
+   * schedule, so a job booked beyond it looks unbooked here.
+   */
+  scheduledDay?: string | null;
   dueAt?: string | null;
   completedAt?: string | null;
   /** The office's completion day, yyyy-mm-dd. */
@@ -166,29 +178,34 @@ function parseMs(iso: string | null | undefined): number | undefined {
   return Number.isFinite(ms) ? ms : undefined;
 }
 
-/** The first of several optional instants that parses. */
-function firstMs(...candidates: (string | null | undefined)[]): number | undefined {
+/** The Queensland day of the first of several optional dates that reads as one. */
+function firstDay(...candidates: (string | null | undefined)[]): string | undefined {
   for (const c of candidates) {
-    const ms = parseMs(c);
-    if (ms !== undefined) return ms;
+    const day = qldIsoDay(c ?? undefined);
+    if (day) return day;
   }
   return undefined;
 }
 
 /**
- * When a finished job was finished. The app stamps `completedAt` when a
- * technician closes a job here; the office records a completion day; failing
- * both, the due date is the nearest thing to it, and the issue date after that.
+ * The Queensland day a finished job was finished. The app stamps `completedAt`
+ * when a technician closes a job here; the office records a completion day;
+ * failing both, the due date is the nearest thing to it, and the issue date
+ * after that.
  */
-function finishedMs(job: MapJob): number | undefined {
-  return firstMs(job.completedAt, job.completedDate, job.dueAt, job.scheduledFor);
+function finishedDay(job: MapJob): string | undefined {
+  return firstDay(job.completedAt, job.completedDate, job.dueAt, job.scheduledFor);
 }
 
-/** The date a job's line shows. */
+/**
+ * The date a job's line shows. For live work the office's booking comes
+ * first: "Routine · 30/09" is the day the technician is going, and the day
+ * the office raised the job is nothing to a person reading a map.
+ */
 function lineDate(job: MapJob, kind: PinKind): string | undefined {
   return kind === 'recent'
     ? (job.completedAt ?? job.completedDate ?? job.dueAt ?? job.scheduledFor ?? undefined)
-    : (job.scheduledFor ?? job.dueAt ?? undefined);
+    : (job.scheduledDay ?? job.scheduledFor ?? job.dueAt ?? undefined);
 }
 
 /**
@@ -197,19 +214,32 @@ function lineDate(job: MapJob, kind: PinKind): string | undefined {
  * Finished within the last ninety days is `recent`; finished earlier is not on
  * the map at all, because it is history rather than service. A finished job
  * with no date on it is treated the same way — the alternative is a green dot
- * that never goes out. Anything not finished is `upcoming` if it is scheduled
- * after now, and otherwise `open`: in progress, blocked, overdue or simply
- * unscheduled are all work that exists today.
+ * that never goes out. Anything not finished is `upcoming` if it is booked
+ * for a later day, and otherwise `open`: in progress, blocked, overdue, booked
+ * for today or simply unbooked are all work that exists today.
+ *
+ * Every comparison is between Queensland days, never between an instant and
+ * a day. A job completed on the first day of the window is inside it however
+ * early that morning it was closed — the invoice read and the repository's
+ * read both count that day, and the dot has to agree with them — and a job
+ * booked for today is on now from midnight, not from ten in the morning when
+ * the UTC date catches up.
+ *
+ * The booking is the office's schedule where the phone holds it, and the
+ * job's own planned date otherwise. The office's job record carries only the
+ * day it was issued, which is never a day in the future, so for an office
+ * job without a booking the fallback lands on `open`, which is right: the
+ * work exists and nobody is rostered on it yet.
  */
 export function classifyJob(job: MapJob, now: Date | string | number = Date.now()): PinKind | null {
-  const nowMs = toMs(now);
+  const today = qldIsoDay(new Date(toMs(now)).toISOString()) ?? '';
   if (isComplete(job)) {
-    const finished = finishedMs(job);
-    if (finished === undefined) return null;
-    return nowMs - finished <= RECENT_MS ? 'recent' : null;
+    const finished = finishedDay(job);
+    if (!finished) return null;
+    return isRecentDay(finished, recentSinceDay(now)) ? 'recent' : null;
   }
-  const scheduled = parseMs(job.scheduledFor);
-  if (scheduled !== undefined && scheduled > nowMs) return 'upcoming';
+  const booked = firstDay(job.scheduledDay, job.scheduledFor);
+  if (booked && today && booked > today) return 'upcoming';
   return 'open';
 }
 
@@ -457,15 +487,26 @@ export function formatCount(n: number): string {
 // Messages from the page
 // ---------------------------------------------------------------------------
 
+/** Where the technician has panned and zoomed to, as the page reports it. */
+export interface MapView {
+  centre: LatLng;
+  zoom: number;
+}
+
 export type MapMessage =
   | { type: 'select'; siteId: string }
   | { type: 'place'; placeId: string }
-  | { type: 'clear' };
+  | { type: 'clear' }
+  /** A link in the page was tapped — the attribution — and the phone's browser should open it, not the map. */
+  | { type: 'link'; url: string }
+  /** The view moved. Kept so a rebuilt page can land where the technician left it. */
+  | { type: 'view'; view: MapView };
 
 /**
  * What the page posted, or null for anything that is not one of its
  * messages. The page is ours, but the WebView's message channel is a string,
- * and a string is checked rather than trusted.
+ * and a string is checked rather than trusted: a link is only a link when it
+ * is a web address, and a view is only a view when it is somewhere on Earth.
  */
 export function parseMapMessage(raw: string): MapMessage | null {
   let parsed: unknown;
@@ -483,6 +524,12 @@ export function parseMapMessage(raw: string): MapMessage | null {
     return { type: 'place', placeId: m.placeId };
   }
   if (m.type === 'clear') return { type: 'clear' };
+  if (m.type === 'link' && typeof m.url === 'string' && /^https?:\/\//i.test(m.url)) {
+    return { type: 'link', url: m.url };
+  }
+  if (m.type === 'view' && isPosition(m.lat, m.lng) && typeof m.zoom === 'number' && Number.isFinite(m.zoom)) {
+    return { type: 'view', view: { centre: { latitude: m.lat as number, longitude: m.lng as number }, zoom: m.zoom } };
+  }
   return null;
 }
 
@@ -511,9 +558,18 @@ export function filterScript(kinds: ReadonlySet<PinKind>, query: string, fit = f
   return `window.__setFilter && window.__setFilter(${jsLiteral([...kinds])}, ${jsLiteral(query)}, ${fit ? 'true' : 'false'}); true;`;
 }
 
-/** The script that centres the page on the technician. */
+/**
+ * The script that centres the page on the technician. For the button only:
+ * it moves the view, and a view that moves by itself — because a fix arrived,
+ * or the page was rebuilt — is a map that fights the person holding it.
+ */
 export function centreScript(latitude: number, longitude: number): string {
   return `window.__centre && window.__centre(${Number(latitude)}, ${Number(longitude)}); true;`;
+}
+
+/** The script that draws the technician's dot where they are, and moves nothing. */
+export function hereScript(latitude: number, longitude: number): string {
+  return `window.__here && window.__here(${Number(latitude)}, ${Number(longitude)}); true;`;
 }
 
 /** A search result on the page: a hollow marker the card can be opened from. */
@@ -540,11 +596,26 @@ export function selectScript(selection: MapSelection): string {
 // ---------------------------------------------------------------------------
 
 export interface MapHtmlOptions {
+  /** Where the map opens with nothing to fit to. */
   centre: LatLng;
   zoom: number;
   dark: boolean;
   /** The layers on at first paint. Defaults to DEFAULT_KINDS. */
   kinds?: readonly PinKind[];
+  /**
+   * Where the technician had the map before it was rebuilt. With one, the
+   * page opens there instead of fitting to the pins, so the rebuild after the
+   * geocoder's run lands where they left it rather than back over the whole
+   * state.
+   */
+  view?: MapView | null;
+  /**
+   * Pixels between the page's bottom edge and the Leaflet attribution. The
+   * tab bar floats over the bottom of the map, and on a phone with a home
+   * indicator it floats higher, so the clearance is the screen's to say.
+   * Defaults to 96.
+   */
+  bottomClearancePx?: number;
   /** Clustering, overridable for tests. */
   cellPx?: number;
   clusterMaxZoom?: number;
@@ -552,9 +623,43 @@ export interface MapHtmlOptions {
 
 export const OSM_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
+/**
+ * Leaflet, pinned to the byte.
+ *
+ * The page loads Leaflet from a CDN, and the page holds the whole site list.
+ * A CDN that served something else under the same URL — a compromised
+ * package, a tampered edge — would be running inside a page carrying every
+ * customer's address. The integrity hash makes the browser refuse anything
+ * but the exact 1.9.4 files these digests were taken from (sha256 over the
+ * published dist files, base64), so a changed file is a map that fails to
+ * draw rather than a page that leaks.
+ */
+export const LEAFLET_VERSION = '1.9.4';
+export const LEAFLET_JS_URL = `https://unpkg.com/leaflet@${LEAFLET_VERSION}/dist/leaflet.js`;
+export const LEAFLET_CSS_URL = `https://unpkg.com/leaflet@${LEAFLET_VERSION}/dist/leaflet.css`;
+export const LEAFLET_JS_INTEGRITY = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
+export const LEAFLET_CSS_INTEGRITY = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
+
+/**
+ * What the WebView appends to its User-Agent, so every tile request names
+ * this app and somebody to write to.
+ *
+ * OpenStreetMap's tile usage policy requires a User-Agent that identifies the
+ * application, and blocks the stock browser strings a WebView sends on its
+ * own — an app hidden behind a browser's name is exactly what the policy is
+ * written against. Appended to the browser string rather than replacing it,
+ * because Leaflet reads the browser's name out of the same string to decide
+ * how to handle touch, and a bare app token would leave it guessing.
+ */
+export function mapUserAgent(contactEmail: string): string {
+  const contact = contactEmail.trim();
+  return contact ? `SafeQLD-FieldApp/1.0 (service map; ${contact})` : 'SafeQLD-FieldApp/1.0 (service map)';
+}
+
 /** Mirrors src/domain/mapCluster.ts; the two must agree, and the test says so. */
 const PAGE_CELL_PX = 56;
 const PAGE_CLUSTER_MAX_ZOOM = 14;
+const DEFAULT_BOTTOM_CLEARANCE_PX = 96;
 
 /**
  * The whole page, as a string.
@@ -596,7 +701,7 @@ export function mapHtml(pins: readonly MapPin[], options: MapHtmlOptions): strin
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="${LEAFLET_CSS_URL}" integrity="${LEAFLET_CSS_INTEGRITY}" crossorigin="anonymous">
 <style>
 html,body,#map{height:100%;margin:0;padding:0;background:${c.bg};font-family:-apple-system,Roboto,Helvetica,Arial,sans-serif;-webkit-tap-highlight-color:transparent}
 ${darkTiles}
@@ -606,7 +711,7 @@ ${darkTiles}
 .leaflet-control-attribution a{color:${c.muted}!important}
 .leaflet-bar a{background:${c.surface}!important;color:${c.text}!important;border-color:${c.border}!important;width:40px!important;height:40px!important;line-height:40px!important;font-size:20px!important}
 .leaflet-top.leaflet-left{top:150px}
-.leaflet-bottom{bottom:96px}
+.leaflet-bottom{bottom:${Math.max(0, Math.round(options.bottomClearancePx ?? DEFAULT_BOTTOM_CLEARANCE_PX))}px}
 .clw{background:none;border:none}
 .cl{display:flex;align-items:center;justify-content:center;border-radius:50%;color:#12080A;font-weight:800;border:2px solid ${c.ring};box-shadow:0 2px 8px rgba(0,0,0,.35);font-size:12px;line-height:1}
 .cl-s{width:30px;height:30px}
@@ -616,7 +721,7 @@ ${darkTiles}
 </head>
 <body>
 <div id="map"></div>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="${LEAFLET_JS_URL}" integrity="${LEAFLET_JS_INTEGRITY}" crossorigin="anonymous"></script>
 <script>
 var PINS = ${jsLiteral(data)};
 var COLOUR = ${jsLiteral(PIN_COLOUR)};
@@ -624,6 +729,7 @@ var ORDER = ${jsLiteral(PIN_KINDS)};
 var DEFAULT_KINDS = ${jsLiteral(options.kinds ?? DEFAULT_KINDS)};
 var CENTRE = ${jsLiteral([options.centre.latitude, options.centre.longitude])};
 var ZOOM = ${Number(options.zoom)};
+var VIEW = ${jsLiteral(options.view ? [options.view.centre.latitude, options.view.centre.longitude, options.view.zoom] : null)};
 var RING = ${jsLiteral(c.ring)};
 var SURFACE = ${jsLiteral(c.surface)};
 var CELL_PX = ${Number(options.cellPx ?? PAGE_CELL_PX)};
@@ -847,16 +953,32 @@ window.__select = function (selection) {
   if (at) map.panInside(at, { paddingTopLeft: [20, 150], paddingBottomRight: [20, 320] });
 };
 
-window.__centre = function (lat, lng) {
+// The dot for the technician. Drawing it and going to it are two hooks on
+// purpose: a fix that arrives on its own, or a page rebuilt after the
+// geocoder's run, redraws the dot and leaves the view alone. Only the button
+// moves the map.
+window.__here = function (lat, lng) {
   if (!map) return;
   if (here) map.removeLayer(here);
   here = L.circleMarker([lat, lng], { radius: 8, weight: 3, color: '#FFFFFF', fillColor: '#4DABF7', fillOpacity: 1, interactive: false })
     .addTo(map);
+};
+
+window.__centre = function (lat, lng) {
+  if (!map) return;
+  window.__here(lat, lng);
   map.setView([lat, lng], Math.max(map.getZoom(), 13));
 };
 
+function postView() {
+  var c = map.getCenter();
+  post({ type: 'view', lat: c.lat, lng: c.lng, zoom: map.getZoom() });
+}
+
 function fitToPins() {
-  if (PINS.length === 1) {
+  if (VIEW) {
+    map.setView([VIEW[0], VIEW[1]], VIEW[2]);
+  } else if (PINS.length === 1) {
     map.setView([PINS[0].lat, PINS[0].lng], 14);
   } else if (PINS.length > 1) {
     var bounds = L.latLngBounds(PINS.map(function (p) { return [p.lat, p.lng]; }));
@@ -870,8 +992,15 @@ if (!window.L) {
   document.getElementById('map').innerHTML = '<div class="offline">The map needs a data connection the first time it opens. The site list still works without one.</div>';
 } else {
   map = L.map('map', { renderer: L.canvas({ padding: 0.5 }), zoomControl: true, attributionControl: true });
+  // Tiles are fetched for the viewport and only once a pan has settled, with
+  // a thin ring kept around it: OpenStreetMap's tile servers are run by
+  // volunteers and their policy asks that an app not pull tiles it is not
+  // showing.
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
+    updateWhenIdle: true,
+    updateWhenZooming: false,
+    keepBuffer: 1,
     attribution: ${jsLiteral(OSM_ATTRIBUTION)},
   }).addTo(map);
   clusters = L.layerGroup().addTo(map);
@@ -879,11 +1008,22 @@ if (!window.L) {
   placeLayer = L.layerGroup().addTo(map);
 
   map.on('zoomend', render);
+  map.on('moveend', postView);
   map.on('click', function () {
     state.selected = null;
     drawSelection();
     post({ type: 'clear' });
   });
+  // A link in the page — the attribution — is handed to the phone to open.
+  // Followed in place, it would replace the map with a web page the tab has
+  // no way back from.
+  document.addEventListener('click', function (e) {
+    var el = e.target;
+    while (el && el !== document && !(el.tagName === 'A' && el.href)) el = el.parentNode;
+    if (!el || el === document) return;
+    e.preventDefault();
+    if (/^https?:/i.test(el.href)) post({ type: 'link', url: el.href });
+  }, true);
 
   map.setView(CENTRE, ZOOM);
   fitToPins();

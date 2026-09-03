@@ -1,4 +1,4 @@
-import { getDb, nowIso } from './index';
+import { getDb, inTransaction, nowIso } from './index';
 import type { ScheduleEntry } from '@/domain/myDay';
 
 /**
@@ -50,7 +50,7 @@ export async function replaceScheduleWindow(from: string, to: string, blocks: re
   const db = await getDb();
   const at = nowIso();
   let written = 0;
-  await db.withTransactionAsync(async () => {
+  await inTransaction(db, async () => {
     await db.runAsync('DELETE FROM schedule WHERE date >= ? AND date <= ?', from, to);
     for (const b of blocks) {
       if (!b.id || !b.date) continue;

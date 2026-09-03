@@ -72,6 +72,32 @@ describe('asset type mapping', () => {
   it('reports an asset with no type at all', () => {
     expect(mapSimproAsset(asset({ typeName: undefined })).unmappedType).toBe('(no type)');
   });
+
+  it('still files an unrecognised type as equipment, under the unknown type with the office\'s name for it', () => {
+    // Skipped, a lay-flat hose was missing from the register the occupier's
+    // statement counts; held as unrecognised, the form can say it was not placed.
+    const mapped = mapSimproAsset(asset({ typeName: 'Delivery of Lay Flat Fire Hose', custom: { Location: 'Loading dock' } }));
+    expect(mapped.unmappedType).toBe('Delivery of Lay Flat Fire Hose');
+    expect(mapped.input).toMatchObject({
+      assetTypeId: 'unknown', externalId: '1339', name: 'Loading dock',
+      attributes: { simproType: 'Delivery of Lay Flat Fire Hose' },
+    });
+    expect(mapSimproAsset(asset({ typeName: 'Emergency Planning in Facilities', custom: {} })).input.name).toBe('Emergency Planning in Facilities');
+  });
+
+  it('does not read the office\'s master template as any kind of equipment', () => {
+    const mapped = mapSimproAsset(asset({ typeName: 'ZZZ. MASTER ASSET TEMPLATE (RJ)' }));
+    expect({ type: mapped.input.assetTypeId, unmapped: mapped.unmappedType })
+      .toEqual({ type: 'unknown', unmapped: 'ZZZ. MASTER ASSET TEMPLATE (RJ)' });
+  });
+
+  it('keeps which door register an office door came from, since the type alone cannot say', () => {
+    const fire = mapSimproAsset(asset({ typeName: 'Passive Fire and Smoke Systems - Fire Resistant Doorsets' }));
+    const smoke = mapSimproAsset(asset({ typeName: 'Passive Fire and Smoke Systems - Smoke Doors' }));
+    expect(fire.input.attributes?.registerSystem).toBe('fire-door');
+    expect(smoke.input.attributes?.registerSystem).toBe('smoke-door');
+    expect(mapSimproAsset(asset()).input.attributes?.registerSystem).toBeUndefined();
+  });
 });
 
 describe('service levels', () => {

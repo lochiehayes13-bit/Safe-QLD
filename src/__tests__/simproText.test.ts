@@ -39,6 +39,18 @@ describe('htmlToText', () => {
   it('drops script and style bodies whole', () => {
     expect(htmlToText('<style>p{}</style><p>kept</p><script>x()</script>')).toBe('kept');
   });
+
+  it('leaves a technician\'s own angle brackets alone', () => {
+    // "<fault>" is a word here, not a tag; treating it as one deleted it.
+    expect(htmlToText('Zone 4 <fault>: replace detector')).toBe('Zone 4 <fault>: replace detector');
+    expect(htmlToText('<p>Zone 4 <fault>: replace detector</p>')).toBe('Zone 4 <fault>: replace detector');
+    expect(htmlToText('<p>reading <5mA and >2V</p>')).toBe('reading <5mA and >2V');
+  });
+
+  it('flattens a nested list without a blank line and a stray dash', () => {
+    expect(htmlToText('<ul><li>Panel<ul><li>Loop 1</li></ul></li><li>Pump</li></ul>')).toBe('- Panel\n- Loop 1\n- Pump');
+    expect(htmlToText('<p>Before</p><ul><li>One</li></ul>')).toBe('Before\n- One');
+  });
 });
 
 describe('looksLikeHtml', () => {
@@ -47,6 +59,9 @@ describe('looksLikeHtml', () => {
     expect(looksLikeHtml('a &amp; b')).toBe(true);
     expect(looksLikeHtml('a < b and c > d')).toBe(false);
     expect(looksLikeHtml('plain')).toBe(false);
+    expect(looksLikeHtml('Zone 4 <fault>: replace detector')).toBe(false);
+    expect(looksLikeHtml('<br/>')).toBe(true);
+    expect(looksLikeHtml('<!-- note -->')).toBe(true);
   });
 });
 

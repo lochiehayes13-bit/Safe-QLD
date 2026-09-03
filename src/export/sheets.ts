@@ -147,8 +147,29 @@ export interface ReportBundle {
   defects: Defect[];
 }
 
+/**
+ * The customer the report is for.
+ *
+ * The job's customer outranks the site's client: a body corporate's building
+ * can be serviced under a managing agent's job, and it is the job's customer
+ * who receives the report. One line, so the document never shows two names
+ * where they differ — that difference is exactly the case the job number is
+ * accepted for.
+ */
+export function reportCustomer(b: Pick<ReportBundle, 'site' | 'report'>): string {
+  return b.report.customerName?.trim() || b.site.clientName?.trim() || '';
+}
+
+/** The site contact as "name · phone", or whichever half the report holds. */
+export function reportSiteContact(b: Pick<ReportBundle, 'report'>): string | undefined {
+  const parts = [b.report.siteContactName?.trim(), b.report.siteContactPhone?.trim()].filter(Boolean);
+  return parts.length ? parts.join(' · ') : undefined;
+}
+
 export function reportCoverSheet(b: ReportBundle): Sheet {
   const { site, report } = b;
+  const jobNumber = report.jobNumber?.trim();
+  const siteContact = reportSiteContact(b);
   const pass = b.testRows.filter((r) => r.result === 'pass').length;
   const fail = b.testRows.filter((r) => r.result === 'fail').length;
   const na = b.testRows.filter((r) => r.result === 'na').length;
@@ -157,10 +178,15 @@ export function reportCoverSheet(b: ReportBundle): Sheet {
   const rows: Row[] = [
     [{ v: report.title, style: 'title' }],
     [],
+    // The job number is the line the office files by, so it leads; it is
+    // left off rather than printed blank so an unnumbered report does not
+    // look like a numbered one with the number missing.
+    ...(jobNumber ? [[H('Customer job no.'), jobNumber] as Row] : []),
     [H('Site'), site.name],
     [H('Address'), [site.address, site.suburb, site.state, site.postcode].filter(Boolean).join(' ')],
-    [H('Client'), site.clientName ?? ''],
+    [H('Client'), reportCustomer(b)],
     [H('Site reference'), site.siteRef ?? ''],
+    ...(siteContact ? [[H('Site contact'), siteContact] as Row] : []),
     [H('Panel'), b.panel ? `${b.panel.name}${b.panel.model ? ` (${b.panel.model})` : ''}` : 'All panels'],
     [],
     [H('Service type'), report.frequency],

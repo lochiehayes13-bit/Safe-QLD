@@ -495,7 +495,8 @@ export interface SimproCustomer {
   billingAddress?: SimproAddress;
   customerType?: string;
   customerGroup?: string;
-  archived: boolean;
+  /** Undefined where the row did not carry the field, so the phone keeps what it knew. */
+  archived?: boolean;
   notes?: string;
   tags: string[];
   sites: SimproPerson[];
@@ -538,12 +539,19 @@ const idOf = (v: unknown): string | undefined => {
  * so they are rounded here, once, and every total the phone shows is added
  * up in integers. A string is read too, because one endpoint quotes its
  * numbers and a mirror should not care.
+ *
+ * Rounded half away from zero, the way an invoice does, and on the decimal
+ * the build sent rather than on the binary float: 1.265 × 100 is
+ * 126.49999999999999 in a double, and Math.round of that is a cent under
+ * the office's figure. Some lines carry three decimals, so ties are real.
+ * toPrecision(15) recovers the decimal before the rounding sees it.
  */
 export function cents(v: unknown): number | undefined {
   if (v === null || v === undefined || v === '') return undefined;
   const n = typeof v === 'number' ? v : Number(String(v).replace(/[,$\s]/g, ''));
   if (!Number.isFinite(n)) return undefined;
-  return Math.round(n * 100);
+  const magnitude = Math.round(Number((Math.abs(n) * 100).toPrecision(15)));
+  return n < 0 ? -magnitude : magnitude;
 }
 
 const num = (v: unknown): number | undefined => {
@@ -555,6 +563,28 @@ const num = (v: unknown): number | undefined => {
 const text = (v: unknown): string | undefined => {
   const plain = htmlToText(typeof v === 'string' ? v : undefined);
   return plain === '' ? undefined : plain;
+};
+
+/**
+ * An instant as the build writes it, made ISO.
+ *
+ * DateModified comes back as `2026-08-30T09:12:44+10:00`, but an
+ * attachment's DateAdded and a note's DateCreated come back as
+ * `2026-08-30 09:12:44+10` — a space for the T and a two-digit offset.
+ * Date.parse on a desktop reads that; the phone's engine and qldMoment do
+ * not, so a screen formatting it printed nothing. Normalised once, here, and
+ * left alone when it is already ISO or is a bare day.
+ */
+const instant = (v: unknown): string | undefined => {
+  const raw = str(v);
+  if (!raw) return undefined;
+  const m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(Z|[+-]\d{2}(?::?\d{2})?)?$/.exec(raw);
+  if (!m) return raw;
+  const [, day, time, offset] = m as unknown as [string, string, string, string | undefined];
+  const zone = !offset ? '' : offset === 'Z' ? 'Z'
+    : offset.length === 3 ? `${offset}:00`
+      : offset.length === 5 ? `${offset.slice(0, 3)}:${offset.slice(3)}` : offset;
+  return `${day}T${time}${zone}`;
 };
 
 function person(s: RawStaff | null | undefined): SimproPerson | undefined {
@@ -727,7 +757,7 @@ export function mapNote(n: RawNote): SimproNote {
     id: idOf(n.ID) ?? '',
     subject: str(n.Subject),
     note: text(n.Note),
-    createdAt: str(n.DateCreated),
+    createdAt: instant(n.DateCreated),
     createdBy: typeof by === 'string' ? str(by) : str(by?.Name),
     visibleToCustomer: n.Visibility?.Customer === true ? true : n.Visibility?.Customer === false ? false : undefined,
     referenceType: str(n.Reference?.Type),
@@ -742,7 +772,7 @@ export function mapAttachment(a: RawAttachment): SimproAttachment {
     folder: str(a.Folder?.Name),
     mimeType: str(a.MimeType),
     sizeBytes: num(a.FileSizeBytes),
-    dateAdded: str(a.DateAdded),
+    dateAdded: instant(a.DateAdded),
     addedBy: str(a.AddedBy?.Name),
     public: a.Public === true ? true : a.Public === false ? false : undefined,
     base64Data: str(a.Base64Data),
@@ -755,7 +785,7 @@ export function mapTimeline(t: RawTimeline): SimproTimelineEntry {
     message: text(t.Message) ?? '',
     staffId: idOf(t.Staff?.ID),
     staffName: str(t.Staff?.Name),
-    at: str(t.Date),
+    at: instant(t.Date),
   };
 }
 
@@ -872,7 +902,7 @@ export function mapCustomer(c: RawCompany): SimproCustomer {
     billingAddress: address(c.BillingAddress),
     customerType: str(c.CustomerType),
     customerGroup: str(c.Profile?.CustomerGroup?.Name),
-    archived: c.Archived === true,
+    archived: c.Archived === undefined ? undefined : c.Archived === true,
     notes: text(c.Profile?.Notes),
     tags: tags(c.Tags),
     sites: (c.Sites ?? [])
@@ -963,9 +993,15 @@ export const JOB_LIST_COLUMNS =
   'ID,Name,Description,Customer,Site,SiteContact,Stage,Status,Type,DateIssued,DueDate,OrderNo,RequestNo,'
   + 'Tags,Total,DateModified,ProjectManager,Technicians,CompletedDate,ConvertedFromQuote';
 
+/**
+ * ProjectManager and Tags are on the list because upsertQuote writes them
+ * whole: without them here every list pull nulled what the record read
+ * had set. quote_detail carries both, and the quotes list on this build
+ * accepts any record column.
+ */
 export const QUOTE_LIST_COLUMNS =
   'ID,Name,Description,Customer,Site,SiteContact,Stage,CustomerStage,Status,Type,DateIssued,DateApproved,'
-  + 'DueDate,ValidityDays,OrderNo,RequestNo,IsClosed,JobNo,Total,DateModified,Technicians,Salesperson';
+  + 'DueDate,ValidityDays,OrderNo,RequestNo,IsClosed,JobNo,Total,DateModified,Technicians,Salesperson,ProjectManager,Tags';
 
 export const INVOICE_LIST_COLUMNS =
   'ID,Type,Customer,Jobs,DateIssued,Stage,Status,IsPaid,DatePaid,Total,DateModified,OrderNo';
