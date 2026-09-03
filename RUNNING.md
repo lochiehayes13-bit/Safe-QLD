@@ -109,6 +109,46 @@ npm run build:play     # produces an .aab for the Play Console
 Upload the `.aab` to the Play Console under **Internal testing** and add
 testers by email. Requires a Google Play developer account.
 
+## 4. The web app — iPhones, and anyone without an Android
+
+An APK cannot be installed on an iPhone, and the App Store wants an Apple
+developer account and a review. The same app also builds for a browser, which
+is a link anybody can open:
+
+```bash
+npx expo export --platform web --output-dir web-build
+node scripts/webShell.js web-build      # head tags, 404.html, the service worker
+npx serve web-build                     # or any static server
+```
+
+CI does exactly that on every push and keeps the result as a downloadable
+**web-app** artifact on the run. To put it on a URL, make a **public**
+repository that holds nothing but the built app (this one is private, so a page
+served from it would ask every technician for a GitHub login), turn on Pages
+for it, and add a `WEB_REPO` variable here naming it. The `RELEASES_TOKEN`
+secret the APK mirror already uses is reused, so its token needs
+*Contents: read and write* on that repository too. Until both are set the
+publish step says so and does nothing.
+
+On an iPhone: open the link in Safari, **Share → Add to Home Screen**. It then
+opens full screen with no browser chrome, and it works with no signal — the
+first opening takes the whole app into the browser's cache, so the second one
+runs in a basement.
+
+What a browser can and cannot do:
+
+| Works | Does not |
+| --- | --- |
+| Every screen, the whole standards library, the calculators and the forms | The camera and the photo library (a photo has to come from the file picker) |
+| The database, which is the browser's own and stays on that device | The mail app, so the leave, RFI and suggestion screens cannot hand off a message |
+| Syncing with Simpro, including notes, attachments and asset test results — the build allows browser requests | The hardware keystore: keys are held in ordinary browser storage, so the office key belongs on the Android app |
+| Adding to the home screen, and running offline afterwards | Background sync while the tab is closed |
+
+Clearing the browser's site data clears the app's database with it, the same
+way uninstalling the Android app does.
+
+---
+
 ---
 
 ## First run — one name, one paste
