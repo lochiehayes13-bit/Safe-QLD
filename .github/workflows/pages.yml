@@ -40,18 +40,33 @@ jobs:
           node-version: 22
           cache: npm
 
-      # Turns Pages on for this repository if it is not on already, and tells
-      # the build what path the site will be served from.
+      # Tells the build what path the site will be served from, and turns Pages
+      # on where the token is allowed to.
+      #
+      # It is not allowed to here: the app this runs as is refused both
+      # "create a repository" and "create a Pages site", so somebody with the
+      # account has to set Source to GitHub Actions once, by hand. That is a
+      # setting, not a broken build, so this step is allowed to fail and the
+      # publishing below waits for it rather than turning the whole run red
+      # every time somebody pushes.
       - name: Set up Pages
         id: pages
+        continue-on-error: true
         uses: actions/configure-pages@v5
         with:
           enablement: true
 
+      - name: Say how to turn it on
+        if: steps.pages.outcome != 'success'
+        run: |
+          echo "::notice title=The web app is built but not published::Pages is not on for this repository yet. Settings -> Pages -> Build and deployment -> Source: GitHub Actions. Then re-run this workflow and the app is served at https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+
       - name: Install
+        if: steps.pages.outcome == 'success'
         run: npm ci --legacy-peer-deps
 
       - name: Stamp the build
+        if: steps.pages.outcome == 'success'
         run: echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
 
       # A project page is served from /<repo>/, not from the root of the domain,
@@ -59,6 +74,7 @@ jobs:
       # every one of them is a 404 and the page is blank. Expo takes the prefix
       # from app.json rather than a flag, so it goes in before the export.
       - name: Point the build at the site's own path
+        if: steps.pages.outcome == 'success'
         env:
           BASE: ${{ steps.pages.outputs.base_path }}
         run: |
@@ -72,6 +88,7 @@ jobs:
           '
 
       - name: Export for the web
+        if: steps.pages.outcome == 'success'
         env:
           EXPO_PUBLIC_BUILD_SHA: ${{ github.sha }}
           EXPO_PUBLIC_BUILD_TIME: ${{ env.BUILD_TIME }}
@@ -82,15 +99,19 @@ jobs:
       # tab, the offline copy, and 404.html — a static host has no router, so a
       # deep link is a miss and the 404 page is what hands it to the app.
       - name: Finish the web shell
+        if: steps.pages.outcome == 'success'
         run: node scripts/webShell.js web-build
 
       - uses: actions/upload-pages-artifact@v3
+        if: steps.pages.outcome == 'success'
         with:
           path: web-build
 
       - name: Deploy
+        if: steps.pages.outcome == 'success'
         id: deploy
         uses: actions/deploy-pages@v4
 
       - name: Say where it is
+        if: steps.pages.outcome == 'success'
         run: echo "The app is at ${{ steps.deploy.outputs.page_url }}"
