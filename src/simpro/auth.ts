@@ -1,6 +1,6 @@
 import * as WebBrowser from 'expo-web-browser';
 import { SimproClient, SimproError, type SimproConfig } from './client';
-import { REDIRECT_URI, authorizeUrl, expiresAtFrom, parseAuthRedirect, type TokenSet } from './oauth';
+import { authorizeUrl, expiresAtFrom, parseAuthRedirect, redirectUri, type TokenSet } from './oauth';
 import { clearUserSession, writeUserSession } from './userSession';
 import type { CurrentUser } from './identity';
 
@@ -84,41 +84,45 @@ export async function signInInBrowser(config: SimproConfig): Promise<CurrentUser
   if (!config.clientId.trim()) throw new SimproError('No Simpro client ID is set. Add it in Settings.');
 
   const state = newState();
-  const result = await WebBrowser.openAuthSessionAsync(authorizeUrl(config, state), REDIRECT_URI);
+  // Read once and used for all three: the URL sent, the URL waited for, and
+  // the URL the exchange repeats back. Simpro compares the last against the
+  // first, so they cannot be allowed to differ.
+  const redirect = redirectUri();
+  const result = await WebBrowser.openAuthSessionAsync(authorizeUrl(config, state, redirect), redirect);
 
   if (result.type !== 'success') {
     throw new SimproError(
       result.type === 'cancel' || result.type === 'dismiss'
         ? 'The browser was closed before Simpro handed back a login. If the page showed an error, '
-          + `check the Redirect URI on the API application in Simpro is exactly ${REDIRECT_URI}.`
+          + `check the Redirect URI on the API application in Simpro is exactly ${redirect}.`
         : `The browser came back with "${result.type}" before Simpro handed back a login.`,
     );
   }
 
-  const redirect = parseAuthRedirect(result.url);
-  if (redirect.error) {
+  const handed = parseAuthRedirect(result.url);
+  if (handed.error) {
     throw new SimproError(
-      `Simpro refused the sign-in: ${redirect.error}${redirect.errorDescription ? ` — ${redirect.errorDescription}` : ''}.`,
+      `Simpro refused the sign-in: ${handed.error}${handed.errorDescription ? ` — ${handed.errorDescription}` : ''}.`,
     );
   }
-  if (!redirect.code) {
+  if (!handed.code) {
     // The parameter names only, never the URL itself: whatever the build put
     // in it — a token, a session id — would otherwise be printed on screen.
-    const carried = Object.keys(redirect).join(', ') || 'no parameters';
+    const carried = Object.keys(handed).join(', ') || 'no parameters';
     throw new SimproError(
       `Simpro came back without a login code (the redirect carried ${carried}). `
-      + `Check the Redirect URI on the API application in Simpro is exactly ${REDIRECT_URI}.`,
+      + `Check the Redirect URI on the API application in Simpro is exactly ${redirect}.`,
     );
   }
-  if (redirect.state !== state) {
+  if (handed.state !== state) {
     // A code this app did not ask for is not one it will exchange.
     throw new SimproError('The login that came back was not the one this app started. Try again.');
   }
 
   const tokens = await SimproClient.tokenExchange(config, {
     grant_type: 'authorization_code',
-    code: redirect.code,
-    redirect_uri: REDIRECT_URI,
+    code: handed.code,
+    redirect_uri: redirect,
   });
   await keep(tokens, undefined);
   const who = await whoAmI(config);

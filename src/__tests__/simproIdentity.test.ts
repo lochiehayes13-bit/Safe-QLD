@@ -2,7 +2,8 @@ import {
   prefsForEmployee, prefsForNobody, resolveIdentity, searchEmployees, type IdentityCandidate,
 } from '@/simpro/identity';
 import {
-  REDIRECT_URI, authorizeUrl, describeOAuthFailure, expiresAtFrom, parseAuthRedirect, parseTokenResponse,
+  APP_REDIRECT_URI, authorizeUrl, describeOAuthFailure, expiresAtFrom, parseAuthRedirect, parseTokenResponse,
+  redirectUriFor, webBase,
   tokenRequestBody, tokenUrl,
 } from '@/simpro/oauth';
 
@@ -114,9 +115,42 @@ describe('the browser login', () => {
   it('sends the app back to the registered redirect with the state it chose', () => {
     const url = authorizeUrl({ buildDomain: 'safeqld.simprosuite.com', clientId: 'abc' }, 'st4te');
     expect(url.startsWith('https://safeqld.simprosuite.com/oauth2/login?')).toBe(true);
-    expect(url).toContain(`redirect_uri=${encodeURIComponent(REDIRECT_URI)}`);
+    expect(url).toContain(`redirect_uri=${encodeURIComponent(APP_REDIRECT_URI)}`);
     expect(url).toContain('state=st4te');
     expect(url).toContain('response_type=code');
+  });
+
+  /**
+   * The redirect is the app's own scheme on a phone and the page's own
+   * address in a browser. Asking a browser to be redirected to
+   * `safeqld://oauth` is refused every time, whatever the office registered,
+   * which is what the web app was doing.
+   */
+  it('hands back to the app\'s own address in a browser, and to the scheme on a phone', () => {
+    expect(redirectUriFor({ origin: 'https://lochiehayes13-bit.github.io', base: '/Safe-QLD/' }))
+      .toBe('https://lochiehayes13-bit.github.io/Safe-QLD/');
+    // Served from the root, as a Netlify or user-page build is.
+    expect(redirectUriFor({ origin: 'http://localhost:8081' })).toBe('http://localhost:8081/');
+    // No page, or something that is not one: the installed app's own scheme.
+    expect(redirectUriFor()).toBe(APP_REDIRECT_URI);
+    expect(redirectUriFor({ origin: 'file://' })).toBe(APP_REDIRECT_URI);
+    expect(authorizeUrl({ buildDomain: 'b.example', clientId: 'abc' }, 's', 'https://web.example/app/'))
+      .toContain(`redirect_uri=${encodeURIComponent('https://web.example/app/')}`);
+  });
+
+  /**
+   * One registered URI has to match wherever the sign-in was started from, so
+   * it is the app's root and never the route: a person signing in from the
+   * job card would otherwise ask Simpro to hand back to the job card's path.
+   */
+  it('takes the app\'s root from the build, or from the page\'s own icon', () => {
+    expect(webBase('/Safe-QLD/')).toBe('/Safe-QLD/');
+    expect(webBase('Safe-QLD/')).toBe('/Safe-QLD/');
+    expect(webBase(undefined, '/Safe-QLD/favicon.ico')).toBe('/Safe-QLD/');
+    expect(webBase('', '/favicon.ico')).toBe('/');
+    // Nothing to go on, and a relative icon says nothing about the root.
+    expect(webBase()).toBe('/');
+    expect(webBase(undefined, 'favicon.ico')).toBe('/');
   });
 
   it('reads the code and state from the redirect, in the query or the fragment', () => {
@@ -138,9 +172,12 @@ describe('what a refusal says', () => {
     expect(text).toMatch(/enable it on the application/i);
   });
 
-  it('names the redirect URI when that is what went wrong', () => {
-    expect(describeOAuthFailure(400, '{"error":"invalid_request","error_description":"redirect uri mismatch"}'))
-      .toContain(REDIRECT_URI);
+  it('points at the address the sign-in screen shows when the redirect is what went wrong', () => {
+    // Not a constant: the right answer differs between the web app and the
+    // installed one, so the words send the reader to the screen that knows.
+    const text = describeOAuthFailure(400, '{"error":"redirect_uri_mismatch","error_description":"The redirect URI provided is missing or does not match"}');
+    expect(text).toContain('redirect_uri_mismatch');
+    expect(text).toMatch(/sign-in screen shows/i);
   });
 
   it('copes with a body that is not JSON', () => {

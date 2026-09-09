@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as SplashScreen from 'expo-splash-screen';
+import * as WebBrowser from 'expo-web-browser';
 import {
   Manrope_500Medium, Manrope_600SemiBold, Manrope_700Bold, Manrope_800ExtraBold, useFonts,
 } from '@expo-google-fonts/manrope';
@@ -18,6 +19,19 @@ import { Banner, Txt } from '@/components/ui';
 // Held until the faces and the database are ready, so the first frame is the
 // app in its own type rather than a flash of the system font.
 void SplashScreen.preventAutoHideAsync().catch(() => {});
+
+/*
+ * The browser build's sign-in comes back into a popup showing this same page.
+ * This hands that redirect to the window that opened it and closes the popup;
+ * without it the popup sits on the app and the sign-in behind it waits for
+ * ever. A no-op on a phone, where the redirect is the app's own scheme, and
+ * a no-op in a page nobody opened for a sign-in.
+ */
+try {
+  WebBrowser.maybeCompleteAuthSession();
+} catch {
+  // Nothing was in progress. The sign-in screen says what happened.
+}
 import { AutoSyncDriver } from '@/components/AutoSyncDriver';
 import { FirstRunGate } from '@/components/FirstRunGate';
 

@@ -46,12 +46,59 @@ export const TOKEN_PATH = '/oauth2/token';
 /**
  * Where the browser hands the code back to the app.
  *
- * The `safeqld` scheme is registered in app.json. Simpro only redirects to a
- * URI that matches the one registered on the API application in its own
- * setup, exactly — so this string is also what the office types into Simpro,
- * and a mismatch comes back as an error from the login page, not from here.
+ * Two different answers, and asking the wrong one is a refusal every time.
+ * On a phone it is the `safeqld` scheme registered in app.json, which only
+ * an installed app can answer. In a browser — the web build on Pages, the
+ * one an iPhone runs — a custom scheme is not something the page can be
+ * redirected to at all, so it has to be the page's own address. Sending
+ * `safeqld://oauth` from the web build could only ever come back as
+ * "redirect_uri_mismatch", whatever the office had registered.
+ *
+ * Simpro redirects only to a URI matching the one registered on the API
+ * application exactly, so whichever of these applies is also what the office
+ * types into Simpro — which is why the sign-in screen shows the live value
+ * rather than a constant somebody has to know is right.
  */
-export const REDIRECT_URI = 'safeqld://oauth';
+export const APP_REDIRECT_URI = 'safeqld://oauth';
+
+/**
+ * Where the page's own files are served from: the app's root, not the route
+ * it happens to be on.
+ *
+ * A project page lives under `/Safe-QLD/`, and a redirect registered once has
+ * to keep matching wherever a person signs in from — so the current path is
+ * no use, and the base is read instead. Expo writes it into the build when
+ * the export knows it; failing that the icon in the page's own head carries
+ * it, since every asset URL is written from the base.
+ */
+export function webBase(envBase?: string, iconHref?: string): string {
+  const fromBuild = envBase?.trim();
+  if (fromBuild) return fromBuild.startsWith('/') ? fromBuild : `/${fromBuild}`;
+  const icon = iconHref?.trim();
+  if (icon && icon.startsWith('/')) return icon.replace(/[^/]*$/, '') || '/';
+  return '/';
+}
+
+/**
+ * The redirect for a page served at this address, or the app's own scheme
+ * where there is no page.
+ */
+export function redirectUriFor(page?: { origin?: string; base?: string }): string {
+  const origin = page?.origin?.trim();
+  if (!origin || !/^https?:\/\//i.test(origin)) return APP_REDIRECT_URI;
+  const base = webBase(page?.base);
+  return `${origin.replace(/\/$/, '')}${base.endsWith('/') ? base : `${base}/`}`;
+}
+
+/** The redirect this build actually uses, read off the page where there is one. */
+export function redirectUri(): string {
+  if (typeof window === 'undefined') return APP_REDIRECT_URI;
+  const page = (window as { location?: { origin?: string } }).location;
+  const icon = typeof document === 'undefined'
+    ? undefined
+    : document.querySelector('link[rel="icon"]')?.getAttribute('href') ?? undefined;
+  return redirectUriFor({ origin: page?.origin, base: webBase(process.env.EXPO_BASE_URL, icon) });
+}
 
 /** Where token requests go. Behind a proxy that is the proxy, which holds the secret. */
 export function tokenUrl(target: OAuthTarget): string {
@@ -66,11 +113,11 @@ export function tokenUrl(target: OAuthTarget): string {
  * show a person Simpro's login page — that page is Simpro's, and it is the
  * page that handles two-factor prompts and single sign-on.
  */
-export function authorizeUrl(target: OAuthTarget, state: string): string {
+export function authorizeUrl(target: OAuthTarget, state: string, redirect: string = redirectUri()): string {
   const params = new URLSearchParams({
     client_id: target.clientId,
     response_type: 'code',
-    redirect_uri: REDIRECT_URI,
+    redirect_uri: redirect,
     state,
   });
   return `https://${target.buildDomain}${AUTHORIZE_PATH}?${params.toString()}`;
@@ -207,12 +254,37 @@ export function describeOAuthFailure(status: number, bodyText: string): string {
  */
 export type SignInRefusal = 'grant' | 'password' | 'client' | 'redirect' | 'other';
 
+/**
+ * The OAuth error codes, which are the only part of a refusal worth reading.
+ *
+ * Matched before anything else because this app adds its own words to a
+ * refusal — including the sentence about the Redirect URI — and a message
+ * read for the word "redirect" would find the advice rather than the fault.
+ */
+const SETTING_CODES = /redirect_uri_mismatch|unsupported_grant_type|unauthorized_client|invalid_client/i;
+
 export function classifySignInRefusal(message: string): SignInRefusal {
+  if (/redirect_uri_mismatch/i.test(message)) return 'redirect';
   if (/unsupported_grant_type|unauthorized_client/i.test(message)) return 'grant';
   if (/invalid_grant/i.test(message)) return 'password';
   if (/invalid_client/i.test(message)) return 'client';
+  // Nothing named: a login page that showed a redirect complaint and never
+  // came back is still most likely the redirect.
   if (/redirect/i.test(message)) return 'redirect';
   return 'other';
+}
+
+/**
+ * Whether a refusal is a setting on the office's API application rather than
+ * something this attempt did.
+ *
+ * Only a named code counts. A browser closed before it came back reads like
+ * a redirect problem and may well be one, but it may equally be somebody
+ * changing their mind — and hiding the way in on that would be worse than
+ * offering it again.
+ */
+export function isSettingRefusal(message: string): boolean {
+  return SETTING_CODES.test(message);
 }
 
 const HINTS: Record<string, string> = {
@@ -225,8 +297,10 @@ const HINTS: Record<string, string> = {
     'The client ID or secret in Settings was rejected. Check them, and that the secret has not been regenerated.',
   invalid_request:
     'Something in the request was missing. If this happened in the browser, check the Redirect URI '
-    + `on the API application in Simpro is exactly ${REDIRECT_URI}.`,
+    + 'on the API application in Simpro matches the one the sign-in screen shows.',
   redirect_uri_mismatch:
-    `The Redirect URI on the API application in Simpro has to be exactly ${REDIRECT_URI}.`,
+    'The Redirect URI on the API application in Simpro is not the one this app asked to come back to. '
+    + 'The sign-in screen shows the exact address to register — it is different for the web app and '
+    + 'the installed one, and both can be registered.',
   access_denied: 'The login was refused or cancelled on Simpro\'s side.',
 };
