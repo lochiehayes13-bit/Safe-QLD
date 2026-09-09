@@ -199,6 +199,22 @@ export function describeOAuthFailure(status: number, bodyText: string): string {
   return `Simpro refused the sign-in (HTTP ${status}): ${said}.${hint ? ` ${hint}` : ''}`;
 }
 
+/**
+ * What kind of refusal a sign-in met, from the sentence describeOAuthFailure
+ * built. The screen chooses what to offer next by this: a wrong password
+ * wants the field again, a grant the build does not allow wants the staff
+ * list instead, and both want it without the person reading OAuth.
+ */
+export type SignInRefusal = 'grant' | 'password' | 'client' | 'redirect' | 'other';
+
+export function classifySignInRefusal(message: string): SignInRefusal {
+  if (/unsupported_grant_type|unauthorized_client/i.test(message)) return 'grant';
+  if (/invalid_grant/i.test(message)) return 'password';
+  if (/invalid_client/i.test(message)) return 'client';
+  if (/redirect/i.test(message)) return 'redirect';
+  return 'other';
+}
+
 const HINTS: Record<string, string> = {
   unsupported_grant_type:
     'This build does not allow that way of signing in for this API application. '

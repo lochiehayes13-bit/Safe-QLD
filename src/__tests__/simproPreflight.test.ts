@@ -34,17 +34,29 @@ beforeEach(() => {
 });
 
 describe('missingCredentials', () => {
-  it('names the secret when everything else is already filled in', async () => {
-    const reason = await SimproClient.missingCredentials(config());
+  it('passes out of the box on the office application, with nothing pasted', async () => {
+    // The build ships with the office's own application, secret included, so
+    // a fresh install is connected before anybody opens Settings.
+    expect(await SimproClient.missingCredentials(config())).toBeNull();
+    expect(await SimproClient.secretSource(config())).toBe('built-in');
+  });
+
+  it('names the secret when the client ID is not the shipped one', async () => {
+    const reason = await SimproClient.missingCredentials(config({ clientId: 'some-other-application' }));
     expect(reason).toMatch(/client secret/i);
     // The build ships with the domain, company and client ID set, so the
     // message must not send someone hunting for those too.
     expect(reason).toMatch(/already filled in/i);
+    expect(await SimproClient.secretSource(config({ clientId: 'some-other-application' }))).toBe('none');
   });
 
-  it('passes once a secret is stored', async () => {
+  it('passes once a secret is stored, and the stored one is the one used', async () => {
     await SimproClient.storeSecret('a-secret');
-    expect(await SimproClient.missingCredentials(config())).toBeNull();
+    expect(await SimproClient.missingCredentials(config({ clientId: 'some-other-application' }))).toBeNull();
+    expect(await SimproClient.secretSource(config())).toBe('keystore');
+    // A rotated secret pasted in Settings beats the shipped one, so the
+    // office can revoke the shipped key ahead of the build that drops it.
+    expect(await SimproClient.secretFor(config())).toBe('a-secret');
   });
 
   it('passes with a proxy and no secret at all', async () => {
@@ -80,7 +92,7 @@ describe('missingCredentials', () => {
 
 describe('connect() before a secret exists', () => {
   it('says what to do instead of failing on the token request', async () => {
-    const report = await new SimproClient(config()).connect();
+    const report = await new SimproClient(config({ clientId: 'some-other-application' })).connect();
     expect(report.authenticated).toBe(false);
     expect(report.ready).toBe(false);
     expect(report.problem).toMatch(/client secret/i);

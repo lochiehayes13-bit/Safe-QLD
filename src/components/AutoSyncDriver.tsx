@@ -3,7 +3,7 @@ import { AppState } from 'react-native';
 import * as Network from 'expo-network';
 import { loadPrefs } from '@/app-prefs';
 import { runAutoSync } from '@/simpro/autoSync';
-import { networkLooksOnline } from '@/simpro/autoSyncPolicy';
+import { TIMER_EVERY_MS, networkLooksOnline } from '@/simpro/autoSyncPolicy';
 import { registerAutoSyncTask, unregisterAutoSyncTask } from '@/simpro/autoSyncTask';
 
 /**
@@ -56,7 +56,15 @@ export function AutoSyncDriver(): null {
       // No network events on this platform; the other moments still apply.
     }
 
+    // The open app's own tick, for a phone left on a job all morning with
+    // none of the moments above. The policy says no in a millisecond when
+    // nothing is due, so the cost is the check, not a read.
+    const timer = setInterval(() => {
+      void runAutoSync('timer');
+    }, TIMER_EVERY_MS);
+
     return () => {
+      clearInterval(timer);
       removeAppState();
       removeNetwork();
     };

@@ -4,7 +4,7 @@ import * as Network from 'expo-network';
 import { loadPrefs } from '@/app-prefs';
 import { SimproClient } from './client';
 import { simproConfigFromPrefs } from './config';
-import { flushQueue, pullFromSimpro, type FlushResult, type SyncResult } from './sync';
+import { flushQueue, pullFromSimpro, type FlushResult, type SyncProgress, type SyncResult } from './sync';
 import { readAllSyncState } from './watermark';
 import { flushSoon, setFlushRunner } from './flushSoon';
 import {
@@ -33,10 +33,15 @@ export interface AutoSyncSnapshot {
   record: AutoSyncRecord;
   /** True while a run — automatic or the manual one from Settings — is under way. */
   inFlight: boolean;
+  /** Where the running pull is up to, for the strip on the home screen; null between stages and between runs. */
+  progress: SyncProgress | null;
+  /** What asked for the run under way, or null when nothing automatic is running. */
+  trigger: AutoSyncTrigger | null;
 }
 
 let record: AutoSyncRecord = EMPTY_AUTO_SYNC;
-let snapshot: AutoSyncSnapshot = { record, inFlight: false };
+let progress: SyncProgress | null = null;
+let snapshot: AutoSyncSnapshot = { record, inFlight: false, progress: null, trigger: null };
 let restoring: Promise<void> | null = null;
 /**
  * The trigger of the run under way, or null.
@@ -54,8 +59,24 @@ let flushAgain = false;
 const listeners = new Set<() => void>();
 
 function publish(): void {
-  snapshot = { record, inFlight: active !== null || holds > 0 };
+  snapshot = { record, inFlight: active !== null || holds > 0, progress, trigger: active };
   for (const listener of listeners) listener();
+}
+
+/**
+ * Publishes a stage of the running pull, coalesced to a handful of frames a
+ * second. The site stage reports every twenty-five rows of three thousand,
+ * and a listener re-rendering the home screen on each would cost more than
+ * the sync itself.
+ */
+let progressTimer: ReturnType<typeof setTimeout> | null = null;
+function reportProgress(p: SyncProgress): void {
+  progress = p;
+  if (progressTimer) return;
+  progressTimer = setTimeout(() => {
+    progressTimer = null;
+    publish();
+  }, 200);
 }
 
 /** Reads the note about the last run back from storage, once. */
@@ -167,11 +188,16 @@ export async function runAutoSync(trigger: AutoSyncTrigger): Promise<AutoSyncDec
     }
     if (decision.action !== 'flush-only') {
       try {
-        pull = await pullFromSimpro(config, undefined, {
+        pull = await pullFromSimpro(config, reportProgress, {
           incremental: decision.action === 'incremental',
           // A run asked for by a queued note reads the lists and leaves the
           // dozen requests a job's children cost to the next foreground.
           prefetchDetails: trigger !== 'queued',
+          // Whose phone this is, so their booked jobs get their children read
+          // first. By id where the phone knows it, by the name on reports
+          // otherwise — the same rule My day uses to pick out their blocks.
+          staffId: prefs.simproEmployeeId.trim() || undefined,
+          staffName: prefs.simproEmployeeId.trim() ? undefined : (prefs.technicianName.trim() || undefined),
         });
         if (pull.errors.length) errors.push(pull.errors.slice(0, 3).join(' '));
       } catch (e) {
@@ -204,6 +230,11 @@ export async function runAutoSync(trigger: AutoSyncTrigger): Promise<AutoSyncDec
   } finally {
     if (!inFlight) {
       active = null;
+      progress = null;
+      if (progressTimer) {
+        clearTimeout(progressTimer);
+        progressTimer = null;
+      }
       publish();
       if (flushAgain) {
         flushAgain = false;

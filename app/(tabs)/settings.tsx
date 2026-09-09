@@ -29,6 +29,8 @@ import type { RateCardImport } from '@/simpro/rateCard';
 import { formatBytes } from '@/share/pack';
 import { MODE_BLURB, MODE_LABEL, readMode } from '@/domain/appMode';
 import { signOut } from '@/simpro/auth';
+import { forgetSignInSkipped } from '@/simpro/signInFlow';
+import { OFFICE_APPLICATION } from '@/simpro/office';
 import { readSignedOutReason, readUserSession, type UserSession } from '@/simpro/userSession';
 import { describeBuild, describeUpdateCheck } from '@/domain/updateCheck';
 import { buildInfo } from '@/update/buildInfo';
@@ -46,6 +48,8 @@ export default function SettingsScreen() {
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
   const [secret, setSecret] = useState('');
   const [hasSecret, setHasSecret] = useState(false);
+  /** Where the secret a token request carries comes from: pasted, shipped with the build, the proxy, or nowhere. */
+  const [secretSource, setSecretSource] = useState<'proxy' | 'keystore' | 'built-in' | 'none'>('none');
   /** The whole oAuth2 details block off Simpro, pasted rather than picked apart by hand. */
   const [pastedDetails, setPastedDetails] = useState('');
   const [aiKey, setAiKey] = useState('');
@@ -117,6 +121,10 @@ export default function SettingsScreen() {
       setStorage(0);
     }
   }, []);
+
+  useEffect(() => {
+    void SimproClient.secretSource(simproConfigFromPrefs(prefs)).then(setSecretSource);
+  }, [prefs.simproClientId, prefs.simproDomain, prefs.simproProxyUrl, hasSecret]);
 
   // Sign-in and the staff picker push over this screen and pop back; what
   // they changed has to show without a remount.
@@ -432,7 +440,9 @@ export default function SettingsScreen() {
                 title="Sign out"
                 variant="ghost"
                 compact
-                onPress={() => { void signOut().then(() => { setSession(null); setSignedOutReason(null); }); }}
+                onPress={() => {
+                  void Promise.all([signOut(), forgetSignInSkipped()]).then(() => { setSession(null); setSignedOutReason(null); });
+                }}
               />
             </Rowed>
           </>
@@ -672,16 +682,23 @@ export default function SettingsScreen() {
 
       <H2>Simpro</H2>
       <Banner
-        tone="warn"
-        title="About storing the client secret here"
-        body="A secret on every technician's phone is a genuine risk — anyone with the device and a way past the lock screen has your API access. It is kept in the hardware keystore, but the safer arrangement is a Safe QLD server holding the secret and this app talking to that. Set a proxy URL below and no secret is stored on the device at all."
+        tone={secretSource === 'none' ? 'warn' : 'info'}
+        title={secretSource === 'built-in' ? 'Connected out of the box' : 'How this phone reaches Simpro'}
+        body={secretSource === 'built-in'
+          ? `This build ships with the office's “${OFFICE_APPLICATION.name}” API application, so nothing has to be pasted before the app works. If the office regenerates that application's secret in Simpro, paste the new one below and it takes over on this phone straight away.`
+          : secretSource === 'keystore'
+            ? 'A pasted secret in this phone\'s keystore is what every request carries. Remove it to go back to the one built into the app.'
+            : secretSource === 'proxy'
+              ? 'Requests go through the proxy below, which holds the secret. This phone holds none.'
+              : 'This client ID is not the one the app ships with, so its secret has to be pasted below before anything can sync.'}
       />
       <Card>
         <Label>Paste the oAuth2 details from Simpro</Label>
         <Txt size="xs" tone="faint" style={{ marginTop: 4, marginBottom: t.space(2), lineHeight: 17 }}>
-          System Setup → API keys in Simpro shows a block starting “Token URL”. Copy the whole
-          thing and paste it here — the build, the client ID and the secret are read out of it, and
-          the secret goes straight to the keystore. Anything the block does not carry is left alone.
+          Only needed to move this phone to a different API application. System Setup → API in Simpro
+          shows a block starting “Token URL”. Copy the whole thing and paste it here — the build, the
+          client ID and the secret are read out of it, and the secret goes straight to the keystore.
+          Anything the block does not carry is left alone.
         </Txt>
         <Field
           label=""
@@ -717,7 +734,9 @@ export default function SettingsScreen() {
             {hasSecret ? (
               <Rowed gap={2}>
                 <MaterialCommunityIcons name="lock-check" size={18} color={t.color.pass} />
-                <Txt size="sm" tone="pass" style={{ flex: 1 }}>A secret is stored in the keystore.</Txt>
+                <Txt size="sm" tone="pass" style={{ flex: 1 }}>
+                  A pasted secret is stored in the keystore{secretSource === 'keystore' && OFFICE_APPLICATION.clientId === prefs.simproClientId.trim() ? ' and is used ahead of the built-in one' : ''}.
+                </Txt>
                 <Button
                   title="Remove"
                   variant="danger"
@@ -730,9 +749,15 @@ export default function SettingsScreen() {
               </Rowed>
             ) : (
               <>
-                <Field label="" value={secret} onChangeText={setSecret} autoCapitalize="none" placeholder="Paste the client secret" />
+                {secretSource === 'built-in' ? (
+                  <Rowed gap={2} style={{ marginBottom: t.space(2) }}>
+                    <MaterialCommunityIcons name="lock-check" size={18} color={t.color.pass} />
+                    <Txt size="sm" tone="pass" style={{ flex: 1 }}>Using the office key built into this build. Paste a new one only if it has been regenerated.</Txt>
+                  </Rowed>
+                ) : null}
+                <Field label="" value={secret} onChangeText={setSecret} autoCapitalize="none" placeholder={secretSource === 'built-in' ? 'Paste a regenerated client secret' : 'Paste the client secret'} />
                 <View style={{ height: t.space(2) }} />
-                <Button title="Save to keystore" onPress={saveSecret} disabled={!secret.trim()} />
+                <Button title="Save to keystore" onPress={saveSecret} disabled={!secret.trim()} variant={secretSource === 'built-in' ? 'secondary' : 'primary'} />
               </>
             )}
           </>

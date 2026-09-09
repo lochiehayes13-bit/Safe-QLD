@@ -4,6 +4,7 @@ import {
   type TokenGrant, type TokenSet,
 } from './oauth';
 import { clearUserSession, readUserSession, writeUserSession, type UserSession } from './userSession';
+import { shippedSecretFor } from './office';
 import type { CurrentUser } from './identity';
 
 /**
@@ -289,6 +290,26 @@ export class SimproClient {
   }
 
   /**
+   * The secret a token request carries, or none behind a proxy.
+   *
+   * A secret pasted into the keystore wins over the one the app ships with,
+   * so a rotation the office makes in Simpro reaches a phone the moment
+   * somebody pastes the new one — ahead of the build that carries it. The
+   * shipped one applies only to the office's own application; see ./office.
+   */
+  static async secretFor(config: SimproConfig): Promise<string | undefined> {
+    if (config.proxyUrl) return undefined;
+    return (await SecureStore.getItemAsync(SECRET_KEY)) ?? shippedSecretFor(config);
+  }
+
+  /** Where the secret comes from, for the line in Settings that says so. */
+  static async secretSource(config: SimproConfig): Promise<'proxy' | 'keystore' | 'built-in' | 'none'> {
+    if (config.proxyUrl) return 'proxy';
+    if (await SimproClient.hasSecret()) return 'keystore';
+    return shippedSecretFor(config) ? 'built-in' : 'none';
+  }
+
+  /**
    * Why this configuration cannot talk to Simpro yet, or null if it can.
    *
    * Checked once before a sync starts rather than discovered separately by each
@@ -305,7 +326,7 @@ export class SimproClient {
     if (!config.clientId.trim()) {
       return 'No Simpro client ID is set. Add it in Settings.';
     }
-    if (!(await SimproClient.hasSecret())) {
+    if (!(await SimproClient.secretFor(config))) {
       return 'Paste the Simpro client secret in Settings and save it to the keystore. '
         + 'Everything else is already filled in.';
     }
@@ -335,7 +356,7 @@ export class SimproClient {
    * the outbound queue both decide differently on each.
    */
   static async tokenExchange(config: SimproConfig, grant: TokenGrant): Promise<TokenSet> {
-    const secret = config.proxyUrl ? undefined : ((await SecureStore.getItemAsync(SECRET_KEY)) ?? undefined);
+    const secret = await SimproClient.secretFor(config);
     if (!config.proxyUrl && !secret) {
       throw new SimproError('No Simpro client secret is stored on this device. Add it in Settings.');
     }

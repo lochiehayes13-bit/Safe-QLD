@@ -30,10 +30,24 @@ export const INCREMENTAL_EVERY_MS = 30 * 60_000;
  */
 export const FULL_EVERY_MS = 24 * 3_600_000;
 
+/**
+ * How often the open app asks itself whether anything is due.
+ *
+ * The other moments — opening, coming to the front, signal returning — are
+ * events, and a phone left open on a job all morning has none of them. The
+ * tick is cheap: the policy answers "nothing due" in a millisecond, and only
+ * every half hour does it turn into a read.
+ */
+export const TIMER_EVERY_MS = 5 * 60_000;
+
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 
-export type AutoSyncTrigger = 'launch' | 'foreground' | 'online' | 'background' | 'queued';
+/**
+ * What asked for the run. `signin` is somebody who has just signed in and
+ * wants their own jobs on the phone; `timer` is the open app's own tick.
+ */
+export type AutoSyncTrigger = 'launch' | 'foreground' | 'online' | 'background' | 'queued' | 'signin' | 'timer';
 export type AutoSyncAction = 'full' | 'incremental' | 'flush-only' | 'none';
 
 export interface AutoSyncInput {
@@ -118,6 +132,16 @@ export function decideAutoSync(input: AutoSyncInput): AutoSyncDecision {
   }
 
   const age = now - lastAny;
+  if (input.trigger === 'signin') {
+    // Their day and their jobs are what a person signing in is waiting for,
+    // and the last sync may have been somebody else's. Changes only: the full
+    // read ran on this phone already, or the rules above would have asked
+    // for it.
+    return {
+      action: 'incremental',
+      reason: 'Somebody just signed in, so what changed since the last sync is being fetched for them.',
+    };
+  }
   if (age >= INCREMENTAL_EVERY_MS) {
     return {
       action: 'incremental',

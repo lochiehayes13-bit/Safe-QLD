@@ -18,6 +18,7 @@ import { Banner, Card, IconPlate, Rowed, Screen, SectionHeader, Txt } from '@/co
 import { describeLoadFailure } from '@/domain/loadFailure';
 import { Bounce, Reveal, animateNextLayout } from '@/components/motion';
 import { UpdateBanner } from '@/components/UpdateBanner';
+import { SyncStrip } from '@/components/SyncStrip';
 
 /**
  * Home — the company hub.
@@ -113,6 +114,7 @@ export default function HomeScreen() {
       {impairments.map((imp) => <ImpairmentBanner key={imp.id} impairment={imp} />)}
       {notices.length ? <NoticeBanner notices={notices} /> : null}
       <UpdateBanner />
+      <SyncStrip />
 
       {prefs && !prefs.technicianName.trim() ? <NamePrompt /> : null}
       {upNext && upNext.rows.length ? <UpNext label={upNext.label} rows={upNext.rows} /> : null}

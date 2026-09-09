@@ -19,6 +19,7 @@ import { Banner, Txt } from '@/components/ui';
 // app in its own type rather than a flash of the system font.
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 import { AutoSyncDriver } from '@/components/AutoSyncDriver';
+import { FirstRunGate } from '@/components/FirstRunGate';
 
 /**
  * Root layout.
@@ -112,6 +113,8 @@ export default function RootLayout() {
         <StatusBar style={t.mode === 'dark' ? 'light' : 'dark'} />
         {/* Only once the database is open: the first thing it does is read sync state. */}
         <AutoSyncDriver />
+        {/* A new phone is asked whose it is, once, over the home screen. */}
+        <FirstRunGate />
         <Stack
           screenOptions={{
             headerStyle: { backgroundColor: t.color.bgElevated },
