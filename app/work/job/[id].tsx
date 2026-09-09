@@ -13,6 +13,8 @@ import { getSite, listDefects } from '@/db/repo';
 import { assetCountsBySystem } from '@/db/assetRepo';
 import { listRoutineRuns } from '@/db/routineRunRepo';
 import { JOB_RECORDS_PRIVACY_NOTE, draftJobBrief, type JobBrief } from '@/ai/jobBrief';
+import { draftOfficeNote } from '@/ai/officeNote';
+import { hasKey } from '@/ai/client';
 import type { Defect, Site } from '@/domain/types';
 import type { SimproCostCenter, SimproItem, SimproSection } from '@/simpro/mirrorResources';
 import {
@@ -1096,18 +1098,83 @@ function StatusSheet({ visible, onClose, choices, current, suggested, busy, onPi
   );
 }
 
+/**
+ * The note to the office, with the model offered as a tidier.
+ *
+ * Write it up sends the words in the box and nothing else — no job, no
+ * customer, no site — and puts what comes back in the box for the
+ * technician to read before it goes. Their own words are kept underneath
+ * until they are happy, because the draft is a suggestion and the note is
+ * theirs. Without a key the button is not offered and the box works as it
+ * always did.
+ */
 function NoteSheet({ visible, onClose, busy, onSend }: { visible: boolean; onClose: () => void; busy: boolean; onSend: (subject: string, note: string) => void }) {
+  const t = useTheme();
   const [subject, setSubject] = useState('');
   const [note, setNote] = useState('');
+  const [aiOn, setAiOn] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiNote, setAiNote] = useState<string | null>(null);
+  const [mine, setMine] = useState<string | null>(null);
+
+  useEffect(() => { void hasKey().then(setAiOn).catch(() => setAiOn(false)); }, []);
+
+  const writeUp = async () => {
+    const rough = note.trim();
+    setAiBusy(true);
+    setAiNote(null);
+    try {
+      const draft = await draftOfficeNote(rough);
+      if (draft.note) {
+        setMine(rough);
+        setNote(draft.note);
+        if (draft.subject && !subject.trim()) setSubject(draft.subject);
+        setAiNote('Written up from your words. Read it before you send it.');
+      } else {
+        setAiNote(draft.refusal ?? 'Nothing came back. Your own words still stand.');
+      }
+    } catch (e) {
+      setAiNote(describeActionFailure(e, 'write the note up'));
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
   const send = () => {
     if (!note.trim()) { showAlert('Nothing to send', 'Write the note first.'); return; }
     onSend(subject, note);
-    setSubject(''); setNote('');
+    setSubject(''); setNote(''); setMine(null); setAiNote(null);
   };
+
   return (
     <Sheet title="Add note" visible={visible} onClose={onClose}>
       <Field label="Subject" value={subject} onChangeText={setSubject} placeholder="What it is about" autoCapitalize="sentences" />
       <Field label="Note" value={note} onChangeText={setNote} placeholder="What you found, what you did, what is still to do" multiline />
+      {aiOn ? (
+        <Rowed gap={2} align="flex-start">
+          <Txt size="xs" tone="faint" style={{ flex: 1, lineHeight: 17 }}>
+            Write it up tidies your words for the office. It sends what is in the box and nothing else — not the job,
+            the customer or the site — and never adds a number you did not write.
+          </Txt>
+          <Button
+            title="Write it up"
+            variant="secondary"
+            compact
+            disabled={note.trim().split(/\s+/).filter(Boolean).length < 3}
+            loading={aiBusy}
+            onPress={() => void writeUp()}
+            icon={<MaterialCommunityIcons name="auto-fix" size={16} color={t.color.text} />}
+          />
+        </Rowed>
+      ) : null}
+      {aiNote ? <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{aiNote}</Txt> : null}
+      {mine ? (
+        <Card style={{ gap: t.space(1) }}>
+          <Txt size="xs" tone="faint">What you wrote, if you want it back</Txt>
+          <Txt size="sm" style={{ lineHeight: 19 }}>{mine}</Txt>
+          <Chip label="Put mine back" onPress={() => { setNote(mine); setMine(null); setAiNote(null); }} />
+        </Card>
+      ) : null}
       <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
         Goes on the job's notes in Simpro, under your name, with the next send.
       </Txt>

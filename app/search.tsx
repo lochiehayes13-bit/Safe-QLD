@@ -7,6 +7,9 @@ import { searchEverything, searchableCount } from '@/db/searchRepo';
 import {
   KIND_LABEL, SEARCH_HINTS, groupHits, isExact, nothingFoundWords, parseQuery, type HitGroup, type SearchHit,
 } from '@/domain/search';
+import { isPhrase, phraseWords, readPhrase } from '@/domain/findPhrase';
+import { readPhraseWithModel, worthAsking } from '@/ai/findPhrase';
+import { hasKey } from '@/ai/client';
 import { readMode, searchDestinations, type DestinationHit } from '@/domain/appMode';
 import { officeEmptyState, type EmptyStateWords } from '@/domain/deviceData';
 import { describeLoadFailure } from '@/domain/loadFailure';
@@ -29,6 +32,14 @@ import { Bounce, Reveal } from '@/components/motion';
  * test holding four. The results come grouped by kind with a count on each
  * group, an exact number match marked as such, and every row opens the
  * record it names.
+ *
+ * A sentence typed at the box is read before it is searched: "unpaid
+ * invoices for the tower" is invoices matching "the tower", and the screen
+ * says so in a line under the box rather than silently searching for five
+ * words that appear in no record together. That reading is two word lists
+ * and no network. Where they cannot tell what kind of record was meant, and
+ * only then, a model may be asked to pick which of the typed words to
+ * search for — never to answer, and never with a word nobody typed.
  */
 
 /** How many of each kind to show. Where a kind is cut, the group says so. */
@@ -42,6 +53,11 @@ export default function SearchScreen() {
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [screens, setScreens] = useState<DestinationHit[]>([]);
   const [failed, setFailed] = useState<string | null>(null);
+  // A phrase read by the model, kept beside the typed text: the box still
+  // holds what the person wrote, and one line says how it was read.
+  const [asked, setAsked] = useState<{ phrase: string; terms: string; kind?: SearchHit['kind']; note: string } | null>(null);
+  const [asking, setAsking] = useState(false);
+  const [keyed, setKeyed] = useState(false);
   // What an empty answer means: a phone nobody has connected has nothing to
   // search, and "nothing matched" on that phone sends somebody retyping.
   const [empty, setEmpty] = useState<EmptyStateWords | null>(null);
@@ -53,23 +69,34 @@ export default function SearchScreen() {
     return () => clearTimeout(h);
   }, [typed]);
 
-  const parsed = useMemo(() => parseQuery(query), [query]);
+  // What the words asked for, where they were a sentence. A phrase the
+  // model read outranks the word lists' reading of the same phrase.
+  const phrase = useMemo(() => (isPhrase(query) ? readPhrase(query) : null), [query]);
+  const model = asked && asked.phrase === query.trim() ? asked : null;
+  const searched = model ? model.terms : (phrase ? phrase.terms : query);
+  const onlyKind = model ? model.kind : phrase?.kind;
+  const parsed = useMemo(() => parseQuery(searched), [searched]);
 
   const load = useCallback(async () => {
     setFailed(null);
     try {
-      if (parsed.text.length < 2) {
+      // A phrase that named a kind and nothing else — "the open purchase
+      // orders" — is a list of that kind, not two characters of nothing.
+      if (parsed.text.length < 2 && !onlyKind) {
         setHits(null);
         setScreens([]);
         return;
       }
       const prefs = await loadPrefs();
       const [found, held] = await Promise.all([
-        searchEverything(parsed.text, { limitPerKind: PER_KIND }),
+        searchEverything(parsed.text, { limitPerKind: PER_KIND, kinds: onlyKind ? [onlyKind] : undefined }),
         searchableCount(),
       ]);
       setHits(found);
-      setScreens(searchDestinations(parsed.text, readMode(prefs.appMode).mode, 4).filter((d) => !d.destination.needsContext));
+      // The app's own screens answer to what was typed, not to what the
+      // phrase was reduced to: "purchase orders" should still offer the
+      // purchase orders screen.
+      setScreens(searchDestinations(query, readMode(prefs.appMode).mode, 4).filter((d) => !d.destination.needsContext));
       if (!found.length && !held) {
         setEmpty(officeEmptyState(
           { held: 0, connected: Boolean(prefs.simproClientId && prefs.simproCompanyId), everSynced: await everSynced() },
@@ -81,13 +108,45 @@ export default function SearchScreen() {
     } catch (e) {
       setFailed(describeLoadFailure(e, 'the search'));
     }
-  }, [parsed.text]);
+  }, [parsed.text, onlyKind, query]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+
+  // Whether a key exists at all, so the button to ask is only offered where
+  // it can do something.
+  useEffect(() => { void hasKey().then(setKeyed).catch(() => setKeyed(false)); }, []);
+
+  const ask = useCallback(async () => {
+    const phraseText = query.trim();
+    setAsking(true);
+    try {
+      const result = await readPhraseWithModel(phraseText);
+      setAsked(result.suggestion
+        ? {
+          phrase: phraseText,
+          terms: result.suggestion.terms,
+          kind: result.suggestion.kind,
+          note: `Read as: ${result.suggestion.kind ? `${KIND_LABEL[result.suggestion.kind].many.toLowerCase()} ` : ''}`
+            + (result.suggestion.terms ? `matching "${result.suggestion.terms}"` : 'the most recent') + '.',
+        }
+        : { phrase: phraseText, terms: phraseText, note: result.refusal });
+    } catch (e) {
+      // It is written not to throw; if it ever does, the search still ran
+      // on what was typed and the line under the box says why nothing else
+      // happened.
+      setAsked({ phrase: phraseText, terms: phraseText, note: describeLoadFailure(e, 'reading the phrase') });
+    } finally {
+      setAsking(false);
+    }
+  }, [query]);
 
   const groups = useMemo(() => (hits ? groupHits(hits) : []), [hits]);
   const nothing = hits !== null && !hits.length && !screens.length;
   const words = nothingFoundWords(parsed);
+  const readAs = model ? model.note : (phrase ? phraseWords(phrase) : undefined);
+  // Offered under a phrase the word lists could not place, and only where
+  // there is a key to ask with.
+  const canAsk = keyed && !model && Boolean(phrase) && worthAsking(query, phrase!).ok;
 
   return (
     <>
@@ -95,6 +154,7 @@ export default function SearchScreen() {
       <Screen scroll={false} padded={false}>
         <View style={{ padding: t.space(4), paddingBottom: t.space(2), gap: t.space(2) }}>
           <SearchBox value={typed} onChange={setTyped} placeholder="Job, invoice, PO, quote, site, customer, part, phone" />
+          {readAs ? <Txt size="xs" tone="muted">{readAs}</Txt> : null}
           {hits ? (
             <Txt size="xs" tone="faint">
               {hits.length
@@ -133,6 +193,19 @@ export default function SearchScreen() {
             ) : (
               <EmptyState icon="magnify-close" title={words.title} body={words.body} />
             )
+          ) : null}
+
+          {canAsk ? (
+            <Card style={{ gap: t.space(1) }}>
+              <Txt weight="700">That reads like a sentence</Txt>
+              <Txt size="sm" tone="muted">
+                Nothing in it says which kind of record you meant. The words you typed can be sent to the model to pick
+                which of them to search for. Only those words go; no job, customer or site leaves the phone.
+              </Txt>
+              <Bounce onPress={() => { void ask(); }} haptic="light">
+                <Chip label={asking ? 'Reading…' : 'Read it for me'} selected />
+              </Bounce>
+            </Card>
           ) : null}
         </ScrollView>
       </Screen>

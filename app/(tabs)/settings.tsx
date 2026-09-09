@@ -474,6 +474,19 @@ export default function SettingsScreen() {
           makes is numbered to a passage; anything it cannot source, it does not say.
         </Txt>
         <View style={{ height: t.space(2.5) }} />
+        {/*
+          * The four places a key does something, and what each one sends. Kept
+          * beside the key itself: a person deciding whether to set one should
+          * not have to find four screens to learn what it is for.
+          */}
+        <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
+          A key is used in four places, each with the same rule — it may only order and word what it
+          was given, never add a fact. Reading the standards sends your question and the passages
+          found for it. Writing up a defect sends the code, the system and your own words. Writing up
+          a note to the office sends the words in the box. Reading a typed phrase in Find anything
+          sends the phrase. None of those four sends a site, a customer or a register.
+        </Txt>
+        <View style={{ height: t.space(2.5) }} />
         <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>{PRIVACY_NOTE}</Txt>
         <View style={{ height: t.space(3) }} />
         {hasAi ? (
