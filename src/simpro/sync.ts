@@ -18,7 +18,7 @@ import { addDays, scheduleWindow } from '@/domain/myDay';
 import { qldIsoDay } from '@/domain/qldTime';
 import {
   upsertJob, getJob, enqueueSync, pendingSync, markSynced, markSyncFailed, markSyncUnknown, abandonSync,
-  setPurchaseStatus, type JobRecord,
+  claimSync, releaseSync, recoverSending, setPurchaseStatus, type JobRecord,
 } from '@/db/opsRepo';
 import {
   getQuote, heldJobExternalIds, invoiceRowIsWhole, jobDetailIsStale, jobRowFromSimpro, jobsWantingDetail,
@@ -1396,6 +1396,10 @@ function jobIdOf(kind: string, payload: unknown): string | undefined {
  * the office fixes.
  */
 export async function flushQueue(config: SimproConfig): Promise<FlushResult> {
+  // A row a run claimed and never finished — the app killed mid-send — goes
+  // back to pending before this run reads the queue, so a claim can never
+  // strand a row.
+  await recoverSending();
   const items = await pendingSync(50);
   if (!items.length) return { sent: 0, failed: 0, remaining: 0 };
 
@@ -1424,6 +1428,10 @@ export async function flushQueue(config: SimproConfig): Promise<FlushResult> {
       await abandonSync(item.id, `The queued item could not be read: ${e instanceof Error ? e.message : String(e)}`);
       continue;
     }
+    // The list above is a snapshot. The row is sent only if this run wins
+    // it now: a row an undo deleted, or another run handled, since the
+    // snapshot was taken is left exactly as it was found.
+    if (!(await claimSync(item.id))) continue;
     try {
       if (item.kind === 'job-note') {
         const p = payload as JobNotePayload;
@@ -1491,7 +1499,8 @@ export async function flushQueue(config: SimproConfig): Promise<FlushResult> {
         }
         if (outcome.status === 'later') {
           // Not its moment yet — a change still inside the time a person
-          // has to take it back. Left pending, attempts untouched.
+          // has to take it back. Handed back as pending, attempts untouched.
+          await releaseSync(item.id);
           continue;
         }
       }
@@ -1500,6 +1509,8 @@ export async function flushQueue(config: SimproConfig): Promise<FlushResult> {
     } catch (e) {
       const failure = sendFailure({ kind: item.kind, jobId: jobIdOf(item.kind, payload) }, e);
       if (failure.outcome === 'stop') {
+        // Nothing was this row's fault: it goes back exactly as found.
+        await releaseSync(item.id);
         stopped = { why: failure.why, reason: failure.reason };
         break;
       }

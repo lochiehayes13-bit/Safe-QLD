@@ -486,6 +486,28 @@ export async function workHubCounts(): Promise<WorkHubCounts> {
   };
 }
 
+/** A status name as the office spells it, its colour, and how many mirrored jobs wear it. */
+export interface JobStatusSeen { statusName: string; statusColor?: string; count: number }
+
+/**
+ * The office statuses the phone has seen on its jobs, commonest first.
+ *
+ * A mirrored job holds the status name and colour, never the id, so the
+ * job card's Change status picker joins these to the pinned id list in
+ * @/domain/jobActions. Read here as a group rather than off a page of jobs:
+ * the page is capped, and the status a technician wants is often the one
+ * no open job wears yet.
+ */
+export async function distinctJobStatuses(): Promise<JobStatusSeen[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ statusName: string; statusColor: string | null; count: number }>(
+    `SELECT statusName, MAX(statusColor) AS statusColor, COUNT(*) AS count
+       FROM job WHERE statusName IS NOT NULL AND TRIM(statusName) <> ''
+      GROUP BY statusName ORDER BY count DESC, statusName`,
+  );
+  return rows.map((r) => ({ statusName: r.statusName, statusColor: r.statusColor ?? undefined, count: r.count }));
+}
+
 export async function getJob(id: string): Promise<JobRecord | null> {
   const db = await getDb();
   return (await db.getFirstAsync<JobRecord>('SELECT * FROM job WHERE id = ?', id)) ?? null;
@@ -1017,9 +1039,45 @@ export interface SyncEntry {
    * a vendor order that did arrive would be raised twice; a person looks at
    * Simpro and either retries it or lets it go.
    */
-  status: 'pending' | 'sent' | 'failed' | 'unknown';
+  status: 'pending' | 'sending' | 'sent' | 'failed' | 'unknown';
   /** What the item is, derived from its content. See domain/queueKey. */
   contentKey?: string | null;
+}
+
+/**
+ * Claims a row for the send that is about to happen.
+ *
+ * The queue used to be a snapshot: fifty rows read into memory and walked,
+ * with nothing on the row saying it was being sent. So a change taken back
+ * — its row deleted by an undo while a run was on the rows ahead of it —
+ * was still sent when the run reached it, and the phone said nothing went.
+ * Now a row is sent only if this write wins it, and an undo that deletes a
+ * pending row wins against a sender that has not claimed it yet. Returns
+ * false when the row is no longer pending: undone, or already handled.
+ */
+export async function claimSync(id: string): Promise<boolean> {
+  const db = await getDb();
+  const r = await db.runAsync("UPDATE sync_queue SET status = 'sending' WHERE id = ? AND status = 'pending'", id);
+  return r.changes > 0;
+}
+
+/** Hands a claimed row back: the sender decided it is not the row's moment yet. */
+export async function releaseSync(id: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync("UPDATE sync_queue SET status = 'pending' WHERE id = ? AND status = 'sending'", id);
+}
+
+/**
+ * Puts back any row a run claimed and never finished: the app was killed
+ * mid-send. Called at the start of every run, so a claim can never strand
+ * a row. A send that had actually gone out before the kill is sent again;
+ * every sender reads the office before it writes, which is what makes that
+ * safe.
+ */
+export async function recoverSending(): Promise<number> {
+  const db = await getDb();
+  const r = await db.runAsync("UPDATE sync_queue SET status = 'pending' WHERE status = 'sending'");
+  return r.changes;
 }
 
 /**
@@ -1043,7 +1101,7 @@ export async function enqueueSync(
   const db = await getDb();
   const key = options.contentKey ?? queueKey(kind, payload);
   const existing = await db.getFirstAsync<{ id: string }>(
-    "SELECT id FROM sync_queue WHERE contentKey = ? AND status IN ('pending', 'sent', 'unknown') LIMIT 1",
+    "SELECT id FROM sync_queue WHERE contentKey = ? AND status IN ('pending', 'sending', 'sent', 'unknown') LIMIT 1",
     key,
   );
   if (existing) return { id: existing.id, duplicate: true };

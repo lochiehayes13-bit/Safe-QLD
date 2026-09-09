@@ -96,7 +96,7 @@ function sendState(e: ClockEntry, q: QueueState | undefined): { label: string; t
   if (!e.endedAt) return { label: 'Running', tone: 'accent' };
   if (q?.status === 'unknown') return { label: 'Unsure', tone: 'warn', words: `No reply came back. Check Waiting to send.${q.lastError ? ` ${q.lastError}` : ''}` };
   if (q?.status === 'failed') return { label: 'Failed', tone: 'fail', words: q.lastError ?? e.sendError };
-  if (q?.status === 'pending') return { label: q.lastError ? 'Retrying' : 'Queued', tone: 'accent', words: q.lastError };
+  if (q?.status === 'pending' || q?.status === 'sending') return { label: q.lastError ? 'Retrying' : 'Queued', tone: 'accent', words: q.lastError };
   if (e.sendError) return { label: 'Not sent', tone: 'fail', words: e.sendError };
   const ready = sendReadiness(e);
   if (!ready.ready) return { label: e.kind === 'break' ? 'Break' : 'Not sent', tone: 'muted', words: e.kind === 'break' ? undefined : ready.why };
@@ -302,7 +302,7 @@ export default function ClockScreen() {
       let held = 0;
       for (const e of todays) {
         const q = queue.get(e.id)?.status;
-        if (q === 'pending' || q === 'unknown') continue;
+        if (q === 'pending' || q === 'sending' || q === 'unknown') continue;
         if (!sendReadiness(e).ready) continue;
         const r = await queueClockEntry(e);
         if (r.status === 'queued') queued++;
@@ -411,7 +411,7 @@ export default function ClockScreen() {
             <Button title="Edit" variant="ghost" compact disabled={busy} onPress={() => setEditing({ id: e.id, start: qldClock(e.startedAt) ?? '', end: e.endedAt ? qldClock(e.endedAt) ?? '' : '' })} />
             <Button title="Delete" variant="ghost" compact disabled={busy} onPress={() => remove(e)} />
             {/* Not while it is queued, and not while nobody can say whether it went: that one is decided on Waiting to send. */}
-            {e.endedAt && sendReadiness(e).ready && queue.get(e.id)?.status !== 'pending' && queue.get(e.id)?.status !== 'unknown' ? (
+            {e.endedAt && sendReadiness(e).ready && !['pending', 'sending', 'unknown'].includes(queue.get(e.id)?.status ?? '') ? (
               <Button title={queue.get(e.id) ? 'Send again' : 'Send'} variant="secondary" compact disabled={busy} onPress={() => { void send(e); }} />
             ) : null}
           </Rowed>

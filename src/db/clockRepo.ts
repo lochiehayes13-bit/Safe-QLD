@@ -151,7 +151,8 @@ export async function unsentEntries(): Promise<ClockEntry[]> {
 
 /** The state of each entry's queue row, by entry id, for the send chip beside it. */
 export interface QueueState {
-  status: 'pending' | 'sent' | 'failed' | 'unknown';
+  /** 'sending' is a row a run has claimed this moment; the screen treats it as pending. */
+  status: 'pending' | 'sending' | 'sent' | 'failed' | 'unknown';
   lastError?: string;
 }
 

@@ -93,7 +93,7 @@ export async function acceptedKeys(): Promise<string[]> {
 export async function queuedAttachmentKeys(): Promise<string[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<{ contentKey: string | null }>(
-    "SELECT contentKey FROM sync_queue WHERE kind = 'attachment' AND status IN ('pending', 'sent', 'unknown')",
+    "SELECT contentKey FROM sync_queue WHERE kind = 'attachment' AND status IN ('pending', 'sending', 'sent', 'unknown')",
   );
   return rows.map((r) => r.contentKey).filter((k): k is string => !!k);
 }
