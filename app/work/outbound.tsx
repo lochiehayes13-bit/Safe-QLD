@@ -24,6 +24,8 @@ import { CLOCK_QUEUE_KIND, describeEntry, type ClockEntry } from '@/domain/clock
 import { flushSoon } from '@/simpro/flushSoon';
 import { markerFor } from '@/domain/queueKey';
 import { describeJobChange } from '@/domain/jobActions';
+import { describeAssetChange, isAssetChangeKind } from '@/domain/assetChanges';
+import { describeScheduleChange, isScheduleKind } from '@/domain/scheduling';
 import type { Site } from '@/domain/types';
 import { formatBytes } from '@/share/pack';
 import { useTheme } from '@/theme';
@@ -469,7 +471,13 @@ function describeUnknown(u: SyncEntry, clockEntries: ReadonlyMap<string, ClockEn
       }
       // A status, a line or a sign-off from the job card; named by what a
       // person would search the job for.
-      default: return describeJobChange(u.kind, p) ?? u.kind;
+      default:
+        // The register and the calendar name their own changes: a row here
+        // reading "asset-update" tells a technician nothing about which
+        // asset, and this list is where they decide whether to send it again.
+        if (isAssetChangeKind(u.kind)) return describeAssetChange(u.kind, p);
+        if (isScheduleKind(u.kind)) return describeScheduleChange(u.kind, p);
+        return describeJobChange(u.kind, p) ?? u.kind;
     }
   } catch {
     return u.kind;

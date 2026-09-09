@@ -967,8 +967,7 @@ export const DESTINATIONS: readonly Destination[] = [
 
   {
     route: '/work/schedule', file: 'app/work/schedule.tsx', tab: 'work', section: 'On the tools',
-    // My day opens it, and the Work hub's hardcoded rows do not yet.
-    label: 'Schedule', modes: BOTH, openedFrom: ['/work/my-day', '/shortcuts'],
+    label: 'Schedule', modes: BOTH, openedFrom: ['/work', '/work/my-day', '/shortcuts'],
     blurb: "The team's day and yours, and the three things you can do to it from the phone: book on, move, take off.",
     terms: ['schedule', 'calendar', 'book', 'book me on', 'roster', 'team', 'blocks', 'move', 'who is where'],
   },
