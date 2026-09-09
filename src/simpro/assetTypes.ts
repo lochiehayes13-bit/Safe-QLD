@@ -12,7 +12,8 @@ export type { OfficeAssetType, OfficeCustomField };
  *
  * Read from `setup/assetTypes/` — verified on the live build: nineteen rows
  * of {ID, Name}, and each type's fields at `setup/assetTypes/{id}/customFields/`
- * as {ID, Name, Type, Order, Locked}. The `customerAssetTypes/` path the
+ * as {ID, Name, Type, Order, Locked, ListItems}, the last two only when asked
+ * for by name. The `customerAssetTypes/` path the
  * public documentation suggests is a 404 "Invalid route" on this build, and
  * the type record itself carries no fields; the sub-collection does. So the
  * read is one request for the list and one per type for its fields, twenty
@@ -25,7 +26,18 @@ export type { OfficeAssetType, OfficeCustomField };
  */
 
 interface RawType { ID?: number; Name?: string; Archived?: boolean }
-interface RawField { ID?: number; Name?: string; Type?: string; Order?: number; ListItems?: unknown }
+interface RawField { ID?: number; Name?: string; Type?: string; Order?: number; ListItems?: unknown; Locked?: boolean }
+
+/**
+ * The columns a custom field is read with.
+ *
+ * `ListItems` and `Locked` are the reason this is spelled out: the
+ * collection answers without either unless they are asked for by name, so
+ * a plain read gives every List field no choices at all and says nothing
+ * about the fields the office has locked. Verified against the live build
+ * on 2026-09-09 — the same read with these columns returns all six.
+ */
+const FIELD_COLUMNS = 'ID,Name,Type,Order,ListItems,Locked';
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
 
@@ -37,7 +49,7 @@ export async function readAssetTypes(client: SimproClient): Promise<OfficeAssetT
   const out: OfficeAssetType[] = [];
   for (const t of types) {
     if (t.ID === undefined || t.Archived === true) continue;
-    const fields = await client.listAll<RawField>(collectionPath(`setup/assetTypes/${t.ID}/customFields`));
+    const fields = await client.listAll<RawField>(collectionPath(`setup/assetTypes/${t.ID}/customFields`), { columns: FIELD_COLUMNS });
     out.push({
       id: String(t.ID),
       name: str(t.Name) ?? `Type ${t.ID}`,
@@ -49,6 +61,7 @@ export async function readAssetTypes(client: SimproClient): Promise<OfficeAssetT
           name: str(f.Name) ?? `Field ${f.ID}`,
           type: str(f.Type) ?? 'Text',
           listItems: Array.isArray(f.ListItems) ? f.ListItems.map(String) : [],
+          locked: f.Locked === true,
         })),
     });
   }
@@ -213,7 +226,10 @@ export const NO_RETRY_KEY_WORDS =
  * was cleared from one that was never there.
  */
 export function customFieldsFor(asset: FieldSource, officeType: Pick<OfficeAssetType, 'customFields'>): AssetFieldValue[] {
-  return officeType.customFields.map((f) => {
+  // A field the office locked is theirs; writing one is refused, and a
+  // create refused for a field nobody on site can even see is a create the
+  // technician cannot fix.
+  return officeType.customFields.filter((f) => !f.locked).map((f) => {
     let value: string;
     if (LOCATION_FIELD.test(f.name)) value = locationFor(asset);
     else if (TAG_FIELD.test(f.name)) value = tagFor(asset);

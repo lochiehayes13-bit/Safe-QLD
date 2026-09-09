@@ -111,14 +111,20 @@ describe('the office field each value goes under', () => {
 
 describe('reading the types from the office', () => {
   /** Answers the list and each type's fields on the paths the build verified. */
-  function fakeClient(): { client: SimproClient; reads: string[] } {
-    const reads: string[] = [];
+  function fakeClient(): { client: SimproClient; reads: { path: string; columns?: string }[] } {
+    const reads: { path: string; columns?: string }[] = [];
     const client = {
-      listAll: async (path: string) => {
-        reads.push(path);
+      listAll: async (path: string, query: Record<string, string> = {}) => {
+        reads.push({ path, columns: query.columns });
         if (path === 'setup/assetTypes/') return [{ ID: 6, Name: 'Portable Equipment - Fire Extinguishers' }, { ID: 1, Name: 'Old', Archived: true }, { Name: 'no id' }];
         if (path === 'setup/assetTypes/6/customFields/') {
-          return [{ ID: 63, Name: 'Extinguisher Type', Type: 'List', Order: 2, ListItems: ['ABE', 'CO2'] }, { ID: 61, Name: 'Asset #', Type: 'Text', Order: 1 }];
+          // The live build answers a field's choices and its locked flag only
+          // when the columns name them, which is why they are named.
+          if (!query.columns?.includes('ListItems')) return [{ ID: 63, Name: 'Extinguisher Type', Type: 'List', Order: 2 }, { ID: 61, Name: 'Asset #', Type: 'Text', Order: 1 }];
+          return [
+            { ID: 63, Name: 'Extinguisher Type', Type: 'List', Order: 2, ListItems: ['ABE', 'CO2'], Locked: false },
+            { ID: 61, Name: 'Asset #', Type: 'Text', Order: 1, Locked: true },
+          ];
         }
         throw new Error(`unexpected read ${path}`);
       },
@@ -126,16 +132,30 @@ describe('reading the types from the office', () => {
     return { client, reads };
   }
 
-  it('reads the list and each type\'s fields, in the office\'s order', async () => {
+  it('reads the list and each type\'s fields, in the office\'s order, asking for the choices by name', async () => {
     const { client, reads } = fakeClient();
     expect(await readAssetTypes(client)).toEqual([{
       id: '6', name: 'Portable Equipment - Fire Extinguishers',
       customFields: [
-        { id: 61, name: 'Asset #', type: 'Text', listItems: [] },
-        { id: 63, name: 'Extinguisher Type', type: 'List', listItems: ['ABE', 'CO2'] },
+        { id: 61, name: 'Asset #', type: 'Text', listItems: [], locked: true },
+        { id: 63, name: 'Extinguisher Type', type: 'List', listItems: ['ABE', 'CO2'], locked: false },
       ],
     }]);
-    expect(reads).toEqual(['setup/assetTypes/', 'setup/assetTypes/6/customFields/']);
+    expect(reads).toEqual([
+      { path: 'setup/assetTypes/', columns: undefined },
+      { path: 'setup/assetTypes/6/customFields/', columns: 'ID,Name,Type,Order,ListItems,Locked' },
+    ]);
+  });
+
+  it('never offers a locked field for writing, since the office refuses one', async () => {
+    const officeType = {
+      customFields: [
+        { id: 61, name: 'Asset #', type: 'Text', listItems: [], locked: true },
+        { id: 62, name: 'Location', type: 'Text', listItems: [] },
+      ],
+    };
+    expect(customFieldsFor({ code: 'E-12', locationNote: 'Kitchen', attributes: {} }, officeType))
+      .toEqual([{ id: 62, name: 'Location', value: 'Kitchen' }]);
   });
 
   it('replaces the table whole, and the table reads back what was written', async () => {

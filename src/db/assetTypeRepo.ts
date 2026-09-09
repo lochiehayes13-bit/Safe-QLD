@@ -17,6 +17,8 @@ export interface OfficeCustomField {
   type: string;
   /** The choices of a List field, where the office gave any. */
   listItems: string[];
+  /** True where the office locked the field: read on the phone, never written. */
+  locked?: boolean;
 }
 
 export interface OfficeAssetType {

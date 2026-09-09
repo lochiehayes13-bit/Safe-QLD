@@ -20,7 +20,8 @@ import {
   buildArchive, buildDelete, buildUpdate, changedFields, describeAssetChange, describeChangeState, diffFields,
   undoMsLeft, updateHasContent, type BuiltChange,
 } from '@/domain/assetChanges';
-import { customFieldsByName } from '@/simpro/assetTypes';
+import { customFieldsByName, officeTypeForApp, type OfficeCustomField } from '@/simpro/assetTypes';
+import { listOfficeAssetTypes } from '@/db/assetTypeRepo';
 import { flushSoon } from '@/simpro/flushSoon';
 import type { Site } from '@/domain/types';
 import { formatAuDate } from '@/export/sheets';
@@ -130,6 +131,15 @@ export default function AssetScreen() {
   const [undo, setUndo] = useState<Undoable | null>(null);
   // Ticks once a second while a change can still be taken back, for the countdown.
   const [now, setNow] = useState(nowIso());
+  /*
+   * The office's own fields for this asset's type, by name, read from the
+   * table the sync fills and never from the network: a List field the
+   * office wrote 26 choices for should be those 26 choices here, not a
+   * free-text box where "Dry Chem" gets typed at a list that says "Dry
+   * Chemical Powder". Empty where the table has not been filled, and then
+   * every field is a box as before.
+   */
+  const [officeFields, setOfficeFields] = useState<Map<string, OfficeCustomField>>(new Map());
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -146,6 +156,14 @@ export default function AssetScreen() {
         setEvents(e);
         setSchedule(sched);
         setChanges(ch);
+        const officeTypes = await listOfficeAssetTypes();
+        const mine = officeTypes.length
+          ? officeTypeForApp(a.assetTypeId, officeTypes, {
+            simproType: typeof a.attributes.simproType === 'string' ? a.attributes.simproType : undefined,
+            registerSystem: typeof a.attributes.registerSystem === 'string' ? a.attributes.registerSystem : undefined,
+          })
+          : undefined;
+        setOfficeFields(new Map((mine?.customFields ?? []).map((f) => [f.name.trim().toLowerCase(), f])));
         // Opened from New asset with the create just queued: the window is
         // still open, and the banner offers it.
         const fresh = changeParam ? ch.find((c) => c.id === changeParam && c.state === 'undoable') : undefined;
@@ -437,11 +455,12 @@ export default function AssetScreen() {
               <>
                 <H2>From the register</H2>
                 {fromRegister.map((a) => (
-                  <Field
+                  <RegisterField
                     key={a.key}
                     label={a.label}
+                    office={officeFields.get(a.key.trim().toLowerCase())}
                     value={form.attributes[a.key] ?? ''}
-                    onChangeText={(v) => setForm({ ...form, attributes: { ...form.attributes, [a.key]: v } })}
+                    onChange={(v) => setForm({ ...form, attributes: { ...form.attributes, [a.key]: v } })}
                   />
                 ))}
               </>
@@ -734,6 +753,59 @@ function toneForDue(line: RegisterScheduleLine): 'default' | 'pass' | 'warn' | '
  * shapes New asset renders, kept here rather than imported from a route
  * file, which expo-router treats as a screen.
  */
+/**
+ * One field the office owns, edited the way the office defines it.
+ *
+ * A List field is its own choices and nothing else, because a value the
+ * office's list does not have is a value Simpro refuses — and the refusal
+ * arrives long after the technician has driven away. A locked field is the
+ * office's to set: shown, never edited, and said so, since a box that
+ * silently discards what is typed into it is worse than no box.
+ */
+function RegisterField({ label, office, value, onChange }: {
+  label: string; office: OfficeCustomField | undefined; value: string; onChange: (v: string) => void;
+}) {
+  const t = useTheme();
+
+  if (office?.locked) {
+    return (
+      <View style={{ gap: 2 }}>
+        <Label>{label}</Label>
+        <Txt size="sm" tone={value ? 'default' : 'faint'}>{value || 'Not set'}</Txt>
+        <Txt size="xs" tone="faint">The office locked this one; it can only be changed in Simpro.</Txt>
+      </View>
+    );
+  }
+
+  if (office?.type === 'List' && office.listItems.length) {
+    return (
+      <View style={{ gap: t.space(1.5) }}>
+        <Label>{label}</Label>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.space(2) }}>
+          {office.listItems.map((o) => (
+            <Chip key={o} label={o} selected={value === o} onPress={() => onChange(value === o ? '' : o)} />
+          ))}
+        </View>
+        {value && !office.listItems.includes(value) ? (
+          <Txt size="xs" tone="warn">
+            This asset holds "{value}", which is not on the office's list. Picking one above replaces it.
+          </Txt>
+        ) : null}
+      </View>
+    );
+  }
+
+  return (
+    <Field
+      label={label}
+      value={value}
+      onChangeText={onChange}
+      keyboardType={office?.type === 'Numeric' ? 'decimal-pad' : 'default'}
+      placeholder={office?.type === 'Date' ? 'YYYY-MM-DD' : undefined}
+    />
+  );
+}
+
 function AttributeField({ attr, value, onChange }: { attr: AttributeDef; value: string; onChange: (v: string) => void }) {
   const t = useTheme();
 
