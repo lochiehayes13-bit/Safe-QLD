@@ -22,6 +22,7 @@ import { MIGRATION_V20 } from './schemaSite';
 import { MIGRATION_V21 } from './schemaScale';
 import { MIGRATION_V22 } from './schemaNeeds';
 import { MIGRATION_V23 } from './schemaV23';
+import { MIGRATION_V24 } from './schemaV24';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -340,6 +341,11 @@ export const MIGRATIONS: string[] = [
   // activities, payments and credit notes, and the hours clocked on this
   // phone before the office has them
   MIGRATION_V23,
+
+  // v24 — the register changed from the phone: the office's asset types with
+  // their custom fields, and the record of each create, edit, archive or
+  // delete asked for on site, with the moment before which it can be taken back
+  MIGRATION_V24,
 ];
 
 /**

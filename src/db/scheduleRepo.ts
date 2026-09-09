@@ -104,3 +104,27 @@ export async function scheduleSyncedAt(): Promise<string | undefined> {
   const row = await db.getFirstAsync<{ at: string | null }>('SELECT MAX(syncedAt) AS at FROM schedule');
   return row?.at ?? undefined;
 }
+
+/**
+ * Everyone's blocks between two days, inclusive, for the team's day and
+ * week. By day, then by name, then by time: the calendar reads it in that
+ * order, and the office's names are what a column is headed with.
+ */
+export async function listScheduleBetween(from: string, to: string): Promise<ScheduleRecord[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<ScheduleRow>(
+    'SELECT * FROM schedule WHERE date >= ? AND date <= ? ORDER BY date, staffName COLLATE NOCASE, startTime, id',
+    from, to,
+  );
+  return rows.map(hydrate);
+}
+
+/** The blocks on one job between two days, inclusive: who is booked to it, and when. */
+export async function listScheduleForJob(jobExternalId: string, from: string, to: string): Promise<ScheduleRecord[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<ScheduleRow>(
+    'SELECT * FROM schedule WHERE jobId = ? AND date >= ? AND date <= ? ORDER BY date, startTime, id',
+    jobExternalId, from, to,
+  );
+  return rows.map(hydrate);
+}

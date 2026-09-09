@@ -91,6 +91,13 @@ export default function MyDayScreen() {
           </Txt>
           <Button title="Change" variant="ghost" compact onPress={() => router.push('/whoami')} />
         </Rowed>
+        {/* The team's calendar, and the shortest way onto it: the same screen, opened at the picker. */}
+        <Rowed gap={2} wrap>
+          <Button title="Schedule" variant="secondary" compact onPress={() => router.push('/work/schedule')}
+            icon={<MaterialCommunityIcons name="calendar-month-outline" size={18} color={t.color.accentText} />} />
+          <Button title="Book me on" compact onPress={() => router.push({ pathname: '/work/schedule', params: { book: '1' } })}
+            icon={<MaterialCommunityIcons name="calendar-plus" size={18} color="#fff" />} />
+        </Rowed>
 
         <H2>Today</H2>
         {g && g.today.length ? g.today.map((r) => <ScheduleRow key={r.schedule.id} row={r} />) : (

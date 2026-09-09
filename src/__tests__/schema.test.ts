@@ -77,6 +77,8 @@ describe('migrations', () => {
       'vendor_order', 'vendor_order_line', 'vendor', 'catalog_item', 'catalog_group', 'contact', 'lead',
       'simpro_timesheet', 'activity_schedule', 'setup_activity', 'customer_payment', 'customer_payment_invoice',
       'credit_note', 'clock_entry',
+      // v24: the office's asset types, and the register changes made on the phone.
+      'simpro_asset_type', 'asset_change',
     ]) {
       expect({ table, present: present.has(table) }).toEqual({ table, present: true });
     }
