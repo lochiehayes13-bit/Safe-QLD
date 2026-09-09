@@ -2,7 +2,7 @@ import React, { useCallback, useRef, useState } from 'react';
 import { qldIsoDay } from '@/domain/qldTime';
 import { loadPrefs } from '@/app-prefs';
 import { simproConfigFromPrefs } from '@/simpro/config';
-import { syncSiteDetail } from '@/simpro/sync';
+import { SIMPRO_SOURCE, syncSiteDetail } from '@/simpro/sync';
 import { Linking, Pressable, View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -19,7 +19,9 @@ import { notSharedNotice } from '@/export/shareOutcome';
 import { formatAuDate } from '@/export/sheets';
 import { buildRoutineReport } from '@/db/routineReportRepo';
 import { listJobsFor, listQuotes, siteStats, type CustomerStats } from '@/db/mirrorRepo';
-import { contactActions } from '@/domain/jobPresentation';
+import { listContactsForSite, type ContactRecord } from '@/db/moreRepo';
+import { contactActions, telHref } from '@/domain/jobPresentation';
+import { smsHref } from '@/domain/search';
 import { formatCents } from '@/domain/rates';
 import { siteCustomers, type SiteCustomer } from '@/domain/siteSimpro';
 import { jobNumberForReport } from '@/domain/reportJobMatch';
@@ -54,6 +56,9 @@ export default function SiteScreen() {
   // The office's side of this site — the customer, the counts and what is
   // owed — read from the mirror beside the phone's own records.
   const [office, setOffice] = useState<{ stats: CustomerStats; quoteCount: number; customers: SiteCustomer[] } | null>(null);
+  // The people the office lists at this site, from the contact mirror —
+  // more than the one site contact the site record itself carries.
+  const [people, setPeople] = useState<ContactRecord[]>([]);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -81,6 +86,7 @@ export default function SiteScreen() {
         listQuotes({ siteId: id, limit: 500 }),
       ]);
       setOffice({ stats, quoteCount: quotes.length, customers: siteCustomers(jobs, quotes) });
+      setPeople(s?.externalId && s.externalSource === SIMPRO_SOURCE ? await listContactsForSite(s.externalId, 6) : []);
     } catch (e) {
       setFailed(describeLoadFailure(e, 'this site'));
     }
@@ -428,6 +434,32 @@ export default function SiteScreen() {
                 </Txt>
               ) : null}
             </Card>
+            {/*
+              * Everyone the office lists here, with the number as the
+              * button. The site record carries one contact; the contact
+              * mirror carries the rest — the body corporate manager, the
+              * caretaker, the person with the plant-room key.
+              */}
+            {site.externalId && site.externalSource === SIMPRO_SOURCE ? (
+              <Card>
+                <Rowed gap={2}>
+                  <Label>People here</Label>
+                  <View style={{ flex: 1 }} />
+                  <Pressable
+                    onPress={() => router.push({ pathname: '/contacts', params: { siteExternalId: site.externalId! } })}
+                    hitSlop={8}
+                    style={{ minHeight: 44, justifyContent: 'center' }}
+                  >
+                    <Txt size="sm" tone="accent" weight="800">All contacts</Txt>
+                  </Pressable>
+                </Rowed>
+                {people.length ? (
+                  people.map((p) => <PersonRow key={p.id} person={p} />)
+                ) : (
+                  <Txt size="sm" tone="faint" style={{ marginTop: 4 }}>The office lists nobody at this site beyond the site contact above.</Txt>
+                )}
+              </Card>
+            ) : null}
             {office ? (
               <>
                 <NavRow
@@ -614,6 +646,47 @@ export default function SiteScreen() {
         <Button title="Delete site" variant="danger" onPress={confirmDelete} />
       </Screen>
     </>
+  );
+}
+
+/** One of the office's contacts at this site: the name, the role, and the number as a button. */
+function PersonRow({ person: p }: { person: ContactRecord }) {
+  const t = useTheme();
+  const number = p.cellPhone ?? p.workPhone ?? p.altPhone;
+  const call = telHref(number);
+  const text = smsHref(p.cellPhone);
+  return (
+    <Pressable
+      onPress={() => router.push({ pathname: '/contacts/[id]', params: { id: p.id } })}
+      hitSlop={4}
+      style={{ marginTop: t.space(2), minHeight: 44, justifyContent: 'center' }}
+    >
+      <Rowed gap={2}>
+        <View style={{ flex: 1 }}>
+          <Txt weight="700" numberOfLines={1}>{p.name || 'Unnamed contact'}</Txt>
+          <Txt size="xs" tone="muted" numberOfLines={1}>{[p.position, p.department, number].filter(Boolean).join(' · ') || 'No number on record'}</Txt>
+        </View>
+        {call ? (
+          <Button
+            title="Ring"
+            variant="secondary"
+            compact
+            icon={<MaterialCommunityIcons name="phone-outline" size={18} color={t.color.text} />}
+            onPress={() => void Linking.openURL(call)}
+          />
+        ) : null}
+        {text ? (
+          <Button
+            title="Text"
+            variant="secondary"
+            compact
+            icon={<MaterialCommunityIcons name="message-text-outline" size={18} color={t.color.text} />}
+            onPress={() => void Linking.openURL(text)}
+          />
+        ) : null}
+        <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
+      </Rowed>
+    </Pressable>
   );
 }
 

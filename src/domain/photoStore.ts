@@ -18,7 +18,8 @@
  * sits above it.
  */
 
-export type PhotoSubject = 'defect' | 'asset' | 'site' | 'test-result' | 'report';
+/** What a photograph is of. 'job' is one attached to a Simpro job from its card, with the local job id as the subject id. */
+export type PhotoSubject = 'defect' | 'asset' | 'site' | 'test-result' | 'report' | 'job';
 
 export interface PhotoRef {
   id: string;
@@ -73,16 +74,28 @@ export function extensionFor(uri: string): string {
 export function photoFileName(photo: {
   id: string; subject: PhotoSubject; subjectId: string; takenAt: string; sourceUri?: string;
 }): string {
+  return keptFileName({ ...photo, extension: extensionFor(photo.sourceUri ?? '') });
+}
+
+/**
+ * The same name for anything else kept beside the photographs — a document
+ * picked off the phone for a job's attachments — with the extension the
+ * file actually has, since a PDF named .jpg is a file nobody can open.
+ */
+export function keptFileName(file: {
+  id: string; subject: PhotoSubject; takenAt: string; extension: string;
+}): string {
   // Strip the fractional seconds and the zone marker, whether or not the
   // timestamp carried fractions — otherwise the same instant produces two
   // different names depending on which form it arrived in.
-  const stamp = photo.takenAt
+  const stamp = file.takenAt
     .replace(/\.\d+/, '')
     .replace(/[zZ]$/, '')
     .replace(/[-:]/g, '')
     .replace('T', '-');
-  const safeId = photo.id.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 12) || 'photo';
-  return `${stamp}-${photo.subject}-${safeId}.${extensionFor(photo.sourceUri ?? '')}`;
+  const safeId = file.id.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 12) || 'photo';
+  const ext = file.extension.toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
+  return `${stamp}-${file.subject}-${safeId}.${ext}`;
 }
 
 /** The path a stored photograph gets, relative to the documents directory. */

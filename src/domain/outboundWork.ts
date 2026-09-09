@@ -495,9 +495,10 @@ export const WITHHELD_FROM_SIMPRO: { what: string; why: string }[] = [
       + 'unreconciled number that nobody updates when the quote changes.',
   },
   {
-    what: 'Job stage, status, dates, description or scheduling',
-    why: 'Only appended notes go out. A phone that has been offline for a week would otherwise overwrite a '
-      + 'scheduler\'s edit made yesterday, and nobody would know it had happened.',
+    what: 'Job stage, dates, description or scheduling',
+    why: 'Only appended notes, lines and the status picked on the job card go out. A phone that has been '
+      + 'offline for a week would otherwise overwrite a scheduler\'s edit made yesterday, and nobody would '
+      + 'know it had happened.',
   },
   {
     what: 'Customer, site and contact details',
@@ -546,7 +547,26 @@ export const PUSHED_TO_SIMPRO: { what: string; how: string }[] = [
   {
     what: 'A work-completed note',
     how: 'One short appended note when a job is marked complete on the phone: what was done, when and by '
-      + 'whom. The job\'s stage and status in Simpro are left for the office to change.',
+      + 'whom. The job\'s stage in Simpro is left for the office; the status moves only where it was '
+      + 'picked on the job card, as its own row below.',
+  },
+  {
+    what: 'The job status picked on the job card',
+    how: 'One status change per pick, sent as a PATCH of the status id the office already uses. The job is '
+      + 'read first and nothing is sent where it already wears that status, so a retry cannot move it twice. '
+      + 'Stage, dates and scheduling are never touched.',
+  },
+  {
+    what: 'Materials used, onto a cost centre',
+    how: 'One line per part: a catalogue item by its office id, or a one-off in the technician\'s words, with '
+      + 'the quantity. The cost centre is read first and a matching line from the last hour is taken as this '
+      + 'one already landed. Prices come from the office\'s price book, never from the phone.',
+  },
+  {
+    what: 'The customer\'s sign-off',
+    how: 'One appended note naming who signed and when, with a reference key so a retry is recognised, and '
+      + 'the signature itself as an SVG file on the job\'s attachments, named by the job, the day and the '
+      + 'time so a second sign-off on the same day is a second file.',
   },
 ];
 
@@ -1776,6 +1796,12 @@ export interface WorkCompletedJob {
   /** The technician's own notes on the job, if any. */
   notes?: string;
   orderNo?: string;
+  /**
+   * True where the card queued a Simpro status change alongside this
+   * completion. The footer then says the status is moving as its own row
+   * rather than telling the office to close a job the phone is closing.
+   */
+  statusQueued?: boolean;
 }
 
 /** The routine service done under the job, where one was recorded and linked. */
@@ -1796,9 +1822,11 @@ export interface WorkCompletedRun {
  * Deliberately not the service record: that carries the counts and the
  * defects and goes through its own review. This says only that the work is
  * done, when, and by whom, so the office sees it the moment it happens rather
- * than when the paperwork lands — and it says in so many words that the job's
- * stage in Simpro has not been touched, because a scheduler reading "work
- * completed" would otherwise wonder why the job is still in progress.
+ * than when the paperwork lands — and it says in so many words that this
+ * note itself moves neither the stage nor the status, because a scheduler
+ * reading "work completed" would otherwise wonder why the job is still in
+ * progress. Where the card queued a status change beside it the footer
+ * says so instead, since "the office closes the job" would then be untrue.
  *
  * Keyed on the job and the Queensland day it was completed, so marking the
  * same job complete twice in a day — a double tap, a re-open and re-close a
@@ -1847,8 +1875,12 @@ export function workCompletedNote(job: WorkCompletedJob, run?: WorkCompletedRun)
   }
   sections.push({
     id: 'footer',
-    text: 'Marked complete in the Safe QLD field app. The job\'s stage and status in Simpro are not changed by '
-      + 'this note; the office closes the job.',
+    text: job.statusQueued
+      ? 'Marked complete in the Safe QLD field app. The status change made on the phone goes as its own '
+        + 'update; the job\'s stage in Simpro is left for the office.'
+      : 'Marked complete in the Safe QLD field app. This note itself moves neither the job\'s stage nor its '
+        + 'status in Simpro; a status picked on the phone goes as its own update, and otherwise the office '
+        + 'closes the job.',
     essential: true,
   });
 

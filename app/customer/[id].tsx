@@ -8,7 +8,9 @@ import {
   type CustomerRecord, type CustomerStats, type InvoiceRecord, type QuoteRecord,
 } from '@/db/mirrorRepo';
 import type { JobRecord } from '@/db/opsRepo';
+import { listContactsForCustomer, type ContactRecord } from '@/db/moreRepo';
 import { listSites } from '@/db/repo';
+import { smsHref } from '@/domain/search';
 import {
   contactActions, customerKindLabel, formatAddress, invoiceState, jobStatusWord, mailHref, mapHref, quoteState, telHref,
 } from '@/domain/jobPresentation';
@@ -44,6 +46,10 @@ export default function CustomerScreen() {
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [quotes, setQuotes] = useState<QuoteRecord[]>([]);
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
+  // The people the office lists under this customer, from the contact
+  // mirror, which carries a phone for each; the customer record's own
+  // contact list is the fallback where the mirror has nobody.
+  const [people, setPeople] = useState<ContactRecord[]>([]);
 
   const [reloads, setReloads] = useState(0);
 
@@ -58,15 +64,17 @@ export default function CustomerScreen() {
         setCustomer(c);
         setMissing(!c);
         if (!c) return;
-        const [s, sites, j, q, inv] = await Promise.all([
+        const [s, sites, j, q, inv, ppl] = await Promise.all([
           customerStats(id),
           listSites(),
           listJobsFor({ customerExternalId: id, limit: 6 }),
           listQuotes({ customerExternalId: id, limit: 6 }),
           listInvoices({ customerExternalId: id, limit: 6 }),
+          listContactsForCustomer(id, 8),
         ]);
         if (cancelled) return;
         setStats(s);
+        setPeople(ppl);
         // The office's site number to the phone's site id, for the sites list.
         setSiteIds(new Map(sites.filter((x) => x.externalId).map((x) => [x.externalId!, x.id])));
         setJobs(j); setQuotes(q); setInvoices(inv);
@@ -96,6 +104,7 @@ export default function CustomerScreen() {
   const phone = telHref(c.phone);
   const altPhone = telHref(c.altPhone);
   const email = mailHref(c.email);
+  const text = smsHref(c.phone);
   const site = mapHref(address);
 
   return (
@@ -117,9 +126,36 @@ export default function CustomerScreen() {
         <Card>
           <Label>Reach them</Label>
           <View style={{ marginTop: t.space(2), gap: t.space(2) }}>
-            {phone && c.phone ? <ActionRow icon="phone-outline" label={c.phone} onPress={() => void Linking.openURL(phone)} /> : null}
+            {phone && c.phone ? (
+              <Rowed gap={2} wrap>
+                <Button
+                  title={`Ring ${c.phone}`}
+                  compact
+                  icon={<MaterialCommunityIcons name="phone-outline" size={18} color={t.color.onAccent} />}
+                  onPress={() => void Linking.openURL(phone)}
+                />
+                {text ? (
+                  <Button
+                    title="Text"
+                    variant="secondary"
+                    compact
+                    icon={<MaterialCommunityIcons name="message-text-outline" size={18} color={t.color.text} />}
+                    onPress={() => void Linking.openURL(text)}
+                  />
+                ) : null}
+              </Rowed>
+            ) : null}
             {altPhone && c.altPhone ? <ActionRow icon="phone-outline" label={c.altPhone} sub="Alternate" onPress={() => void Linking.openURL(altPhone)} /> : null}
-            {email && c.email ? <ActionRow icon="email-outline" label={c.email} onPress={() => void Linking.openURL(email)} /> : null}
+            {email && c.email ? (
+              <Button
+                title={c.email}
+                variant="secondary"
+                compact
+                icon={<MaterialCommunityIcons name="email-outline" size={18} color={t.color.text} />}
+                onPress={() => void Linking.openURL(email)}
+                style={{ alignSelf: 'flex-start' }}
+              />
+            ) : null}
             {c.website ? (
               <ActionRow
                 icon="web"
@@ -162,8 +198,38 @@ export default function CustomerScreen() {
           </>
         ) : null}
 
-        <H2>Contacts</H2>
-        {c.contacts.length ? (
+        <SectionHeader
+          title="People"
+          action="All contacts"
+          onAction={() => router.push({ pathname: '/contacts', params: { customerExternalId: c.externalId } })}
+        />
+        {people.length ? (
+          people.map((p) => {
+            const number = p.cellPhone ?? p.workPhone ?? p.altPhone;
+            const call = telHref(number);
+            const sms = smsHref(p.cellPhone);
+            const mail = mailHref(p.email);
+            return (
+              <Card key={p.id} onPress={() => router.push({ pathname: '/contacts/[id]', params: { id: p.id } })}>
+                <Rowed gap={3} align="flex-start">
+                  <View style={{ flex: 1 }}>
+                    <Txt weight="700">{p.name || 'Unnamed contact'}</Txt>
+                    {p.position || p.department ? <Txt size="sm" tone="muted">{[p.position, p.department].filter(Boolean).join(' · ')}</Txt> : null}
+                    {number ? <Txt size="xs" tone="faint" mono>{number}</Txt> : null}
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
+                </Rowed>
+                {call || sms || mail ? (
+                  <Rowed gap={2} wrap style={{ marginTop: t.space(2) }}>
+                    {call ? <Button title="Ring" variant="secondary" compact icon={<MaterialCommunityIcons name="phone-outline" size={18} color={t.color.text} />} onPress={() => void Linking.openURL(call)} /> : null}
+                    {sms ? <Button title="Text" variant="secondary" compact icon={<MaterialCommunityIcons name="message-text-outline" size={18} color={t.color.text} />} onPress={() => void Linking.openURL(sms)} /> : null}
+                    {mail ? <Button title="Email" variant="secondary" compact icon={<MaterialCommunityIcons name="email-outline" size={18} color={t.color.text} />} onPress={() => void Linking.openURL(mail)} /> : null}
+                  </Rowed>
+                ) : null}
+              </Card>
+            );
+          })
+        ) : c.contacts.length ? (
           c.contacts.map((p, i) => {
             const ways = contactActions(p);
             return (
@@ -189,7 +255,7 @@ export default function CustomerScreen() {
           })
         ) : (
           <Txt size="sm" tone="faint">
-            {c.detailSyncedAt ? 'The office lists no contacts for this customer.' : 'Contacts come with the full customer record, on the next full sync.'}
+            {c.detailSyncedAt ? 'The office lists nobody under this customer.' : 'People come with the contact sync and the full customer record.'}
           </Txt>
         )}
 

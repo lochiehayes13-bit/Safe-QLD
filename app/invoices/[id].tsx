@@ -4,6 +4,7 @@ import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { nowIso } from '@/db';
 import { getInvoice, getJobFull, localJobId, type InvoiceRecord } from '@/db/mirrorRepo';
+import { listCreditNotesForInvoice, listPaymentsForInvoice, type CreditNoteRecord, type CustomerPaymentRecord } from '@/db/moreRepo';
 import type { SimproCostCenter } from '@/simpro/mirrorResources';
 import { invoiceState, sellTotalLine } from '@/domain/jobPresentation';
 import { qldIsoDay } from '@/domain/qldTime';
@@ -46,6 +47,11 @@ export default function InvoiceScreen() {
   // And a read that threw is neither. See RecordGate.
   const [failed, setFailed] = useState<string | null>(null);
   const [jobs, setJobs] = useState<BilledJob[]>([]);
+  // What the office recorded against it: the payments and the credit notes,
+  // from their own mirrors, so the balance line can say where the figure
+  // on the invoice came from.
+  const [payments, setPayments] = useState<CustomerPaymentRecord[]>([]);
+  const [credits, setCredits] = useState<CreditNoteRecord[]>([]);
 
   const [reloads, setReloads] = useState(0);
 
@@ -71,7 +77,12 @@ export default function InvoiceScreen() {
             detailSynced: full?.detailSynced ?? false,
           };
         }));
-        if (!cancelled) setJobs(billed);
+        if (cancelled) return;
+        setJobs(billed);
+        const [paid, credited] = await Promise.all([listPaymentsForInvoice(id), listCreditNotesForInvoice(id)]);
+        if (cancelled) return;
+        setPayments(paid);
+        setCredits(credited);
       } catch (e) {
         if (!cancelled) setFailed(describeLoadFailure(e, 'this invoice'));
       }
@@ -95,6 +106,15 @@ export default function InvoiceScreen() {
   const today = qldIsoDay(nowIso()) ?? '';
   const state = invoiceState(inv, today);
   const total = sellTotalLine(inv.totalExTaxCents, inv.totalIncTaxCents);
+  // A payment can settle several invoices; the amount against this one is
+  // the line for this invoice, or the payment's total where it is the only line.
+  const amountOn = (p: CustomerPaymentRecord): number | undefined =>
+    p.invoices.find((i) => i.invoiceId === inv.externalId)?.amountCents ?? (p.invoices.length <= 1 ? p.totalCents : undefined);
+  // Counted and summed over the same payments, so "2 payments totalling"
+  // is never two payments and the amount of one.
+  const attributed = payments.map(amountOn).filter((n): n is number => n !== undefined);
+  const paidHere = attributed.reduce((a, b) => a + b, 0);
+  const creditedHere = credits.map((n) => n.totalIncTaxCents).filter((n): n is number => n !== undefined).reduce((a, b) => a + b, 0);
 
   return (
     <>
@@ -147,6 +167,75 @@ export default function InvoiceScreen() {
             <Card><Txt size="sm" style={{ lineHeight: 20 }}>{inv.notes}</Txt></Card>
           </>
         ) : null}
+
+        <H2>Payments</H2>
+        {payments.length ? (
+          payments.map((p) => {
+            const amount = amountOn(p);
+            return (
+              <Card key={p.id}>
+                <Rowed gap={3} align="flex-start">
+                  <View style={{ flex: 1 }}>
+                    <Txt weight="700">{p.date ? formatAuDate(p.date) : 'Undated'}{p.paymentMethod ? ` · ${p.paymentMethod}` : ''}</Txt>
+                    <Txt size="xs" tone="faint">
+                      {[
+                        p.status,
+                        p.invoices.length > 1 ? `one payment across ${p.invoices.length} invoices` : undefined,
+                        p.notes,
+                      ].filter(Boolean).join(' · ') || `Payment ${p.id}`}
+                    </Txt>
+                  </View>
+                  <Txt weight="700" tone="pass">{amount !== undefined ? formatCents(amount) : '—'}</Txt>
+                </Rowed>
+              </Card>
+            );
+          })
+        ) : (
+          <Txt size="sm" tone="faint">
+            {inv.isPaid ? 'Marked paid at the office, but no payment record for it has come down.' : 'No payment recorded against this invoice on the phone.'}
+          </Txt>
+        )}
+
+        <H2>Credit notes</H2>
+        {credits.length ? (
+          credits.map((n) => (
+            <Card key={n.id}>
+              <Rowed gap={3} align="flex-start">
+                <View style={{ flex: 1 }}>
+                  <Txt weight="700">Credit note {n.id}{n.dateIssued ? ` · ${formatAuDate(n.dateIssued)}` : ''}</Txt>
+                  <Txt size="xs" tone="faint">
+                    {[n.creditType, n.status ?? n.stage, n.description].filter(Boolean).join(' · ') || 'No description'}
+                  </Txt>
+                </View>
+                <Txt weight="700" tone="warn">{n.totalIncTaxCents !== undefined ? formatCents(n.totalIncTaxCents) : '—'}</Txt>
+              </Rowed>
+            </Card>
+          ))
+        ) : (
+          <Txt size="sm" tone="faint">No credit note against this invoice.</Txt>
+        )}
+
+        {/*
+          * The balance, and where it came from. The figure on the invoice is
+          * the office's; the payments and credits below it are what the phone
+          * holds, and the two are printed beside each other rather than one
+          * being worked out from the other, because when they disagree the
+          * disagreement is the useful thing to see.
+          */}
+        <Card>
+          <Txt size="sm" style={{ lineHeight: 20 }}>
+            {inv.balanceDueCents !== undefined
+              ? `The office records ${formatCents(inv.balanceDueCents)} still due on ${inv.totalIncTaxCents !== undefined ? formatCents(inv.totalIncTaxCents) : 'this invoice'}`
+              : inv.isPaid ? 'The office records this invoice as paid' : 'The office has not recorded a balance for this invoice'}
+            {inv.amountAppliedCents !== undefined ? `, with ${formatCents(inv.amountAppliedCents)} applied` : ''}.
+            {' '}The phone holds {payments.length
+              ? `${payments.length} payment${payments.length === 1 ? '' : 's'}${attributed.length === payments.length
+                ? ` totalling ${formatCents(paidHere)}`
+                : `, ${formatCents(paidHere)} of it recorded against this invoice`}`
+              : 'no payment'}
+            {credits.length ? ` and ${credits.length} credit note${credits.length === 1 ? '' : 's'} for ${formatCents(creditedHere)}` : ''} against it.
+          </Txt>
+        </Card>
 
         <H2>Jobs billed</H2>
         {jobs.length ? (

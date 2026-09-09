@@ -102,6 +102,7 @@ export default function HomeScreen() {
     <Screen>
       <Hero name={prefs?.technicianName ?? ''} />
       <AskBar />
+      <FindRow />
 
       {failed ? (
         <Banner
@@ -260,6 +261,41 @@ function AskBar() {
           </Bounce>
         ))}
       </ScrollView>
+    </Reveal>
+  );
+}
+
+/**
+ * The way to the office's records, under the question bar.
+ *
+ * The question bar searches the library — clauses, defect wording, the
+ * standards — and it stays that way, because that is what it has always
+ * done and what the starters under it promise. But the thing a technician
+ * is holding is as often a job number off a docket or a supplier's part
+ * number, and those live in the other search. One row, smaller than the
+ * bar, so the two are not confused and neither is hidden.
+ */
+function FindRow() {
+  const t = useTheme();
+  return (
+    <Reveal index={1} distance={8}>
+      <Bounce onPress={() => router.push('/search')} haptic="light" scaleTo={0.98} accessibilityLabel="Find a job, invoice, order, site, customer or part">
+        <View
+          style={{
+            flexDirection: 'row', alignItems: 'center', gap: t.space(3),
+            backgroundColor: t.color.surface, borderRadius: t.radius.lg,
+            borderWidth: 1, borderColor: t.color.border,
+            paddingHorizontal: t.space(3.5), minHeight: 56,
+          }}
+        >
+          <IconPlate icon="text-box-search-outline" size={34} muted />
+          <View style={{ flex: 1 }}>
+            <Txt weight="700" numberOfLines={1}>Find a job, invoice, order, site, customer or part</Txt>
+            <Txt size="xs" tone="muted" numberOfLines={1}>Any number or name the office has. Works offline.</Txt>
+          </View>
+          <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
+        </View>
+      </Bounce>
     </Reveal>
   );
 }

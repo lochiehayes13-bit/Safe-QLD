@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { PanResponder, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
+import { STROKE_WIDTH, strokePath, strokesToSvg, svgDataUri, type Stroke } from '@/domain/signature';
 import { useTheme } from '@/theme';
 import { Button, Label, Rowed, Txt } from './ui';
 
@@ -9,7 +10,14 @@ import { Button, Label, Rowed, Txt } from './ui';
  *
  * Drawn with SVG paths and a PanResponder rather than a WebView-backed canvas:
  * one fewer native dependency, no white flash on a dark screen, and the strokes
- * serialise directly to an SVG data URI that drops straight into the PDF.
+ * serialise directly to an SVG the PDF can embed and the job card can file as
+ * an attachment. The strokes are points, and @/domain/signature turns them
+ * into path data and the document, so what is drawn and what is sent cannot
+ * disagree and the document itself is tested without a screen.
+ *
+ * Two outputs, because two callers want two things: the statutory forms want
+ * a data URI for an <img> in a PDF, and the job card wants the SVG document
+ * to write to a file. Both are given on every stroke.
  */
 
 export interface SignatureValue {
@@ -21,29 +29,40 @@ export function SignaturePad({
   label,
   value,
   onChange,
+  onSvg,
   height = 170,
 }: {
   label: string;
   value?: string;
+  /** The signature as a data URI, or undefined once cleared. */
   onChange: (v: string | undefined) => void;
+  /** The same signature as a complete SVG document, for a file. */
+  onSvg?: (svg: string | undefined) => void;
   height?: number;
 }) {
   const t = useTheme();
-  const [strokes, setStrokes] = useState<string[]>([]);
-  const current = useRef<string>('');
+  const [strokes, setStrokes] = useState<Stroke[]>([]);
+  const current = useRef<Stroke>([]);
   const [, force] = useState(0);
   const [size, setSize] = useState({ w: 0, h: height });
+  // The latest callbacks, read at the end of a stroke rather than captured
+  // when the responder was made: a parent that re-renders mid-signature
+  // would otherwise be told through a stale closure.
+  const handlers = useRef({ onChange, onSvg });
+  handlers.current = { onChange, onSvg };
 
   const responder = useMemo(
     () => {
       /** Keeps the stroke in progress, however the gesture ended. */
       const commit = () => {
-        if (!current.current) return;
+        if (!current.current.length) return;
         const done = current.current;
-        current.current = '';
+        current.current = [];
         setStrokes((prev) => {
           const next = [...prev, done];
-          onChange(toDataUri(next, size.w, size.h));
+          const svg = strokesToSvg(next, size.w, size.h);
+          handlers.current.onChange(svgDataUri(svg));
+          handlers.current.onSvg?.(svg);
           return next;
         });
       };
@@ -61,28 +80,29 @@ export function SignaturePad({
         onPanResponderTerminationRequest: () => false,
         onPanResponderGrant: (e) => {
           const { locationX, locationY } = e.nativeEvent;
-          current.current = `M${round(locationX)},${round(locationY)}`;
+          current.current = [{ x: locationX, y: locationY }];
           force((n) => n + 1);
         },
         onPanResponderMove: (e) => {
           const { locationX, locationY } = e.nativeEvent;
-          current.current += ` L${round(locationX)},${round(locationY)}`;
+          current.current.push({ x: locationX, y: locationY });
           force((n) => n + 1);
         },
         onPanResponderRelease: commit,
         onPanResponderTerminate: commit,
       });
     },
-    [onChange, size.w, size.h],
+    [size.w, size.h],
   );
 
   const clear = () => {
-    current.current = '';
+    current.current = [];
     setStrokes([]);
     onChange(undefined);
+    onSvg?.(undefined);
   };
 
-  const allPaths = current.current ? [...strokes, current.current] : strokes;
+  const allStrokes = current.current.length ? [...strokes, current.current] : strokes;
   const hasSignature = strokes.length > 0 || !!value;
 
   return (
@@ -105,11 +125,11 @@ export function SignaturePad({
         }}
       >
         <Svg width="100%" height="100%">
-          {allPaths.map((d, i) => (
-            <Path key={i} d={d} stroke={t.color.text} strokeWidth={2.4} fill="none" strokeLinecap="round" strokeLinejoin="round" />
+          {allStrokes.map((s, i) => (
+            <Path key={i} d={strokePath(s)} stroke={t.color.text} strokeWidth={STROKE_WIDTH} fill="none" strokeLinecap="round" strokeLinejoin="round" />
           ))}
         </Svg>
-        {!allPaths.length ? (
+        {!allStrokes.length ? (
           <View style={{ position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center' }} pointerEvents="none">
             <Txt tone="faint" size="sm">Sign here</Txt>
           </View>
@@ -117,25 +137,4 @@ export function SignaturePad({
       </View>
     </View>
   );
-}
-
-function round(n: number): number {
-  // One decimal is plenty for a signature and keeps the data URI small.
-  return Math.round(n * 10) / 10;
-}
-
-/**
- * Serialises strokes to an SVG data URI.
- *
- * Black ink on a transparent ground, so the same signature reads correctly on
- * the dark app screen and on a white printed page.
- */
-function toDataUri(strokes: string[], width: number, height: number): string | undefined {
-  if (!strokes.length || width <= 0) return undefined;
-  const paths = strokes
-    .map((d) => `<path d="${d}" stroke="black" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>`)
-    .join('');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(width)}" height="${Math.round(height)}" viewBox="0 0 ${Math.round(width)} ${Math.round(height)}">${paths}</svg>`;
-  // encodeURIComponent keeps this valid without needing base64.
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }

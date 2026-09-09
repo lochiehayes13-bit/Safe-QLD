@@ -4,6 +4,12 @@ import { flushSoon } from './flushSoon';
 import { sendAssetChange } from './outboundAssets';
 import { sendScheduleChange } from './outboundSchedule';
 import type { QueuedItem, SendDeps, SendMoreOutcome } from './outboundKinds';
+import { SIMPRO_PATHS } from './mirrorResources';
+import {
+  JOB_MATERIAL_KIND, JOB_SIGNOFF_KIND, JOB_STATUS_KIND,
+  type JobMaterialPayload, type JobSignoffPayload, type JobStatusPayload,
+} from '@/domain/jobActions';
+import { hasMarker } from '@/domain/queueKey';
 import { enqueueSync } from '@/db/opsRepo';
 import { getEntry, markEntrySendFailed, markEntrySent } from '@/db/clockRepo';
 import {
@@ -159,6 +165,148 @@ async function sendClockEntry(payload: ClockBlockPayload, client: SimproClient):
   }
 }
 
+// ---------------------------------------------------------------------------
+// The job card: status, materials, sign-off
+// ---------------------------------------------------------------------------
+
+/**
+ * The three things a technician does to a job from the card, sent.
+ *
+ * Each has a read before the write, because each is a POST or a PATCH the
+ * office cannot tell a retry from: a status is read and not patched when
+ * the job already wears it; a line is read and not posted when the cost
+ * centre already holds one like it from the last hour; a sign-off note is
+ * read and not posted when the job's notes already carry its marker. Where
+ * the read itself fails the write goes ahead, for the reason the clock
+ * entry gives above: a duplicate is a thing the office can see and delete,
+ * and a line or a status that never went is not.
+ *
+ * None of the three bodies has been tried on the live build; each is the
+ * documented shape, with the key names confirmed by reading the same
+ * collections with GET on 2026-09-09. A refusal reaches the person in the
+ * server's words on Waiting to send.
+ */
+
+/** A job as `jobs/{id}?columns=ID,Status` answers it on the live build. */
+interface JobStatusReply { ID?: unknown; Status?: { ID?: unknown; Name?: unknown } | null }
+
+function isJobId(v: unknown): v is string {
+  return typeof v === 'string' && v.trim() !== '';
+}
+
+async function sendJobStatus(payload: JobStatusPayload, client: SimproClient): Promise<SendMoreOutcome> {
+  if (!isJobId(payload.jobId) || !isJobId(payload.statusId)) {
+    return { status: 'abandon', reason: 'The queued status change names no job or no status, so nothing was sent.' };
+  }
+  const path = SIMPRO_PATHS.job(payload.jobId);
+  try {
+    const { data } = await client.request<JobStatusReply | undefined>('GET', path, { query: { columns: 'ID,Status' } });
+    const held = data && typeof data === 'object' ? data.Status?.ID : undefined;
+    if (held !== undefined && held !== null && String(held) === payload.statusId) return { status: 'done' };
+  } catch {
+    // The PATCH is idempotent: patching a status the job already wears
+    // changes nothing, so a read that failed costs only the request.
+  }
+  await client.request('PATCH', path, { body: { Status: Number(payload.statusId) } });
+  return { status: 'sent' };
+}
+
+/** A line as the cost centre's `catalogs/` or `oneOffs/` list it: the part or the words, the count, and when. */
+interface HeldLine {
+  ID?: unknown;
+  Catalog?: { ID?: unknown } | null;
+  Description?: unknown;
+  Total?: { Qty?: unknown } | null;
+  DateModified?: unknown;
+}
+
+/** How far back a matching line on the cost centre counts as this one. */
+const MATERIAL_GUARD_MS = 60 * 60 * 1000;
+
+/**
+ * Whether the cost centre already holds this line from the last hour.
+ *
+ * The same part (or the same words) with the same quantity, modified in the
+ * hour before now, is taken as this line having landed on an earlier try.
+ * The limit of that: a technician who adds two of the same part an hour
+ * apart on purpose gets both; one who adds them twenty minutes apart gets
+ * one, and sees the second closed as already there on Waiting to send. A
+ * line the office added itself in that hour reads the same way. A held line
+ * with no DateModified cannot be placed in time and does not count, so a
+ * list that will not give the column posts rather than skips.
+ */
+export function materialAlreadyHeld(held: readonly HeldLine[], payload: JobMaterialPayload, now: number): boolean {
+  const description = payload.description.trim().toLowerCase();
+  return held.some((line) => {
+    const qty = Number(line.Total?.Qty);
+    if (!Number.isFinite(qty) || qty !== payload.qty) return false;
+    const modified = typeof line.DateModified === 'string' ? Date.parse(line.DateModified) : NaN;
+    if (!Number.isFinite(modified) || now - modified > MATERIAL_GUARD_MS || modified - now > MATERIAL_GUARD_MS) return false;
+    if (payload.kind === 'catalog') {
+      const id = line.Catalog?.ID;
+      return id !== undefined && id !== null && String(id) === payload.catalogId;
+    }
+    return typeof line.Description === 'string' && line.Description.trim().toLowerCase() === description;
+  });
+}
+
+async function sendJobMaterial(payload: JobMaterialPayload, client: SimproClient): Promise<SendMoreOutcome> {
+  if (!isJobId(payload.jobId) || !isJobId(payload.sectionId) || !isJobId(payload.costCenterId)) {
+    return { status: 'abandon', reason: 'The queued line names no job or no cost centre, so nothing was sent.' };
+  }
+  if (!(typeof payload.qty === 'number' && payload.qty > 0)) {
+    return { status: 'abandon', reason: 'The queued line has no quantity, so nothing was sent.' };
+  }
+  const kind = payload.kind === 'oneOff' ? 'oneOff' : 'catalog';
+  if (kind === 'catalog' && !isJobId(payload.catalogId)) {
+    return { status: 'abandon', reason: 'The queued line names no catalogue item, so nothing was sent.' };
+  }
+  if (kind === 'oneOff' && !(typeof payload.description === 'string' && payload.description.trim())) {
+    return { status: 'abandon', reason: 'The queued one-off line has no description, so nothing was sent.' };
+  }
+  const path = SIMPRO_PATHS.jobItems(payload.jobId, payload.sectionId, payload.costCenterId, kind);
+  try {
+    // One page of 250: a cost centre with more lines than that is a project
+    // this card is not written for. The columns are the ones the guard reads.
+    const columns = kind === 'catalog' ? 'ID,Catalog,Total,DateModified' : 'ID,Description,Total,DateModified';
+    const { data } = await client.request<HeldLine[] | undefined>('GET', path, { query: { columns, pageSize: 250 } });
+    if (materialAlreadyHeld(Array.isArray(data) ? data : [], payload, Date.now())) return { status: 'done' };
+  } catch {
+    // Read failed: post, for the reason given above.
+  }
+  const body = kind === 'catalog'
+    ? { Catalog: Number(payload.catalogId), Qty: payload.qty }
+    : { Description: payload.description.trim(), Qty: payload.qty };
+  await client.request('POST', path, { body });
+  return { status: 'sent' };
+}
+
+/** A note as `jobs/{id}/notes/` lists it, the two columns the guard reads. */
+interface HeldNote { ID?: unknown; Note?: unknown }
+
+async function sendJobSignoff(payload: JobSignoffPayload, deps: SendDeps): Promise<SendMoreOutcome> {
+  if (!isJobId(payload.jobId) || typeof payload.note !== 'string' || !payload.note.trim()) {
+    return { status: 'abandon', reason: 'The queued sign-off names no job or has no note, so nothing was sent.' };
+  }
+  if (isJobId(payload.noteKey)) {
+    try {
+      const { data } = await deps.client.request<HeldNote[] | undefined>('GET', SIMPRO_PATHS.jobNotes(payload.jobId), {
+        query: { columns: 'ID,Note', pageSize: 250 },
+      });
+      const notes = Array.isArray(data) ? data : [];
+      if (notes.some((n) => typeof n.Note === 'string' && hasMarker(n.Note, payload.noteKey))) return { status: 'done' };
+    } catch {
+      // Read failed: post. The marker in the note is what lets a person
+      // find the duplicate, and the sign-off itself is what the office
+      // invoices on.
+    }
+  }
+  // The signature file is queued alongside as an ordinary attachment row;
+  // this is only the note that names who signed and where the file is.
+  await deps.api.addJobNote(payload.jobId, typeof payload.subject === 'string' ? payload.subject : 'Signed off', payload.note);
+  return { status: 'sent' };
+}
+
 export async function sendMore(item: QueuedItem, deps: SendDeps): Promise<SendMoreOutcome> {
   if (item.kind === CLOCK_QUEUE_KIND) {
     const payload = item.payload as ClockBlockPayload | null;
@@ -167,6 +315,9 @@ export async function sendMore(item: QueuedItem, deps: SendDeps): Promise<SendMo
     }
     return sendClockEntry(payload, deps.client);
   }
+  if (item.kind === JOB_STATUS_KIND) return sendJobStatus((item.payload ?? {}) as JobStatusPayload, deps.client);
+  if (item.kind === JOB_MATERIAL_KIND) return sendJobMaterial((item.payload ?? {}) as JobMaterialPayload, deps.client);
+  if (item.kind === JOB_SIGNOFF_KIND) return sendJobSignoff((item.payload ?? {}) as JobSignoffPayload, deps);
   // The register and the calendar have modules of their own; each is asked
   // in turn before the kind is given up on.
   const asset = await sendAssetChange(item, deps);

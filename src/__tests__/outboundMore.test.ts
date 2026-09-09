@@ -1,9 +1,12 @@
-import { moreJobIdOf, queueClockEntry, sendMore } from '@/simpro/outboundMore';
+import { materialAlreadyHeld, moreJobIdOf, queueClockEntry, sendMore } from '@/simpro/outboundMore';
+import { signOffNote } from '@/domain/jobActions';
+import { markerFor } from '@/domain/queueKey';
 import { flushQueue } from '@/simpro/sync';
 import { SimproError, type SimproClient } from '@/simpro/client';
 import type { SimproResources } from '@/simpro/resources';
 import { getEntry, startEntry, stopOpenEntry } from '@/db/clockRepo';
-import { enqueueSync, pendingSync, type SyncEntry } from '@/db/opsRepo';
+import { distinctJobStatuses, enqueueSync, pendingSync, upsertJob, type SyncEntry } from '@/db/opsRepo';
+import { statusChoices } from '@/domain/jobActions';
 import { getDb } from '@/db/index';
 import { clockContentKey } from '@/domain/clockOn';
 import { flushSoon } from '@/simpro/flushSoon';
@@ -231,6 +234,166 @@ describe('the block the office already holds', () => {
     expect(await sendMore(item(e.id), deps(client))).toEqual({ status: 'sent' });
     expect(sent).toHaveLength(1);
     expect((await getEntry(e.id))?.simproUid).toBe('9999');
+  });
+});
+
+describe('the job card: status', () => {
+  const status = { id: 'q1', kind: 'job-status', payload: { jobId: '1001', statusId: '113', statusName: 'In Progress', at: '2026-09-09T00:30:00.000Z' } };
+
+  it('reads the job\'s status off the record path first, then patches the id as a number', async () => {
+    const { client, sent, reads } = fakeClient(() => ({ ID: 1001 }), () => ({ ID: 1001, Status: { ID: 109, Name: 'Employee Scheduled' } }) as unknown as unknown[]);
+    expect(await sendMore(status, deps(client))).toEqual({ status: 'sent' });
+    expect(reads).toEqual([{ path: 'jobs/1001', query: { columns: 'ID,Status' } }]);
+    expect(sent).toEqual([{ method: 'PATCH', path: 'jobs/1001', body: { Status: 113 } }]);
+  });
+
+  it('answers done, patching nothing, when the job already wears the status', async () => {
+    const { client, sent } = fakeClient(() => ({}), () => ({ ID: 1001, Status: { ID: 113, Name: 'In Progress' } }) as unknown as unknown[]);
+    expect(await sendMore(status, deps(client))).toEqual({ status: 'done' });
+    expect(sent).toEqual([]);
+  });
+
+  it('patches anyway when the read fails, since the patch is idempotent', async () => {
+    const { client, sent } = fakeClient(() => ({}), () => { throw new SimproError('Simpro returned HTTP 500 for jobs/1001', 500, 'jobs/1001'); });
+    expect(await sendMore(status, deps(client))).toEqual({ status: 'sent' });
+    expect(sent).toHaveLength(1);
+  });
+
+  it('reads the statuses the phone has seen, commonest first, so the picker joins them to ids by name', async () => {
+    await upsertJob({ id: 'simpro-1001', externalId: '1001', siteName: 'Fictional Tower', title: 'A', statusName: 'In Progress', statusColor: '#ffcc00' });
+    await upsertJob({ id: 'simpro-1002', externalId: '1002', siteName: 'Fictional Tower', title: 'B', statusName: 'On Hold' });
+    await upsertJob({ id: 'simpro-1003', externalId: '1003', siteName: 'Fictional Tower', title: 'C', statusName: 'On Hold', statusColor: '#8888ff' });
+    await upsertJob({ id: 'local-1', siteName: 'Fictional Tower', title: 'D' });
+    const seen = await distinctJobStatuses();
+    expect(seen).toEqual([
+      { statusName: 'On Hold', statusColor: '#8888ff', count: 2 },
+      { statusName: 'In Progress', statusColor: '#ffcc00', count: 1 },
+    ]);
+    expect(statusChoices(seen).find((c) => c.name === 'On Hold')).toEqual({ id: '115', name: 'On Hold', color: '#8888ff', seen: 2 });
+  });
+
+  it('abandons a change with no job or no status, sending nothing', async () => {
+    const { client, sent } = fakeClient();
+    expect(await sendMore({ id: 'q1', kind: 'job-status', payload: { jobId: '1001' } }, deps(client)))
+      .toEqual({ status: 'abandon', reason: expect.stringMatching(/no job or no status/) });
+    expect(await sendMore({ id: 'q1', kind: 'job-status', payload: null }, deps(client))).toMatchObject({ status: 'abandon' });
+    expect(sent).toEqual([]);
+  });
+});
+
+describe('the job card: materials', () => {
+  const catalog = { id: 'q2', kind: 'job-material', payload: { jobId: '1001', sectionId: '5', costCenterId: '9', kind: 'catalog', catalogId: '4321', description: 'Smoke detector', qty: 2, at: '2026-09-09T00:30:00.000Z' } };
+  const oneOff = { id: 'q3', kind: 'job-material', payload: { jobId: '1001', sectionId: '5', costCenterId: '9', kind: 'oneOff', description: 'Conduit, 20 mm', qty: 1.5, at: '2026-09-09T00:30:00.000Z' } };
+  const justNow = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const yesterday = new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString();
+
+  it('posts a catalogue line to the cost centre\'s catalogs with the catalogue id as a number', async () => {
+    const { client, sent, reads } = fakeClient(() => ({ ID: 77 }));
+    expect(await sendMore(catalog, deps(client))).toEqual({ status: 'sent' });
+    expect(reads).toEqual([{ path: 'jobs/1001/sections/5/costCenters/9/catalogs/', query: { columns: 'ID,Catalog,Total,DateModified', pageSize: 250 } }]);
+    expect(sent).toEqual([{ method: 'POST', path: 'jobs/1001/sections/5/costCenters/9/catalogs/', body: { Catalog: 4321, Qty: 2 } }]);
+  });
+
+  it('posts a one-off to oneOffs with its words and count', async () => {
+    const { client, sent, reads } = fakeClient(() => ({ ID: 78 }));
+    expect(await sendMore(oneOff, deps(client))).toEqual({ status: 'sent' });
+    expect(reads[0]).toEqual({ path: 'jobs/1001/sections/5/costCenters/9/oneOffs/', query: { columns: 'ID,Description,Total,DateModified', pageSize: 250 } });
+    expect(sent).toEqual([{ method: 'POST', path: 'jobs/1001/sections/5/costCenters/9/oneOffs/', body: { Description: 'Conduit, 20 mm', Qty: 1.5 } }]);
+  });
+
+  it('takes a matching line from the last hour as this one landed: done, nothing posted', async () => {
+    const held = [{ ID: 1, Catalog: { ID: 4321, PartNo: 'SD-1', Name: 'Smoke detector' }, Total: { Qty: 2 }, DateModified: justNow }];
+    const { client, sent } = fakeClient(() => ({ ID: 77 }), held);
+    expect(await sendMore(catalog, deps(client))).toEqual({ status: 'done' });
+    expect(sent).toEqual([]);
+    const words = [{ ID: 2, Description: 'conduit, 20 MM', Total: { Qty: 1.5 }, DateModified: justNow }];
+    const second = fakeClient(() => ({ ID: 78 }), words);
+    expect(await sendMore(oneOff, deps(second.client))).toEqual({ status: 'done' });
+    expect(second.sent).toEqual([]);
+  });
+
+  it('posts when the held line is older than an hour, a different count, a different part, or undated', async () => {
+    const now = Date.now();
+    const p = catalog.payload as Parameters<typeof materialAlreadyHeld>[1];
+    expect(materialAlreadyHeld([{ Catalog: { ID: 4321 }, Total: { Qty: 2 }, DateModified: yesterday }], p, now)).toBe(false);
+    expect(materialAlreadyHeld([{ Catalog: { ID: 4321 }, Total: { Qty: 3 }, DateModified: justNow }], p, now)).toBe(false);
+    expect(materialAlreadyHeld([{ Catalog: { ID: 9999 }, Total: { Qty: 2 }, DateModified: justNow }], p, now)).toBe(false);
+    expect(materialAlreadyHeld([{ Catalog: { ID: 4321 }, Total: { Qty: 2 } }], p, now)).toBe(false);
+    expect(materialAlreadyHeld([{ Catalog: { ID: 4321 }, Total: { Qty: 2 }, DateModified: justNow }], p, now)).toBe(true);
+    // The office's own clock, ten hours ahead, is still "now".
+    expect(materialAlreadyHeld([{ Catalog: { ID: 4321 }, Total: { Qty: 2 }, DateModified: '2026-09-09T10:35:00+10:00' }], p, Date.parse('2026-09-09T00:30:00.000Z'))).toBe(true);
+    const { client, sent } = fakeClient(() => ({ ID: 77 }), [{ ID: 1, Catalog: { ID: 4321 }, Total: { Qty: 2 }, DateModified: yesterday }]);
+    expect(await sendMore(catalog, deps(client))).toEqual({ status: 'sent' });
+    expect(sent).toHaveLength(1);
+  });
+
+  it('posts when the read itself fails', async () => {
+    const { client, sent } = fakeClient(() => ({ ID: 77 }), () => { throw new SimproError('Simpro returned HTTP 500 for the read', 500, 'x'); });
+    expect(await sendMore(catalog, deps(client))).toEqual({ status: 'sent' });
+    expect(sent).toHaveLength(1);
+  });
+
+  it('abandons a line that could never go, sending nothing', async () => {
+    const { client, sent } = fakeClient();
+    const why = async (payload: unknown) => {
+      const r = await sendMore({ id: 'q', kind: 'job-material', payload }, deps(client));
+      return r.status === 'abandon' ? r.reason : r.status;
+    };
+    expect(await why({ ...catalog.payload, costCenterId: '' })).toMatch(/no job or no cost centre/);
+    expect(await why({ ...catalog.payload, qty: 0 })).toMatch(/no quantity/);
+    expect(await why({ ...catalog.payload, catalogId: undefined })).toMatch(/no catalogue item/);
+    expect(await why({ ...oneOff.payload, description: ' ' })).toMatch(/no description/);
+    expect(sent).toEqual([]);
+  });
+
+  it('lets a refusal through untouched, so the queue files it by status', async () => {
+    const refused = new SimproError('Simpro returned HTTP 422 for jobs/1001/sections/5/costCenters/9/catalogs/. Catalog is required', 422, 'jobs/1001/sections/5/costCenters/9/catalogs/');
+    const { client } = fakeClient(() => { throw refused; });
+    await expect(sendMore(catalog, deps(client))).rejects.toBe(refused);
+  });
+});
+
+describe('the job card: sign-off', () => {
+  const note = signOffNote({ externalId: '1001', title: 'Six-monthly routine', siteName: 'Fictional Tower' }, 'A. Customer', '2026-09-09T00:30:00.000Z');
+  const item = { id: 'q4', kind: 'job-signoff', payload: note };
+
+  it('reads the job\'s notes for its marker, then posts the note through the resources', async () => {
+    const { client, reads, sent } = fakeClient();
+    const added: unknown[] = [];
+    const api = { addJobNote: async (...args: unknown[]) => { added.push(args); } } as unknown as SimproResources;
+    expect(await sendMore(item, { client, api })).toEqual({ status: 'sent' });
+    expect(reads).toEqual([{ path: 'jobs/1001/notes/', query: { columns: 'ID,Note', pageSize: 250 } }]);
+    expect(added).toEqual([['1001', 'Signed off - Fictional Tower - 2026-09-09', note.note]]);
+    expect(note.note).toContain(markerFor(note.noteKey));
+    expect(sent).toEqual([]);
+  });
+
+  it('answers done when the job already carries the marker', async () => {
+    const { client } = fakeClient(() => ({}), [{ ID: 1, Note: `Some earlier text\n${markerFor(note.noteKey)}` }]);
+    const addJobNote = jest.fn();
+    expect(await sendMore(item, { client, api: { addJobNote } as unknown as SimproResources })).toEqual({ status: 'done' });
+    expect(addJobNote).not.toHaveBeenCalled();
+  });
+
+  it('posts when the notes cannot be read', async () => {
+    const { client } = fakeClient(() => ({}), () => { throw new SimproError('Simpro returned HTTP 500 for the read', 500, 'x'); });
+    const addJobNote = jest.fn(async () => undefined);
+    expect(await sendMore(item, { client, api: { addJobNote } as unknown as SimproResources })).toEqual({ status: 'sent' });
+    expect(addJobNote).toHaveBeenCalledTimes(1);
+  });
+
+  it('abandons a sign-off with no job or no note', async () => {
+    const { client } = fakeClient();
+    const addJobNote = jest.fn();
+    expect(await sendMore({ id: 'q', kind: 'job-signoff', payload: { ...note, note: '' } }, { client, api: { addJobNote } as unknown as SimproResources }))
+      .toEqual({ status: 'abandon', reason: expect.stringMatching(/no job or has no note/) });
+    expect(addJobNote).not.toHaveBeenCalled();
+  });
+
+  it('names the job for the failure rules on all three kinds', () => {
+    expect(moreJobIdOf('job-status', { jobId: '1001', statusId: '113' })).toBe('1001');
+    expect(moreJobIdOf('job-material', { jobId: '1001' })).toBe('1001');
+    expect(moreJobIdOf('job-signoff', note)).toBe('1001');
   });
 });
 

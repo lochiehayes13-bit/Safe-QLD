@@ -1,6 +1,6 @@
 import { upsertJob } from '@/db/opsRepo';
 import {
-  getCatalogItem, getContact, getCreditNote, getCustomerPayment, getLead, getVendor, getVendorOrder,
+  countVendorOrders, getCatalogItem, getContact, getCreditNote, getCustomerPayment, getLead, getVendor, getVendorOrder,
   listActivitySchedules, listCatalogGroups, listContactsForCustomer, listContactsForSite, listCreditNotesForCustomer,
   listCreditNotesForInvoice, listLeads, listPaymentsForCustomer, listPaymentsForInvoice, listSetupActivities,
   listSimproTimesheets, listSimproTimesheetsForJob, listVendorOrdersForJob, pruneActivitySchedulesNotSyncedAt,
@@ -137,7 +137,7 @@ describe('purchase orders', () => {
 
   it('lists a job’s orders, and searches by number, reference and supplier', async () => {
     await upsertVendorOrder(order(), AT);
-    await upsertVendorOrder(order({ id: '5102', jobId: '1002', reference: 'Pump seals', vendorName: 'Fictional Pumps', dateIssued: '2026-08-22' }), AT);
+    await upsertVendorOrder(order({ id: '5102', jobId: '1002', reference: 'Pump seals', vendorId: '78', vendorName: 'Fictional Pumps', dateIssued: '2026-08-22' }), AT);
     await upsertVendorOrder(order({ id: '5103', jobId: undefined, reference: 'Stock', archived: true }), AT);
     expect((await listVendorOrdersForJob('1001')).map((o) => o.id)).toEqual(['5101']);
     expect((await searchVendorOrders('pump')).map((o) => o.id)).toEqual(['5102']);
@@ -145,6 +145,25 @@ describe('purchase orders', () => {
     expect((await searchVendorOrders('riser', { jobExternalId: '1002' })).map((o) => o.id)).toEqual([]);
     // Newest issued first, archived last.
     expect((await searchVendorOrders('')).map((o) => o.id)).toEqual(['5102', '5101', '5103']);
+    // The supplier's own page asks by id, not by the name on the row.
+    expect((await searchVendorOrders('', { vendorExternalId: '77' })).map((o) => o.id)).toEqual(['5101', '5103']);
+    expect(await countVendorOrders('', { vendorExternalId: '77' })).toBe(2);
+  });
+
+  it('picks the open orders in the database, so a page of closed ones cannot hide an open one past it', async () => {
+    await upsertVendorOrder(order(), AT);
+    await upsertVendorOrder(order({ id: '5102', stage: 'Complete', dateIssued: '2026-08-22' }), AT);
+    await upsertVendorOrder(order({ id: '5103', stage: ' CANCELLED ', dateIssued: '2026-08-23' }), AT);
+    await upsertVendorOrder(order({ id: '5104', stage: 'Approved', dateIssued: '2026-08-24', archived: true }), AT);
+    await upsertVendorOrder(order({ id: '5105', stage: undefined, dateIssued: '2026-08-25' }), AT);
+    // The open one is the oldest; a list capped at the newest three would never reach it.
+    expect((await searchVendorOrders('', { openOnly: true, limit: 3 })).map((o) => o.id)).toEqual(['5105', '5101']);
+    expect((await searchVendorOrders('', { limit: 3 })).map((o) => o.id)).toEqual(['5105', '5103', '5102']);
+    // The chip counts come from the same WHERE, past any page.
+    expect(await countVendorOrders('')).toBe(5);
+    expect(await countVendorOrders('', { openOnly: true })).toBe(2);
+    expect(await countVendorOrders('riser', { openOnly: true, jobExternalId: '1001' })).toBe(2);
+    expect(await countVendorOrders('', { openOnly: true, vendorExternalId: '78' })).toBe(0);
   });
 
   it('wants the lines of orders the office changed lately or against a held job, not read since, capped', async () => {
@@ -208,9 +227,19 @@ describe('the catalogue', () => {
     expect((await searchCatalogItems('DET-OPT-1')).map((c) => c.id)).toEqual(['301', '302']);
     expect((await searchCatalogItems('opt', { groupId: '7' })).map((c) => c.id)).toEqual(['302', '301']);
     expect((await searchCatalogItems('jacking pump')).map((c) => c.id)).toEqual(['303']);
+    // A parent group reaches the parts filed under its children, and a part filed in the parent itself.
+    await replaceCatalogGroups([
+      { id: '1', name: 'Detection' }, { id: '7', name: 'Detectors', parentId: '1', parentName: 'Detection' },
+      { id: '2', name: 'Hydraulics' }, { id: '9', name: 'Pumps', parentId: '2', parentName: 'Hydraulics' },
+    ], AT);
+    await upsertCatalogItem(item({ id: '304', partNo: 'SND-1', name: 'Sounder', groupId: '1', groupName: 'Detection', parentGroupName: undefined }), AT);
+    expect((await searchCatalogItems('', { parentGroupId: '1' })).map((c) => c.id)).toEqual(['302', '301', '304']);
+    expect((await searchCatalogItems('', { parentGroupId: '2' })).map((c) => c.id)).toEqual(['303']);
+    expect((await searchCatalogItems('opt', { parentGroupId: '2' })).map((c) => c.id)).toEqual([]);
     expect(await getCatalogItem('301')).toMatchObject({ sellExTaxCents: 8495, isInventory: true, parentGroupName: 'Detection' });
     await upsertCatalogItem(item(), LATER);
-    expect(await pruneCatalogItemsNotSyncedAt(LATER)).toBe(2);
+    // 302, 303 and 304 were not in the later read; the detector was.
+    expect(await pruneCatalogItemsNotSyncedAt(LATER)).toBe(3);
   });
 
   it('replaces the groups whole', async () => {

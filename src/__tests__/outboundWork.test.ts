@@ -1578,7 +1578,7 @@ describe('workCompletedNote', () => {
     expect(note.note).toContain('Site: An Example Building');
     expect(note.note).toContain('Completed: 03/07/2026 14:30 (Qld)');
     expect(note.note).toContain('Technician: A Technician');
-    expect(note.note).toContain('stage and status in Simpro are not changed by this note');
+    expect(note.note).toContain('This note itself moves neither the job\'s stage nor its status in Simpro');
     expect(note.note).not.toContain('2026-07-03');
     expect(note.truncated).toBe(false);
   });

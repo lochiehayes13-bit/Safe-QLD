@@ -235,6 +235,15 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['run', 'route', 'order', 'driving', 'nearest', 'travel'],
   },
   {
+    route: '/search', file: 'app/search.tsx', opensVia: 'src/domain/search.ts',
+    tab: 'today', section: 'The day',
+    label: 'Find anything', modes: BOTH, openedFrom: ['/', '/shortcuts'],
+    // Its results open record screens by the routes held in the domain
+    // module it maps over, the same arrangement as the module picker.
+    blurb: 'One box over every job, invoice, order, quote, site, customer, contact, part and supplier the phone holds.',
+    terms: ['find', 'search', 'lookup', 'number', 'job number', 'invoice number', 'po', 'part number', 'phone', 'anything'],
+  },
+  {
     route: '/work/due', file: 'app/work/due.tsx', tab: 'today', section: 'The day',
     label: 'Overdue and due', modes: BOTH, openedFrom: ['/work', '/shortcuts'],
     blurb: 'Routines past their tolerance window, across every site.',
@@ -259,7 +268,7 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/work/job/[id]', file: 'app/work/job/[id].tsx', tab: 'today', section: 'The day',
     label: 'Job', needsContext: true, modes: BOTH,
-    openedFrom: ['/work/jobs', '/customer/[id]', '/quotes/simpro/[id]', '/invoices/[id]'],
+    openedFrom: ['/work/jobs', '/customer/[id]', '/quotes/simpro/[id]', '/invoices/[id]', '/search', '/orders/[id]'],
     blurb: 'The site briefing: what is already broken, and what the last person found.',
     terms: ['job', 'briefing', 'attendance'],
   },
@@ -374,7 +383,7 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/site/[id]', file: 'app/site/[id].tsx', tab: 'sites', section: 'Your sites',
     label: 'Site', needsContext: true, modes: BOTH,
-    openedFrom: ['/sites', '/work/job/[id]', '/customer/[id]', '/quotes/simpro/[id]', '/quotes'],
+    openedFrom: ['/sites', '/work/job/[id]', '/customer/[id]', '/quotes/simpro/[id]', '/quotes', '/search', '/contacts/[id]', '/leads'],
     blurb: 'One site: its systems, its history, its paperwork, and the pack that hands it to another technician.',
     terms: ['site', 'building', 'pack'],
   },
@@ -767,7 +776,7 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/quotes/simpro/[id]', file: 'app/quotes/simpro/[id].tsx', tab: 'work', section: 'Records',
-    label: 'Simpro quote', needsContext: true, modes: BOTH, openedFrom: ['/quotes/simpro', '/customer/[id]'],
+    label: 'Simpro quote', needsContext: true, modes: BOTH, openedFrom: ['/quotes/simpro', '/customer/[id]', '/search'],
     blurb: 'One quote as the office holds it: the sections and lines, the notes, the files, and the job it became.',
     terms: ['quote', 'simpro', 'lines', 'sections', 'attachments', 'converted'],
   },
@@ -783,16 +792,40 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/invoices/[id]', file: 'app/invoices/[id].tsx', tab: 'work', section: 'Records',
-    label: 'Invoice', needsContext: true, modes: BOTH, openedFrom: ['/invoices', '/work/job/[id]', '/customer/[id]'],
+    label: 'Invoice', needsContext: true, modes: BOTH, openedFrom: ['/invoices', '/work/job/[id]', '/customer/[id]', '/search'],
     blurb: 'One invoice: what it bills, for whom, when it is due, and how much of it has been paid.',
     terms: ['invoice', 'balance', 'due', 'paid', 'jobs billed'],
   },
   {
     route: '/customer/[id]', file: 'app/customer/[id].tsx', tab: 'work', section: 'Records',
     label: 'Customer', needsContext: true, modes: BOTH,
-    openedFrom: ['/work/job/[id]', '/quotes/simpro/[id]', '/invoices/[id]', '/site/[id]'],
+    openedFrom: ['/work/job/[id]', '/quotes/simpro/[id]', '/invoices/[id]', '/site/[id]', '/search', '/contacts/[id]'],
     blurb: 'A customer as the office holds them: who to ring, their sites, and their jobs, quotes and invoices.',
     terms: ['customer', 'client', 'company', 'contact', 'sites', 'who to ring'],
+  },
+  {
+    route: '/contacts', file: 'app/contacts/index.tsx', tab: 'work', section: 'Records',
+    // A site and a customer open it scoped to their own people.
+    label: 'Contacts', modes: BOTH, openedFrom: ['/shortcuts', '/site/[id]', '/customer/[id]'],
+    blurb: 'Everyone the office has a number for, searched by name, number, email or role. Ring or text from the row.',
+    terms: ['contacts', 'people', 'phone', 'ring', 'call', 'text', 'sms', 'email', 'building manager', 'who to ring'],
+  },
+  {
+    route: '/contacts/[id]', file: 'app/contacts/[id].tsx', tab: 'work', section: 'Records',
+    label: 'Contact', needsContext: true, modes: BOTH,
+    openedFrom: ['/contacts', '/search', '/site/[id]', '/customer/[id]'],
+    blurb: 'One person: ring, text or email in a tap, and the sites and customers they belong to.',
+    terms: ['contact', 'person', 'ring', 'text', 'email', 'position'],
+  },
+  {
+    route: '/leads', file: 'app/leads/index.tsx', tab: 'work', section: 'Records',
+    label: 'Leads', modes: BOTH, openedFrom: ['/search'],
+    blurb: 'The work the office is chasing before it is a quote, by stage, each opening the site it names.',
+    terms: ['leads', 'lead', 'prospect', 'sales', 'chasing', 'follow up'],
+    keptBecause:
+      'A lead is a salesperson\'s record and reads as office work, but it carries no price — only a site, a '
+      + 'customer and a stage — and "is anything happening with this building" is asked of whoever is standing '
+      + 'in it. Nothing lists it in a hub either way; Find anything is the only way in.',
   },
   {
     route: '/work/reports', file: 'app/work/reports.tsx', tab: 'work', section: 'Records',
@@ -866,6 +899,37 @@ export const DESTINATIONS: readonly Destination[] = [
       + 'you can do.',
   },
   {
+    route: '/orders', file: 'app/orders/index.tsx', tab: 'work', section: 'Parts and stock',
+    // A supplier opens it scoped to their orders; a job card may too.
+    label: 'Purchase orders', modes: BOTH, openedFrom: ['/shortcuts', '/vendors/[id]'],
+    blurb: 'What the office has ordered, from whom, for which job, and whether it has arrived. Quantities, never prices.',
+    terms: ['purchase orders', 'po', 'orders', 'supplier', 'vendor', 'received', 'on order', 'delivery'],
+    keptBecause:
+      '"Has the part for this job been ordered, and is it here yet" is asked on site, of the technician, '
+      + 'and the answer is on the order. Nothing on it is a price: the phone holds quantities only.',
+  },
+  {
+    route: '/orders/[id]', file: 'app/orders/[id].tsx', tab: 'work', section: 'Parts and stock',
+    label: 'Purchase order', needsContext: true, modes: BOTH, openedFrom: ['/orders', '/search', '/vendors/[id]'],
+    blurb: 'One order: the supplier, the job, the reference and dates, and each line with what was ordered and what has arrived.',
+    terms: ['purchase order', 'po', 'lines', 'received', 'supplier', 'reference'],
+  },
+  {
+    route: '/vendors/[id]', file: 'app/vendors/[id].tsx', tab: 'work', section: 'Parts and stock',
+    label: 'Supplier', needsContext: true, modes: BOTH, openedFrom: ['/orders/[id]', '/search'],
+    blurb: 'A supplier as the office holds them: who to ring, where they are, and the orders open with them.',
+    terms: ['supplier', 'vendor', 'ring', 'counter', 'orders with'],
+  },
+  {
+    route: '/office-catalogue', file: 'app/office-catalogue/index.tsx', tab: 'work', section: 'Parts and stock',
+    label: 'Office catalogue', modes: BOTH, openedFrom: ['/shortcuts', '/search'],
+    blurb: 'The office\'s own parts list with its sell prices, by part number or name, with the number a tap away from the clipboard.',
+    terms: ['office catalogue', 'simpro catalogue', 'part number', 'sell price', 'parts', 'materials', 'copy'],
+    keptBecause:
+      'The sell price on a part is the office\'s own figure, already on every quote a customer has seen; reading '
+      + 'it out commits nobody to anything. What the company pays for the part is not on the phone at all.',
+  },
+  {
     route: '/work/knowledge', file: 'app/work/knowledge.tsx', tab: 'work', section: 'Parts and stock',
     label: 'Company knowledge', modes: BOTH, openedFrom: ['/shortcuts', '/work'],
     blurb: 'Tricks of the trade, marked verified or not wherever they are used.',
@@ -900,6 +964,7 @@ export const DESTINATIONS: readonly Destination[] = [
       'A batch job that ends at a label printer, so it happens in the workshop and not on site. '
       + 'The numbers it issues are what you scan afterwards.',
   },
+
 
   // -- Settings --------------------------------------------------------------
   {

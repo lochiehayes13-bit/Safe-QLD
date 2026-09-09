@@ -51,6 +51,12 @@ export interface AppModule {
  */
 export const MODULES: AppModule[] = [
   // -- Every day -----------------------------------------------------------
+  { href: '/search', label: 'Find anything', icon: 'text-box-search-outline', group: 'Every day',
+    blurb: 'A job, invoice, order, quote, site, customer, part or phone number. One box.',
+    keywords: ['search', 'find', 'lookup', 'job number', 'invoice number', 'purchase order', 'po', 'part number', 'phone', 'who'] },
+  { href: '/contacts', label: 'Contacts', icon: 'account-group-outline', group: 'Every day',
+    blurb: 'Everyone the office has a number for. Ring, text or email in one tap.',
+    keywords: ['people', 'phone', 'ring', 'call', 'text', 'sms', 'email', 'building manager', 'who to ring'] },
   { href: '/work/clock', label: 'Clock on', icon: 'timer-play-outline', group: 'Every day',
     blurb: 'On when you start a job, off when you finish. The hours go to Simpro.',
     keywords: ['clock', 'on', 'off', 'hours', 'time', 'timesheet', 'job hours', 'travel', 'break', 'schedule block'] },
@@ -174,6 +180,12 @@ export const MODULES: AppModule[] = [
   { href: '/work/purchases', label: 'Order parts', icon: 'cart-outline', group: 'On site',
     blurb: 'A purchase request that lands in Simpro as an order.',
     keywords: ['purchase order', 'supplier'] },
+  { href: '/office-catalogue', label: 'Office catalogue', icon: 'clipboard-list-outline', group: 'On site',
+    blurb: "The office's own parts list with its sell prices, by part number or name.",
+    keywords: ['simpro catalogue', 'part number', 'sell price', 'parts', 'materials', 'copy'] },
+  { href: '/orders', label: 'Purchase orders', icon: 'package-variant', group: 'On site',
+    blurb: 'What the office has ordered, from whom, and whether it has arrived.',
+    keywords: ['po', 'order', 'supplier', 'vendor', 'received', 'parts on order', 'delivery'] },
 
   // -- Forms and records ---------------------------------------------------
   { href: '/work/reports', label: 'Reports', icon: 'file-document-outline', group: 'Forms and records',

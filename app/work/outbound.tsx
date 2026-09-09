@@ -23,6 +23,7 @@ import { getEntry, markEntrySent } from '@/db/clockRepo';
 import { CLOCK_QUEUE_KIND, describeEntry, type ClockEntry } from '@/domain/clockOn';
 import { flushSoon } from '@/simpro/flushSoon';
 import { markerFor } from '@/domain/queueKey';
+import { describeJobChange } from '@/domain/jobActions';
 import type { Site } from '@/domain/types';
 import { formatBytes } from '@/share/pack';
 import { useTheme } from '@/theme';
@@ -420,6 +421,20 @@ export default function OutboundScreen() {
   );
 }
 
+/**
+ * What a queued attachment is, for its line: a signature from the job card,
+ * a photograph, or a document picked from the phone. Named by the file
+ * rather than by a kind on the row, because the row has none — every
+ * attachment queues the same way and only the file says what it is.
+ */
+function attachmentWord(p: { filename?: string; mimeType?: string }): string {
+  const mime = (p.mimeType ?? '').toLowerCase();
+  if ((p.filename ?? '').startsWith('Sign-off') || mime === 'image/svg+xml') return 'Signature';
+  if (mime.startsWith('image/') || (!mime && !p.filename)) return 'Photo';
+  if (!mime && /\.(jpe?g|png|heic|heif|webp)$/i.test(p.filename ?? '')) return 'Photo';
+  return 'File';
+}
+
 /** The clock entry a timesheet row is for, or none for any other row. */
 function clockEntryIdOf(u: SyncEntry): string | undefined {
   if (u.kind !== CLOCK_QUEUE_KIND) return undefined;
@@ -442,17 +457,19 @@ function clockEntryIdOf(u: SyncEntry): string | undefined {
  */
 function describeUnknown(u: SyncEntry, clockEntries: ReadonlyMap<string, ClockEntry>): string {
   try {
-    const p = JSON.parse(u.payload) as { jobId?: string; subject?: string; filename?: string; lines?: unknown[]; entryId?: string };
+    const p = JSON.parse(u.payload) as { jobId?: string; subject?: string; filename?: string; mimeType?: string; lines?: unknown[]; entryId?: string };
     switch (u.kind) {
       case 'job-note': return `Note on job ${p.jobId ?? '?'}: ${p.subject ?? ''}`;
-      case 'attachment': return `Photo on job ${p.jobId ?? '?'}: ${p.filename ?? p.subject ?? ''}`;
+      case 'attachment': return `${attachmentWord(p)} on job ${p.jobId ?? '?'}: ${p.filename ?? p.subject ?? ''}`;
       case 'purchase-order':
         return `Parts order${p.jobId ? ` for job ${p.jobId}` : ''}, ${Array.isArray(p.lines) ? p.lines.length : 0} lines`;
       case CLOCK_QUEUE_KIND: {
         const entry = p.entryId ? clockEntries.get(p.entryId) : undefined;
         return entry ? describeEntry(entry) : `Hours${p.jobId ? ` on job ${p.jobId}` : ''}, entry no longer on this phone`;
       }
-      default: return u.kind;
+      // A status, a line or a sign-off from the job card; named by what a
+      // person would search the job for.
+      default: return describeJobChange(u.kind, p) ?? u.kind;
     }
   } catch {
     return u.kind;

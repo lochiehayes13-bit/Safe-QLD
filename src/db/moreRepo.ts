@@ -244,21 +244,44 @@ export async function getVendorOrder(externalId: string): Promise<VendorOrderFul
 }
 
 /**
- * Purchase orders by number, reference, supplier, quote number or the job
- * they are for — every word somewhere — newest issued first. No words
- * lists the newest.
+ * Still on its way: not archived, and not at a stage the office closes an
+ * order under. The stage is Simpro's word for it, so the closed words are
+ * matched case-blind and with the American spelling beside the Australian.
  */
-export async function searchVendorOrders(query: string, options: { jobExternalId?: string; vendorExternalId?: string; limit?: number } = {}): Promise<VendorOrderRecord[]> {
-  const db = await getDb();
+const OPEN_ORDER = "archived = 0 AND LOWER(TRIM(COALESCE(stage, ''))) NOT IN ('complete', 'completed', 'archived', 'cancelled', 'canceled')";
+
+export interface VendorOrderFilter {
+  jobExternalId?: string;
+  vendorExternalId?: string;
+  /** Only the orders still on their way — the same rule the list's Open chip shows. */
+  openOnly?: boolean;
+}
+
+/** The WHERE shared by the order search and its count, so the chip's number is of the rows the chip shows. */
+function vendorOrderWhere(query: string, options: VendorOrderFilter): { where: string[]; args: (string | number)[] } {
   const where: string[] = [];
   const args: (string | number)[] = [];
   if (options.jobExternalId) { where.push('jobExternalId = ?'); args.push(options.jobExternalId); }
   if (options.vendorExternalId) { where.push('vendorExternalId = ?'); args.push(options.vendorExternalId); }
+  if (options.openOnly) where.push(OPEN_ORDER);
   for (const word of searchWords(query)) {
     const like = `%${word}%`;
     where.push('(externalId LIKE ? OR reference LIKE ? OR vendorName LIKE ? OR quoteNo LIKE ? OR jobExternalId LIKE ?)');
     args.push(like, like, like, like, like);
   }
+  return { where, args };
+}
+
+/**
+ * Purchase orders by number, reference, supplier, quote number or the job
+ * they are for — every word somewhere — newest issued first. No words
+ * lists the newest. `openOnly` filters in the database rather than over
+ * the page that came back, because an office with more open orders than
+ * one page holds must not be told nothing is on order.
+ */
+export async function searchVendorOrders(query: string, options: VendorOrderFilter & { limit?: number } = {}): Promise<VendorOrderRecord[]> {
+  const db = await getDb();
+  const { where, args } = vendorOrderWhere(query, options);
   args.push(options.limit ?? 50);
   const rows = await db.getAllAsync<VendorOrderRow>(
     `SELECT * FROM vendor_order ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
@@ -266,6 +289,17 @@ export async function searchVendorOrders(query: string, options: { jobExternalId
     ...args,
   );
   return rows.map(hydrateVendorOrder);
+}
+
+/** How many orders match, under the same WHERE as the search, so a chip can count past the page. */
+export async function countVendorOrders(query: string, options: VendorOrderFilter = {}): Promise<number> {
+  const db = await getDb();
+  const { where, args } = vendorOrderWhere(query, options);
+  const row = await db.getFirstAsync<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM vendor_order ${where.length ? 'WHERE ' + where.join(' AND ') : ''}`,
+    ...args,
+  );
+  return row?.n ?? 0;
 }
 
 /** Every order raised against a job, with its lines, newest issued first. */
@@ -422,13 +456,20 @@ export async function pruneCatalogItemsNotSyncedAt(at: string): Promise<number> 
  * Catalogue items by part number or name — every word somewhere — with an
  * exact part number first, then a part number that starts with the words,
  * then the rest by name. Current items ahead of archived. Optionally
- * within one group.
+ * within one group: `groupId` is the leaf group an item carries, and
+ * `parentGroupId` a top-level group, which reaches the items filed
+ * under it directly and under any of its children — a part is filed in
+ * "Detectors", not in "Detection", and the parent chip has to find it.
  */
-export async function searchCatalogItems(query: string, options: { groupId?: string; limit?: number } = {}): Promise<CatalogItemRecord[]> {
+export async function searchCatalogItems(query: string, options: { groupId?: string; parentGroupId?: string; limit?: number } = {}): Promise<CatalogItemRecord[]> {
   const db = await getDb();
   const where: string[] = [];
   const args: (string | number)[] = [];
   if (options.groupId) { where.push('groupExternalId = ?'); args.push(options.groupId); }
+  if (options.parentGroupId) {
+    where.push('groupExternalId IN (SELECT externalId FROM catalog_group WHERE externalId = ? OR parentExternalId = ?)');
+    args.push(options.parentGroupId, options.parentGroupId);
+  }
   const words = searchWords(query);
   for (const word of words) {
     const like = `%${word}%`;
