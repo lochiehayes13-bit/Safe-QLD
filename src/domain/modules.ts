@@ -51,6 +51,9 @@ export interface AppModule {
  */
 export const MODULES: AppModule[] = [
   // -- Every day -----------------------------------------------------------
+  { href: '/work/clock', label: 'Clock on', icon: 'timer-play-outline', group: 'Every day',
+    blurb: 'On when you start a job, off when you finish. The hours go to Simpro.',
+    keywords: ['clock', 'on', 'off', 'hours', 'time', 'timesheet', 'job hours', 'travel', 'break', 'schedule block'] },
   { href: '/work/timesheets', label: 'Timesheet', icon: 'calendar-clock-outline', group: 'Every day',
     blurb: 'Your week, copied from last week if you like, emailed to accounts.',
     keywords: ['hours', 'pay', 'overtime', 'RDO', 'leave'] },

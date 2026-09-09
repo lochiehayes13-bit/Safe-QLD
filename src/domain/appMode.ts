@@ -435,6 +435,12 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['register', 'assets', 'devices', 'equipment'],
   },
   {
+    route: '/site/bulk-test', file: 'app/site/bulk-test.tsx', tab: 'sites', section: 'This site',
+    label: 'Bulk test', needsContext: true, modes: BOTH, openedFrom: ['/site/[id]'],
+    blurb: 'Walk the register and test every asset in turn, failing the ones that fail.',
+    terms: ['bulk test', 'test assets', 'fail', 'walk'],
+  },
+  {
     route: '/site/points', file: 'app/site/points.tsx', tab: 'sites', section: 'This site',
     label: 'Points', needsContext: true, modes: BOTH, openedFrom: ['/site/[id]'],
     blurb: 'Every point off the panel configuration, with its zone text on the row.',
@@ -797,6 +803,12 @@ export const DESTINATIONS: readonly Destination[] = [
       'The sheet you were filling in this morning is reopened from here. Making a technician '
       + 'walk back through the site to find their own half-finished report is how it gets '
       + 'finished on paper instead.',
+  },
+  {
+    route: '/work/clock', file: 'app/work/clock.tsx', tab: 'work', section: 'Records',
+    label: 'Clock on', modes: BOTH, openedFrom: ['/work', '/shortcuts'],
+    blurb: 'On when you start a job, off when you finish; the hours go to the Simpro job as a schedule block.',
+    terms: ['clock on', 'clock off', 'hours', 'job hours', 'travel', 'break', 'schedule block', 'timesheet'],
   },
   {
     route: '/work/timesheets', file: 'app/work/timesheets.tsx', tab: 'work', section: 'Records',

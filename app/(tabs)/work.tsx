@@ -35,6 +35,7 @@ export default function WorkScreen() {
     {
       title: 'On the tools',
       rows: [
+        { label: 'Clock on', sub: 'On when you start a job, off when you finish; the hours go to Simpro', icon: 'timer-play-outline', href: '/work/clock' },
         { label: 'Jobs', sub: 'Scheduled and outstanding work', icon: 'clipboard-list-outline', href: '/work/jobs', badge: counts.jobsOpen },
         { label: 'Month plan', sub: 'The month day by day, with what could not be planned said out loud', icon: 'calendar-month-outline', href: '/work/plan' },
         { label: 'Portfolio health', sub: 'How the whole book is going, coverage stated before any score', icon: 'chart-donut', href: '/work/portfolio' },

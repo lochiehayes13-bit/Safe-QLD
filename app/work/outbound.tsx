@@ -19,6 +19,8 @@ import { photosWithSizes } from '@/simpro/attachmentFiles';
 import { formatAuDate } from '@/export/sheets';
 import { loadPrefs } from '@/app-prefs';
 import { dismissSync, failedSync, forgetSync, retrySync, unknownSync, type SyncEntry } from '@/db/opsRepo';
+import { getEntry, markEntrySent } from '@/db/clockRepo';
+import { CLOCK_QUEUE_KIND, describeEntry, type ClockEntry } from '@/domain/clockOn';
 import { flushSoon } from '@/simpro/flushSoon';
 import { markerFor } from '@/domain/queueKey';
 import type { Site } from '@/domain/types';
@@ -111,10 +113,33 @@ export default function OutboundScreen() {
    * retried without being shown is a technician's work silently dropped.
    */
   const [failed, setFailed] = useState<SyncEntry[]>([]);
+  /** The clock entries behind the timesheet rows above, so a row can be named by its hours rather than its kind. */
+  const [clockEntries, setClockEntries] = useState<Map<string, ClockEntry>>(new Map());
   const loadQueues = useCallback(async () => {
     const [u, f] = await Promise.all([unknownSync(), failedSync()]);
     setUnknown(u);
     setFailed(f);
+    const found = new Map<string, ClockEntry>();
+    for (const row of [...u, ...f]) {
+      const id = clockEntryIdOf(row);
+      if (!id || found.has(id)) continue;
+      const entry = await getEntry(id);
+      if (entry) found.set(id, entry);
+    }
+    setClockEntries(found);
+  }, []);
+
+  /**
+   * A person has found it in Simpro. For a clock entry the entry row is
+   * stamped sent as well, because the clock screen reads the state of a
+   * send off the entry, not the queue: a row dismissed here and an entry
+   * still marked unsent would offer "Send again" for a block the office
+   * already holds.
+   */
+  const dismiss = useCallback(async (u: SyncEntry) => {
+    const id = clockEntryIdOf(u);
+    if (id) await markEntrySent(id, undefined);
+    await dismissSync(u.id);
   }, []);
   useFocusEffect(useCallback(() => { void loadQueues(); }, [loadQueues]));
 
@@ -294,7 +319,7 @@ export default function OutboundScreen() {
           </Txt>
           {unknown.map((u) => (
             <Card key={u.id}>
-              <Txt weight="700">{describeUnknown(u)}</Txt>
+              <Txt weight="700">{describeUnknown(u, clockEntries)}</Txt>
               <Txt size="xs" tone="muted">{formatAuDate(u.createdAt)}{u.lastError ? ` · ${u.lastError}` : ''}</Txt>
               {u.contentKey ? (
                 <Txt size="xs" tone="faint" style={{ marginTop: 4 }} mono>Reference {markerFor(u.contentKey)}</Txt>
@@ -305,7 +330,7 @@ export default function OutboundScreen() {
                   variant="secondary"
                   compact
                   style={{ flex: 1 }}
-                  onPress={() => { void dismissSync(u.id).then(loadQueues); }}
+                  onPress={() => { void dismiss(u).then(loadQueues); }}
                 />
                 <Button
                   title="Send again"
@@ -333,7 +358,7 @@ export default function OutboundScreen() {
           </Txt>
           {failed.map((f) => (
             <Card key={f.id}>
-              <Txt weight="700">{describeUnknown(f)}</Txt>
+              <Txt weight="700">{describeUnknown(f, clockEntries)}</Txt>
               <Txt size="xs" tone="muted">
                 {formatAuDate(f.createdAt)} · {f.attempts} attempt{f.attempts === 1 ? '' : 's'}
               </Txt>
@@ -395,21 +420,38 @@ export default function OutboundScreen() {
   );
 }
 
+/** The clock entry a timesheet row is for, or none for any other row. */
+function clockEntryIdOf(u: SyncEntry): string | undefined {
+  if (u.kind !== CLOCK_QUEUE_KIND) return undefined;
+  try {
+    const id = (JSON.parse(u.payload) as { entryId?: unknown }).entryId;
+    return typeof id === 'string' ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * One line for a queued send nobody can vouch for, or one the app gave up on.
  *
  * A photograph is named by its file, because that is what somebody searches
- * the job's attachments for; a note by its subject; an order by its lines. A
- * payload that will not parse still shows its kind rather than nothing.
+ * the job's attachments for; a note by its subject; an order by its lines; a
+ * block of hours by its job, its times and its day, which is what somebody
+ * looks for on the job's schedule. A payload that will not parse still shows
+ * its kind rather than nothing.
  */
-function describeUnknown(u: SyncEntry): string {
+function describeUnknown(u: SyncEntry, clockEntries: ReadonlyMap<string, ClockEntry>): string {
   try {
-    const p = JSON.parse(u.payload) as { jobId?: string; subject?: string; filename?: string; lines?: unknown[] };
+    const p = JSON.parse(u.payload) as { jobId?: string; subject?: string; filename?: string; lines?: unknown[]; entryId?: string };
     switch (u.kind) {
       case 'job-note': return `Note on job ${p.jobId ?? '?'}: ${p.subject ?? ''}`;
       case 'attachment': return `Photo on job ${p.jobId ?? '?'}: ${p.filename ?? p.subject ?? ''}`;
       case 'purchase-order':
         return `Parts order${p.jobId ? ` for job ${p.jobId}` : ''}, ${Array.isArray(p.lines) ? p.lines.length : 0} lines`;
+      case CLOCK_QUEUE_KIND: {
+        const entry = p.entryId ? clockEntries.get(p.entryId) : undefined;
+        return entry ? describeEntry(entry) : `Hours${p.jobId ? ` on job ${p.jobId}` : ''}, entry no longer on this phone`;
+      }
       default: return u.kind;
     }
   } catch {

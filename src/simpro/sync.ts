@@ -558,6 +558,13 @@ export async function pullFromSimpro(
             // to the wrong building on the wrong day.
             patch.nextDueAt = mapped.input.nextDueAt;
           }
+          // The office's service levels are the office's too: a result is
+          // filed against one of their ids, and a phone that synced before
+          // the ids were written would otherwise never get them.
+          const levels = mapped.input.attributes?.['simproServiceLevels'];
+          if (levels !== undefined && match.attributes?.['simproServiceLevels'] !== levels) {
+            patch.attributes = { ...match.attributes, simproServiceLevels: levels };
+          }
           if (Object.keys(patch).length) {
             await updateAsset(match.id, patch);
             result.assetsUpdated++;
@@ -1467,8 +1474,19 @@ export async function flushQueue(config: SimproConfig): Promise<FlushResult> {
         // Every kind added since the first four lives in ./outboundMore. A
         // kind nothing knows is marked done rather than retried forever.
         const outcome = await sendMore({ id: item.id, kind: item.kind, payload, contentKey: key }, { client, api });
-        if (outcome.status === 'not-mine') {
+        if (outcome.status === 'not-mine' || outcome.status === 'done') {
+          // Done is nothing to send — the record is gone from the phone, or
+          // the office already holds it — so the row closes without being
+          // counted as a send.
           await markSynced(item.id);
+          continue;
+        }
+        if (outcome.status === 'abandon') {
+          // Nothing went and nothing will from this row; said so by the
+          // sender rather than thrown, so it is never filed as a send that
+          // may have landed.
+          failed++;
+          await abandonSync(item.id, outcome.reason);
           continue;
         }
       }
