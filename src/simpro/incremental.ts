@@ -131,7 +131,17 @@ export type SyncResource =
   | 'sites' | 'jobs' | 'assets' | 'employees' | 'schedules' | 'rates'
   /* The mirror's own stages: customers, quotes and invoices come down by
      DateModified like jobs do; tasks are a handful of rows read whole. */
-  | 'customers' | 'quotes' | 'invoices' | 'tasks';
+  | 'customers' | 'quotes' | 'invoices' | 'tasks'
+  /* The rest of Simpro, v23: see ./syncMore for which come down by
+     DateModified and which are read whole. */
+  | 'vendorOrders' | 'vendors' | 'catalogs' | 'contacts' | 'leads'
+  | 'timesheets' | 'activities' | 'payments' | 'creditNotes';
+
+/** Every resource the sync records state for, in the order Settings lists them. */
+export const SYNC_RESOURCES: readonly SyncResource[] = [
+  'sites', 'jobs', 'assets', 'employees', 'schedules', 'customers', 'quotes', 'invoices', 'tasks',
+  'vendorOrders', 'vendors', 'catalogs', 'contacts', 'leads', 'timesheets', 'activities', 'payments', 'creditNotes',
+];
 
 export interface SyncState {
   resource: SyncResource;

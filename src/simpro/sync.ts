@@ -5,6 +5,8 @@ import {
 } from './mirrorResources';
 import { assessIncremental, nextWatermark, planIncremental, type SyncResource } from './incremental';
 import { readSyncState, writeSyncState } from './watermark';
+import { MORE_STAGES, pullMore, type MoreResource } from './syncMore';
+import { sendMore } from './outboundMore';
 import { flushSoon } from './flushSoon';
 import { keysAlreadyOnJob } from './testResults';
 import { reachabilityFailure, sendFailure } from './sendOutcome';
@@ -64,8 +66,10 @@ export interface SyncProgress {
   total: number;
 }
 
-/** Stages a pull reports progress across. */
-const TOTAL_STAGES = 12;
+/** The main pull's list stages, before the rest of Simpro and the detail reads. */
+const LIST_STAGES = 10;
+/** Stages a pull reports progress across: the lists, the rest of Simpro, then job and quote details. */
+const TOTAL_STAGES = LIST_STAGES + MORE_STAGES + 2;
 
 /** The job list ceiling. The build holds 4,562; the guard is against a runaway, not the book of work. */
 const JOB_CEILING = 6000;
@@ -112,6 +116,8 @@ export interface SyncResult {
   /** Jobs and quotes whose children were read this run. */
   jobDetailsRead: number;
   quoteDetailsRead: number;
+  /** Rows read per v23 resource: purchase orders, vendors, the catalogue and the rest. See ./syncMore. */
+  more: Partial<Record<MoreResource, number>>;
   errors: string[];
   /**
    * Whether each resource actually came down incrementally.
@@ -273,7 +279,7 @@ export async function pullFromSimpro(
     assetsAdded: 0, assetsUpdated: 0, assetsWithoutSite: 0,
     ratesRead: 0, feesRead: 0, employeesRead: 0, schedulesRead: 0,
     customersRead: 0, quotesRead: 0, invoicesRead: 0, tasksRead: 0,
-    jobDetailsRead: 0, quoteDetailsRead: 0,
+    jobDetailsRead: 0, quoteDetailsRead: 0, more: {},
     errors: [], modes: {}, notes: [],
   };
   const startedAt = new Date().toISOString();
@@ -886,8 +892,28 @@ export async function pullFromSimpro(
     result.errors.push(describe(e, 'tasks'));
   }
 
+  /*
+   * The rest of Simpro — purchase orders, suppliers, the catalogue, contacts,
+   * leads, the office's hours, activities, payments, credit notes — in its
+   * own module, each stage failing on its own. Its progress is numbered
+   * from zero and slotted in after the lists.
+   */
+  const more = await pullMore({
+    client,
+    force,
+    startedAt,
+    progress: (stage, done, total) => (
+      total === undefined ? progress(stage, LIST_STAGES + done) : progress(stage, done, total)
+    ),
+    staffId: options?.staffId,
+  });
+  result.more = more.counts;
+  result.errors.push(...more.errors);
+  result.notes.push(...more.notes);
+  Object.assign(result.modes, more.modes);
+
   if (options?.prefetchDetails !== false) {
-    progress('Reading job details', 10);
+    progress('Reading job details', LIST_STAGES + MORE_STAGES);
 
     /*
      * What sits under a job, for the jobs that will be opened: the ones on
@@ -928,7 +954,7 @@ export async function pullFromSimpro(
       result.errors.push(describe(e, 'job details'));
     }
 
-    progress('Reading quote details', 11);
+    progress('Reading quote details', LIST_STAGES + MORE_STAGES + 1);
 
     try {
       const today = qldIsoDay(startedAt) ?? '';
@@ -1344,6 +1370,8 @@ function jobIdOf(kind: string, payload: unknown): string | undefined {
   const id = (payload as { jobId?: unknown } | null)?.jobId;
   return typeof id === 'string' ? id : undefined;
 }
+/* Every queued kind carries jobId where it has one, so the rule above holds
+   for the kinds ./outboundMore sends too. */
 
 /**
  * Sends whatever is queued.
@@ -1436,9 +1464,13 @@ export async function flushQueue(config: SimproConfig): Promise<FlushResult> {
           filename: read.file.filename, mimeType: read.file.mimeType, base64: read.file.base64,
         });
       } else {
-        // Unknown kinds are marked done rather than retried forever.
-        await markSynced(item.id);
-        continue;
+        // Every kind added since the first four lives in ./outboundMore. A
+        // kind nothing knows is marked done rather than retried forever.
+        const outcome = await sendMore({ id: item.id, kind: item.kind, payload, contentKey: key }, { client, api });
+        if (outcome.status === 'not-mine') {
+          await markSynced(item.id);
+          continue;
+        }
       }
       await markSynced(item.id);
       sent++;

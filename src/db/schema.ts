@@ -21,6 +21,7 @@ import { MIGRATION_V19 } from './schemaForms';
 import { MIGRATION_V20 } from './schemaSite';
 import { MIGRATION_V21 } from './schemaScale';
 import { MIGRATION_V22 } from './schemaNeeds';
+import { MIGRATION_V23 } from './schemaV23';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -333,6 +334,12 @@ export const MIGRATIONS: string[] = [
   // v22 — the running list of things a technician needs to get, for now and
   // for work that has not come around yet
   MIGRATION_V22,
+
+  // v23 — the rest of Simpro: purchase orders and their suppliers, the
+  // office catalogue, contacts, leads, the hours the office already holds,
+  // activities, payments and credit notes, and the hours clocked on this
+  // phone before the office has them
+  MIGRATION_V23,
 ];
 
 /**

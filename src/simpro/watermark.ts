@@ -1,5 +1,5 @@
 import { getDb } from '@/db';
-import type { SyncResource, SyncState } from './incremental';
+import { SYNC_RESOURCES, type SyncResource, type SyncState } from './incremental';
 
 /**
  * Reading and writing the sync watermarks.
@@ -52,10 +52,7 @@ export async function writeSyncState(state: SyncState, now: string): Promise<voi
 }
 
 export async function readAllSyncState(): Promise<SyncState[]> {
-  const resources: SyncResource[] = [
-    'sites', 'jobs', 'assets', 'employees', 'schedules', 'customers', 'quotes', 'invoices', 'tasks',
-  ];
-  return Promise.all(resources.map(readSyncState));
+  return Promise.all(SYNC_RESOURCES.map(readSyncState));
 }
 
 /**
