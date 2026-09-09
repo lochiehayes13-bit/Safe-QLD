@@ -1489,6 +1489,11 @@ export async function flushQueue(config: SimproConfig): Promise<FlushResult> {
           await abandonSync(item.id, outcome.reason);
           continue;
         }
+        if (outcome.status === 'later') {
+          // Not its moment yet — a change still inside the time a person
+          // has to take it back. Left pending, attempts untouched.
+          continue;
+        }
       }
       await markSynced(item.id);
       sent++;

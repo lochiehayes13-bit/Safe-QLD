@@ -1,6 +1,9 @@
 import type { SimproClient } from './client';
 import type { SimproResources } from './resources';
 import { flushSoon } from './flushSoon';
+import { sendAssetChange } from './outboundAssets';
+import { sendScheduleChange } from './outboundSchedule';
+import type { QueuedItem, SendDeps, SendMoreOutcome } from './outboundKinds';
 import { enqueueSync } from '@/db/opsRepo';
 import { getEntry, markEntrySendFailed, markEntrySent } from '@/db/clockRepo';
 import {
@@ -41,28 +44,10 @@ import {
  * see and delete; a block that never went is hours nobody is paid for.
  */
 
-export interface QueuedItem {
-  id: string;
-  kind: string;
-  payload: unknown;
-  /** The content key the queue de-duplicates on, where the kind has one. */
-  contentKey?: string;
-}
-
-export interface SendDeps {
-  client: SimproClient;
-  api: SimproResources;
-}
-
-export type SendMoreOutcome =
-  /** The request went out and the server said yes. */
-  | { status: 'sent' }
-  /** Nothing to send: the entry is gone from the phone, or the office already holds it. The row is done. */
-  | { status: 'done' }
-  /** Nothing was sent and never will be from this row; the reason is for a person. */
-  | { status: 'abandon'; reason: string }
-  /** Nothing here sends this kind. */
-  | { status: 'not-mine' };
+/* The contract lives in ./outboundKinds so the register and calendar
+   modules can share it without importing this one; re-exported here for
+   the callers that always read it from here. */
+export type { QueuedItem, SendDeps, SendMoreOutcome } from './outboundKinds';
 
 /** The Simpro job an item is bound for, where it has one, for the failure rules. */
 export function moreJobIdOf(kind: string, payload: unknown): string | undefined {
@@ -182,5 +167,11 @@ export async function sendMore(item: QueuedItem, deps: SendDeps): Promise<SendMo
     }
     return sendClockEntry(payload, deps.client);
   }
+  // The register and the calendar have modules of their own; each is asked
+  // in turn before the kind is given up on.
+  const asset = await sendAssetChange(item, deps);
+  if (asset.status !== 'not-mine') return asset;
+  const schedule = await sendScheduleChange(item, deps);
+  if (schedule.status !== 'not-mine') return schedule;
   return { status: 'not-mine' };
 }
