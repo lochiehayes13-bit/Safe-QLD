@@ -3,6 +3,7 @@ import { Animated, Easing, LayoutAnimation, Pressable, View, type StyleProp, typ
 import * as Haptics from 'expo-haptics';
 import Svg, { Circle } from 'react-native-svg';
 import { useTheme } from '@/theme';
+import { splitLayoutStyle } from './layoutStyle';
 
 /**
  * Motion, in one place.
@@ -38,8 +39,13 @@ export function Bounce({
   const scale = useRef(new Animated.Value(1)).current;
   const down = () => Animated.spring(scale, { toValue: scaleTo, ...SPRING }).start();
   const up = () => Animated.spring(scale, { toValue: 1, ...SPRING }).start();
+  // The parent lays out the Pressable, not the view that scales inside it —
+  // so flex, size and position go on the Pressable or the parent never sees
+  // them. See layoutStyle for the bar that taught us that.
+  const { outer, inner } = splitLayoutStyle(style);
   return (
     <Pressable
+      style={outer}
       onPress={() => {
         if (disabled || !onPress) return;
         if (haptic === 'selection') void Haptics.selectionAsync();
@@ -56,7 +62,7 @@ export function Bounce({
       accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled: !!disabled }}
     >
-      <Animated.View style={[{ transform: [{ scale }] }, style]}>{children}</Animated.View>
+      <Animated.View style={[{ transform: [{ scale }] }, inner]}>{children}</Animated.View>
     </Pressable>
   );
 }

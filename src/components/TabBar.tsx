@@ -86,12 +86,12 @@ export function TabBar({ state, descriptors, navigation }: TabBarProps) {
                   style={{ borderRadius: t.radius.lg, minHeight: 52, alignItems: 'center', justifyContent: 'center', gap: 2 }}
                 >
                   <MaterialCommunityIcons name={icon.on} size={22} color={t.color.onAccent} />
-                  <Txt size="xs" weight="800" style={{ color: t.color.onAccent, letterSpacing: 0.3 }}>{label}</Txt>
+                  <Txt size="xs" weight="800" numberOfLines={1} style={{ color: t.color.onAccent, letterSpacing: 0.3 }}>{label}</Txt>
                 </LinearGradient>
               ) : (
                 <View style={{ minHeight: 52, alignItems: 'center', justifyContent: 'center', gap: 2 }}>
                   <MaterialCommunityIcons name={icon.off} size={22} color={t.color.textFaint} />
-                  <Txt size="xs" weight="700" tone="faint">{label}</Txt>
+                  <Txt size="xs" weight="700" tone="faint" numberOfLines={1}>{label}</Txt>
                 </View>
               )}
             </Bounce>
