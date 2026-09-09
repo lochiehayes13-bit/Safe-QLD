@@ -6,7 +6,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { loadPrefs, type Prefs } from '@/app-prefs';
 import { signInInBrowser, signInWithPassword } from '@/simpro/auth';
 import { SimproNetworkError } from '@/simpro/client';
-import { simproConfigFromPrefs } from '@/simpro/config';
+import { hasSignInApplication, signInConfigFromPrefs, simproConfigFromPrefs } from '@/simpro/config';
 import { classifySignInRefusal, isSettingRefusal, redirectUri, type SignInRefusal } from '@/simpro/oauth';
 import {
   completeSignIn, ensureEmployees, markSignInSkipped, noteWayRefused, refusedWays,
@@ -50,7 +50,7 @@ export default function SignInScreen() {
   useFocusEffect(useCallback(() => {
     void loadPrefs().then(async (held) => {
       setPrefs(held);
-      setRefused(await refusedWays(simproConfigFromPrefs(held)));
+      setRefused(await refusedWays(signInConfigFromPrefs(held)));
     });
   }, []));
 
@@ -78,13 +78,16 @@ export default function SignInScreen() {
     setBusy(kind);
     setRefusal(null);
     const config = simproConfigFromPrefs(prefs);
+    // The login goes through whichever application can do logins; the staff
+    // list, the identity and the sync that follows are the office's own.
+    const asPerson = signInConfigFromPrefs(prefs);
     try {
       const who = kind === 'browser'
-        ? await signInInBrowser(config)
-        : await signInWithPassword(config, username, password);
+        ? await signInInBrowser(asPerson)
+        : await signInWithPassword(asPerson, username, password);
       setPassword('');
       // It worked, so whatever the build refused before, it does not now.
-      await noteWayRefused(config, kind, false);
+      await noteWayRefused(asPerson, kind, false);
       setRefused((held) => ({ ...held, [kind]: false }));
       finish(await completeSignIn(config, who));
     } catch (e) {
@@ -95,7 +98,7 @@ export default function SignInScreen() {
       // every attempt the same way. Remembered so the next visit to this
       // screen does not start with it.
       if ((classified === 'grant' || classified === 'redirect') && isSettingRefusal(message)) {
-        await noteWayRefused(config, kind);
+        await noteWayRefused(asPerson, kind);
         setRefused((held) => ({ ...held, [kind]: true }));
         setInsist(null);
       }
@@ -122,8 +125,12 @@ export default function SignInScreen() {
     router.back();
   };
 
-  const passwordOff = refused.password && insist !== 'password';
-  const browserOff = refused.browser && insist !== 'browser';
+  // No second application means the office's own, which cannot sign anybody
+  // in whatever they type. Treated as refused from the start rather than
+  // after a round trip that was never going to work.
+  const canLogIn = prefs ? hasSignInApplication(prefs) : true;
+  const passwordOff = (refused.password || !canLogIn) && insist !== 'password';
+  const browserOff = (refused.browser || !canLogIn) && insist !== 'browser';
   const where = redirectUri();
 
   return (
@@ -142,8 +149,11 @@ export default function SignInScreen() {
             busy={busy === 'skip'}
             disabled={busy !== null}
             onPick={() => { void pickInstead(); }}
-            why={'The Simpro application this phone connects with is a Client Credentials one, which cannot sign a '
-              + 'person in. The staff list is the way in, and what you write still goes up under your name.'}
+            why={canLogIn
+              ? 'The Simpro application this phone signs in through refused it, so the staff list is the way in. '
+                + 'What you write still goes up under your name.'
+              : 'The Simpro application this phone connects with is a Client Credentials one, which cannot sign a '
+                + 'person in. The staff list is the way in, and what you write still goes up under your name.'}
           />
         ) : (
           <Card>
@@ -198,8 +208,9 @@ export default function SignInScreen() {
               <Txt size="xs" tone="muted" style={{ lineHeight: 17, marginTop: 4, marginBottom: t.space(2) }}>
                 Password sign-in needs an API application in Simpro whose Authentication Method allows
                 it. The one this app connects with is a Client Credentials application, which is what
-                lets the phone talk to the office at all, and it refuses logins by design. Once the
-                office has one that allows them, this works without reinstalling.
+                lets the phone talk to the office at all, and it refuses logins by design. The office
+                adds a second application for logins, and its ID and secret go in Settings under
+                Simpro; from then on this works without reinstalling.
               </Txt>
               <Button
                 title="Try a password sign-in anyway"

@@ -39,6 +39,17 @@ export interface Prefs {
   simproDomain: string;
   simproCompanyId: string;
   simproClientId: string;
+  /**
+   * The client ID of a second API application, the one that signs a person in.
+   *
+   * An API application in Simpro has one Authentication Method, fixed when it
+   * is created. The office's is Client Credentials — how a phone reaches
+   * Simpro with nobody logged in — and that kind refuses every login. Signing
+   * in as yourself needs an application made with a method that allows it,
+   * which is a different application with a different id and secret. Empty
+   * until the office makes one, and then the staff list is the way in.
+   */
+  simproSignInClientId: string;
   simproProxyUrl: string;
   /**
    * Whether a completed test is written back onto the asset in Simpro.
@@ -139,6 +150,7 @@ export const DEFAULT_PREFS: Prefs = {
   simproDomain: 'safeqld.simprosuite.com',
   simproCompanyId: '0',
   simproClientId: '6564738df3bba3cd587e3dacb58a1d',
+  simproSignInClientId: '',
   simproProxyUrl: '',
   simproWriteAssetTests: false,
   simproSendPhotos: true,

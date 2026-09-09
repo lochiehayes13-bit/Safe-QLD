@@ -49,6 +49,9 @@ export default function SettingsScreen() {
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
   const [secret, setSecret] = useState('');
   const [hasSecret, setHasSecret] = useState(false);
+  /** The second application, the one that can sign a person in. */
+  const [hasSignInSecret, setHasSignInSecret] = useState(false);
+  const [signInSecret, setSignInSecret] = useState('');
   /** Where the secret a token request carries comes from: pasted, shipped with the build, the proxy, or nowhere. */
   const [secretSource, setSecretSource] = useState<'proxy' | 'keystore' | 'built-in' | 'none'>('none');
   /** The whole oAuth2 details block off Simpro, pasted rather than picked apart by hand. */
@@ -103,6 +106,7 @@ export default function SettingsScreen() {
     void loadPrefs().then(setPrefs);
     void loadRateCard().then(setCard);
     void SimproClient.hasSecret().then(setHasSecret);
+    void SimproClient.hasSecret('signin').then(setHasSignInSecret);
     void hasAiKey().then(setHasAi);
     void hasPlacesKey().then(setHasPlaces);
     void hasGhToken().then(setHasGh);
@@ -803,6 +807,69 @@ export default function SettingsScreen() {
                 <Field label="" value={secret} onChangeText={setSecret} autoCapitalize="none" placeholder={secretSource === 'built-in' ? 'Paste a regenerated client secret' : 'Paste the client secret'} />
                 <View style={{ height: t.space(2) }} />
                 <Button title="Save to keystore" onPress={saveSecret} disabled={!secret.trim()} variant={secretSource === 'built-in' ? 'secondary' : 'primary'} />
+              </>
+            )}
+          </>
+        ) : null}
+
+        <Divider />
+        {/*
+          * The application that signs a person in.
+          *
+          * An API application in Simpro has one Authentication Method, fixed
+          * when it is made, and the office's is Client Credentials — which is
+          * how this phone reaches Simpro with nobody logged in, and which
+          * refuses every login. Signing in as yourself needs a second
+          * application made to allow it. Both live on the same build, so only
+          * the id and the secret are asked for here.
+          */}
+        <Label>Signing in as yourself</Label>
+        <Txt size="xs" tone="faint" style={{ marginTop: 4, marginBottom: t.space(2), lineHeight: 17 }}>
+          The application above is a Client Credentials one: it lets this phone reach the office with
+          nobody logged in, and it cannot sign a person in. Leave this empty and everyone picks
+          themselves from the staff list, which works and puts their name on what they write. Fill it
+          in with a second API application — one made with an Authentication Method that allows
+          logins, and with the Redirect URI the sign-in screen shows — and Simpro's own login works.
+        </Txt>
+        <Field
+          label="Sign-in application client ID"
+          value={prefs.simproSignInClientId}
+          onChangeText={(v) => update({ simproSignInClientId: v })}
+          autoCapitalize="none"
+          placeholder="Leave empty to use the staff list"
+        />
+        {prefs.simproSignInClientId.trim() && !prefs.simproProxyUrl ? (
+          <>
+            <View style={{ height: t.space(2.5) }} />
+            <Label>Sign-in application secret</Label>
+            <View style={{ height: t.space(1.5) }} />
+            {hasSignInSecret ? (
+              <Rowed gap={2}>
+                <MaterialCommunityIcons name="lock-check" size={18} color={t.color.pass} />
+                <Txt size="sm" tone="pass" style={{ flex: 1 }}>Held in the keystore, apart from the office's own.</Txt>
+                <Button
+                  title="Remove"
+                  variant="danger"
+                  compact
+                  onPress={async () => {
+                    await SimproClient.clearSecret('signin');
+                    setHasSignInSecret(false);
+                  }}
+                />
+              </Rowed>
+            ) : (
+              <>
+                <Field label="" value={signInSecret} onChangeText={setSignInSecret} autoCapitalize="none" placeholder="Paste the sign-in application's secret" />
+                <View style={{ height: t.space(2) }} />
+                <Button
+                  title="Save to keystore"
+                  disabled={!signInSecret.trim()}
+                  onPress={async () => {
+                    await SimproClient.storeSecret(signInSecret.trim(), 'signin');
+                    setSignInSecret('');
+                    setHasSignInSecret(true);
+                  }}
+                />
               </>
             )}
           </>

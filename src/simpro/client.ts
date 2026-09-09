@@ -34,6 +34,11 @@ import type { CurrentUser } from './identity';
 
 const TOKEN_KEY = 'safeqld.simpro.token';
 const SECRET_KEY = 'safeqld.simpro.clientSecret';
+/** The sign-in application's own secret, which is a different application and a different secret. */
+const SIGNIN_SECRET_KEY = 'safeqld.simpro.signInClientSecret';
+
+const secretSlot = (config: Pick<SimproConfig, 'application'>): string =>
+  (config.application === 'signin' ? SIGNIN_SECRET_KEY : SECRET_KEY);
 
 /** The build limit is 10/sec; pacing below it leaves headroom for office traffic. */
 const REQUESTS_PER_SECOND = 8;
@@ -59,6 +64,16 @@ export interface SimproConfig {
   clientId: string;
   /** When set, requests go here instead of directly to Simpro and no secret is stored on device. */
   proxyUrl?: string;
+  /**
+   * Which of the office's API applications this is.
+   *
+   * An application in Simpro has one Authentication Method, fixed when it is
+   * made. The office's own is Client Credentials, which is how a phone
+   * reaches Simpro with nobody logged in; an application that can sign a
+   * person in is a second one, with its own id and its own secret. Absent
+   * means the office's, which is everything but the sign-in.
+   */
+  application?: 'office' | 'signin';
 }
 
 /**
@@ -279,14 +294,14 @@ export class SimproClient {
 
   // -------------------------------------------------------------- credentials
 
-  static async storeSecret(secret: string): Promise<void> {
-    await SecureStore.setItemAsync(SECRET_KEY, secret, {
+  static async storeSecret(secret: string, application: 'office' | 'signin' = 'office'): Promise<void> {
+    await SecureStore.setItemAsync(secretSlot({ application }), secret, {
       keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
     });
   }
 
-  static async hasSecret(): Promise<boolean> {
-    return (await SecureStore.getItemAsync(SECRET_KEY)) !== null;
+  static async hasSecret(application: 'office' | 'signin' = 'office'): Promise<boolean> {
+    return (await SecureStore.getItemAsync(secretSlot({ application }))) !== null;
   }
 
   /**
@@ -299,13 +314,17 @@ export class SimproClient {
    */
   static async secretFor(config: SimproConfig): Promise<string | undefined> {
     if (config.proxyUrl) return undefined;
+    // The shipped secret is the office application's, so it is never handed
+    // to the sign-in one: a second application has a second secret or none.
+    if (config.application === 'signin') return (await SecureStore.getItemAsync(SIGNIN_SECRET_KEY)) ?? undefined;
     return (await SecureStore.getItemAsync(SECRET_KEY)) ?? shippedSecretFor(config);
   }
 
   /** Where the secret comes from, for the line in Settings that says so. */
   static async secretSource(config: SimproConfig): Promise<'proxy' | 'keystore' | 'built-in' | 'none'> {
     if (config.proxyUrl) return 'proxy';
-    if (await SimproClient.hasSecret()) return 'keystore';
+    if (await SimproClient.hasSecret(config.application === 'signin' ? 'signin' : 'office')) return 'keystore';
+    if (config.application === 'signin') return 'none';
     return shippedSecretFor(config) ? 'built-in' : 'none';
   }
 
@@ -333,9 +352,11 @@ export class SimproClient {
     return null;
   }
 
-  static async clearSecret(): Promise<void> {
-    await SecureStore.deleteItemAsync(SECRET_KEY);
-    await SecureStore.deleteItemAsync(TOKEN_KEY);
+  static async clearSecret(application: 'office' | 'signin' = 'office'): Promise<void> {
+    await SecureStore.deleteItemAsync(secretSlot({ application }));
+    // The office's token was minted with the office's secret; the sign-in
+    // application never mints one of these.
+    if (application === 'office') await SecureStore.deleteItemAsync(TOKEN_KEY);
   }
 
   // ------------------------------------------------------------------- token
