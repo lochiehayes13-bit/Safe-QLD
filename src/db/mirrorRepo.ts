@@ -120,6 +120,7 @@ export function jobRowFromSimpro(
     orderNo: job.orderNo,
     requestNo: job.requestNo,
     statusName: job.status,
+    statusId: job.statusId,
     statusColor: job.statusColor,
     siteContactJson: job.siteContact ? JSON.stringify(job.siteContact) : undefined,
     techniciansJson: JSON.stringify(job.technicians),

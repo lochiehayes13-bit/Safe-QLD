@@ -55,6 +55,8 @@ export interface JobRecord {
   orderNo?: string;
   requestNo?: string;
   statusName?: string;
+  /** Simpro's own id for the status. What a status change from the phone sends. */
+  statusId?: string;
   /** Simpro's status colour, a hex string like "#f5a623", for the pill. */
   statusColor?: string;
   stageRaw?: string;
@@ -160,7 +162,7 @@ export async function listJobs(filter: { status?: JobRecord['status']; onDate?: 
 /** The columns a job list reads: everything the row and the filter look at, none of the JSON or the long text. */
 const JOB_SUMMARY_COLUMNS = [
   'id', 'externalId', 'siteId', 'siteName', 'customerName', 'customerExternalId', 'title', 'address', 'orderNo',
-  'status', 'statusName', 'statusColor', 'stage', 'stageRaw', 'jobType', 'jobTypeRaw', 'priority',
+  'status', 'statusName', 'statusId', 'statusColor', 'stage', 'stageRaw', 'jobType', 'jobTypeRaw', 'priority',
   'scheduledFor', 'dueAt', 'completedDate', 'completedAt', 'startedAt', 'technician', 'techniciansJson',
 ] as const;
 
@@ -487,25 +489,41 @@ export async function workHubCounts(): Promise<WorkHubCounts> {
 }
 
 /** A status name as the office spells it, its colour, and how many mirrored jobs wear it. */
-export interface JobStatusSeen { statusName: string; statusColor?: string; count: number }
+export interface JobStatusSeen {
+  statusName: string;
+  /** The office's own id, where a mirrored job carried one. */
+  statusId?: string;
+  statusColor?: string;
+  count: number;
+}
 
 /**
  * The office statuses the phone has seen on its jobs, commonest first.
  *
- * A mirrored job holds the status name and colour, never the id, so the
- * job card's Change status picker joins these to the pinned id list in
- * @/domain/jobActions. Read here as a group rather than off a page of jobs:
- * the page is capped, and the status a technician wants is often the one
- * no open job wears yet.
+ * Since v25 a mirrored job carries the office's status id beside the name,
+ * so the picker sends what the office holds; the pinned list in
+ * @/domain/jobActions only fills in a status no job on this phone wears.
+ * Read as a group rather than off a page of jobs: the page is capped, and
+ * the status a technician wants is often the one no open job wears yet.
+ *
+ * The id is the commonest non-null one for the name, not any one of them:
+ * a row written before v25 has none, and two rows disagreeing means the
+ * office renamed a status, in which case the id most jobs carry is the one
+ * that name means now.
  */
 export async function distinctJobStatuses(): Promise<JobStatusSeen[]> {
   const db = await getDb();
-  const rows = await db.getAllAsync<{ statusName: string; statusColor: string | null; count: number }>(
-    `SELECT statusName, MAX(statusColor) AS statusColor, COUNT(*) AS count
+  const rows = await db.getAllAsync<{ statusName: string; statusId: string | null; statusColor: string | null; count: number }>(
+    `SELECT statusName, MAX(statusColor) AS statusColor, COUNT(*) AS count,
+            (SELECT j2.statusId FROM job j2
+              WHERE j2.statusName = job.statusName AND j2.statusId IS NOT NULL
+              GROUP BY j2.statusId ORDER BY COUNT(*) DESC, j2.statusId LIMIT 1) AS statusId
        FROM job WHERE statusName IS NOT NULL AND TRIM(statusName) <> ''
       GROUP BY statusName ORDER BY count DESC, statusName`,
   );
-  return rows.map((r) => ({ statusName: r.statusName, statusColor: r.statusColor ?? undefined, count: r.count }));
+  return rows.map((r) => ({
+    statusName: r.statusName, statusId: r.statusId ?? undefined, statusColor: r.statusColor ?? undefined, count: r.count,
+  }));
 }
 
 export async function getJob(id: string): Promise<JobRecord | null> {
@@ -569,10 +587,10 @@ export async function upsertJob(
   await db.runAsync(
     `INSERT INTO job (id,externalId,siteId,siteName,customerName,title,jobType,stage,priority,
        scheduledFor,dueAt,technician,address,latitude,longitude,status,startedAt,completedAt,notes,createdAt,updatedAt,
-       orderNo,requestNo,statusName,statusColor,stageRaw,jobTypeRaw,customerExternalId,siteExternalId,
+       orderNo,requestNo,statusName,statusId,statusColor,stageRaw,jobTypeRaw,customerExternalId,siteExternalId,
        siteContactJson,techniciansJson,tagsJson,projectManager,descriptionText,notesText,completedDate,
        totalExTaxCents,totalIncTaxCents,convertedFromQuoteId,customerContractJson,dateModified,detailSyncedAt)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET
        siteId=CASE
          WHEN excluded.siteExternalId IS NOT NULL AND excluded.siteExternalId IS NOT job.siteExternalId THEN excluded.siteId
@@ -588,7 +606,7 @@ export async function upsertJob(
        notes=COALESCE(job.notes, excluded.notes),
        updatedAt=excluded.updatedAt,
        orderNo=excluded.orderNo, requestNo=excluded.requestNo,
-       statusName=excluded.statusName, statusColor=excluded.statusColor,
+       statusName=excluded.statusName, statusId=excluded.statusId, statusColor=excluded.statusColor,
        stageRaw=excluded.stageRaw, jobTypeRaw=excluded.jobTypeRaw,
        customerExternalId=excluded.customerExternalId,
        siteExternalId=COALESCE(excluded.siteExternalId, job.siteExternalId),
@@ -608,7 +626,7 @@ export async function upsertJob(
     job.dueAt ?? null, job.technician ?? null, job.address ?? null, job.latitude ?? null,
     job.longitude ?? null, job.status, job.startedAt ?? null, job.completedAt ?? null,
     job.notes ?? null, job.createdAt, job.updatedAt,
-    job.orderNo ?? null, job.requestNo ?? null, job.statusName ?? null, job.statusColor ?? null,
+    job.orderNo ?? null, job.requestNo ?? null, job.statusName ?? null, job.statusId ?? null, job.statusColor ?? null,
     job.stageRaw ?? null, job.jobTypeRaw ?? null, job.customerExternalId ?? null, job.siteExternalId ?? null,
     job.siteContactJson ?? null, job.techniciansJson ?? null, job.tagsJson ?? null, job.projectManager ?? null,
     job.descriptionText ?? null, job.notesText ?? null, job.completedDate ?? null,

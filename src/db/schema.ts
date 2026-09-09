@@ -23,6 +23,7 @@ import { MIGRATION_V21 } from './schemaScale';
 import { MIGRATION_V22 } from './schemaNeeds';
 import { MIGRATION_V23 } from './schemaV23';
 import { MIGRATION_V24 } from './schemaV24';
+import { MIGRATION_V25 } from './schemaV25';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -346,6 +347,11 @@ export const MIGRATIONS: string[] = [
   // their custom fields, and the record of each create, edit, archive or
   // delete asked for on site, with the moment before which it can be taken back
   MIGRATION_V24,
+
+  // v25 — the office's status id on the job row, so the job card sends the
+  // status the office actually holds rather than one matched by name
+  // against a list pinned in code
+  MIGRATION_V25,
 ];
 
 /**

@@ -118,31 +118,35 @@ export function statusNameKey(name: string | undefined): string {
 /**
  * The statuses a technician may pick from, pinned order first.
  *
- * The pinned list gives the ids and the order a job roughly moves through;
- * the mirrored jobs give the colours and how common each is. A name seen on
- * a job that the pinned list lacks goes last, with no id: it exists in the
- * office, it can be shown, and it cannot be sent until the list is read
- * again. The one thing this never does is invent an id.
+ * The mirrored jobs are the source of the ids: since v25 each carries the
+ * office's own status id beside the name, so a status any job on the phone
+ * wears is sendable whether or not anybody pinned it. The pinned list gives
+ * the order a job roughly moves through, and an id for a status no mirrored
+ * job wears yet. A name with neither goes last with no id: it exists in the
+ * office, it can be shown, and it cannot be sent until a job wearing it
+ * reaches the phone. The one thing this never does is invent an id.
  */
 export function statusChoices(
-  jobsSeen: readonly { statusName?: string; statusColor?: string; count?: number }[],
+  jobsSeen: readonly { statusName?: string; statusId?: string; statusColor?: string; count?: number }[],
   known: readonly { id: string; name: string }[] = OFFICE_JOB_STATUSES,
 ): StatusChoice[] {
-  const seen = new Map<string, { name: string; color?: string; seen: number }>();
+  const seen = new Map<string, { name: string; id?: string; color?: string; seen: number }>();
   for (const j of jobsSeen) {
     const key = statusNameKey(j.statusName);
     if (!key) continue;
     const row = seen.get(key) ?? { name: j.statusName!.trim(), seen: 0 };
     row.seen += j.count ?? 1;
+    if (!row.id && j.statusId?.trim()) row.id = j.statusId.trim();
     if (!row.color && j.statusColor) row.color = j.statusColor;
     seen.set(key, row);
   }
   const out: StatusChoice[] = known.map((k) => {
     const s = seen.get(statusNameKey(k.name));
     seen.delete(statusNameKey(k.name));
-    return { id: k.id, name: k.name, color: s?.color, seen: s?.seen ?? 0 };
+    // The office's own id where a job carried one; the pinned id otherwise.
+    return { id: s?.id ?? k.id, name: k.name, color: s?.color, seen: s?.seen ?? 0 };
   });
-  for (const s of seen.values()) out.push({ name: s.name, color: s.color, seen: s.seen });
+  for (const s of seen.values()) out.push({ id: s.id, name: s.name, color: s.color, seen: s.seen });
   return out;
 }
 

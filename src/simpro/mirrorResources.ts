@@ -301,6 +301,8 @@ export interface SimproJob {
   siteContact?: SimproContact;
   stage?: string;
   status?: string;
+  /** Simpro's own id for the status, which is what a status change PATCHes. */
+  statusId?: string;
   statusColor?: string;
   issuedAt?: string;
   dueAt?: string;
@@ -667,6 +669,7 @@ export function mapJobRow(j: RawJobRow): SimproJob {
     siteContact: contact(j.SiteContact),
     stage: str(j.Stage),
     status: str(j.Status?.Name),
+    statusId: idOf(j.Status?.ID),
     statusColor: str(j.Status?.Color),
     issuedAt: str(j.DateIssued),
     dueAt: str(j.DueDate),

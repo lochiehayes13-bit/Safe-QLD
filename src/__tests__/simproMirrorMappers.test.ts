@@ -69,6 +69,8 @@ describe('a job row', () => {
       siteContact: { id: '55', name: 'Dana Reyes', email: 'dana@example.invalid' },
       stage: 'Progress',
       status: 'In Progress',
+      // The id the job card sends when a technician changes the status.
+      statusId: '4',
       statusColor: '#f5a623',
       issuedAt: '2026-08-28',
       dueAt: undefined,

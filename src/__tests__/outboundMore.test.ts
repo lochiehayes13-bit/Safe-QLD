@@ -259,17 +259,30 @@ describe('the job card: status', () => {
     expect(sent).toHaveLength(1);
   });
 
-  it('reads the statuses the phone has seen, commonest first, so the picker joins them to ids by name', async () => {
-    await upsertJob({ id: 'simpro-1001', externalId: '1001', siteName: 'Fictional Tower', title: 'A', statusName: 'In Progress', statusColor: '#ffcc00' });
+  it('reads the statuses the phone has seen, commonest first, with the office\'s own id on each', async () => {
+    await upsertJob({ id: 'simpro-1001', externalId: '1001', siteName: 'Fictional Tower', title: 'A', statusName: 'In Progress', statusId: '113', statusColor: '#ffcc00' });
+    // No id on this row: written before the mirror carried one.
     await upsertJob({ id: 'simpro-1002', externalId: '1002', siteName: 'Fictional Tower', title: 'B', statusName: 'On Hold' });
-    await upsertJob({ id: 'simpro-1003', externalId: '1003', siteName: 'Fictional Tower', title: 'C', statusName: 'On Hold', statusColor: '#8888ff' });
+    await upsertJob({ id: 'simpro-1003', externalId: '1003', siteName: 'Fictional Tower', title: 'C', statusName: 'On Hold', statusId: '115', statusColor: '#8888ff' });
     await upsertJob({ id: 'local-1', siteName: 'Fictional Tower', title: 'D' });
     const seen = await distinctJobStatuses();
     expect(seen).toEqual([
-      { statusName: 'On Hold', statusColor: '#8888ff', count: 2 },
-      { statusName: 'In Progress', statusColor: '#ffcc00', count: 1 },
+      { statusName: 'On Hold', statusId: '115', statusColor: '#8888ff', count: 2 },
+      { statusName: 'In Progress', statusId: '113', statusColor: '#ffcc00', count: 1 },
     ]);
     expect(statusChoices(seen).find((c) => c.name === 'On Hold')).toEqual({ id: '115', name: 'On Hold', color: '#8888ff', seen: 2 });
+  });
+
+  it('can send a status the office added after the pinned list was written', async () => {
+    // Nobody pinned this one; a job on the phone wears it, so it has an id.
+    await upsertJob({ id: 'simpro-1004', externalId: '1004', siteName: 'Fictional Tower', title: 'E', statusName: 'Awaiting Parts', statusId: '777' });
+    const choice = statusChoices(await distinctJobStatuses()).find((c) => c.name === 'Awaiting Parts');
+    expect(choice).toEqual({ id: '777', name: 'Awaiting Parts', color: undefined, seen: 1 });
+  });
+
+  it('takes the office\'s id over the pinned one where they disagree, since the office renamed it', async () => {
+    await upsertJob({ id: 'simpro-1005', externalId: '1005', siteName: 'Fictional Tower', title: 'F', statusName: 'On Hold', statusId: '901' });
+    expect(statusChoices(await distinctJobStatuses()).find((c) => c.name === 'On Hold')?.id).toBe('901');
   });
 
   it('abandons a change with no job or no status, sending nothing', async () => {
