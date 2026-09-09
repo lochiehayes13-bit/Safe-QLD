@@ -73,6 +73,10 @@ describe('migrations', () => {
       'site', 'panel', 'zone', 'point', 'loop', 'report', 'defect',
       'baseline', 'timesheet', 'catalogue_item',
       'asset', 'asset_event', 'occupier_statement',
+      // v23: the rest of Simpro, and the hours clocked on the phone.
+      'vendor_order', 'vendor_order_line', 'vendor', 'catalog_item', 'catalog_group', 'contact', 'lead',
+      'simpro_timesheet', 'activity_schedule', 'setup_activity', 'customer_payment', 'customer_payment_invoice',
+      'credit_note', 'clock_entry',
     ]) {
       expect({ table, present: present.has(table) }).toEqual({ table, present: true });
     }
