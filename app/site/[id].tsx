@@ -342,7 +342,12 @@ export default function SiteScreen() {
             loading={sharing}
             style={{ flex: 1 }}
           />
-          <View style={{ flex: 1 }} />
+          <Button
+            title="Bulk test"
+            variant="secondary"
+            onPress={() => router.push({ pathname: '/site/bulk-test', params: { siteId: site.id } })}
+            style={{ flex: 1 }}
+          />
         </Rowed>
 
         {/*

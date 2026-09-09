@@ -60,6 +60,18 @@ export interface Prefs {
    */
   simproSendPhotos: boolean;
   /**
+   * Whether a job's record may be sent to the language model for a brief.
+   *
+   * Off until someone turns it on, and separate from having a key at all.
+   * The grounded search and the defect wording send nothing about a site by
+   * construction; the job brief cannot work without the office's description
+   * and notes, which name the customer. That is a different thing to agree
+   * to, so it is a different switch, and the note beside it in Settings says
+   * exactly what leaves the phone. Checked in src/ai/jobBrief.ts, not only
+   * on the screen.
+   */
+  aiShareJobRecords: boolean;
+  /**
    * Whether the office copy is kept current without anybody pressing anything.
    *
    * On by default, because "I'm sick of syncing" was the whole brief: changes
@@ -130,6 +142,7 @@ export const DEFAULT_PREFS: Prefs = {
   simproProxyUrl: '',
   simproWriteAssetTests: false,
   simproSendPhotos: true,
+  aiShareJobRecords: false,
   autoSync: true,
   shortcuts: DEFAULT_SHORTCUTS,
   supervisorEmail: company.email,

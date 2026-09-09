@@ -15,6 +15,8 @@ import { keepPhoto } from '@/export/photoFiles';
 import { addAssetEvent } from '@/db/assetRepo';
 import { photosWithSizes } from '@/simpro/attachmentFiles';
 import { queueJobAttachment } from '@/simpro/sync';
+import { hasKey } from '@/ai/client';
+import { draftDefectWording, MAX_CANDIDATES } from '@/ai/defectWording';
 import { SYSTEM_LABELS, type SystemKind } from '@/seed/assetTypes';
 import {
   DEFECT_LIBRARY, SEVERITY_LABEL, defectComponents, defectsForSystem, searchDefects,
@@ -55,6 +57,15 @@ export default function NewDefectScreen() {
    */
   const [officeJobs, setOfficeJobs] = useState<JobRecord[]>([]);
   const [attachTo, setAttachTo] = useState<string | null>(null);
+  /*
+   * The model's offer to write the specifics up in the record's register.
+   * Optional and small: with no key the button says why, and nothing else
+   * on the screen changes. It sends the type's system, the picked code and
+   * what was typed — never the site, the location or the customer.
+   */
+  const [aiOn, setAiOn] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiNote, setAiNote] = useState<string | null>(null);
 
   /**
    * Everything the user actually typed lives in a draft, so a lock screen, a
@@ -65,6 +76,12 @@ export default function NewDefectScreen() {
     code: null as string | null,
     location: params.location ?? '',
     extra: '',
+    /**
+     * The sentence that goes on the record, kept apart from `extra` so the
+     * model's draft never replaces what the technician typed. Blank, the
+     * record is the library wording with the specifics after it, as ever.
+     */
+    wording: '',
     photos: [] as string[],
     severity: null as Severity | null,
     siteId: params.siteId as string | undefined,
@@ -74,6 +91,7 @@ export default function NewDefectScreen() {
 
   const setLocation = (v: string) => draft.setValue((p) => ({ ...p, location: v }));
   const setExtra = (v: string) => draft.setValue((p) => ({ ...p, extra: v }));
+  const setWording = (v: string) => draft.setValue((p) => ({ ...p, wording: v }));
   const setSeverity = (v: Severity) => draft.setValue((p) => ({ ...p, severity: v }));
   const setSiteId = (v: string | undefined) => draft.setValue((p) => ({ ...p, siteId: v }));
   const setPhotos = (fn: (prev: string[]) => string[]) =>
@@ -83,6 +101,8 @@ export default function NewDefectScreen() {
 
   const location = d.location;
   const extra = d.extra;
+  // A draft saved before this field existed has no wording; that is blank, not lost.
+  const wording = d.wording ?? '';
   const photos = d.photos;
   const severity = d.severity;
   const siteId = d.siteId;
@@ -94,6 +114,42 @@ export default function NewDefectScreen() {
     });
     // Only runs once the draft has loaded, so a recovered site choice wins.
   }, [siteId, draft.ready]);
+
+  React.useEffect(() => { void hasKey().then(setAiOn); }, []);
+
+  const writeUp = async () => {
+    if (!selected) return;
+    setAiBusy(true);
+    setAiNote(null);
+    try {
+      // The picked code goes first so the model keeps it; the rest of its
+      // component fills the candidate list, in case the specifics say the
+      // technician picked a neighbour.
+      const siblings = defectsForSystem(selected.system)
+        .filter((c) => c.code !== selected.code && c.component === selected.component)
+        .slice(0, MAX_CANDIDATES - 1);
+      const result = await draftDefectWording({
+        assetTypeLabel: selected.component,
+        system: selected.system,
+        observation: extra,
+        candidates: [selected, ...siblings],
+      });
+      if (result.wording) {
+        // Into its own field, beside what was typed rather than over it:
+        // the observation is still the note, and still on the timeline.
+        setWording(result.wording);
+        setAiNote(result.code && result.code !== selected.code
+          ? `Drafted, but under ${result.code} rather than ${selected.code}. Read it before you save; the code stays as you picked it and your words stay in the note.`
+          : 'Drafted from what you wrote. Read it before you save — it is your record. Your words stay in the note.');
+      } else {
+        setAiNote(result.refusal ?? 'No wording came back.');
+      }
+    } catch (e) {
+      setAiNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAiBusy(false);
+    }
+  };
 
   React.useEffect(() => {
     let cancelled = false;
@@ -182,7 +238,14 @@ export default function NewDefectScreen() {
 
     setSaving(true);
     try {
-      const description = [selected.reportWording, extra.trim()].filter(Boolean).join(' ');
+      // The drafted (or hand-written) wording is the record where there is
+      // one; otherwise the library wording with the specifics after it. The
+      // observation goes in the note either way, so nothing typed is lost
+      // to a better-worded sentence.
+      const own = wording.trim();
+      const observation = extra.trim();
+      const description = own || [selected.reportWording, observation].filter(Boolean).join(' ');
+      const technicianNote = observation ? `Technician note: ${observation}` : undefined;
       const critical = (severity ?? selected.severity) === 'critical';
       const defect = await createDefect({
         siteId,
@@ -197,17 +260,19 @@ export default function NewDefectScreen() {
         // them from the row, and a row without them reads as non-critical.
         defectCode: selected.code,
         as1851Class: critical ? 'critical' : 'non-critical',
-        notes: `${selected.code}${extra.trim() ? `\n\nTechnician note: ${extra.trim()}` : ''}`,
+        notes: [selected.code, technicianNote].filter(Boolean).join('\n\n'),
       });
 
       // The asset timeline is what makes recurring failures visible later.
+      // The observation rides with it where the wording replaced it in the
+      // description, because "what the technician saw" is the useful half.
       if (params.assetId) {
         await addAssetEvent({
           assetId: params.assetId,
           kind: 'defect-raised',
           occurredAt: defect.raisedAt,
           summary: `${selected.defect} (${selected.code})`,
-          detail: description,
+          detail: [description, own ? technicianNote : undefined].filter(Boolean).join('\n'),
           photos,
         });
       }
@@ -398,6 +463,31 @@ export default function NewDefectScreen() {
               onChangeText={setExtra}
               multiline
               placeholder="Only what the standard wording does not already say"
+            />
+            <Rowed gap={2} align="flex-start">
+              <Txt size="xs" tone="faint" style={{ flex: 1, lineHeight: 17 }}>
+                {aiOn
+                  ? 'Write it up puts what you typed into the record\'s register. It sends the code, the system and your words — never the site or the location.'
+                  : 'No API key is set, so the wording above is the record. A key goes in Settings.'}
+              </Txt>
+              <Button
+                title="Write it up"
+                variant="secondary"
+                compact
+                disabled={!aiOn || extra.trim().length < 4}
+                loading={aiBusy}
+                onPress={() => void writeUp()}
+                icon={<MaterialCommunityIcons name="auto-fix" size={16} color={t.color.text} />}
+              />
+            </Rowed>
+            {aiNote ? <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{aiNote}</Txt> : null}
+            <Field
+              label="Wording on the record"
+              value={wording}
+              onChangeText={setWording}
+              multiline
+              placeholder={[selected.reportWording, extra.trim()].filter(Boolean).join(' ')}
+              hint={wording.trim() ? 'What you typed above still goes in the note.' : 'Left blank, the record reads as the placeholder above.'}
             />
 
             <H2>Photos{selected.photoRequired ? ' — required' : ''}</H2>

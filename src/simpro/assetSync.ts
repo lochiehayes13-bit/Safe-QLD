@@ -141,6 +141,15 @@ export function mapSimproAsset(asset: SimproAsset): MappedAsset {
     .map((l) => frequencyForServiceLevel(l.name))
     .filter((f): f is string => Boolean(f));
   if (frequencies.length) attributes['frequencies'] = frequencies.join(',');
+  // The office's own ids beside the names, because a test result goes back
+  // to Simpro filed against a service level *id*, and the names above have
+  // lost it. One entry per level as id:name:dueAt (the date left off where
+  // the office has none), so the bulk test can pick the level that is due.
+  if (asset.serviceLevels.length) {
+    attributes['simproServiceLevels'] = asset.serviceLevels
+      .map((l) => `${l.id}:${l.name}${l.dueAt ? `:${l.dueAt}` : ''}`)
+      .join(',');
+  }
 
   // Fire and smoke doors share one asset type, and the type alone cannot say
   // which Schedule 2 row a door answers. The register the office keeps it

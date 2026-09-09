@@ -237,6 +237,19 @@ describe('a whole asset, in the shape the live build returns', () => {
     });
   });
 
+  it('keeps the office\'s service level ids beside the names, with the date each falls due', () => {
+    // A test result goes back to Simpro against a service level *id*; the
+    // frequency names alone have lost it. This is the one key the bulk test
+    // reads the id from.
+    expect(mapped.input.attributes?.['simproServiceLevels']).toBe('3:6 Monthly:2026-11-01,12:Yearly:2027-05-01');
+  });
+
+  it('leaves the date off a level the office has not scheduled, and the key off an asset with no levels', () => {
+    const undated = mapSimproAsset(asset({ serviceLevels: [{ id: '5', name: 'Monthly' }] }));
+    expect(undated.input.attributes?.['simproServiceLevels']).toBe('5:Monthly');
+    expect(mapSimproAsset(asset()).input.attributes).not.toHaveProperty('simproServiceLevels');
+  });
+
   it('does not repeat the location inside the attributes', () => {
     expect(mapped.input.attributes).not.toHaveProperty('Location');
   });

@@ -5,11 +5,13 @@ import {
 } from './grounding';
 
 /**
- * The network half of the grounded answer.
+ * The network half of every language-model feature in the app.
  *
  * Thin on purpose. Every decision worth testing — what gets sent, whether it is
- * worth sending, and whether the answer can be trusted — lives in grounding.ts,
- * which is pure. This part only carries it over the wire.
+ * worth sending, and whether the answer can be trusted — lives in the pure
+ * module beside each feature (grounding.ts, defectWording.ts, jobBrief.ts).
+ * This part only carries it over the wire, and it does that in one place so
+ * there is exactly one endpoint, one model id and one way of reading a key.
  *
  * The key is held in the platform keystore rather than ordinary app storage,
  * the same as the Simpro client secret, and for the same reason: a key on a
@@ -37,25 +39,33 @@ export async function clearKey(): Promise<void> {
   await SecureStore.deleteItemAsync(KEY_SLOT);
 }
 
-/**
- * Answers a question from retrieved passages, or says why it did not.
- *
- * Never throws. Every failure — no key, no signal, a refusal, a rate limit —
- * comes back as a refusal a technician can read, because this sits under a
- * search that already answered and must never take the screen down with it.
- */
-export async function askGrounded(input: GroundedQuestion): Promise<GroundedAnswer> {
-  const worth = worthAsking(input);
-  if (!worth.ok) return { cited: [], refusal: worth.reason };
+/** Why a completion did not come back, for the caller to word in its own terms. */
+export type CompletionFailure = 'no-key' | 'key-rejected' | 'rate-limited' | 'service' | 'empty' | 'no-answer';
 
+export interface Completion {
+  /** The model's text, joined across content blocks. Undefined on any failure. */
+  text?: string;
+  /** A short reason, in words. Present exactly when `text` is not. */
+  refusal?: string;
+  failure?: CompletionFailure;
+}
+
+/**
+ * One round trip: a system instruction, a user message, a text answer.
+ *
+ * Never throws. Every failure — no key, no signal, a rejected key, a rate
+ * limit — comes back as a refusal, because everything that calls this sits on
+ * top of a feature that already works without it and must never take the
+ * screen down. The caller decides what to say about the refusal; the reason
+ * is here so it can.
+ *
+ * What is sent is exactly the two strings handed in. This function adds no
+ * context of its own, so a caller that has been careful about what it puts in
+ * `user` can be sure that is all that left the phone.
+ */
+export async function complete(input: { system: string; user: string; maxTokens?: number }): Promise<Completion> {
   const key = await SecureStore.getItemAsync(KEY_SLOT);
-  if (!key) {
-    return {
-      cited: [],
-      refusal: 'No API key is set, so the passages below are the answer. Everything else in this '
-        + 'app works without one; this only reads what the search already found.',
-    };
-  }
+  if (!key) return { failure: 'no-key', refusal: 'No API key is set.' };
 
   try {
     const response = await fetch(ENDPOINT, {
@@ -67,31 +77,67 @@ export async function askGrounded(input: GroundedQuestion): Promise<GroundedAnsw
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: MAX_TOKENS,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: buildPrompt(input) }],
+        max_tokens: input.maxTokens ?? MAX_TOKENS,
+        system: input.system,
+        messages: [{ role: 'user', content: input.user }],
       }),
     });
 
     if (!response.ok) {
-      const detail = response.status === 401 ? 'The API key was rejected.'
-        : response.status === 429 ? 'Rate limited — try again shortly.'
-          : `The service returned ${response.status}.`;
-      return { cited: [], refusal: `${detail} The passages below are what the search found.` };
+      if (response.status === 401) return { failure: 'key-rejected', refusal: 'The API key was rejected.' };
+      if (response.status === 429) return { failure: 'rate-limited', refusal: 'Rate limited — try again shortly.' };
+      return { failure: 'service', refusal: `The service returned ${response.status}.` };
     }
 
     const body = await response.json() as { content?: { type: string; text?: string }[] };
     const text = (body.content ?? [])
       .filter((c) => c.type === 'text')
       .map((c) => c.text ?? '')
-      .join('\n');
-
-    return checkAnswer(text, input.passages.slice(0, MAX_PASSAGES));
+      .join('\n')
+      .trim();
+    if (!text) return { failure: 'empty', refusal: 'The model returned nothing.' };
+    return { text };
   } catch {
-    return {
-      cited: [],
-      refusal: 'No answer came back — most likely no signal. The passages below were found on this '
-        + 'device and do not need one.',
-    };
+    return { failure: 'no-answer', refusal: 'No answer came back — most likely no signal.' };
   }
+}
+
+/**
+ * Answers a question from retrieved passages, or says why it did not.
+ *
+ * Never throws. Every failure comes back as a refusal a technician can read,
+ * because this sits under a search that already answered and must never take
+ * the screen down with it. The wording is this feature's own: every refusal
+ * points back at the passages, which are the answer whether or not the model
+ * had anything to add.
+ */
+export async function askGrounded(input: GroundedQuestion): Promise<GroundedAnswer> {
+  const worth = worthAsking(input);
+  if (!worth.ok) return { cited: [], refusal: worth.reason };
+
+  const result = await complete({ system: SYSTEM_PROMPT, user: buildPrompt(input), maxTokens: MAX_TOKENS });
+
+  if (result.text === undefined) {
+    switch (result.failure) {
+      case 'no-key':
+        return {
+          cited: [],
+          refusal: 'No API key is set, so the passages below are the answer. Everything else in this '
+            + 'app works without one; this only reads what the search already found.',
+        };
+      case 'no-answer':
+        return {
+          cited: [],
+          refusal: 'No answer came back — most likely no signal. The passages below were found on this '
+            + 'device and do not need one.',
+        };
+      case 'empty':
+        // checkAnswer words the empty case; keep that one voice.
+        return checkAnswer('', input.passages.slice(0, MAX_PASSAGES));
+      default:
+        return { cited: [], refusal: `${result.refusal ?? 'No answer.'} The passages below are what the search found.` };
+    }
+  }
+
+  return checkAnswer(result.text, input.passages.slice(0, MAX_PASSAGES));
 }

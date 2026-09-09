@@ -8,6 +8,8 @@ import { setJobStatus, listKnowledge, type KnowledgeNote } from '@/db/opsRepo';
 import { getJobFull, type AttachmentRecord, type JobFull } from '@/db/mirrorRepo';
 import { getSite, listDefects } from '@/db/repo';
 import { assetCountsBySystem } from '@/db/assetRepo';
+import { listRoutineRuns } from '@/db/routineRunRepo';
+import { JOB_RECORDS_PRIVACY_NOTE, draftJobBrief, type JobBrief } from '@/ai/jobBrief';
 import type { Defect, Site } from '@/domain/types';
 import type { SimproCostCenter, SimproItem, SimproSection } from '@/simpro/mirrorResources';
 import {
@@ -71,6 +73,10 @@ export default function JobScreen() {
   // queued by the status write, and the person who pressed the button is
   // told so here, once, rather than left to find it on the outbound screen.
   const [noteQueued, setNoteQueued] = useState(false);
+  // The three sentences from the job card, or why there are none. Not in the
+  // draft and not kept across jobs: a brief is read once, on the way in.
+  const [brief, setBrief] = useState<JobBrief | null>(null);
+  const [briefBusy, setBriefBusy] = useState(false);
   const refreshing = useRef(false);
 
   const load = useCallback(async () => {
@@ -136,7 +142,58 @@ export default function JobScreen() {
     return () => { cancelled = true; };
   }, [load, refreshFromOffice]));
 
-  useEffect(() => { setShowAllTimeline(false); setNoteQueued(false); }, [id]);
+  useEffect(() => { setShowAllTimeline(false); setNoteQueued(false); setBrief(null); }, [id]);
+
+  /**
+   * Three sentences before walking in, from the job card on this phone.
+   *
+   * The switch is read here and again inside draftJobBrief: here so a
+   * technician who has it off is shown what turning it on would send and
+   * where the switch is, rather than a refusal; there so no screen can send
+   * a job card by passing a flag. Everything handed over is a field of this
+   * screen's own record — nothing is fetched for the purpose.
+   */
+  const briefMe = async (f: JobFull) => {
+    const prefs = await loadPrefs();
+    if (!prefs.aiShareJobRecords) {
+      showAlert('Brief me is off', JOB_RECORDS_PRIVACY_NOTE, [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Turn on in Settings', onPress: () => router.push('/settings') },
+      ]);
+      return;
+    }
+    setBriefBusy(true);
+    try {
+      const j = f.job;
+      // The last routine run here, where the phone has one. One row, newest
+      // first, so a site with years of them costs the same as one with none.
+      const lastRun = j.siteId ? (await listRoutineRuns(j.siteId, 1))[0] : undefined;
+      const result = await draftJobBrief({
+        jobNumber: j.externalId,
+        title: j.title,
+        jobType: j.jobTypeRaw ?? j.jobType,
+        description: j.descriptionText,
+        officeNotes: j.notesText,
+        notes: f.notes.map((n) => ({ subject: n.subject, note: n.note, createdAt: n.createdAt })),
+        siteNotes: site?.notes,
+        openDefects: defects.map((d) => ({
+          location: d.location,
+          description: d.description,
+          severity: d.severity === 'critical' ? 'critical' : 'non-critical',
+        })),
+        lastServicedAt: lastRun?.completedAt,
+        lastServiceSummary: lastRun
+          ? `${lastRun.routineLabel}: ${lastRun.checksPassed} passed, ${lastRun.checksFailed} failed, ${lastRun.defectsRaised} defect${lastRun.defectsRaised === 1 ? '' : 's'} raised`
+          : undefined,
+        scheduledFor: j.scheduledFor,
+      });
+      setBrief(result);
+    } catch (e) {
+      setBrief({ refusal: describeActionFailure(e, 'draft the brief') });
+    } finally {
+      setBriefBusy(false);
+    }
+  };
 
   /**
    * The phone's own status on the job, then the row read back.
@@ -219,6 +276,34 @@ export default function JobScreen() {
             </Rowed>
           </View>
         </Rowed>
+
+        {/*
+          * The brief. Only for an office job, because that is the card with
+          * a description and notes on it; a job added on the phone has only
+          * what the technician typed, and they have read that.
+          */}
+        {isSimpro ? (
+          <>
+            <Button
+              title="Brief me"
+              variant="secondary"
+              loading={briefBusy}
+              onPress={() => void briefMe(full)}
+              icon={<MaterialCommunityIcons name="text-box-outline" size={18} color={t.color.text} />}
+            />
+            {brief ? (
+              <Card>
+                <Label>{brief.text ? 'Before you walk in' : 'No brief'}</Label>
+                <Txt size="sm" style={{ lineHeight: 20, marginTop: 4 }}>{brief.text ?? brief.refusal ?? 'No brief came back.'}</Txt>
+                {brief.text ? (
+                  <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
+                    Drafted from this job's record; check it. The card below is what the office holds.
+                  </Txt>
+                ) : null}
+              </Card>
+            ) : null}
+          </>
+        ) : null}
 
         <Card>
           <MetaRow label="Job no." value={job.externalId ? `#${job.externalId}` : 'On this phone only'} mono={!!job.externalId} />

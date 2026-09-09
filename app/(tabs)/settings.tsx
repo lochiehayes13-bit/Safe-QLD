@@ -10,6 +10,7 @@ import { registerAutoSyncTask, unregisterAutoSyncTask } from '@/simpro/autoSyncT
 import { clearKey as clearAiKey, hasKey as hasAiKey, storeKey as storeAiKey } from '@/ai/client';
 import { clearPlacesKey, hasPlacesKey, storePlacesKey } from '@/geo/placesKey';
 import { PRIVACY_NOTE } from '@/ai/grounding';
+import { JOB_RECORDS_PRIVACY_NOTE } from '@/ai/jobBrief';
 import { loadPrefs, savePrefs, DEFAULT_PREFS, type Prefs } from '@/app-prefs';
 import { clearExports, exportsSize } from '@/export/files';
 import { listPhotoFiles } from '@/export/photoFiles';
@@ -507,6 +508,37 @@ export default function SettingsScreen() {
             />
           </>
         )}
+
+        {/*
+          * The one switch that sends customer data. Its own switch rather than
+          * part of having a key, because agreeing to send a question and some
+          * standards passages is not agreeing to send a job card with the
+          * customer's name on it. The note says exactly what goes.
+          */}
+        <Divider />
+        <Label>Brief me before a job</Label>
+        <Txt size="xs" tone="faint" style={{ marginTop: 4, marginBottom: t.space(2), lineHeight: 17 }}>
+          {JOB_RECORDS_PRIVACY_NOTE}
+        </Txt>
+        <Rowed gap={2}>
+          <MaterialCommunityIcons
+            name={prefs.aiShareJobRecords ? 'file-send-outline' : 'file-lock-outline'}
+            size={18}
+            color={prefs.aiShareJobRecords ? t.color.warn : t.color.textFaint}
+          />
+          <Txt size="sm" tone={prefs.aiShareJobRecords ? 'warn' : 'faint'} style={{ flex: 1 }}>
+            {prefs.aiShareJobRecords
+              ? hasAi
+                ? 'On. A job\'s record is sent when you press Brief me at the top of that job\'s screen, and not before.'
+                : 'On, but no key is set above, so nothing can be sent yet.'
+              : 'Off. Job records stay on the phone.'}
+          </Txt>
+          <Switch
+            value={prefs.aiShareJobRecords}
+            onValueChange={(on) => update({ aiShareJobRecords: on })}
+            trackColor={{ true: t.color.accent, false: t.color.border }}
+          />
+        </Rowed>
       </Card>
 
       <H2>The map</H2>
