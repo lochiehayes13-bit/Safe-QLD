@@ -142,8 +142,8 @@ export default function SignInScreen() {
             busy={busy === 'skip'}
             disabled={busy !== null}
             onPick={() => { void pickInstead(); }}
-            why={'This office\'s Simpro application does not allow password sign-in, so the staff list is the way in. '
-              + 'What you write still goes up under your name.'}
+            why={'The Simpro application this phone connects with is a Client Credentials one, which cannot sign a '
+              + 'person in. The staff list is the way in, and what you write still goes up under your name.'}
           />
         ) : (
           <Card>
@@ -196,8 +196,10 @@ export default function SignInScreen() {
           {passwordOff ? (
             <>
               <Txt size="xs" tone="muted" style={{ lineHeight: 17, marginTop: 4, marginBottom: t.space(2) }}>
-                Password sign-in needs the Password Credentials grant switched on for this app's API
-                application in Simpro. Once the office has done it, this works without reinstalling.
+                Password sign-in needs an API application in Simpro whose Authentication Method allows
+                it. The one this app connects with is a Client Credentials application, which is what
+                lets the phone talk to the office at all, and it refuses logins by design. Once the
+                office has one that allows them, this works without reinstalling.
               </Txt>
               <Button
                 title="Try a password sign-in anyway"
@@ -210,8 +212,10 @@ export default function SignInScreen() {
           ) : null}
 
           <Txt size="xs" tone="muted" style={{ lineHeight: 17, marginTop: 4, marginBottom: t.space(2) }}>
-            Simpro's own login page handles two-factor and single sign-on. It needs the Redirect URI
-            below registered on the API application, exactly as it reads.
+            Simpro's own login page handles two-factor and single sign-on. It needs two things on the
+            API application: the Redirect URI below, exactly as it reads, and an Authentication Method
+            of Authorization Code. A Client Credentials application — the kind that lets this phone
+            talk to the office — cannot sign a person in, whatever the Redirect URI says.
           </Txt>
           <RedirectRow where={where} />
           <View style={{ height: t.space(2.5) }} />
@@ -306,7 +310,8 @@ function RefusalBanner({
       case 'grant':
         return {
           title: 'This office\'s Simpro app does not allow password sign-in',
-          body: 'Nothing is wrong with your login, and trying again will not change it: the Password Credentials grant is switched off on the API application in Simpro. '
+          body: 'Nothing is wrong with your login, and trying again will not change it: the API application this phone connects with does not allow logins. '
+            + 'Its Authentication Method is Client Credentials, which is what lets the phone reach the office at all. '
             + 'Pick yourself from the staff list and everything works with your name on it.',
           pick: true,
           tone: 'warn' as const,
