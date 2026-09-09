@@ -340,8 +340,22 @@ export default function JobScreen() {
   const queueNote = async (subject: string, note: string): Promise<boolean> => {
     if (!job.externalId) return false;
     const subj = subject.trim() || 'Note from site';
-    const body = note.trim();
     const at = nowIso();
+    /*
+     * Whose note it is, written into it.
+     *
+     * Simpro records a note against the API application that sent it, which
+     * is the office's, so a note from the phone reads as the office's unless
+     * the words say otherwise. The service record and the sign-off already
+     * name their person; a note typed on the card did not, while the screen
+     * that queued it promised what you write goes up under your name. Signed
+     * in, that is who Simpro says you are; otherwise it is who the phone is
+     * set to, which is the person picked from the staff list.
+     */
+    const [prefs, session] = await Promise.all([loadPrefs(), readUserSession()]);
+    const who = session?.label?.trim() || prefs.technicianName.trim();
+    const typed = note.trim();
+    const body = who ? `${typed}\n\n— ${who}` : typed;
     setActing('note');
     try {
       const row = await queueJobNote(
