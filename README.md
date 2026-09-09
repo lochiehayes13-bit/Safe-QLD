@@ -104,6 +104,18 @@ the chart in red rather than hidden.
 **Sharing.** A site packs to a `.sqld` file carrying only normalised data and
 never the vendor's original — a real 1.67 MB configuration packs to 61 KB.
 
+**The office, on the phone.** Everything Simpro holds for a technician is
+mirrored onto the device and searched in one box: jobs, sites, customers,
+contacts, quotes, invoices, purchase orders, the office catalogue, leads and
+suppliers, by the office's own numbers first. A job card changes the status,
+adds notes and materials, attaches photos and documents and takes the
+customer's signature. The clock goes on against a Simpro job and the hours come
+back as schedule blocks. The asset register is created, edited, archived and
+deleted from site. The calendar shows the team's week and a person can book
+themselves onto a job, move their block or take it off. Every one of those goes
+through a queue that survives a basement, and the ones with an undo hold for
+half a minute before they go anywhere.
+
 **Coverage.** "Not tested" is recorded as its own result with a reason, never as
 a pass. A failure raises a defect and a pass closes the item; an inaccessible
 device does neither, which is why it goes unchased. Those are listed per site
@@ -149,17 +161,72 @@ OAuth2 client credentials, tokens refreshed ahead of expiry rather than after a
 401, and requests paced below the build's 10/sec limit so a field sync never
 costs the office their rate budget.
 
-A client secret sitting on every technician's phone is a real risk. It is held
-in the platform keystore, and Settings says so plainly. The better arrangement
-is a Safe QLD server holding the secret with the app talking to that — set a
-proxy URL and no secret is stored on the device at all. The client is shaped
-for that swap.
+**Signing in.** The office's own application is shipped in the app, so a new
+phone is connected before anybody types anything. A technician then signs in
+with their own Simpro account, and what they do is recorded against them. The
+sign-in is skippable — the app is useful without it — and Settings says which
+credential is in use.
+
+**What comes down.** Jobs with their sections, cost centres, items and
+attachments; sites, customers, contacts and the customer asset register; quotes
+and invoices with their payments and credit notes; purchase orders with their
+lines and the suppliers behind them; the office catalogue and its groups; leads,
+activities, schedules and the hours the office already holds. A full pull runs
+daily, an incremental every half hour, and both are watermarked per resource so
+a resource the build refuses does not stall the rest.
+
+**What goes back.** Test results and defects, work-completed notes, photographs
+and documents as attachments, purchase requests as orders, timesheet blocks from
+the clock, job status changes, job notes, one-off materials, the customer's
+signature, asset creates, edits, archives and deletes, and schedule bookings,
+moves and removals. Everything is queued locally first and sent by a single
+run that claims each row before it sends it, so a change taken back inside its
+undo window is never sent, and a row is never sent twice.
+
+**Money the phone does not hold.** Cost, markup, margin and trade prices are
+never requested, stored or shown. Sell prices, invoice totals, balances and
+payments are, because they are what a customer has already seen. That line is
+enforced by a test over the column sets the client asks for, not by
+convention.
+
+**The secret.** A client secret sitting on every technician's phone is a real
+risk. It is held in the platform keystore, and Settings says so plainly. The
+better arrangement is a Safe QLD server holding the secret with the app talking
+to that — set a proxy URL and no secret is stored on the device at all. The
+client is shaped for that swap.
+
+## The model, where there is one
+
+Four features can use an Anthropic API key, and none of them is required: with
+no key, no signal, or a refusal, each sits on top of something that already
+works. The rule they share is that a model may order and word what it was
+given and may never add a fact, and each checks the answer on the way back
+rather than asking nicely in the prompt.
+
+- **Reading the standards.** The search finds the passages; the model says
+  which one answers the question. An answer citing a passage that was not
+  supplied is discarded.
+- **Writing up a defect.** The coded library gives the wording; the model
+  folds in what the technician typed. A number that was not in front of it, or
+  a code it was not offered, is refused.
+- **Writing up a note to the office.** The rough words in the box become a
+  note a scheduler can act on. A number nobody typed — a date, a quantity — is
+  refused outright.
+- **Reading a phrase in Find anything.** Only where the word lists cannot tell
+  which kind of record was meant, and only ever to pick which of the typed
+  words to search for. A term that was not typed is dropped.
+
+What leaves the phone is, in each case, the question and its passages, or the
+words in the box, or the phrase — never a site, a customer or a register. The
+one feature that does send job records, the briefing before you walk in, is
+behind its own switch that is off until somebody turns it on.
 
 ## Layout
 
 ```
 app/            screens (expo-router, file-based)
 src/
+  ai/           the four model features and the checks on their answers
   calc/         battery, VESDA, resistor, dipswitch, EOL, electrical, units
   db/           SQLite schema, migrations, repositories
   domain/       types: sites, panels, points, baseline data, timesheets
@@ -178,7 +245,7 @@ spreadsheet reader.
 
 ## Testing
 
-700 tests, run without a native toolchain:
+4,500 tests, run without a native toolchain:
 
 ```bash
 npm test
