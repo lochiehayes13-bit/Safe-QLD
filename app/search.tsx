@@ -56,6 +56,10 @@ export default function SearchScreen() {
   // A phrase read by the model, kept beside the typed text: the box still
   // holds what the person wrote, and one line says how it was read.
   const [asked, setAsked] = useState<{ phrase: string; terms: string; kind?: SearchHit['kind']; note: string } | null>(null);
+  // A refusal is kept apart from a reading. It has nothing to search with,
+  // so the plain reading goes on driving the search and the button stays
+  // there to tap again when the signal comes back.
+  const [refused, setRefused] = useState<{ phrase: string; note: string } | null>(null);
   const [asking, setAsking] = useState(false);
   const [keyed, setKeyed] = useState(false);
   // What an empty answer means: a phone nobody has connected has nothing to
@@ -121,20 +125,23 @@ export default function SearchScreen() {
     setAsking(true);
     try {
       const result = await readPhraseWithModel(phraseText);
-      setAsked(result.suggestion
-        ? {
+      if (result.suggestion) {
+        setRefused(null);
+        setAsked({
           phrase: phraseText,
           terms: result.suggestion.terms,
           kind: result.suggestion.kind,
           note: `Read as: ${result.suggestion.kind ? `${KIND_LABEL[result.suggestion.kind].many.toLowerCase()} ` : ''}`
             + (result.suggestion.terms ? `matching "${result.suggestion.terms}"` : 'the most recent') + '.',
-        }
-        : { phrase: phraseText, terms: phraseText, note: result.refusal });
+        });
+      } else {
+        setRefused({ phrase: phraseText, note: result.refusal });
+      }
     } catch (e) {
       // It is written not to throw; if it ever does, the search still ran
       // on what was typed and the line under the box says why nothing else
       // happened.
-      setAsked({ phrase: phraseText, terms: phraseText, note: describeLoadFailure(e, 'reading the phrase') });
+      setRefused({ phrase: phraseText, note: describeLoadFailure(e, 'reading the phrase') });
     } finally {
       setAsking(false);
     }
@@ -144,6 +151,7 @@ export default function SearchScreen() {
   const nothing = hits !== null && !hits.length && !screens.length;
   const words = nothingFoundWords(parsed);
   const readAs = model ? model.note : (phrase ? phraseWords(phrase) : undefined);
+  const refusal = refused && refused.phrase === query.trim() ? refused.note : undefined;
   // Offered under a phrase the word lists could not place, and only where
   // there is a key to ask with.
   const canAsk = keyed && !model && Boolean(phrase) && worthAsking(query, phrase!).ok;
@@ -155,6 +163,7 @@ export default function SearchScreen() {
         <View style={{ padding: t.space(4), paddingBottom: t.space(2), gap: t.space(2) }}>
           <SearchBox value={typed} onChange={setTyped} placeholder="Job, invoice, PO, quote, site, customer, part, phone" />
           {readAs ? <Txt size="xs" tone="muted">{readAs}</Txt> : null}
+          {refusal ? <Txt size="xs" tone="muted">{refusal}</Txt> : null}
           {hits ? (
             <Txt size="xs" tone="faint">
               {hits.length

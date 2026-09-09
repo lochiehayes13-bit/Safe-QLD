@@ -1310,9 +1310,13 @@ export interface PurchaseOrderPayload {
  * exists to avoid. The queue is then sent a moment later if there is signal,
  * so queued and sent are usually two seconds apart; see ./flushSoon.
  */
-export async function queueJobNote(payload: JobNotePayload): Promise<void> {
-  await enqueueSync('job-note', payload);
-  flushSoon();
+export async function queueJobNote(payload: JobNotePayload, options: { contentKey?: string } = {}): Promise<{ id: string; duplicate: boolean }> {
+  // The default key is the note's own words, which makes the same words
+  // twice one note for ever. A caller that means "the same words are a new
+  // note tomorrow" passes its own key saying so.
+  const row = await enqueueSync('job-note', payload, options);
+  if (!row.duplicate) flushSoon();
+  return row;
 }
 
 export async function queuePurchaseOrder(payload: PurchaseOrderPayload): Promise<void> {

@@ -17,11 +17,13 @@ import {
   type RegisterScheduleLine, type RegisterScheduleRow,
 } from '@/domain/registerSchedule';
 import {
-  buildArchive, buildDelete, buildUpdate, changedFields, describeAssetChange, describeChangeState, diffFields,
+  buildArchive, buildDelete, buildUpdate, changedFields, describeAssetChange, describeChangeState, diffFields, revertFor,
+  snapshot,
   undoMsLeft, updateHasContent, type BuiltChange,
 } from '@/domain/assetChanges';
-import { customFieldsByName, officeTypeForApp, type OfficeCustomField } from '@/simpro/assetTypes';
+import { PHONE_KEYS, customFieldsByName, officeAssetTypes, officeTypeForApp, type OfficeCustomField } from '@/simpro/assetTypes';
 import { listOfficeAssetTypes } from '@/db/assetTypeRepo';
+import { simproConfigFromPrefs } from '@/simpro/config';
 import { flushSoon } from '@/simpro/flushSoon';
 import type { Site } from '@/domain/types';
 import { formatAuDate } from '@/export/sheets';
@@ -101,12 +103,17 @@ const formFrom = (a: AssetRecord): EditForm => ({
 
 const blank = (s: string): string | undefined => (s.trim() ? s.trim() : undefined);
 
-/** A change still inside its window, and what to put back if it is taken back. */
+/**
+ * A change still inside its window.
+ *
+ * What taking it back puts on the phone is not held here: it is read off
+ * the change's own payload by `revertFor`, so an undo pressed on a screen
+ * opened after the change was queued does exactly what the banner's does.
+ */
 interface Undoable {
   changeId: string;
   notBefore: string;
   label: string;
-  revert: Partial<AssetRecord>;
 }
 
 const isSimproAsset = (a: AssetRecord): a is AssetRecord & { externalId: string } =>
@@ -156,7 +163,18 @@ export default function AssetScreen() {
         setEvents(e);
         setSchedule(sched);
         setChanges(ch);
-        const officeTypes = await listOfficeAssetTypes();
+        // Read through to the office where the table is empty: it is filled
+        // by whichever screen needs it first, and a technician who only ever
+        // corrects existing assets never opens New asset. A failure here is
+        // not the screen's failure — the fields fall back to plain boxes.
+        let officeTypes = await listOfficeAssetTypes();
+        if (!officeTypes.length && isSimproAsset(a)) {
+          try {
+            officeTypes = await officeAssetTypes(simproConfigFromPrefs(await loadPrefs()));
+          } catch {
+            officeTypes = [];
+          }
+        }
         const mine = officeTypes.length
           ? officeTypeForApp(a.assetTypeId, officeTypes, {
             simproType: typeof a.attributes.simproType === 'string' ? a.attributes.simproType : undefined,
@@ -169,7 +187,7 @@ export default function AssetScreen() {
         const fresh = changeParam ? ch.find((c) => c.id === changeParam && c.state === 'undoable') : undefined;
         if (fresh) {
           setUndo((held) => held ?? {
-            changeId: fresh.id, notBefore: fresh.notBefore, label: describeAssetChange(fresh.kind, fresh.payload), revert: {},
+            changeId: fresh.id, notBefore: fresh.notBefore, label: describeAssetChange(fresh.kind, fresh.payload),
           });
         }
       }
@@ -214,9 +232,9 @@ export default function AssetScreen() {
   };
 
   /** Queues a built change and opens its window on the screen. */
-  const queue = async (built: BuiltChange, revert: Partial<AssetRecord>) => {
+  const queue = async (built: BuiltChange) => {
     const { change } = await queueAssetChange(built);
-    setUndo({ changeId: change.id, notBefore: change.notBefore, label: describeAssetChange(change.kind, change.payload), revert });
+    setUndo({ changeId: change.id, notBefore: change.notBefore, label: describeAssetChange(change.kind, change.payload) });
     setNow(nowIso());
     flushSoon();
   };
@@ -227,9 +245,13 @@ export default function AssetScreen() {
     try {
       const outcome = await undoAssetChange(held.changeId);
       if (outcome.status === 'undone') {
-        if (Object.keys(held.revert).length) await updateAsset(asset.id, held.revert);
+        // Read off the change itself rather than off what the screen was
+        // holding when it was queued: the same undo whether it came from
+        // the banner or from the list on a screen opened afterwards.
+        const revert = revertFor(outcome.change.payload);
+        if (Object.keys(revert.patch).length) await updateAsset(asset.id, revert.patch as Partial<AssetRecord>);
         setUndo(null);
-        showAlert('Taken back', 'Nothing was sent to the office.');
+        showAlert('Taken back', revert.note);
       } else {
         setUndo(null);
         showAlert('Too late to take back', 'The change has already left the phone. Ask the office to reverse it, or make the opposite change here.');
@@ -262,12 +284,6 @@ export default function AssetScreen() {
         setEditing(false);
         return;
       }
-      const revert: Partial<AssetRecord> = {
-        name: asset.name, locationNote: asset.locationNote ?? undefined, level: asset.level ?? undefined,
-        room: asset.room ?? undefined, manufacturer: asset.manufacturer ?? undefined, model: asset.model ?? undefined,
-        serial: asset.serial ?? undefined, installedDate: asset.installedDate ?? undefined,
-        notes: asset.notes ?? undefined, attributes: asset.attributes,
-      };
       await updateAsset(asset.id, {
         name: after.name, locationNote: after.locationNote, level: after.level, room: after.room,
         manufacturer: after.manufacturer, model: after.model, serial: after.serial,
@@ -279,7 +295,8 @@ export default function AssetScreen() {
         // Only what the office would notice: its own fields, by name, and
         // the start date. The phone's name for the asset and its notes are
         // the phone's.
-        const fields = diffFields(customFieldsByName(asset), customFieldsByName(after));
+        const officeType = officeFields.size ? { customFields: [...officeFields.values()] } : undefined;
+        const fields = diffFields(customFieldsByName(asset, officeType), customFieldsByName(after, officeType));
         const startDate = changed.includes('installedDate') ? after.installedDate ?? '' : undefined;
         const built = buildUpdate({
           assetId: asset.id,
@@ -287,8 +304,10 @@ export default function AssetScreen() {
           fields,
           startDate,
           label: after.name,
+          // What it was, so taking the edit back puts the phone back too.
+          before: snapshot(asset),
         }, { now: nowIso(), changeNo: await nextChangeNo(asset.id) });
-        if (updateHasContent(built.payload)) await queue(built, revert);
+        if (updateHasContent(built.payload)) await queue(built);
         else showAlert('Saved on the phone', 'Nothing the office holds changed, so nothing was sent to Simpro.');
       }
       void load();
@@ -299,15 +318,21 @@ export default function AssetScreen() {
     }
   };
 
+  /*
+   * Archive and delete change nothing on the phone here. The status moves
+   * when the office says yes — sendArchive and sendDelete do it — because a
+   * status changed at queue time stayed changed when the office refused,
+   * with the Edit and Remove buttons that could put it right disabled
+   * behind it, and no sync ever puts a status back.
+   */
   const archiveInSimpro = async () => {
     if (!asset || !isSimproAsset(asset)) return;
     try {
-      await updateAsset(asset.id, { status: 'decommissioned' });
       const built = buildArchive(
         { assetId: asset.id, assetExternalId: asset.externalId, previousStatus: asset.status, label: asset.name },
         { now: nowIso(), changeNo: await nextChangeNo(asset.id) },
       );
-      await queue(built, { status: asset.status });
+      await queue(built);
       void load();
     } catch (e) {
       showAlert('Could not queue it', e instanceof Error ? e.message : String(e));
@@ -317,12 +342,11 @@ export default function AssetScreen() {
   const deleteFromSimpro = async () => {
     if (!asset || !isSimproAsset(asset)) return;
     try {
-      await updateAsset(asset.id, { status: 'removed' });
       const built = buildDelete(
         { assetId: asset.id, assetExternalId: asset.externalId, previousStatus: asset.status, label: asset.name },
         { now: nowIso(), changeNo: await nextChangeNo(asset.id) },
       );
-      await queue(built, { status: asset.status });
+      await queue(built);
       void load();
     } catch (e) {
       showAlert('Could not queue it', e instanceof Error ? e.message : String(e));
@@ -364,6 +388,17 @@ export default function AssetScreen() {
   const attributes: AttributeDef[] = type?.attributes ?? [];
   const routines = registerScheduleLines(schedule, nowIso());
   const fromRegister = registerAttributes(asset.attributes, attributes.map((a) => a.key));
+  /*
+   * The same list without the sync's own bookkeeping — the frequencies, the
+   * office's service-level ids, the register a door was filed under, and the
+   * two copies of the tag. Those are shown below with everything else and
+   * are not boxes to type in: the send drops every one of them, so an edit
+   * to one changed the phone and nothing else, and clearing the service
+   * levels quietly broke the bulk test's filing until the next full sync.
+   * A Simpro asset's number is edited under the office's own heading; an
+   * imported one has no such heading, so its box stays.
+   */
+  const editableRegister = fromRegister.filter((a) => !(PHONE_KEYS.has(a.key) && (simpro || a.key !== 'assetNumber')));
   const simpro = isSimproAsset(asset);
   const secondsLeft = undo ? Math.ceil(undoMsLeft(now, undo.notBefore) / 1000) : 0;
 
@@ -451,10 +486,10 @@ export default function AssetScreen() {
             </Rowed>
             <Field label="Note on this asset" value={form.notes} onChangeText={(v) => setForm({ ...form, notes: v })} multiline />
 
-            {fromRegister.length ? (
+            {editableRegister.length ? (
               <>
                 <H2>From the register</H2>
-                {fromRegister.map((a) => (
+                {editableRegister.map((a) => (
                   <RegisterField
                     key={a.key}
                     label={a.label}
@@ -689,7 +724,7 @@ export default function AssetScreen() {
                         variant="secondary"
                         compact
                         onPress={() => {
-                          setUndo({ changeId: c.id, notBefore: c.notBefore, label: describeAssetChange(c.kind, c.payload), revert: {} });
+                          setUndo({ changeId: c.id, notBefore: c.notBefore, label: describeAssetChange(c.kind, c.payload) });
                           setNow(nowIso());
                         }}
                       />

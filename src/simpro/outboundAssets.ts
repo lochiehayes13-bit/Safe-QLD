@@ -140,12 +140,17 @@ async function sendCreate(p: AssetCreatePayload, changeId: string | undefined, c
   // behind that one. The office's own id is written onto the phone's asset
   // so the next pull updates rather than duplicates it.
   const location = p.fields.find((f) => LOCATION_FIELD.test(f.name) && f.value.trim())?.value.trim();
-  if (!p.tag && !location) {
+  // The tag is only a key if it is going into a tag field on the record.
+  // A payload can carry the phone's own asset code for a type the office
+  // has no tag field for, and matching on a field the record does not have
+  // never matches — every retry then created another asset.
+  const taggable = Boolean(p.tag && p.fields.some((f) => TAG_FIELD.test(f.name) && f.value.trim()));
+  if (!taggable && !location) {
     const reason = 'Nothing was sent: this asset type has no tag field in Simpro and the asset has no location, so a retry could create it twice. Create it in the office instead.';
     if (changeId) await markAssetChangeFailed(changeId, reason);
     return { status: 'abandon', reason };
   }
-  const same = (a: RemoteAsset): boolean => (p.tag
+  const same = (a: RemoteAsset): boolean => (taggable
     ? norm(tagOf(a)) === norm(p.tag)
     : norm(locationOf(a)) === norm(location) && a.AssetType?.ID !== undefined && String(a.AssetType.ID) === p.assetTypeExternalId);
   const link = async (): Promise<string | undefined> => {
@@ -198,9 +203,15 @@ async function sendUpdate(p: AssetUpdatePayload, changeId: string | undefined, c
     const name = norm(f.CustomField?.Name);
     if (name) remoteFields.set(name, { id: f.CustomField?.ID, value: (f.Value ?? '').trim() });
   }
+  // The office's own heading for a serial, whatever it calls it: "Serial
+  // No." and "Serial Number" are the same field to a technician, and a
+  // serial typed on site under one spelling used to be dropped for want of
+  // the other and the change still reported as sent.
+  const remoteSerial = [...remoteFields.entries()].find(([name]) => /serial/i.test(name));
   const fields: AssetFieldValue[] = [];
   for (const f of p.fields) {
-    const held = remoteFields.get(norm(f.name));
+    const held = remoteFields.get(norm(f.name))
+      ?? (/serial/i.test(f.name) ? remoteSerial?.[1] : undefined);
     const id = held?.id ?? f.id;
     if (id === undefined) continue;
     if (held && held.value === f.value.trim()) continue;

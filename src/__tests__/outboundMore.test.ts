@@ -340,6 +340,28 @@ describe('the job card: materials', () => {
     expect(sent).toHaveLength(1);
   });
 
+  it('does not read a line it posted itself as an earlier try of the next one', async () => {
+    // Two separate lines for the same part, added hours apart offline, sent
+    // in one run when the signal came back. The second used to see the
+    // first's line as its own and be closed without being sent, so the job
+    // was billed one battery instead of two.
+    const posted: { ID: number; Catalog: { ID: number }; Total: { Qty: number }; DateModified: string }[] = [];
+    const client = {
+      request: async (method: string, path: string, options?: { body?: unknown }) => {
+        if (method === 'GET') return { data: posted };
+        const id = 500 + posted.length;
+        posted.push({ ID: id, Catalog: { ID: 4321 }, Total: { Qty: 2 }, DateModified: new Date().toISOString() });
+        expect(path).toBe('jobs/1001/sections/5/costCenters/9/catalogs/');
+        expect(options?.body).toEqual({ Catalog: 4321, Qty: 2 });
+        return { data: { ID: id } };
+      },
+    } as unknown as SimproClient;
+    expect(await sendMore(catalog, deps(client))).toEqual({ status: 'sent' });
+    const later = { ...catalog, id: 'q-later', payload: { ...(catalog.payload as object), at: '2026-09-09T03:40:00.000Z' } };
+    expect(await sendMore(later, deps(client))).toEqual({ status: 'sent' });
+    expect(posted).toHaveLength(2);
+  });
+
   it('posts when the read itself fails', async () => {
     const { client, sent } = fakeClient(() => ({ ID: 77 }), () => { throw new SimproError('Simpro returned HTTP 500 for the read', 500, 'x'); });
     expect(await sendMore(catalog, deps(client))).toEqual({ status: 'sent' });

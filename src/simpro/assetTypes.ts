@@ -187,7 +187,8 @@ export function tagFor(asset: Pick<FieldSource, 'code' | 'attributes'>): string 
 
 /** Whether the office type has a field for the number on the equipment. */
 export function hasTagField(officeType: Pick<OfficeAssetType, 'customFields'>): boolean {
-  return officeType.customFields.some((f) => TAG_FIELD.test(f.name));
+  // A locked field is not one this app can write, so it is no key either.
+  return officeType.customFields.some((f) => !f.locked && TAG_FIELD.test(f.name));
 }
 
 /**
@@ -208,7 +209,7 @@ export function retryKeyFor(
     if (tag) return { tag };
   }
   const location = locationFor(asset);
-  if (location && officeType.customFields.some((f) => LOCATION_FIELD.test(f.name))) return { location };
+  if (location && officeType.customFields.some((f) => !f.locked && LOCATION_FIELD.test(f.name))) return { location };
   return undefined;
 }
 
@@ -246,7 +247,7 @@ export function customFieldsFor(asset: FieldSource, officeType: Pick<OfficeAsset
  * unknown type, and the two copies of the tag the sync keeps beside the
  * office's own heading for it.
  */
-const PHONE_KEYS = new Set(['frequencies', 'simproServiceLevels', 'registerSystem', 'simproType', 'tag', 'assetNumber']);
+export const PHONE_KEYS = new Set(['frequencies', 'simproServiceLevels', 'registerSystem', 'simproType', 'tag', 'assetNumber']);
 
 /**
  * An asset's office fields by name alone, for an asset the office already
@@ -260,7 +261,10 @@ const PHONE_KEYS = new Set(['frequencies', 'simproServiceLevels', 'registerSyste
  * can ride along without harm. A serial edited on the phone goes under
  * whichever heading of the office's has "serial" in it, where there is one.
  */
-export function customFieldsByName(asset: FieldSource): AssetFieldValue[] {
+export function customFieldsByName(
+  asset: FieldSource,
+  officeType?: Pick<OfficeAssetType, 'customFields'>,
+): AssetFieldValue[] {
   const out: AssetFieldValue[] = [{ name: 'Location', value: locationFor(asset) }];
   const serial = asText(asset.serial);
   let serialPlaced = false;
@@ -270,6 +274,16 @@ export function customFieldsByName(asset: FieldSource): AssetFieldValue[] {
     if (SERIAL_FIELD.test(name) && serial) { value = serial; serialPlaced = true; }
     out.push({ name, value });
   }
-  if (serial && !serialPlaced) out.push({ name: 'Serial Number', value: serial });
+  if (serial && !serialPlaced) {
+    // Under the office's own heading for a serial, where the type has one.
+    // A made-up "Serial Number" matched nothing the office holds, so the
+    // send dropped the field and still reported the change as sent — the
+    // technician read "Sent to the office" over a serial that never left.
+    // With no office type to ask, the old heading stands: the send's own
+    // fallback matches it against the record's fields by the same words.
+    const heading = officeType?.customFields.find((f) => !f.locked && SERIAL_FIELD.test(f.name));
+    if (officeType && !heading) return out;
+    out.push(heading ? { id: heading.id, name: heading.name, value: serial } : { name: 'Serial Number', value: serial });
+  }
   return out;
 }

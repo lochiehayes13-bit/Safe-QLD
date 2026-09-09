@@ -244,6 +244,22 @@ describe('drawing what is queued', () => {
     expect(out[0]!.pending).toBeUndefined();
   });
 
+  it('stops drawing a sent booking the office has since taken off', () => {
+    const booking = {
+      employeeId: '77', jobId: '1002', sectionId: '5', costCenterId: '9', date: '2026-09-09', start: '07:00', end: '15:30', notBefore: 'x',
+    };
+    const sent = change(SCHEDULE_BOOK_KIND, booking, { state: 'sent' });
+    // Read before the booking went: the office cannot have shown it yet, so
+    // it stays drawn.
+    expect(mergePending(office, [sent], [], '2026-09-07T21:00:00.000Z')).toHaveLength(3);
+    // Read since, and the office's blocks do not include it: taken off.
+    expect(mergePending(office, [sent], [], '2026-09-09T06:00:00.000Z')).toHaveLength(2);
+    // A booking still on its way is drawn whatever the read says.
+    expect(mergePending(office, [change(SCHEDULE_BOOK_KIND, booking)], [], '2026-09-09T06:00:00.000Z')).toHaveLength(3);
+    // And with no read at all, nothing is dropped.
+    expect(mergePending(office, [sent])).toHaveLength(3);
+  });
+
   it('ignores a change for a block the office no longer lists', () => {
     expect(mergePending(office, [change(SCHEDULE_REMOVE_KIND, { employeeId: '77', scheduleId: '9', href: 'h', date: '2026-09-08', notBefore: 'x' })]))
       .toHaveLength(2);

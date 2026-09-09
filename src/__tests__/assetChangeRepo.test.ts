@@ -139,7 +139,9 @@ describe('where a change has got to', () => {
     expect(stateOf(row, { status: 'pending', error: null }, '2026-09-09T01:00:00.000Z')).toBe('undoable');
     expect(stateOf(row, { status: 'pending', error: null }, '2026-09-09T01:01:00.000Z')).toBe('queued');
     expect(stateOf(row, { status: 'failed', error: 'x' }, NOW)).toBe('failed');
-    expect(stateOf(row, undefined, NOW)).toBe('taken-back');
+    // No queue row and nothing recorded: the row was dropped from Waiting
+    // to send. An undo would have deleted this row too, so it is never that.
+    expect(stateOf(row, undefined, NOW)).toBe('forgotten');
     expect(stateOf({ ...row, error: 'x' }, undefined, NOW)).toBe('failed');
     expect(stateOf({ ...row, sentAt: NOW }, { status: 'failed', error: 'x' }, NOW)).toBe('sent');
   });

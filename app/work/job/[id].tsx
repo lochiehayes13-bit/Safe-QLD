@@ -23,6 +23,7 @@ import {
   technicianLine,
 } from '@/domain/jobPresentation';
 import { qldIsoDay, qldMoment } from '@/domain/qldTime';
+import { queueKey } from '@/domain/queueKey';
 import {
   JOB_MATERIAL_KIND, JOB_SIGNOFF_KIND, JOB_STATUS_KIND, materialContentKey, materialLine, officeStatusFor, signOffNote,
   signatureFilename, statusChoices, statusContentKey, statusPayload, type JobMaterialPayload, type StatusChoice,
@@ -327,15 +328,32 @@ export default function JobScreen() {
     }
   };
 
-  const queueNote = async (subject: string, note: string) => {
-    if (!job.externalId) return;
+  /**
+   * A note for the office. True once the queue holds it.
+   *
+   * Keyed on the words and the Queensland day, the way the sign-off is: a
+   * tap that lands twice is one note, and the same sentence tomorrow — "still
+   * waiting on the sparky" — is tomorrow's note rather than one the queue
+   * swallows. A note that was already queued says so instead of reporting a
+   * send that never happened.
+   */
+  const queueNote = async (subject: string, note: string): Promise<boolean> => {
+    if (!job.externalId) return false;
+    const subj = subject.trim() || 'Note from site';
+    const body = note.trim();
+    const at = nowIso();
     setActing('note');
     try {
-      await queueJobNote({ jobId: job.externalId, subject: subject.trim() || 'Note from site', note: note.trim() });
+      const row = await queueJobNote(
+        { jobId: job.externalId, subject: subj, note: body },
+        { contentKey: queueKey('job-note', { jobId: job.externalId, subject: subj, note: body, day: qldIsoDay(at) ?? at }) },
+      );
       setSheet(null);
-      said(`Note: ${subject.trim() || 'Note from site'}`);
+      said(row.duplicate ? `That note is already queued: ${subj}` : `Note: ${subj}`);
+      return true;
     } catch (e) {
       showAlert('Could not queue that note', describeActionFailure(e, 'queue the note'));
+      return false;
     } finally {
       setActing(null);
     }
@@ -986,7 +1004,7 @@ export default function JobScreen() {
             busy={acting === 'status'}
             onPick={(c) => void queueStatus(c)}
           />
-          <NoteSheet visible={sheet === 'note'} onClose={() => setSheet(null)} busy={acting === 'note'} onSend={(su, n) => void queueNote(su, n)} />
+          <NoteSheet visible={sheet === 'note'} onClose={() => setSheet(null)} busy={acting === 'note'} onSend={queueNote} />
           <MaterialsSheet visible={sheet === 'materials'} onClose={() => setSheet(null)} sections={full.sections} onQueue={queueMaterial} />
           <SignOffSheet
             visible={sheet === 'signoff'}
@@ -1108,7 +1126,9 @@ function StatusSheet({ visible, onClose, choices, current, suggested, busy, onPi
  * theirs. Without a key the button is not offered and the box works as it
  * always did.
  */
-function NoteSheet({ visible, onClose, busy, onSend }: { visible: boolean; onClose: () => void; busy: boolean; onSend: (subject: string, note: string) => void }) {
+function NoteSheet({ visible, onClose, busy, onSend }: {
+  visible: boolean; onClose: () => void; busy: boolean; onSend: (subject: string, note: string) => Promise<boolean>;
+}) {
   const t = useTheme();
   const [subject, setSubject] = useState('');
   const [note, setNote] = useState('');
@@ -1140,9 +1160,11 @@ function NoteSheet({ visible, onClose, busy, onSend }: { visible: boolean; onClo
     }
   };
 
-  const send = () => {
+  const send = async () => {
     if (!note.trim()) { showAlert('Nothing to send', 'Write the note first.'); return; }
-    onSend(subject, note);
+    // Cleared only once the queue has it: a write that failed used to take
+    // the technician's words with it.
+    if (!(await onSend(subject, note))) return;
     setSubject(''); setNote(''); setMine(null); setAiNote(null);
   };
 
@@ -1178,7 +1200,7 @@ function NoteSheet({ visible, onClose, busy, onSend }: { visible: boolean; onClo
       <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
         Goes on the job's notes in Simpro, under your name, with the next send.
       </Txt>
-      <Button title="Queue note" loading={busy} onPress={send} />
+      <Button title="Queue note" loading={busy} onPress={() => { void send(); }} />
     </Sheet>
   );
 }

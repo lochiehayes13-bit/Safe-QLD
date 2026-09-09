@@ -546,11 +546,19 @@ export interface CalendarBlock extends ScheduleEntry {
  * office's own row wins once the sync has it: a booking the office holds
  * at the same place is not drawn twice, and a sent change whose block the
  * office now shows at the destination, or no longer lists, leaves no mark.
+ *
+ * `officeReadAt` is when the office's calendar was last read. A booking
+ * that has gone and is not in a read newer than itself is not on the
+ * office's calendar — the scheduler took it off — and is dropped rather
+ * than drawn for the week the queue keeps it. Without it, a block a
+ * person can no longer see in Simpro stays on their phone and they turn
+ * up to it.
  */
 export function mergePending(
   blocks: readonly ScheduleEntry[],
   pending: readonly PendingScheduleChange[],
   people: readonly SchedulePerson[] = [],
+  officeReadAt?: string,
 ): CalendarBlock[] {
   const nameOf = (id: string) => people.find((p) => p.id === id)?.name;
   const out: CalendarBlock[] = blocks.map((b) => ({ ...b }));
@@ -562,6 +570,8 @@ export function mergePending(
       const samePlace = (b: CalendarBlock) => b.staffId === book.employeeId && b.date === book.date
         && b.startTime === book.start && b.endTime === book.end && (b.jobId ?? '') === book.jobId;
       if (out.some((b) => samePlace(b) && !b.pending)) continue;
+      // Gone, and a read since then does not show it: the office took it off.
+      if (change.state === 'sent' && officeReadAt && officeReadAt > change.createdAt) continue;
       // The same booking queued again after the first was sent — the office
       // took it off and the person put it back — is one block, the newer row.
       const earlier = out.findIndex((b) => samePlace(b) && b.pending === SCHEDULE_BOOK_KIND);

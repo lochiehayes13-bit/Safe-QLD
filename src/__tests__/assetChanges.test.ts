@@ -127,5 +127,7 @@ describe('the words', () => {
     expect(describeChangeState('failed', 'HTTP 422')).toBe('Refused by Simpro: HTTP 422');
     expect(describeChangeState('unknown')).toMatch(/Waiting to send/);
     expect(describeChangeState('taken-back')).toMatch(/before it went/);
+    expect(describeChangeState('forgotten')).toMatch(/the office does not have it/);
+    expect(describeChangeState('forgotten', 'HTTP 502')).toMatch(/HTTP 502/);
   });
 });

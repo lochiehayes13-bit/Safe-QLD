@@ -210,7 +210,11 @@ export function materialLine(input: {
   if (!input.jobId.trim()) return { ok: false, why: 'This job has no Simpro job number, so there is nowhere to put the line.' };
   if (!input.sectionId.trim() || !input.costCenterId.trim()) return { ok: false, why: 'Pick the cost centre the line goes under.' };
   if (!Number.isFinite(qty) || qty <= 0) return { ok: false, why: 'Quantity has to be more than zero.' };
-  if (Math.round(qty * 1000) !== qty * 1000) return { ok: false, why: 'Quantity can have up to three decimal places.' };
+  // Rounded on the decimal the technician typed, not on the binary float:
+  // 16.1 * 1000 is 16100.000000000002, and a metre reading with one decimal
+  // place was being refused for having four.
+  const scaled = Number((qty * 1000).toPrecision(15));
+  if (Math.round(scaled) !== scaled) return { ok: false, why: 'Quantity can have up to three decimal places.' };
   if (input.kind === 'catalog' && !input.catalogId?.trim()) return { ok: false, why: 'Pick a part from the catalogue.' };
   if (!description) return { ok: false, why: input.kind === 'oneOff' ? 'Say what the line is.' : 'Pick a part from the catalogue.' };
   return {

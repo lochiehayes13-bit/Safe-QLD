@@ -13,7 +13,9 @@ import { DevicePicker } from '@/components/DevicePicker';
 import type { CatalogueItem } from '@/db/catalogueRepo';
 import type { Site } from '@/domain/types';
 import { buildCreate } from '@/domain/assetChanges';
-import { customFieldsFor, officeTypeForApp, refreshAssetTypes, tagFor, type OfficeAssetType } from '@/simpro/assetTypes';
+import {
+  NO_RETRY_KEY_WORDS, customFieldsFor, officeTypeForApp, refreshAssetTypes, retryKeyFor, tagFor, type OfficeAssetType,
+} from '@/simpro/assetTypes';
 import { simproConfigFromPrefs } from '@/simpro/config';
 import { flushSoon } from '@/simpro/flushSoon';
 import { loadPrefs } from '@/app-prefs';
@@ -170,7 +172,17 @@ export default function NewAssetScreen() {
 
       let changeId: string | undefined;
       if (toSimpro && simproSite?.externalId && officeType) {
-        const tag = tagFor(asset);
+        // What a retry will recognise this asset by, on the office's own
+        // record: the tag where the type has a tag field to write it into,
+        // the location otherwise. Neither means a retry cannot tell this
+        // asset from a second one, so it is not queued at all.
+        const key = retryKeyFor(officeType, asset);
+        if (!key) {
+          showAlert('Cannot create this one in Simpro', NO_RETRY_KEY_WORDS);
+          router.replace({ pathname: '/assets/[id]', params: { id: asset.id } });
+          return;
+        }
+        const tag = 'tag' in key ? key.tag : undefined;
         const built = buildCreate({
           assetId: asset.id,
           siteExternalId: simproSite.externalId,
@@ -180,7 +192,7 @@ export default function NewAssetScreen() {
           // Typed as a day already; nothing here turns an instant into one.
           startDate: asset.installedDate,
           tag,
-          label: [asset.name, tag].filter(Boolean).join(' '),
+          label: [asset.name, tagFor(asset)].filter(Boolean).join(' '),
         }, { now: nowIso(), changeNo: await nextChangeNo(asset.id) });
         const { change } = await queueAssetChange(built);
         changeId = change.id;

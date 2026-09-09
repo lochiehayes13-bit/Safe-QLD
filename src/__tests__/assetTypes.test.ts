@@ -109,6 +109,32 @@ describe('the office field each value goes under', () => {
   });
 });
 
+describe('a serial the office has its own heading for', () => {
+  const withSerial = { customFields: [
+    { id: 62, name: 'Location', type: 'Text', listItems: [] },
+    { id: 64, name: 'Serial No.', type: 'Text', listItems: [] },
+  ] };
+
+  it('goes under the office\'s heading, not a made-up one', () => {
+    const asset = { serial: 'S-1', locationNote: 'Kitchen', attributes: {} };
+    expect(customFieldsByName(asset, withSerial)).toEqual([
+      { name: 'Location', value: 'Kitchen' },
+      { id: 64, name: 'Serial No.', value: 'S-1' },
+    ]);
+  });
+
+  it('is left off entirely where the office type has no serial field', () => {
+    const noSerial = { customFields: [{ id: 62, name: 'Location', type: 'Text', listItems: [] }] };
+    expect(customFieldsByName({ serial: 'S-1', locationNote: 'Kitchen', attributes: {} }, noSerial))
+      .toEqual([{ name: 'Location', value: 'Kitchen' }]);
+  });
+
+  it('keeps the old heading where no office type is known, for the send to match by name', () => {
+    expect(customFieldsByName({ serial: 'S-1', attributes: {} }))
+      .toEqual([{ name: 'Location', value: '' }, { name: 'Serial Number', value: 'S-1' }]);
+  });
+});
+
 describe('reading the types from the office', () => {
   /** Answers the list and each type's fields on the paths the build verified. */
   function fakeClient(): { client: SimproClient; reads: { path: string; columns?: string }[] } {

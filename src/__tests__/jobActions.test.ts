@@ -113,6 +113,16 @@ describe('a material line', () => {
     expect(why(materialLine({ ...base, kind: 'oneOff', description: 'x', qty: 'two' }))).toMatch(/more than zero/);
     expect(why(materialLine({ ...base, kind: 'oneOff', description: 'x', qty: -1 }))).toMatch(/more than zero/);
     expect(why(materialLine({ ...base, kind: 'oneOff', description: 'x', qty: 1.0001 }))).toMatch(/three decimal/);
+    // Rounded on the decimal typed, not on the float: 16.1 * 1000 is
+    // 16100.000000000002, and a metre reading was being refused for having
+    // four decimal places when it has one.
+    for (const qty of [16.1, 32.2, 32.3, 64.1, 2.01, 8.03, 0.001, 1999.999]) {
+      expect({ qty, why: why(materialLine({ ...base, kind: 'oneOff', description: 'x', qty })) }).toEqual({ qty, why: 'ok' });
+    }
+    for (const qty of [0.0005, 2.3456, 0.12345]) {
+      expect({ qty, why: why(materialLine({ ...base, kind: 'oneOff', description: 'x', qty })) })
+        .toEqual({ qty, why: 'Quantity can have up to three decimal places.' });
+    }
     expect(why(materialLine({ ...base, costCenterId: '', kind: 'oneOff', description: 'x', qty: 1 }))).toMatch(/cost centre/);
     expect(why(materialLine({ ...base, jobId: '', kind: 'oneOff', description: 'x', qty: 1 }))).toMatch(/job number/);
   });

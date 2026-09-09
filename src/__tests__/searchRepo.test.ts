@@ -148,6 +148,19 @@ describe('words, codes, phones and emails', () => {
     expect(await searchEverything('f')).toEqual([]);
     expect(await searchEverything('   ')).toEqual([]);
   });
+
+  it('lists a kind asked for by name even with no words left to match on', async () => {
+    // "show me the open purchase orders" reduces to no terms and one kind.
+    // The floor above is about two characters of a name; this is a request
+    // for a list, and answering it with nothing was the screen promising
+    // one thing and showing another.
+    await seedOffice();
+    const orders = await searchEverything('', { kinds: ['order'] });
+    expect(orders.length).toBeGreaterThan(0);
+    expect(orders.every((h) => h.kind === 'order')).toBe(true);
+    // And it is still a floor for anyone who did not name a kind.
+    expect(await searchEverything('')).toEqual([]);
+  });
 });
 
 describe('how it reads', () => {

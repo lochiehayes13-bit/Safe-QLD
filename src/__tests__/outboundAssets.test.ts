@@ -167,6 +167,39 @@ describe('creating an asset', () => {
     expect(await getAsset(asset.id)).toMatchObject({ externalId: '8002' });
   });
 
+  it('links by location and type where the office type has no tag field, so a retry cannot duplicate', async () => {
+    // A fire door type with Location and no Asset # field. The payload still
+    // carries the phone's own code, which is written nowhere on the record,
+    // so keying on it would never match and every retry made another door.
+    const { asset, item } = await create({}, {
+      assetTypeExternalId: '11',
+      fields: [{ id: 71, name: 'Location', value: 'Level 1 Stair A' }],
+      tag: 'SQ-FD-0000001',
+    });
+    let posted = false;
+    const { client, sent } = fakeClient({
+      list: () => (posted
+        ? [{ ID: 8100, AssetType: { ID: 11 }, CustomFields: [{ CustomField: { ID: 71, Name: 'Location' }, Value: 'Level 1 Stair A' }] }]
+        : []),
+      answer: () => { posted = true; return undefined; },
+    });
+    expect(await sendAssetChange(item, deps(client), LATER)).toEqual({ status: 'sent' });
+    expect(sent).toHaveLength(1);
+    // The second run finds the door it made rather than posting again.
+    expect(await sendAssetChange(item, deps(client), LATER)).toEqual({ status: 'done' });
+    expect(sent).toHaveLength(1);
+    expect(await getAsset(asset.id)).toMatchObject({ externalId: '8100' });
+  });
+
+  it('refuses a create with nothing a retry could recognise it by', async () => {
+    const { item } = await create({}, { fields: [{ id: 71, name: 'FRL Level', value: '-/60/30' }], tag: undefined });
+    const { client, sent } = fakeClient();
+    expect(await sendAssetChange(item, deps(client), LATER)).toMatchObject({
+      status: 'abandon', reason: expect.stringContaining('no tag field'),
+    });
+    expect(sent).toEqual([]);
+  });
+
   it('is done for an asset gone from the phone, or already linked', async () => {
     const { asset, item } = await create({ externalId: '7', externalSource: 'simpro' });
     const { client, sent, reads } = fakeClient();

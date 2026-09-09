@@ -243,7 +243,7 @@ export default function ScheduleScreen() {
   }, [pending, now, tick]);
 
   const activePeople = useMemo<SchedulePerson[]>(() => people.map((p) => ({ id: p.id, name: p.name })), [people]);
-  const calendar = useMemo(() => mergePending(blocks, pending, activePeople), [blocks, pending, activePeople]);
+  const calendar = useMemo(() => mergePending(blocks, pending, activePeople, asOf ?? undefined), [blocks, pending, activePeople, asOf]);
   const myBlocks = useMemo(() => calendar.filter((b) => employeeId && b.staffId === employeeId), [calendar, employeeId]);
   const visible = onlyMe && employeeId ? myBlocks : calendar;
   const week = useMemo(() => weekOf(day), [day]);

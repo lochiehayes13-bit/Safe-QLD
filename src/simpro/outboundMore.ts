@@ -224,20 +224,44 @@ interface HeldLine {
 const MATERIAL_GUARD_MS = 60 * 60 * 1000;
 
 /**
+ * Lines this run has posted, as `path#id`.
+ *
+ * The guard below asks "did an earlier try of this row already land?" and
+ * reads the answer off the office's list. A line this run posted a moment
+ * ago answers yes to that question wrongly: two separate lines for the same
+ * part — one added in the morning, one after lunch, both waiting for signal
+ * — flush together, and the second reads the first as its own earlier try
+ * and is closed without being sent, so the job is billed one battery
+ * instead of two. A line this run made itself is therefore not evidence,
+ * and is skipped.
+ *
+ * Not kept across a restart, on purpose: a row whose reply was never read
+ * has no id here either way, which is the case the guard exists for.
+ */
+const postedLines = new Set<string>();
+
+/**
  * Whether the cost centre already holds this line from the last hour.
  *
  * The same part (or the same words) with the same quantity, modified in the
- * hour before now, is taken as this line having landed on an earlier try.
- * The limit of that: a technician who adds two of the same part an hour
- * apart on purpose gets both; one who adds them twenty minutes apart gets
- * one, and sees the second closed as already there on Waiting to send. A
- * line the office added itself in that hour reads the same way. A held line
- * with no DateModified cannot be placed in time and does not count, so a
- * list that will not give the column posts rather than skips.
+ * hour before the send, is taken as this line having landed on an earlier
+ * try. The limit of that: a technician who adds two of the same part an
+ * hour apart, each sent while online, gets both; one who adds them twenty
+ * minutes apart gets one, and sees the second closed as already there on
+ * Waiting to send. A line the office added itself in that hour reads the
+ * same way. A held line with no DateModified cannot be placed in time and
+ * does not count, so a list that will not give the column posts rather than
+ * skips. A line this run posted is not counted at all — see `postedLines`.
  */
-export function materialAlreadyHeld(held: readonly HeldLine[], payload: JobMaterialPayload, now: number): boolean {
+export function materialAlreadyHeld(
+  held: readonly HeldLine[],
+  payload: JobMaterialPayload,
+  now: number,
+  path = '',
+): boolean {
   const description = payload.description.trim().toLowerCase();
   return held.some((line) => {
+    if (line.ID !== undefined && line.ID !== null && postedLines.has(`${path}#${String(line.ID)}`)) return false;
     const qty = Number(line.Total?.Qty);
     if (!Number.isFinite(qty) || qty !== payload.qty) return false;
     const modified = typeof line.DateModified === 'string' ? Date.parse(line.DateModified) : NaN;
@@ -270,14 +294,16 @@ async function sendJobMaterial(payload: JobMaterialPayload, client: SimproClient
     // this card is not written for. The columns are the ones the guard reads.
     const columns = kind === 'catalog' ? 'ID,Catalog,Total,DateModified' : 'ID,Description,Total,DateModified';
     const { data } = await client.request<HeldLine[] | undefined>('GET', path, { query: { columns, pageSize: 250 } });
-    if (materialAlreadyHeld(Array.isArray(data) ? data : [], payload, Date.now())) return { status: 'done' };
+    if (materialAlreadyHeld(Array.isArray(data) ? data : [], payload, Date.now(), path)) return { status: 'done' };
   } catch {
     // Read failed: post, for the reason given above.
   }
   const body = kind === 'catalog'
     ? { Catalog: Number(payload.catalogId), Qty: payload.qty }
     : { Description: payload.description.trim(), Qty: payload.qty };
-  await client.request('POST', path, { body });
+  const reply = await client.request<{ ID?: unknown } | undefined>('POST', path, { body });
+  const id = reply.data && typeof reply.data === 'object' ? (reply.data as { ID?: unknown }).ID : undefined;
+  if (id !== undefined && id !== null) postedLines.add(`${path}#${String(id)}`);
   return { status: 'sent' };
 }
 

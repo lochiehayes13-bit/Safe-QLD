@@ -88,7 +88,12 @@ function hydrate(r: Row): AssetChangeRow {
  *
  * The queue row outranks this one while it exists, because the queue is
  * what moves. A change with no queue row and no sentAt was forgotten from
- * Waiting to send, and reads as refused with the reason this row kept.
+ * Waiting to send: an undo deletes this row along with the queue's, so a
+ * row that is still here was never taken back, whatever it says about
+ * itself. It reads as dropped — with the refusal where one was recorded,
+ * and without one where the send failed before it ever wrote a request,
+ * which is most of the ways a send fails. Saying "taken back" there told a
+ * technician they had cancelled something they had not.
  */
 export function stateOf(
   row: Pick<AssetChangeRow, 'sentAt' | 'error' | 'notBefore'>,
@@ -103,7 +108,7 @@ export function stateOf(
     case 'sent': return 'sent';
     case 'unknown': return 'unknown';
     case 'failed': return 'failed';
-    default: return row.error ? 'failed' : 'taken-back';
+    default: return row.error ? 'failed' : 'forgotten';
   }
 }
 

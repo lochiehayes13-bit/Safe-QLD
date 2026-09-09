@@ -369,7 +369,7 @@ export function describeAssetChange(kind: string, payload: unknown): string {
 }
 
 /** The state of a change in a word a person can act on. */
-export type AssetChangeState = 'undoable' | 'queued' | 'sent' | 'failed' | 'unknown' | 'taken-back';
+export type AssetChangeState = 'undoable' | 'queued' | 'sent' | 'failed' | 'unknown' | 'forgotten' | 'taken-back';
 
 export function describeChangeState(state: AssetChangeState, error?: string): string {
   switch (state) {
@@ -378,6 +378,7 @@ export function describeChangeState(state: AssetChangeState, error?: string): st
     case 'sent': return 'Sent to the office';
     case 'failed': return `Refused by Simpro${error ? `: ${error}` : ''}`;
     case 'unknown': return 'Sent, and no reply came — see Waiting to send';
+    case 'forgotten': return `Dropped from Waiting to send${error ? `: ${error}` : ''} — the office does not have it`;
     case 'taken-back': return 'Taken back before it went';
   }
 }

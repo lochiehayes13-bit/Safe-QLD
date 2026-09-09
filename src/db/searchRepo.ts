@@ -336,14 +336,17 @@ export async function searchKind(kind: SearchKind, q: ParsedQuery, limit: number
  * answer dressed as a helpful one. Anything else asks every kind that can
  * hold it, each capped at `limitPerKind`, and hands the lot to `rankHits`.
  * Under two characters returns nothing rather than every row that has an
- * "a" in it.
+ * "a" in it — unless the caller named the kinds, which is a request for
+ * those kinds' most recent records and not a search for two characters:
+ * "the open purchase orders" is a phrase whose words all belong to the
+ * sentence and none to a name, and the answer to it is the orders.
  */
 export async function searchEverything(
   query: string,
   options: { limitPerKind?: number; kinds?: readonly SearchKind[] } = {},
 ): Promise<SearchHit[]> {
   const q = parseQuery(query);
-  if (q.text.length < 2) return [];
+  if (q.text.length < 2 && !options.kinds?.length) return [];
   const limit = options.limitPerKind ?? 8;
   const kinds = q.hint ? [q.hint] : (options.kinds ?? KIND_ORDER);
   const perKind = await Promise.all(kinds.map((k) => searchKind(k, q, limit)));
