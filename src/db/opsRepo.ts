@@ -430,6 +430,24 @@ export async function jobCount(): Promise<number> {
  * inside the three hundred — and missed a job scheduled for today that was
  * issued last year, which is most of a maintenance contract.
  */
+/**
+ * Whole job rows for a set of the office's job numbers.
+ *
+ * The summary above drops the description and the coordinates, and the day's
+ * run needs the coordinates — it orders stops by how far apart they are. Named
+ * apart from the summary rather than widening it, because a screen that only
+ * lists jobs should not be reading every column of five hundred rows to do it.
+ */
+export async function jobsByExternalIds(externalIds: readonly string[]): Promise<JobRecord[]> {
+  const wanted = [...new Set(externalIds.filter(Boolean))];
+  if (!wanted.length) return [];
+  const db = await getDb();
+  return db.getAllAsync<JobRecord>(
+    `SELECT * FROM job WHERE externalId IN (${wanted.map(() => '?').join(',')})`,
+    ...wanted,
+  );
+}
+
 export async function jobSummariesByExternalIds(externalIds: readonly string[]): Promise<JobSummary[]> {
   const wanted = [...new Set(externalIds.filter(Boolean))];
   if (!wanted.length) return [];

@@ -5,10 +5,14 @@ import { Linking, Platform, View } from 'react-native';
 import { Stack, router } from 'expo-router';
 import * as Location from 'expo-location';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { listJobs, type JobRecord } from '@/db/opsRepo';
-import { formatKm, planRoute, type RoutePoint } from '@/domain/routing';
+import { jobsByExternalIds, listJobs, type JobRecord } from '@/db/opsRepo';
+import { listScheduleFor } from '@/db/scheduleRepo';
+import { whoseSchedule } from '@/domain/myDay';
+import { loadPrefs } from '@/app-prefs';
+import { formatKm, planRoute, runCandidates, type RoutePoint } from '@/domain/routing';
 import { useTheme } from '@/theme';
 import { showAlert } from '@/components/alert';
+import { describeLoadFailure } from '@/domain/loadFailure';
 import {
   Banner, Button, Card, Chip, EmptyState, H2, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
@@ -52,9 +56,70 @@ export default function RouteScreen() {
   const [locating, setLocating] = useState(false);
   const [locationNote, setLocationNote] = useState<string | null>(null);
   const [scope, setScope] = useState<'today' | 'open'>('today');
+  /*
+   * Whose day this is, and whether the phone knows.
+   *
+   * "Today's run" used to be every job in the company scheduled today, read
+   * off the newest five hundred job rows and ordered by how far each was from
+   * where the technician is standing. On a company with four technicians that
+   * is three other people's work, presented as yours, sorted so convincingly
+   * that there is nothing on the screen to suggest otherwise. It also missed
+   * anything outside those five hundred rows, which on this book is most of
+   * the contract services.
+   *
+   * The office's own schedule already says who is on what. Where the phone
+   * knows who it belongs to, that is what the run is built from; where it does
+   * not, the old behaviour is kept and the screen says out loud that it is
+   * showing everybody's.
+   */
+  const [mine, setMine] = useState<{ label: string } | null>(null);
+  const [everyones, setEveryones] = useState(false);
+  // A read that threw. An empty run and a run that could not be read are
+  // different things and only one of them means there is no work.
+  const [failed, setFailed] = useState<string | null>(null);
+  /** The ids the office has this person on today. Empty where the phone does not know who it is. */
+  const [bookedToday, setBookedToday] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
-    setJobs(await listJobs({ limit: 500 }));
+    setFailed(null);
+    try {
+      const prefs = await loadPrefs();
+      const who = whoseSchedule(prefs);
+      const day = qldIsoDay(nowIso()) ?? '';
+      if (!who || !day) {
+        setMine(null);
+        setEveryones(true);
+        setBookedToday(new Set());
+        setJobs(await listJobs({ limit: 500 }));
+        return;
+      }
+      const blocks = await listScheduleFor({
+        staffId: who.by === 'id' ? who.staffId : undefined,
+        staffName: who.by === 'name' ? who.staffName : undefined,
+        from: day,
+        to: day,
+      });
+      const booked = await jobsByExternalIds(blocks.map((b) => b.jobId).filter((id): id is string => !!id));
+      /*
+       * Everything still open is a different question from what is booked
+       * today, so the other tab keeps reading the job list. Both are loaded
+       * here because switching tabs should not be a second wait.
+       */
+      const open = await listJobs({ limit: 500 });
+      const byId = new Map(open.map((j) => [j.id, j]));
+      for (const j of booked) byId.set(j.id, j);
+      /*
+       * Set together, at the end. A screen that has taken the bookings but not
+       * the jobs shows an empty run and says the office has you on nothing,
+       * which is a lie told confidently.
+       */
+      setJobs([...byId.values()]);
+      setBookedToday(new Set(booked.map((j) => j.id)));
+      setMine({ label: who.label });
+      setEveryones(false);
+    } catch (e) {
+      setFailed(describeLoadFailure(e, "today's run"));
+    }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
@@ -91,12 +156,8 @@ export default function RouteScreen() {
   const today = qldIsoDay(nowIso()) ?? '';
 
   const candidates = useMemo(
-    () => jobs.filter((j) => {
-      if (j.status === 'complete') return false;
-      if (scope === 'open') return true;
-      return qldIsoDay(j.scheduledFor ?? undefined) === today;
-    }),
-    [jobs, scope, today],
+    () => runCandidates(jobs, { scope, bookedToday, everyones, today, dayOf: qldIsoDay }),
+    [jobs, scope, today, bookedToday, everyones],
   );
 
   const route = useMemo(() => {
@@ -147,6 +208,30 @@ export default function RouteScreen() {
           options={[{ value: 'here', label: 'From here' }, { value: 'first', label: 'From first job' }]}
         />
 
+        {failed ? (
+          <Banner
+            tone="fail"
+            title="The run could not be read"
+            body={`${failed}\n\nWhat is below is not your day — it is nothing, because nothing could be read. Do not take the empty list as no work.`}
+          />
+        ) : null}
+
+        {scope === 'today' && everyones && !failed ? (
+          <Banner
+            tone="warn"
+            title="This is everybody's day, not yours"
+            body={
+              'This phone does not know whose it is, so the run is every job in the company scheduled today. '
+              + 'Pick yourself under Who am I and it becomes the jobs the office has you booked on.'
+            }
+          />
+        ) : null}
+        {scope === 'today' && mine ? (
+          <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+            The jobs the office has {mine.label} booked on today.
+          </Txt>
+        ) : null}
+
         {locationNote ? <Banner tone="warn" title="Ordering without a position" body={locationNote} /> : null}
 
         {start === 'here' && !here && !locationNote ? (
@@ -182,10 +267,13 @@ export default function RouteScreen() {
         {!route.stops.length && !route.unplaceable.length ? (
           <EmptyState
           icon="map-marker-path"
-            title={scope === 'today' ? 'Nothing scheduled today' : 'Nothing open'}
+            title={scope === 'today' ? (mine ? 'Nothing booked for you today' : 'Nothing scheduled today') : 'Nothing open'}
             body={
               scope === 'today'
-                ? 'Switch to all open work to plan a run across everything outstanding.'
+                ? mine
+                  ? 'The office has not booked you on anything today. Switch to all open work to plan a run across '
+                    + 'everything outstanding, or book yourself on from the calendar.'
+                  : 'Switch to all open work to plan a run across everything outstanding.'
                 : 'No jobs are outstanding. Pull from Simpro in Settings if you expect some.'
             }
           />

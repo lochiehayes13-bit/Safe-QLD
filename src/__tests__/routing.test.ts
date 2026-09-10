@@ -1,6 +1,5 @@
 import {
-  distanceKm, formatKm, hasPosition, planRoute, type RoutePoint,
-} from '@/domain/routing';
+  distanceKm, formatKm, hasPosition, planRoute, type RoutePoint, runCandidates} from '@/domain/routing';
 
 /**
  * Route ordering.
@@ -158,5 +157,79 @@ describe('formatting', () => {
   it('refuses to render a nonsense distance as a number', () => {
     expect(formatKm(Number.NaN)).toBe('—');
     expect(formatKm(-1)).toBe('—');
+  });
+});
+
+/**
+ * Whose day the run is.
+ *
+ * It used to be everybody's. "Today's run" filtered the newest five hundred
+ * job rows to those scheduled today and ordered them by distance from the
+ * technician — so on a company with four technicians it presented three other
+ * people's work as yours, sorted convincingly enough that nothing on the
+ * screen suggested otherwise.
+ */
+describe("whose jobs are today's run", () => {
+  const dayOf = (iso: string | undefined) => (iso ? iso.slice(0, 10) : undefined);
+  const TODAY = '2026-09-10';
+  const job = (id: string, over: Partial<{ status: string; scheduledFor: string | null }> = {}) => ({
+    id, status: 'scheduled', scheduledFor: `${TODAY}T00:00:00.000Z`, ...over,
+  });
+
+  it('takes only the jobs the office has this person booked on', () => {
+    const jobs = [job('a'), job('b'), job('c')];
+    const out = runCandidates(jobs, {
+      scope: 'today', bookedToday: new Set(['b']), everyones: false, today: TODAY, dayOf,
+    });
+    expect(out.map((j) => j.id)).toEqual(['b']);
+  });
+
+  it('shows nothing rather than everything when this person is booked on nothing', () => {
+    // The failure that matters: an empty booking list must not fall back to
+    // the whole company's day, which is the bug this replaced.
+    const jobs = [job('a'), job('b')];
+    const out = runCandidates(jobs, {
+      scope: 'today', bookedToday: new Set(), everyones: false, today: TODAY, dayOf,
+    });
+    expect(out).toEqual([]);
+  });
+
+  it('falls back to the job\'s own date only where the phone does not know whose it is', () => {
+    const jobs = [job('a'), job('b', { scheduledFor: '2026-09-11T00:00:00.000Z' })];
+    const out = runCandidates(jobs, {
+      scope: 'today', bookedToday: new Set(), everyones: true, today: TODAY, dayOf,
+    });
+    expect(out.map((j) => j.id)).toEqual(['a']);
+  });
+
+  it('never puts a finished job on a run', () => {
+    const jobs = [job('a', { status: 'complete' }), job('b')];
+    for (const everyones of [true, false]) {
+      const out = runCandidates(jobs, {
+        scope: 'today', bookedToday: new Set(['a', 'b']), everyones, today: TODAY, dayOf,
+      });
+      expect(out.map((j) => j.id)).toEqual(['b']);
+    }
+  });
+
+  it('takes everything still open on the other tab, booked or not', () => {
+    const jobs = [job('a', { scheduledFor: null }), job('b'), job('c', { status: 'complete' })];
+    const out = runCandidates(jobs, {
+      scope: 'open', bookedToday: new Set(), everyones: false, today: TODAY, dayOf,
+    });
+    expect(out.map((j) => j.id)).toEqual(['a', 'b']);
+  });
+
+  it('reads the day in Queensland time, not off the front of the instant', () => {
+    /*
+     * A block booked at 7am here is 21:00 the day before in UTC. Slicing the
+     * instant would file half the winter's work against yesterday, which is
+     * the whole reason dayOf is passed in rather than assumed.
+     */
+    const qld = (iso: string | undefined) => (iso === '2026-09-09T21:00:00.000Z' ? TODAY : iso?.slice(0, 10));
+    const out = runCandidates([job('a', { scheduledFor: '2026-09-09T21:00:00.000Z' })], {
+      scope: 'today', bookedToday: new Set(), everyones: true, today: TODAY, dayOf: qld,
+    });
+    expect(out.map((j) => j.id)).toEqual(['a']);
   });
 });

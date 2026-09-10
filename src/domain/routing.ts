@@ -156,3 +156,42 @@ export function formatKm(km: number): string {
   if (km < 1) return `${Math.round(km * 1000)} m`;
   return `${km < 10 ? km.toFixed(1) : Math.round(km)} km`;
 }
+
+/**
+ * Which jobs are today's run, and whose day it is.
+ *
+ * "Today's run" used to be every job in the company scheduled today, read off
+ * the newest five hundred job rows and ordered by how far each one was from
+ * where the technician was standing. On a company with four technicians that
+ * is three other people's work presented as yours, sorted so convincingly that
+ * nothing on the screen suggests otherwise — and it missed anything outside
+ * those five hundred rows, which on a book of this size is most of the
+ * contract services.
+ *
+ * The office's own schedule already says who is on what, so where the phone
+ * knows whose it is, that is what the run is built from. Where it does not,
+ * the old behaviour is kept and the screen is made to say so, because a run
+ * that is quietly everybody's is worse than one that admits it.
+ */
+export function runCandidates<T extends { id: string; status: string; scheduledFor?: string | null }>(
+  jobs: readonly T[],
+  opts: {
+    scope: 'today' | 'open';
+    /** Job ids the office has this person booked on today. */
+    bookedToday: ReadonlySet<string>;
+    /** True where the phone does not know who it belongs to. */
+    everyones: boolean;
+    /** The Queensland calendar day. */
+    today: string;
+    /** Reads a job's scheduled day, in Queensland time. */
+    dayOf: (iso: string | undefined) => string | undefined;
+  },
+): T[] {
+  return jobs.filter((j) => {
+    if (j.status === 'complete') return false;
+    if (opts.scope === 'open') return true;
+    // Booked on it by the office, whenever the phone knows whose day this is.
+    if (!opts.everyones) return opts.bookedToday.has(j.id);
+    return opts.dayOf(j.scheduledFor ?? undefined) === opts.today;
+  });
+}
