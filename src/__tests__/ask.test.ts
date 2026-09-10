@@ -1,4 +1,4 @@
-import { readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { ANSWER_THRESHOLD, CALCULATORS, COVERAGE, KIND_LABEL, ask, explainQuery } from '@/domain/ask';
 import { DEFECT_LIBRARY } from '@/seed/defectLibrary';
@@ -211,11 +211,41 @@ describe('every answer the ask bar gives has a screen behind it', () => {
     expect(routes).toContain('/tools/voltdrop');
   });
 
+  const matches = (route: string) => routes.some((r) => new RegExp(
+    `^${r.replace(/\[\.\.\.[^\]]+\]/g, '.+').replace(/\[[^\]]+\]/g, '[^/]+')}$`,
+  ).test(route));
+
   it('has no answer pointing at a route with no file', () => {
-    const matches = (route: string) => routes.some((r) => new RegExp(
-      `^${r.replace(/\[\.\.\.[^\]]+\]/g, '.+').replace(/\[[^\]]+\]/g, '[^/]+')}$`,
-    ).test(route));
     const dead = CALCULATORS.filter((topic) => !matches(topic.route)).map((topic) => `${topic.title} → ${topic.route}`);
+    expect(dead).toEqual([]);
+  });
+
+  it('checks the routes the calculators list does not hold, too', () => {
+    /*
+     * CALCULATORS is one of six places in ask.ts that name a route. Four more
+     * are written inline in the answer builders — the defect library, the
+     * routines, the end-of-line values, the addressing — and one is built from
+     * a document id. Walking only the calculators and calling it "every
+     * answer" is how the two dead routes this check was written for could have
+     * been joined by a third without anybody hearing about it.
+     *
+     * So the source is read for every literal route it names, whatever list it
+     * sits in. The dynamic one is exercised with a stand-in id, since what is
+     * being asked is whether a file answers to that shape.
+     */
+    const source = readFileSync(join(__dirname, '..', 'domain', 'ask.ts'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+
+    const literals = [...source.matchAll(/route:\s*'(\/[^']*)'/g)].map((m) => m[1] ?? '');
+    const templated = [...source.matchAll(/route:\s*`(\/[^`]*)`/g)]
+      .map((m) => (m[1] ?? '').replace(/\$\{[^}]*\}/g, 'stand-in'));
+
+    // The matcher has to be seeing something, or this passes over nothing.
+    expect(literals.length).toBeGreaterThanOrEqual(10);
+    expect(templated.length).toBeGreaterThanOrEqual(1);
+
+    const dead = [...literals, ...templated].filter((r) => !matches(r));
     expect(dead).toEqual([]);
   });
 });

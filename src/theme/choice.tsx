@@ -32,6 +32,23 @@ export function readThemeChoice(value: unknown): ThemeChoice {
   return value === 'dark' || value === 'light' ? value : 'system';
 }
 
+/**
+ * The mode to draw in, given the stored choice and what the phone says.
+ *
+ * Pulled out of the provider so the one rule that decides every colour in the
+ * app can be checked without mounting anything. `undefined` is the window
+ * before preferences have been read: dark, deliberately.
+ */
+export function resolveMode(
+  choice: ThemeChoice | undefined,
+  /* Anything the platform might hand back, including its 'unspecified'. */
+  scheme: string | null | undefined,
+): 'dark' | 'light' {
+  if (choice === undefined) return 'dark';
+  if (choice === 'system') return scheme === 'light' ? 'light' : 'dark';
+  return choice;
+}
+
 interface ChoiceContext {
   choice: ThemeChoice;
   /** The mode to actually draw in, once the phone has been consulted. */
@@ -52,13 +69,25 @@ const Ctx = createContext<ChoiceContext>({
 
 export function ThemeChoiceProvider({ children }: { children: React.ReactNode }): React.ReactElement {
   const scheme = useColorScheme();
-  const [choice, setLocal] = useState<ThemeChoice>('system');
+  /*
+   * Undefined until the stored choice is read, and dark while it is unknown.
+   *
+   * Starting at 'system' meant asking the phone, and on a handset set to light
+   * that draws the first frames white — including for somebody who locked it
+   * to dark, which is the one case the lock exists for and the one device it
+   * matters on. It also lands white immediately after a splash screen that is
+   * this app's own near-black, which is the most visible flash the app can
+   * produce.
+   *
+   * So the unknown state is dark. That is continuous with the splash, it is
+   * this app's own default, and the one person it briefly surprises — someone
+   * who locked light on a light phone — gets a dark frame that resolves rather
+   * than the reverse.
+   */
+  const [choice, setLocal] = useState<ThemeChoice | undefined>(undefined);
 
   useEffect(() => {
-    // Preferences are on disk, so the first frame is drawn on the default and
-    // corrected a moment later. Dark-to-dark is invisible; light is the one
-    // somebody chose and it arrives fast enough not to read as a flash.
-    void loadPrefs().then((p) => setLocal(readThemeChoice(p.theme))).catch(() => {});
+    void loadPrefs().then((p) => setLocal(readThemeChoice(p.theme))).catch(() => setLocal('system'));
   }, []);
 
   const setChoice = useCallback((next: ThemeChoice) => {
@@ -74,8 +103,10 @@ export function ThemeChoiceProvider({ children }: { children: React.ReactNode })
   }, []);
 
   const value = useMemo<ChoiceContext>(() => ({
-    choice,
-    mode: choice === 'system' ? (scheme === 'light' ? 'light' : 'dark') : choice,
+    // What the settings screen shows while the read is in flight is the
+    // default, not a guess at what is stored.
+    choice: choice ?? 'system',
+    mode: resolveMode(choice, scheme),
     setChoice,
   }), [choice, scheme, setChoice]);
 
