@@ -15,6 +15,7 @@ import {
 import { groupScheduleByDay, scheduleWindow, whoseSchedule, type MyDayRow } from '@/domain/myDay';
 import { useTheme, type Theme } from '@/theme';
 import { Banner, Card, IconPlate, Rowed, Screen, SectionHeader, Txt } from '@/components/ui';
+import { PhotoDrop } from '@/components/PhotoDrop';
 import { describeLoadFailure } from '@/domain/loadFailure';
 import { Bounce, Reveal, animateNextLayout } from '@/components/motion';
 import { UpdateBanner } from '@/components/UpdateBanner';
@@ -101,6 +102,7 @@ export default function HomeScreen() {
   return (
     <Screen>
       <Hero name={prefs?.technicianName ?? ''} />
+      <PhotoDrop technicianName={prefs?.technicianName ?? ''} />
       <AskBar />
       <FindRow />
 
@@ -361,7 +363,7 @@ function NamePrompt() {
           <View style={{ flex: 1 }}>
             <Txt weight="800">Put your name on this phone</Txt>
             <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-              Timesheets, questions and leave requests go out under it. One field, once.
+              Timesheets, questions and photos for the website go out under it. One field, once.
             </Txt>
           </View>
           <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
