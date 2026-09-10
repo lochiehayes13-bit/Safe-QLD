@@ -39,9 +39,10 @@ import {
   checkForUpdate, clearToken as clearGhToken, hasToken as hasGhToken, storeToken as storeGhToken, useUpdateCheck,
 } from '@/update/check';
 import { useTheme } from '@/theme';
-import { Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
+import { Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
 import { showAlert } from '@/components/alert';
 import { describeLoadFailure } from '@/domain/loadFailure';
+import { THEME_CHOICE_LABEL, useThemeChoice } from '@/theme/choice';
 
 
 export default function SettingsScreen() {
@@ -374,6 +375,7 @@ export default function SettingsScreen() {
   };
 
   const mode = readMode(prefs.appMode);
+  const themeChoice = useThemeChoice();
 
   return (
     <Screen>
@@ -390,6 +392,33 @@ export default function SettingsScreen() {
         {mode.assumed ? (
           <Banner tone="warn" title="Mode not recognised" body={mode.assumed} />
         ) : null}
+      </Card>
+
+      {/*
+        * Locking the colours.
+        *
+        * The app is built dark-first — the rooms it is used in are switch
+        * rooms, risers and basement carparks — and it followed the phone. On a
+        * handset that switches to light at sunrise that means the app turns
+        * white at exactly the hour somebody walks into the first plant room of
+        * the day, and back to dark on the drive home when it does not matter.
+        */}
+      <Card>
+        <Label>Colours</Label>
+        <Rowed gap={2} wrap style={{ marginTop: t.space(2) }}>
+          {(['system', 'dark', 'light'] as const).map((c) => (
+            <Chip
+              key={c}
+              label={THEME_CHOICE_LABEL[c]}
+              selected={themeChoice.choice === c}
+              onPress={() => themeChoice.setChoice(c)}
+            />
+          ))}
+        </Rowed>
+        <Txt size="sm" tone="muted" style={{ marginTop: t.space(2), lineHeight: 19 }}>
+          This app is meant to be read in a dark switch room. Lock it if your phone keeps turning it white at
+          sunrise.
+        </Txt>
       </Card>
 
       <H2>You</H2>

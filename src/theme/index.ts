@@ -5,7 +5,8 @@
  * riser cupboards at 2am, and glary rooftops at midday. That means high
  * contrast, large hit targets (techs wear gloves), and a dark default.
  */
-import { Platform, useColorScheme } from 'react-native';
+import { Platform } from 'react-native';
+import { useThemeChoice } from './choice';
 
 import { brand } from './brand';
 
@@ -259,7 +260,12 @@ export const lightTheme: Theme = {
   },
 };
 
+/**
+ * The theme to draw in.
+ *
+ * The phone's own setting, unless a technician has locked it. See
+ * ./choice for why locking it matters on this app in particular.
+ */
 export function useTheme(): Theme {
-  const scheme = useColorScheme();
-  return scheme === 'light' ? lightTheme : darkTheme;
+  return useThemeChoice().mode === 'light' ? lightTheme : darkTheme;
 }

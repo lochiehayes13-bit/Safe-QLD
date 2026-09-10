@@ -13,6 +13,7 @@ import { getDb } from '@/db';
 import { seedReferenceData } from '@/db/assetRepo';
 import { startCatalogueSeed } from '@/seed/catalogueSeed';
 import { setFontsReady, useTheme } from '@/theme';
+import { ThemeChoiceProvider } from '@/theme/choice';
 import { STARTUP_PATIENCE_MS, startupStalled } from '@/domain/startup';
 import { Banner, Txt } from '@/components/ui';
 
@@ -38,10 +39,27 @@ import { FirstRunGate } from '@/components/FirstRunGate';
 /**
  * Root layout.
  *
+ * Everything below draws in a theme, and the theme is a choice a technician
+ * can lock — so the provider that holds that choice has to be outside all of
+ * it, including the startup screens. See `src/theme/choice` for why an app
+ * used in switch rooms and basement carparks needs to be told rather than
+ * asking the operating system.
+ */
+export default function RootLayout() {
+  return (
+    <ThemeChoiceProvider>
+      <RootShell />
+    </ThemeChoiceProvider>
+  );
+}
+
+/**
+ * The app itself.
+ *
  * The database is opened and migrated before any screen renders, so screens can
  * assume a ready schema instead of each guarding for it.
  */
-export default function RootLayout() {
+function RootShell() {
   const t = useTheme();
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);

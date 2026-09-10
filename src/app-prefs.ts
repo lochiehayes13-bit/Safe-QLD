@@ -121,6 +121,17 @@ export interface Prefs {
   attendanceNormalMinutes: number;
   attendanceAfterHoursCents: number;
   attendanceAfterHoursMinutes: number;
+  /**
+   * Light, dark, or whatever the phone is set to.
+   *
+   * The app is built dark-first — the rooms it is used in are switch rooms,
+   * risers and carparks — and followed the operating system, which on a phone
+   * that switches to light at sunrise means the app goes light at exactly the
+   * hour a technician walks into the first plant room of the day. Locking it
+   * is one setting, and 'system' stays the default because most people never
+   * think about this and the operating system is a reasonable guess.
+   */
+  theme: 'system' | 'dark' | 'light';
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -165,6 +176,7 @@ export const DEFAULT_PREFS: Prefs = {
   attendanceNormalMinutes: 120,
   attendanceAfterHoursCents: 0,
   attendanceAfterHoursMinutes: 180,
+  theme: 'system',
 };
 
 export async function loadPrefs(): Promise<Prefs> {
