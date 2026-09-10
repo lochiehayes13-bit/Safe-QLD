@@ -19,6 +19,7 @@ import {
   Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { useRecordPatch } from '@/hooks/useRecordPatch';
 import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { showAlert } from '@/components/alert';
 
@@ -57,15 +58,15 @@ export default function BaselineScreen() {
   useEffect(() => { void load(); }, [load]);
 
   // Persist on change. The form is small enough that a write per edit is
-  // cheaper than the risk of losing a section.
-  const update = useCallback((patch: Partial<BaselineData>) => {
-    setB((prev) => {
-      if (!prev) return prev;
-      const next = { ...prev, ...patch };
-      void saveBaseline(next);
-      return next;
-    });
-  }, []);
+  // cheaper than the risk of losing a section — and useRecordPatch is what
+  // makes sure the write actually happened.
+  const update = useRecordPatch<BaselineData>({
+    record: b,
+    setRecord: setB,
+    write: (next) => saveBaseline(next),
+    what: 'baseline data',
+    reload: load,
+  });
 
   const progress = useMemo(() => (b ? completeness(b) : null), [b]);
 

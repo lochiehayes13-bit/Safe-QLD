@@ -28,6 +28,7 @@ import {
   Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Segmented, StatTile, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { useRecordPatch } from '@/hooks/useRecordPatch';
 import { describeLoadFailure } from '@/domain/loadFailure';
 import { showAlert } from '@/components/alert';
 
@@ -79,13 +80,13 @@ export default function AssessmentScreen() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const patch = useCallback((next: Partial<Assessment>) => {
-    setAssessment((prev) => {
-      if (!prev) return prev;
-      void updateAssessment(prev.id, next);
-      return { ...prev, ...next };
-    });
-  }, []);
+  const patch = useRecordPatch<Assessment>({
+    record: assessment,
+    setRecord: setAssessment,
+    write: (next, changed) => updateAssessment(next.id, changed),
+    what: 'assessment',
+    reload: load,
+  });
 
   const tally = useMemo(() => summariseFindings(findings), [findings]);
   const issues = useMemo(() => validateFindings(findings), [findings]);

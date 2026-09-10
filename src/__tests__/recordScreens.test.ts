@@ -174,6 +174,67 @@ describe('record screens', () => {
     expect(notGated).toEqual([]);
   });
 
+  it('never writes a record away without holding on to what happened', () => {
+    /*
+     * `void saveBaseline(next)` is the same fault as the endless spinner, at
+     * the other end of the screen. The value goes on screen, the write goes
+     * out, and if it throws the promise is unhandled: the field still shows
+     * what was typed, the row does not hold it, and nothing is said. The
+     * technician finds out when the form they filled in comes back empty.
+     *
+     * Six screens had it. `useRecordPatch` is what they use now — it catches,
+     * says so once, and re-reads the record — so what is checked is that no
+     * screen has gone back to firing a repository write into nothing.
+     *
+     * Only writes. A read that fails is the gate's problem, and the gate is
+     * checked above. The verb has to be followed by a capital or nothing at
+     * all, so `attachmentQueueSummary` is not mistaken for an attach.
+     */
+    const VERBS = [
+      'save', 'update', 'insert', 'delete', 'set', 'add', 'remove', 'clear', 'queue', 'mark',
+      'patch', 'create', 'upsert', 'apply', 'record', 'start', 'stop', 'finish', 'complete',
+      'close', 'reopen', 'attach', 'enqueue', 'push', 'book', 'rename', 'move', 'promote', 'assign',
+    ];
+    const isWrite = new RegExp(`^(${VERBS.join('|')})(?![a-z])`);
+
+    const loose: string[] = [];
+    for (const f of files) {
+      // Only what the screen imported from a repository or the outbound queue.
+      // A local helper named `save` is somebody else's promise to keep.
+      const stored = new Set<string>();
+      for (const imp of f.code.matchAll(/import\s*\{([^}]*)\}\s*from\s*'(@\/db\/[^']+|@\/simpro\/[^']+)'/g)) {
+        for (const named of (imp[1] ?? '').split(',')) {
+          const id = named.trim().split(/\s+as\s+/).pop()?.trim();
+          if (id) stored.add(id);
+        }
+      }
+      for (const call of f.code.matchAll(/\bvoid\s+([A-Za-z_$][\w$]*)\s*\(/g)) {
+        const name = call[1] ?? '';
+        if (!stored.has(name) || !isWrite.test(name)) continue;
+        // The statement it sits in, near enough: a caught write says .catch
+        // within a few lines of the call.
+        const near = f.code.slice(call.index).split('\n').slice(0, 6).join('\n');
+        if (!/\.catch\s*\(/.test(near)) loose.push(`${f.path}: void ${name}(`);
+      }
+    }
+    expect(loose).toEqual([]);
+  });
+
+  it('has a shared way to edit a record, and it says when a write failed', () => {
+    // The rule above is only fair because there is one obvious thing to use.
+    const hook = readFileSync(join(REPO, 'src/hooks/useRecordPatch.ts'), 'utf8');
+    expect(hook).toContain('showAlert');
+    // Writes chained, so five keystrokes land in the order they were typed.
+    expect(hook).toMatch(/chain\.current\s*=/);
+    // And one message per run of failures, not one per keystroke.
+    expect(hook).toContain('complaining');
+  });
+
+  it('has the record screens actually using it', () => {
+    const users = files.filter((f) => /useRecordPatch\s*(<[^>]*>)?\s*\(/.test(f.code)).map((f) => f.path);
+    expect(users.length).toBeGreaterThanOrEqual(6);
+  });
+
   it('still answers on a screen whose record is already in memory', () => {
     // The exemption above is only safe because that screen does say something.
     const library = files.find((f) => f.path.endsWith('app/library/[id].tsx'))!;

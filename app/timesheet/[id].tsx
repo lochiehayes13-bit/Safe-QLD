@@ -33,6 +33,7 @@ import { useTheme, type Theme } from '@/theme';
 import { Button, Card, Chip, Rowed, Screen, Txt } from '@/components/ui';
 import { ProgressRing, Reveal } from '@/components/motion';
 import { RecordGate } from '@/components/RecordGate';
+import { useRecordPatch } from '@/hooks/useRecordPatch';
 import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { showAlert } from '@/components/alert';
 
@@ -192,19 +193,17 @@ export default function TimesheetScreen() {
     }
   };
 
-  const persist = useCallback((next: Timesheet) => {
-    setSheet(next);
-    void saveTimesheet(next);
-  }, []);
+  const persist = useRecordPatch<Timesheet>({
+    record: sheet,
+    setRecord: setSheet,
+    write: (next) => saveTimesheet(next),
+    what: 'timesheet',
+    reload: load,
+  });
 
   const setEntries = useCallback((entries: TimesheetEntry[]) => {
-    setSheet((prev) => {
-      if (!prev) return prev;
-      const next = { ...prev, entries };
-      void saveTimesheet(next);
-      return next;
-    });
-  }, []);
+    void persist({ entries });
+  }, [persist]);
 
   const totals = useMemo(() => (sheet ? timesheetTotals(sheet) : null), [sheet]);
   // Saturday and Sunday stay folded until tapped, unless something is already
@@ -274,7 +273,7 @@ export default function TimesheetScreen() {
         recipients: [TIMESHEET_INBOX], subject: timesheetSubject(sheet), body: timesheetBody(sheet), attachments: [file.uri],
       });
       if (status === MailComposer.MailComposerStatus.SENT) {
-        persist({ ...sheet, status: 'submitted' });
+        void persist({ status: 'submitted' });
         showAlert('Sent', `Your week has gone to ${TIMESHEET_INBOX} and is marked submitted.`);
       } else {
         showAlert('Not sent', 'The email was not sent, so this sheet is still a draft. Nothing has gone to the office.');
@@ -383,10 +382,10 @@ export default function TimesheetScreen() {
 
         <Card>
           <Txt size="xs" tone="faint" weight="700" style={{ textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: t.space(2) }}>Your details</Txt>
-          <LabeledInput label="Name" value={sheet.employeeName} onChange={(v) => persist({ ...sheet, employeeName: v })} autoCapitalize="words" theme={t} />
+          <LabeledInput label="Name" value={sheet.employeeName} onChange={(v) => void persist({ employeeName: v })} autoCapitalize="words" theme={t} />
           <Rowed gap={2} align="flex-start" style={{ marginTop: t.space(2) }}>
-            <View style={{ flex: 1 }}><LabeledInput label="Vehicle" value={sheet.vehicleRego} onChange={(v) => persist({ ...sheet, vehicleRego: v })} autoCapitalize="characters" theme={t} /></View>
-            <View style={{ flex: 1 }}><LabeledInput label="Odometer" value={sheet.kilometerReading} onChange={(v) => persist({ ...sheet, kilometerReading: v })} keyboardType="numeric" theme={t} /></View>
+            <View style={{ flex: 1 }}><LabeledInput label="Vehicle" value={sheet.vehicleRego} onChange={(v) => void persist({ vehicleRego: v })} autoCapitalize="characters" theme={t} /></View>
+            <View style={{ flex: 1 }}><LabeledInput label="Odometer" value={sheet.kilometerReading} onChange={(v) => void persist({ kilometerReading: v })} keyboardType="numeric" theme={t} /></View>
           </Rowed>
         </Card>
 
@@ -396,7 +395,7 @@ export default function TimesheetScreen() {
           <Button
             title={sheet.status === 'submitted' ? 'Back to draft' : 'Mark submitted'}
             variant="ghost"
-            onPress={() => persist({ ...sheet, status: sheet.status === 'submitted' ? 'draft' : 'submitted' })}
+            onPress={() => void persist({ status: sheet.status === 'submitted' ? 'draft' : 'submitted' })}
             style={{ flex: 1 }}
           />
         </Rowed>

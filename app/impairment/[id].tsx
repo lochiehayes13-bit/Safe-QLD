@@ -11,6 +11,7 @@ import { qldMoment } from '@/domain/qldTime';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { useRecordPatch } from '@/hooks/useRecordPatch';
 import { describeLoadFailure } from '@/domain/loadFailure';
 import { showAlert } from '@/components/alert';
 
@@ -51,14 +52,13 @@ export default function ImpairmentScreen() {
     return () => clearInterval(h);
   }, [rec?.restoredAt]);
 
-  const update = (patch: Partial<ImpairmentRecord>) => {
-    setRec((prev) => {
-      if (!prev) return prev;
-      const next = { ...prev, ...patch };
-      void updateImpairment(next.id, patch);
-      return next;
-    });
-  };
+  const update = useRecordPatch<ImpairmentRecord>({
+    record: rec,
+    setRecord: setRec,
+    write: (next, patch) => updateImpairment(next.id, patch),
+    what: 'impairment record',
+    reload: load,
+  });
 
   if (!rec) return <RecordGate missing={missing} what="impairment record" failed={failed} onRetry={() => { void load(); }} />;
 

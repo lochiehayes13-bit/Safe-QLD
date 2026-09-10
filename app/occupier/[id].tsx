@@ -31,6 +31,7 @@ import {
   Banner, Button, Card, Chip, Divider, Field, H2, Rowed, Screen, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { useRecordPatch } from '@/hooks/useRecordPatch';
 import { describeLoadFailure } from '@/domain/loadFailure';
 import { showAlert } from '@/components/alert';
 
@@ -79,11 +80,13 @@ export default function OccupierStatementScreen() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const patch = async (p: Partial<OccupierStatement>) => {
-    if (!rec) return;
-    setRec({ ...rec, ...p });
-    await updateOccupierStatement(rec.id, p);
-  };
+  const patch = useRecordPatch<OccupierStatement>({
+    record: rec,
+    setRecord: setRec,
+    write: (next, p) => updateOccupierStatement(next.id, p),
+    what: 'occupier statement',
+    reload: load,
+  });
 
   const setRow = (installation: string, p: Partial<OccupierRow>) => {
     if (!rec) return;

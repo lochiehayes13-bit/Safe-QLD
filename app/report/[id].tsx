@@ -37,6 +37,7 @@ import {
   Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, SearchBox, Segmented, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { useRecordPatch } from '@/hooks/useRecordPatch';
 import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { SignaturePad } from '@/components/SignaturePad';
 import { showAlert } from '@/components/alert';
@@ -321,14 +322,17 @@ export default function ReportScreen() {
    * did not have it. A record that quietly does not save is worse than one
    * that refuses to.
    */
+  const applyReport = useRecordPatch<ServiceReport>({
+    record: report,
+    setRecord: setReport,
+    write: (next, patch) => updateReport(next.id, patch),
+    what: 'report',
+    reload: load,
+  });
+
   const patchReport = (patch: Partial<ServiceReport>) => {
-    if (!report) return;
-    setReport({ ...report, ...patch });
     if (patch.technicianName !== undefined) setTechnician(patch.technicianName);
-    void updateReport(report.id, patch).catch((e: unknown) => {
-      showAlert('Not saved', describeActionFailure(e, 'saving the report'));
-      void load();
-    });
+    void applyReport(patch);
   };
 
   /**
@@ -745,19 +749,19 @@ export default function ReportScreen() {
               <YesNoRow
                 label="Maintenance was carried out in compliance with QDC MP 6.1"
                 value={qdcAffirmed}
-                onChange={(v) => { setQdcAffirmed(v); void updateReport(report.id, { qdcCompliance: v }); }}
+                onChange={(v) => { setQdcAffirmed(v); patchReport({ qdcCompliance: v }); }}
               />
               <Divider />
               <TriRow
                 label="Installation considered to be in proper working order"
                 value={workingOrder}
-                onChange={(v) => { setWorkingOrder(v); void updateReport(report.id, { inProperWorkingOrder: v ?? undefined }); }}
+                onChange={(v) => { setWorkingOrder(v); patchReport({ inProperWorkingOrder: v ?? undefined }); }}
               />
               <Divider />
               <YesNoRow
                 label="Hardcopy record left on site"
                 value={hardcopyLeft}
-                onChange={(v) => { setHardcopyLeft(v); void updateReport(report.id, { hardcopyLeftOnSite: v }); }}
+                onChange={(v) => { setHardcopyLeft(v); patchReport({ hardcopyLeftOnSite: v }); }}
               />
             </Card>
 

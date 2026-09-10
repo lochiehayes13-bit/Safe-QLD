@@ -183,7 +183,13 @@ export default function LibraryScreen() {
       {
         text: 'Remove',
         style: 'destructive',
-        onPress: () => { void deleteLibraryDoc(doc.id).then(load); },
+        onPress: () => {
+          // A delete that throws used to leave the document on screen with no
+          // word said, so pressing Remove twice looked like the app ignoring you.
+          void deleteLibraryDoc(doc.id)
+            .then(load)
+            .catch((e: unknown) => showAlert('Not removed', describeActionFailure(e, 'removing the document')));
+        },
       },
     ]);
   };

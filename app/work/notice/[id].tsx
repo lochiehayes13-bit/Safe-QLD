@@ -20,6 +20,7 @@ import {
   Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { useRecordPatch } from '@/hooks/useRecordPatch';
 import { describeLoadFailure } from '@/domain/loadFailure';
 import { showAlert } from '@/components/alert';
 
@@ -65,14 +66,13 @@ export default function NoticeScreen() {
     return () => clearInterval(h);
   }, [defect?.noticeIssuedAt]);
 
-  const update = (patch: Partial<Defect>) => {
-    setDefect((prev) => {
-      if (!prev) return prev;
-      const next = { ...prev, ...patch };
-      void updateDefect(next.id, patch);
-      return next;
-    });
-  };
+  const update = useRecordPatch<Defect>({
+    record: defect,
+    setRecord: setDefect,
+    write: (next, patch) => updateDefect(next.id, patch),
+    what: 'defect notice',
+    reload: load,
+  });
 
   if (!defect) return <RecordGate missing={missing} what="defect notice" failed={failed} onRetry={() => { void load(); }} />;
 
