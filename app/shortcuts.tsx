@@ -5,7 +5,9 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { loadPrefs, savePrefs, type Prefs } from '@/app-prefs';
 import {
   MODULE_GROUPS,
+  demoteShortcut,
   moveShortcut,
+  promoteShortcut,
   resolveShortcuts,
   searchModules,
   toggleShortcut,
@@ -87,11 +89,15 @@ export default function ShortcutsScreen() {
                   icon="chevron-up"
                   disabled={i === 0}
                   onPress={() => update(moveShortcut(prefs.shortcuts, m.href, -1))}
+                  onLongPress={() => update(promoteShortcut(prefs.shortcuts, m.href))}
+                  label={`Move ${m.label} up. Hold to send it to the top.`}
                 />
                 <ArrowButton
                   icon="chevron-down"
                   disabled={i === chosen.length - 1}
                   onPress={() => update(moveShortcut(prefs.shortcuts, m.href, 1))}
+                  onLongPress={() => update(demoteShortcut(prefs.shortcuts, m.href))}
+                  label={`Move ${m.label} down. Hold to send it to the bottom.`}
                 />
                 <ArrowButton
                   icon="close"
@@ -100,6 +106,12 @@ export default function ShortcutsScreen() {
                 />
               </View>
             ))}
+            {chosen.length > 2 ? (
+              <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
+                Hold an arrow to send a tile straight to the top or the bottom, rather than tapping it up one row
+                at a time.
+              </Txt>
+            ) : null}
           </Card>
         )}
 
@@ -157,15 +169,25 @@ export default function ShortcutsScreen() {
 }
 
 function ArrowButton({
-  icon, onPress, disabled, tone,
-}: { icon: string; onPress: () => void; disabled?: boolean; tone?: 'fail' }) {
+  icon, onPress, onLongPress, disabled, tone, label,
+}: {
+  icon: string;
+  onPress: () => void;
+  /** Straight to the end, rather than one row at a time. */
+  onLongPress?: () => void;
+  disabled?: boolean;
+  tone?: 'fail';
+  label?: string;
+}) {
   const t = useTheme();
   return (
     <Pressable
       onPress={disabled ? undefined : onPress}
+      onLongPress={disabled ? undefined : onLongPress}
       disabled={disabled}
       hitSlop={6}
       accessibilityRole="button"
+      accessibilityLabel={label}
       style={{
         width: 40, height: 40, borderRadius: t.radius.sm,
         alignItems: 'center', justifyContent: 'center',

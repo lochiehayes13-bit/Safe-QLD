@@ -13,6 +13,9 @@ import { qldMoment } from '@/domain/qldTime';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
 import { Button, Card, Chip, H2, Rowed, Screen, Txt } from '@/components/ui';
+import { showAlert } from '@/components/alert';
+import { runAutoSync } from '@/simpro/autoSync';
+import { jobNotHereWords } from '@/domain/syncWords';
 
 /**
  * My day.
@@ -140,7 +143,21 @@ function ScheduleRow({ row, withDate }: { row: MyDayRow; withDate?: boolean }) {
   const job = row.job;
   const time = s.startTime ? `${s.startTime}${s.endTime ? `–${s.endTime}` : ''}` : 'Any time';
   return (
-    <Card onPress={job ? () => router.push({ pathname: '/work/job/[id]', params: { id: job.id } }) : undefined}>
+    <Card
+      onPress={job
+        ? () => router.push({ pathname: '/work/job/[id]', params: { id: job.id } })
+        : () => {
+          // Inert rows read as a broken app. The remedy for a job that has not
+          // come down is a sync, so the row offers one.
+          const said = jobNotHereWords(s.jobId ?? undefined);
+          showAlert(said.title, said.body, s.jobId
+            ? [
+              { text: 'Not now', style: 'cancel' },
+              { text: 'Sync now', onPress: () => { void runAutoSync('foreground'); } },
+            ]
+            : undefined);
+        }}
+    >
       <Rowed gap={3} align="flex-start">
         <View style={{ minWidth: 92 }}>
           {withDate ? <Txt size="xs" tone="muted" weight="700">{formatAuDate(s.date)}</Txt> : null}
@@ -151,7 +168,7 @@ function ScheduleRow({ row, withDate }: { row: MyDayRow; withDate?: boolean }) {
           {job?.title ? <Txt size="sm" tone="muted" numberOfLines={1}>{job.title}</Txt> : null}
           {job?.address ? <Txt size="xs" tone="faint" numberOfLines={1}>{job.address}</Txt> : null}
           {!job && s.jobId ? (
-            <Txt size="xs" tone="faint">Job {s.jobId} is not on this phone yet. It comes with the next sync.</Txt>
+            <Txt size="xs" tone="faint">Job {s.jobId} is not on this phone yet — tap to sync.</Txt>
           ) : null}
         </View>
         {job ? <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} /> : <Chip label={s.type ?? 'Block'} />}

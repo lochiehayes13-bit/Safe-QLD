@@ -2,7 +2,8 @@ import { existsSync } from 'fs';
 import { join } from 'path';
 import {
   DEFAULT_SHORTCUTS, LEGACY_DEFAULT_SHORTCUTS, MODULES, MODULE_GROUPS,
-  migrateShortcuts, moduleFor, moveShortcut, resolveShortcuts, searchModules, toggleShortcut,
+  demoteShortcut, migrateShortcuts, moduleFor, moveShortcut, promoteShortcut, resolveShortcuts,
+  searchModules, toggleShortcut,
 } from '@/domain/modules';
 
 /**
@@ -169,5 +170,61 @@ describe('moduleFor', () => {
 
   it('returns nothing for an unknown one', () => {
     expect(moduleFor('/nope')).toBeUndefined();
+  });
+});
+
+/**
+ * Getting a tile to the top of the list.
+ *
+ * One place at a time is right for a nudge and useless for what people
+ * actually do with this screen, which is drag the thing they open every
+ * morning to the front. From fourteenth that was thirteen taps, thirteen
+ * writes to preferences, and thirteen chances for the list to move out from
+ * under a thumb mid-tap.
+ */
+describe('sending a tile to the end of the list', () => {
+  const list = ['/a', '/b', '/c', '/d'];
+
+  it('puts it at the front from anywhere', () => {
+    expect(promoteShortcut(list, '/c')).toEqual(['/c', '/a', '/b', '/d']);
+    expect(promoteShortcut(list, '/d')).toEqual(['/d', '/a', '/b', '/c']);
+  });
+
+  it('puts it at the back from anywhere', () => {
+    expect(demoteShortcut(list, '/b')).toEqual(['/a', '/c', '/d', '/b']);
+  });
+
+  it('leaves the one already there alone', () => {
+    expect(promoteShortcut(list, '/a')).toEqual(list);
+    expect(demoteShortcut(list, '/d')).toEqual(list);
+  });
+
+  it('refuses to pin something that was not pinned', () => {
+    // Inventing it at the top would put a tile on somebody's home screen that
+    // they never chose.
+    expect(promoteShortcut(list, '/nope')).toEqual(list);
+    expect(demoteShortcut(list, '/nope')).toEqual(list);
+  });
+
+  it('does not modify what it was given', () => {
+    const original = [...list];
+    promoteShortcut(list, '/c');
+    demoteShortcut(list, '/c');
+    expect(list).toEqual(original);
+  });
+
+  it('keeps every tile, so nothing falls off the home screen', () => {
+    for (const href of list) {
+      expect([...promoteShortcut(list, href)].sort()).toEqual([...list].sort());
+      expect([...demoteShortcut(list, href)].sort()).toEqual([...list].sort());
+    }
+  });
+
+  it('gets there in one move where moveShortcut needs one per row', () => {
+    let byOnes = [...list];
+    let taps = 0;
+    while (byOnes[0] !== '/d') { byOnes = moveShortcut(byOnes, '/d', -1); taps += 1; }
+    expect(taps).toBe(3);
+    expect(promoteShortcut(list, '/d')).toEqual(byOnes);
   });
 });

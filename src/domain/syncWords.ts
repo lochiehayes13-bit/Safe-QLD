@@ -45,3 +45,31 @@ export function syncStripWords(input: SyncStripInput): SyncStripWords | null {
   }
   return null;
 }
+
+/**
+ * A schedule block whose job the phone does not have.
+ *
+ * The office books somebody onto a job; the block comes down with the
+ * schedule; the job itself does not, because the mirror pulls a window of
+ * jobs and this one is a contract service raised eighteen months ago. So the
+ * strip shows a row that says "Job 41207" and does nothing at all when it is
+ * tapped — which reads as the app being broken rather than as the job being
+ * absent, and there is nothing on screen to correct that impression.
+ *
+ * The remedy is a sync, so the row offers one instead of being inert. Saying
+ * what is missing matters as much as offering the fix: a technician who knows
+ * the job has not come down yet can ring the office, and one staring at a dead
+ * row cannot.
+ */
+export function jobNotHereWords(jobId: string | undefined): { title: string; body: string } {
+  return {
+    title: jobId ? `Job ${jobId} is not on this phone` : 'This block has no job on it',
+    body: jobId
+      ? `The office has booked you on it, and the schedule block came down, but the job itself has not. That `
+        + `usually means it was raised outside the window the phone pulls — an old contract service, or one `
+        + `booked a long way ahead.\n\nA sync brings it down. Until it does, the office can tell you what the `
+        + `job is.`
+      : 'It is a block on your schedule with no job behind it — a meeting, leave, or time the office has set '
+        + 'aside. There is nothing to open.',
+  };
+}

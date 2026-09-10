@@ -370,6 +370,32 @@ export function moveShortcut(hrefs: readonly string[], href: string, direction: 
   return next;
 }
 
+/**
+ * Straight to the front, or straight to the back.
+ *
+ * Moving a tile one place at a time is right for a nudge and useless for the
+ * thing people actually do, which is put the one they use every morning at the
+ * top. From the fourteenth position that is thirteen taps, and thirteen writes
+ * to preferences, and thirteen chances for the list to animate out from under
+ * a thumb. It is the same reason a list of three thousand sites needed a
+ * search box: the interaction that is fine for a small number stops being an
+ * interaction at all for a real one.
+ *
+ * A missing href is returned unchanged rather than inserted, matching
+ * moveShortcut. Something that is not pinned cannot be moved to the top of the
+ * pinned list, and inventing it there would put a tile on somebody's home
+ * screen that they never chose.
+ */
+export function promoteShortcut(hrefs: readonly string[], href: string): string[] {
+  if (!hrefs.includes(href)) return [...hrefs];
+  return [href, ...hrefs.filter((h) => h !== href)];
+}
+
+export function demoteShortcut(hrefs: readonly string[], href: string): string[] {
+  if (!hrefs.includes(href)) return [...hrefs];
+  return [...hrefs.filter((h) => h !== href), href];
+}
+
 export function toggleShortcut(hrefs: readonly string[], href: string): string[] {
   return hrefs.includes(href) ? hrefs.filter((h) => h !== href) : [...hrefs, href];
 }

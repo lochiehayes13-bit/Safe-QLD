@@ -21,6 +21,9 @@ import { Bounce, Reveal, animateNextLayout } from '@/components/motion';
 import { UpdateBanner } from '@/components/UpdateBanner';
 import { SyncStrip } from '@/components/SyncStrip';
 import { StuckWorkStrip } from '@/components/StuckWorkStrip';
+import { showAlert } from '@/components/alert';
+import { runAutoSync } from '@/simpro/autoSync';
+import { jobNotHereWords } from '@/domain/syncWords';
 
 /**
  * Home — the company hub.
@@ -326,7 +329,22 @@ function UpNext({ label, rows }: { label: string; rows: MyDayRow[] }) {
         {shown.map((r) => (
           <Bounce
             key={r.schedule.id}
-            onPress={r.job ? () => router.push({ pathname: '/work/job/[id]', params: { id: r.job!.id } }) : undefined}
+            onPress={r.job
+              ? () => router.push({ pathname: '/work/job/[id]', params: { id: r.job!.id } })
+              : () => {
+                /*
+                 * A row with no job used to do nothing at all when tapped,
+                 * which reads as the app being broken rather than as the job
+                 * not being here. The remedy is a sync, so it offers one.
+                 */
+                const said = jobNotHereWords(r.schedule.jobId ?? undefined);
+                showAlert(said.title, said.body, r.schedule.jobId
+                  ? [
+                    { text: 'Not now', style: 'cancel' },
+                    { text: 'Sync now', onPress: () => { void runAutoSync('foreground'); } },
+                  ]
+                  : undefined);
+              }}
             haptic="light"
             scaleTo={0.98}
           >
@@ -337,6 +355,9 @@ function UpNext({ label, rows }: { label: string; rows: MyDayRow[] }) {
               <View style={{ flex: 1 }}>
                 <Txt weight="700" numberOfLines={1}>{r.job?.siteName ?? (r.schedule.jobId ? `Job ${r.schedule.jobId}` : r.schedule.type ?? 'Scheduled')}</Txt>
                 {r.job?.title ? <Txt size="xs" tone="muted" numberOfLines={1}>{r.job.title}</Txt> : null}
+                {!r.job && r.schedule.jobId ? (
+                  <Txt size="xs" tone="faint" numberOfLines={1}>Not on this phone yet — tap to sync</Txt>
+                ) : null}
               </View>
               {r.job ? <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} /> : null}
             </Rowed>

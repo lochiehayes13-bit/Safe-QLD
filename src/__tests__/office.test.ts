@@ -2,7 +2,7 @@ import { OFFICE_APPLICATION, isOfficeApplication, shippedSecretFor } from '@/sim
 import { DEFAULT_PREFS } from '@/app-prefs';
 import { firstRunStep } from '@/domain/firstRun';
 import { classifySignInRefusal } from '@/simpro/oauth';
-import { syncStripWords } from '@/domain/syncWords';
+import { jobNotHereWords, syncStripWords } from '@/domain/syncWords';
 
 /**
  * The app ships connected.
@@ -127,5 +127,37 @@ describe('the sync strip', () => {
   it('never shows a stale problem over a run that is under way', () => {
     const w = syncStripWords({ inFlight: true, progress: null, trigger: 'timer', lastError: 'old news' });
     expect(w?.kind).toBe('running');
+  });
+});
+
+/**
+ * A schedule block whose job the phone does not hold.
+ *
+ * The office books somebody on, the block comes down with the schedule, and
+ * the job does not — it was raised outside the window the mirror pulls, an old
+ * contract service or one booked a long way ahead. The home strip then showed
+ * a row reading "Job 41207" that did nothing at all when it was tapped, which
+ * is indistinguishable from the app being broken.
+ */
+describe('a job that is not on this phone', () => {
+  it('names the job, so the technician can ring the office about it', () => {
+    const w = jobNotHereWords('41207');
+    expect(w.title).toContain('41207');
+    expect(w.body).toContain('sync');
+  });
+
+  it('says why it is missing rather than only that it is', () => {
+    // "It is not here" invites a second tap. "It was raised outside the window
+    // the phone pulls" does not.
+    expect(jobNotHereWords('41207').body).toContain('outside the window');
+  });
+
+  it('says something different where the block has no job at all', () => {
+    // Leave, a meeting, time the office set aside. Nothing to open, and no
+    // sync will change that.
+    const w = jobNotHereWords(undefined);
+    expect(w.title).not.toMatch(/\d/);
+    expect(w.body).toContain('nothing to open');
+    expect(w.body).not.toContain('sync');
   });
 });
