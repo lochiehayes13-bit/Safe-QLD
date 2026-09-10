@@ -169,7 +169,7 @@ export default function QuotesScreen() {
       {ordered.map((row) => (
         <Card
           key={row.quote.id}
-          onPress={() => router.push({ pathname: '/site/[id]', params: { id: row.quote.siteId } })}
+          onPress={() => router.push({ pathname: '/quote/[id]', params: { id: row.quote.id } })}
         >
           <Rowed>
             <View style={{ flex: 1 }}>

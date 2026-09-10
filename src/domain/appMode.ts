@@ -383,7 +383,7 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/site/[id]', file: 'app/site/[id].tsx', tab: 'sites', section: 'Your sites',
     label: 'Site', needsContext: true, modes: BOTH,
-    openedFrom: ['/sites', '/work/job/[id]', '/customer/[id]', '/quotes/simpro/[id]', '/quotes', '/search', '/contacts/[id]', '/leads'],
+    openedFrom: ['/sites', '/work/job/[id]', '/customer/[id]', '/quotes/simpro/[id]', '/search', '/contacts/[id]', '/leads'],
     blurb: 'One site: its systems, its history, its paperwork, and the pack that hands it to another technician.',
     terms: ['site', 'building', 'pack'],
   },
@@ -770,6 +770,17 @@ export const DESTINATIONS: readonly Destination[] = [
     label: 'Defects', modes: BOTH, openedFrom: ['/work'],
     blurb: 'Raised, quoted and outstanding, aged in days so a list feels as urgent as it is.',
     terms: ['defects', 'outstanding', 'open', 'faults'],
+  },
+  {
+    route: '/quote/[id]', file: 'app/quote/[id].tsx', tab: 'work', section: 'Records',
+    label: 'Quote', needsContext: true, modes: OFFICE,
+    openedFrom: ['/quotes'],
+    blurb: 'One quote, re-read: what was in it, printed again, emailed again, accepted or declined.',
+    terms: ['quote', 'quotation', 'accepted', 'declined', 'reprint', 'expiry'],
+    hiddenBecause:
+      'What is out with a client and what it is worth. The number commits the company, and a '
+      + 'technician asked in a corridor should not be the one who answers it — the same argument '
+      + 'as the quote builder itself.',
   },
   {
     route: '/defect/[id]', file: 'app/defect/[id].tsx', tab: 'work', section: 'Records',
