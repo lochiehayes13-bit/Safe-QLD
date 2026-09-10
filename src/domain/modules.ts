@@ -251,8 +251,8 @@ export const MODULES: AppModule[] = [
     blurb: 'Assets that keep failing, where a fourth swap will not fix it.',
     keywords: ['repeat', 'keeps failing'] },
   { href: '/work/plan', label: 'Plan work', icon: 'calendar-month-outline', group: 'Jobs and planning',
-    blurb: 'The month day by day, with what could not be planned said out loud.',
-    keywords: ['month', 'schedule', 'planner'] },
+    blurb: 'Build a day from what each site last had done, then put it on your Simpro schedule.',
+    keywords: ['month', 'schedule', 'planner', 'day', 'last service', 'history'] },
 
   // -- Admin ---------------------------------------------------------------
   { href: '/settings', label: 'Settings', icon: 'cog-outline', group: 'Admin',

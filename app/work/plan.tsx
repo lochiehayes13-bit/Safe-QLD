@@ -1,48 +1,400 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
-import { Stack, router } from 'expo-router';
+import { Stack, router, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { loadPrefs, type Prefs } from '@/app-prefs';
+import { nowIso } from '@/db';
+import { planCandidates, siteFacts, type PlanCandidate } from '@/db/siteHistoryRepo';
 import { buildWorkPlan, planCoverage, type PlanCoverage } from '@/db/planRepo';
+import { assetCountsBySystem } from '@/db/assetRepo';
+import { costCentresForJob } from '@/db/clockRepo';
+import { localJobId } from '@/db/mirrorRepo';
+import { queueScheduleChange, undoScheduleChange } from '@/db/scheduleChangeRepo';
+import { simproConfigFromPrefs } from '@/simpro/config';
+import { syncJobDetail } from '@/simpro/sync';
+import { SCHEDULE_BOOK_KIND, notBeforeFrom } from '@/domain/scheduling';
+import { addDays } from '@/domain/clockOn';
+import { qldIsoDay } from '@/domain/qldTime';
+import { assetsLine, lastServiceLine, type SiteFacts } from '@/domain/siteHistory';
 import {
-  CLUSTER_METHOD_LABEL,
-  ESTIMATE_CAVEAT,
-  UNPLANNABLE_REASON_LABEL,
-  formatHours,
-  formatPlanDate,
-  planHeadline,
-  type PlannedDay,
-  type PlannedVisit,
-  type UnplannableReason,
-  type WorkPlan,
+  DAY_END, DAY_START, bookingsFor, dayHeadline, layOutDay, moveStop, type DaySite,
+} from '@/domain/dayBuilder';
+import {
+  CLUSTER_METHOD_LABEL, ESTIMATE_CAVEAT, UNPLANNABLE_REASON_LABEL, estimateVisitHours, formatHours, formatPlanDate,
+  planHeadline, type PlannedDay, type PlannedVisit, type UnplannableReason, type WorkPlan,
 } from '@/domain/workPlan';
-import { FREQUENCY_LABEL } from '@/seed/serviceRoutines';
+import { FREQUENCY_LABEL, SERVICE_ROUTINES } from '@/seed/serviceRoutines';
+import { dayName } from '@/domain/timesheet';
+import { formatAuDate } from '@/export/sheets';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
+import { showAlert } from '@/components/alert';
 import { useTheme } from '@/theme';
 import {
-  Banner, Button, Card, Chip, Divider, EmptyState, H2, Label, Rowed, Screen, Segmented, StatTile, Txt,
+  Banner, Button, Card, Chip, Divider, EmptyState, H2, Label, Rowed, Screen, SearchBox, Segmented, StatTile,
+  StatusPill, Txt,
 } from '@/components/ui';
 
 /**
- * The month, laid out day by day.
+ * Plan work.
  *
- * This is the office's core job and until now it did not exist: the app could
- * say what was due but not what next month looked like. Everything the planner
- * is unsure about is on the screen rather than buried, because a plan is acted
- * on by someone who was not there when it was made:
+ * Two questions, two modes. **Build a day** is the one asked in the ute at
+ * seven in the morning: which sites, in what order, and what do I need to
+ * know before I walk in. Each site carries the facts about the last time it
+ * was serviced — who, when, how long they took and whether anyone recorded
+ * hours at all, what is registered there, what is due, and whether the next
+ * visit is on the office's calendar yet. Add sites to the day, drag the
+ * order, and the day is laid out from seven as back-to-back blocks. Put it
+ * on my Simpro schedule books every block that has a job under it, through
+ * the same read-first, hold-a-minute path the calendar uses.
  *
- *  - Every hours figure is marked as an estimate, every time. They come from
- *    asset counts and a minutes-per-asset table built from experience, not from
- *    a standard, and a number that looks measured gets quoted to a client.
- *  - Each day says how it was grouped. A suburb is a strong grouping; a radius
- *    drawn around a coordinate is not, and the two are never shown as though
- *    they were the same thing.
- *  - Work that could not be planned is a section of this screen, not a silence.
- *    A site missing from the plan because nobody has registered its assets is
- *    the most important thing here — it is the one that goes unserviced.
+ * **The month** is the office's question and the planner that answered it
+ * before: routines due in a window, batched by suburb, sized from asset
+ * counts, marked as estimates every time.
+ *
+ * Nothing here invents a job. A site with no open Simpro job is laid out so
+ * the day's hours are honest and marked not bookable with the reason: the
+ * office raises jobs, and a block posted against nothing is a block on
+ * nothing.
  */
+
+type Mode = 'day' | 'month';
+
+export default function WorkPlanScreen() {
+  const [mode, setMode] = useState<Mode>('day');
+  return (
+    <>
+      <Stack.Screen options={{ title: 'Plan work' }} />
+      <Screen>
+        <Segmented
+          value={mode}
+          onChange={setMode}
+          options={[{ value: 'day', label: 'Build a day' }, { value: 'month', label: 'The month' }]}
+        />
+        {mode === 'day' ? <DayBuilder /> : <MonthPlanner />}
+      </Screen>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Build a day
+// ---------------------------------------------------------------------------
+
+interface Stop extends DaySite {
+  facts?: SiteFacts;
+}
+
+function DayBuilder() {
+  const t = useTheme();
+  const today = qldIsoDay(nowIso()) ?? '';
+  const [prefs, setPrefs] = useState<Prefs | null>(null);
+  const [date, setDate] = useState<string>(today);
+  const [query, setQuery] = useState('');
+  const [candidates, setCandidates] = useState<PlanCandidate[]>([]);
+  const [facts, setFacts] = useState<Record<string, SiteFacts | null>>({});
+  const [open, setOpen] = useState<string | null>(null);
+  const [stops, setStops] = useState<Stop[]>([]);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [booking, setBooking] = useState(false);
+  const [booked, setBooked] = useState<{ rowId: string; siteName: string; start: string; end: string; notBefore: string }[]>([]);
+  const [now, setNow] = useState(() => Date.now());
+
+  const employeeId = prefs?.simproEmployeeId.trim() ?? '';
+  const ownName = prefs?.technicianName ?? '';
+
+  const load = useCallback(async () => {
+    setFailed(null);
+    try {
+      const p = await loadPrefs();
+      setPrefs(p);
+      setCandidates(await planCandidates(today, query));
+    } catch (e) {
+      setCandidates([]);
+      setFailed(describeLoadFailure(e, 'the sites'));
+    }
+  }, [today, query]);
+
+  useFocusEffect(useCallback(() => { void load(); }, [load]));
+
+  // The undo minute is drawn as a countdown, so a stale button never lies.
+  useEffect(() => {
+    if (!booked.length) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [booked.length]);
+
+  /** The facts for one site, read once and kept. */
+  const showFacts = useCallback(async (siteId: string) => {
+    setOpen((cur) => (cur === siteId ? null : siteId));
+    if (facts[siteId] !== undefined) return;
+    try {
+      const f = await siteFacts(siteId, today, ownName);
+      setFacts((m) => ({ ...m, [siteId]: f ?? null }));
+    } catch (e) {
+      setFacts((m) => ({ ...m, [siteId]: null }));
+      setFailed(describeLoadFailure(e, 'that site'));
+    }
+  }, [facts, today, ownName]);
+
+  /**
+   * Adds a site to the day, sized from its register.
+   *
+   * The estimate is the month planner's: asset counts through the same
+   * minutes-per-asset table, against the routines that are due there, or
+   * an annual walk where nothing is. It is an estimate and the layout says
+   * so; the technician can type over it.
+   */
+  const addSite = useCallback(async (c: PlanCandidate) => {
+    if (stops.some((s) => s.siteId === c.siteId)) return;
+    try {
+      const counts = await assetCountsBySystem(c.siteId);
+      const f = facts[c.siteId] ?? await siteFacts(c.siteId, today, ownName);
+      const dueRoutines = (f?.due ?? [])
+        .filter((d) => d.state === 'overdue' || d.state === 'due')
+        .map((d) => SERVICE_ROUTINES.find((r) => r.id === d.routineId))
+        .filter((r): r is NonNullable<typeof r> => Boolean(r))
+        .map((r) => ({ system: r.system, frequency: r.frequency }));
+      const routines = dueRoutines.length ? dueRoutines : [{ system: 'detection', frequency: 'annual' as const }];
+      const estimate = estimateVisitHours(counts.filter((x) => x.system !== 'unknown'), routines);
+      setStops((s) => [...s, {
+        siteId: c.siteId,
+        siteName: c.siteName,
+        estimateHours: estimate?.hours ?? 1.5,
+        job: c.job ? { externalId: c.job.externalId, title: c.job.title } : undefined,
+        facts: f ?? undefined,
+      }]);
+      if (f && facts[c.siteId] === undefined) setFacts((m) => ({ ...m, [c.siteId]: f }));
+    } catch (e) {
+      showAlert('Could not add that site', describeActionFailure(e, 'sizing the visit'));
+    }
+  }, [stops, facts, today, ownName]);
+
+  const layout = useMemo(() => layOutDay(stops), [stops]);
+  const days = useMemo(() => {
+    const out: string[] = [];
+    let d = today;
+    while (out.length < 10 && d) {
+      const dow = new Date(`${d}T12:00:00Z`).getUTCDay();
+      if (dow !== 0 && dow !== 6) out.push(d);
+      d = addDays(d, 1);
+    }
+    return out;
+  }, [today]);
+
+  /**
+   * Puts the day on the schedule.
+   *
+   * One booking per stop with a job, each through queueScheduleChange with
+   * the cost centre read off the job's mirror — synced first where the
+   * phone has never read the job's children. A job with several cost
+   * centres is booked on the first and said so, because a day builder that
+   * stopped to ask about each one would never finish; the block can be
+   * moved on the calendar. Every block shares one undo moment.
+   */
+  const putOnSchedule = async () => {
+    if (!prefs) return;
+    setBooking(true);
+    try {
+      const plan = bookingsFor(layout, { employeeId, date, notBefore: notBeforeFrom(nowIso()) });
+      const done: typeof booked = [];
+      const problems: string[] = [];
+      for (const p of plan.payloads) {
+        let options = await costCentresForJob(p.jobId);
+        if (!options.length) {
+          await syncJobDetail(simproConfigFromPrefs(prefs), localJobId(p.jobId), { force: true });
+          options = await costCentresForJob(p.jobId);
+        }
+        const cc = options[0];
+        if (!cc) {
+          problems.push(`${p.siteName ?? p.jobId}: Simpro lists no cost centre on job ${p.jobId}, so nothing could be booked on it.`);
+          continue;
+        }
+        const r = await queueScheduleChange({
+          kind: SCHEDULE_BOOK_KIND,
+          payload: {
+            employeeId: p.employeeId, jobId: p.jobId, sectionId: cc.sectionExternalId, costCenterId: cc.costCenterExternalId,
+            date: p.date, start: p.start, end: p.end, siteName: p.siteName, notBefore: p.notBefore,
+          },
+        });
+        if (r.duplicate) problems.push(`${p.siteName ?? p.jobId}: already on the queue (${r.state}).`);
+        else done.push({ rowId: r.id, siteName: p.siteName ?? p.jobId, start: p.start, end: p.end, notBefore: p.notBefore });
+        if (options.length > 1) problems.push(`${p.siteName ?? p.jobId}: booked on the first of ${options.length} cost centres (${cc.name}); move it on the calendar if that is the wrong one.`);
+      }
+      for (const s of plan.skipped) problems.push(`${s.stop.siteName}: ${s.why}`);
+      setBooked(done);
+      showAlert(
+        done.length ? `${done.length} block${done.length === 1 ? '' : 's'} queued for ${dayName(date)} ${formatAuDate(date)}` : 'Nothing queued',
+        [
+          done.length ? 'They go to the office in a minute and show on Simpro Mobile for that day. Undo is below until then.' : '',
+          ...problems,
+        ].filter(Boolean).join('\n\n'),
+      );
+    } catch (e) {
+      showAlert('Not booked', describeActionFailure(e, 'putting the day on the schedule'));
+    } finally {
+      setBooking(false);
+    }
+  };
+
+  const undoAll = async () => {
+    let taken = 0;
+    for (const b of booked) {
+      try {
+        if (await undoScheduleChange(b.rowId)) taken += 1;
+      } catch {
+        // Counted below.
+      }
+    }
+    setBooked([]);
+    showAlert(taken === booked.length ? 'Taken back' : 'Some had already gone', `${taken} of ${booked.length} block${booked.length === 1 ? '' : 's'} came off before reaching the office.`);
+  };
+
+  const undoLeft = booked.length ? Math.max(0, Math.ceil((Date.parse(booked[0]!.notBefore) - now) / 1000)) : 0;
+
+  return (
+    <>
+      {failed ? <Banner tone="fail" title="Could not read the sites" body={failed} /> : null}
+
+      {prefs && !employeeId ? (
+        <Card onPress={() => router.push('/signin')}>
+          <Txt weight="700">Sign in as yourself to put a day on the schedule</Txt>
+          <Txt size="sm" tone="muted">The day can still be built and read; booking it needs to know whose schedule it goes on.</Txt>
+        </Card>
+      ) : null}
+
+      <H2>Which day</H2>
+      <Rowed gap={2} wrap>
+        {days.map((d) => (
+          <Chip key={d} label={`${dayName(d)} ${formatAuDate(d).slice(0, 5)}`} selected={date === d} onPress={() => setDate(d)} />
+        ))}
+      </Rowed>
+
+      <H2>{stops.length ? `Your day — ${dayHeadline(layout)}` : 'Your day'}</H2>
+      {stops.length === 0 ? (
+        <EmptyState title="Nothing on the day yet" body="Add sites from the list below. Each one is sized from its register and laid out from seven." />
+      ) : (
+        layout.stops.map((stop, i) => (
+          <Card key={stop.siteId}>
+            <Rowed style={{ justifyContent: 'space-between' }} align="flex-start">
+              <View style={{ flex: 1 }}>
+                <Txt weight="700">{stop.order}. {stop.siteName}</Txt>
+                <Txt size="sm" tone="muted">{stop.start}–{stop.end} · about {stop.estimateHours} h{stop.travelMinutes ? ` · ${stop.travelMinutes} min travel` : ''}</Txt>
+                <Txt size="sm" tone={stop.bookable ? 'muted' : 'warn'} style={{ marginTop: 2 }}>
+                  {stop.bookable ? `Books onto job ${stop.job!.externalId}${stop.job!.title ? ` — ${stop.job!.title}` : ''}` : stop.why}
+                </Txt>
+              </View>
+              <StatusPill label={stop.bookable ? 'Bookable' : 'No job'} tone={stop.bookable ? 'pass' : 'warn'} />
+            </Rowed>
+            <Rowed gap={2} wrap style={{ marginTop: t.space(2) }}>
+              <Chip label="Earlier" onPress={() => setStops((s) => moveStop(s, i, -1))} />
+              <Chip label="Later" onPress={() => setStops((s) => moveStop(s, i, 1))} />
+              <Chip label="Shorter" onPress={() => setStops((s) => s.map((x, j) => (j === i ? { ...x, estimateHours: Math.max(0.25, x.estimateHours - 0.5) } : x)))} />
+              <Chip label="Longer" onPress={() => setStops((s) => s.map((x, j) => (j === i ? { ...x, estimateHours: x.estimateHours + 0.5 } : x)))} />
+              <Chip label="Remove" onPress={() => setStops((s) => s.filter((_, j) => j !== i))} />
+            </Rowed>
+          </Card>
+        ))
+      )}
+      {stops.length ? (
+        <>
+          {layout.overrunHours ? (
+            <Banner tone="warn" title={`${layout.overrunHours} h past the end of the shift`} body={`The shift is ${DAY_START} to ${DAY_END}. Take a site off, or accept the overtime — the estimates are estimates.`} />
+          ) : null}
+          <Button
+            title="Put it on my Simpro schedule"
+            loading={booking}
+            disabled={!employeeId || !layout.stops.some((s) => s.bookable)}
+            onPress={() => { void putOnSchedule(); }}
+            icon={<MaterialCommunityIcons name="calendar-export" size={20} color={t.color.onAccent} />}
+          />
+          {booked.length && undoLeft > 0 ? (
+            <Button title={`Undo all ${booked.length} — ${undoLeft}s`} variant="secondary" onPress={() => { void undoAll(); }} />
+          ) : null}
+          <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>{ESTIMATE_CAVEAT}</Txt>
+        </>
+      ) : null}
+
+      <H2>Sites</H2>
+      <SearchBox value={query} onChange={setQuery} placeholder="A site, a suburb, an address" />
+      {candidates.length === 0 ? (
+        <EmptyState
+          title={query ? 'Nothing matched' : 'Nothing due and no open jobs'}
+          body={query ? 'Try fewer letters.' : 'Sites appear here when a routine is due or overdue, or the office has an open job at them. Search for any other site.'}
+        />
+      ) : (
+        candidates.map((c) => {
+          const f = facts[c.siteId];
+          const onDay = stops.some((s) => s.siteId === c.siteId);
+          return (
+            <Card key={c.siteId} onPress={() => { void showFacts(c.siteId); }}>
+              <Rowed style={{ justifyContent: 'space-between' }} align="flex-start">
+                <View style={{ flex: 1 }}>
+                  <Txt weight="700">{c.siteName}</Txt>
+                  <Txt size="sm" tone="muted">
+                    {c.suburb ? `${c.suburb} · ` : ''}
+                    {c.reason === 'overdue' ? `overdue${c.daysUntilDue !== undefined ? ` by ${Math.abs(c.daysUntilDue)} days` : ''}`
+                      : c.reason === 'due' ? `due${c.daysUntilDue !== undefined ? ` in ${c.daysUntilDue} days` : ''}`
+                        : c.reason === 'open-job' ? `open job ${c.job?.externalId}` : c.job ? `job ${c.job.externalId}` : 'no open job'}
+                  </Txt>
+                </View>
+                <StatusPill
+                  label={c.reason === 'overdue' ? 'Overdue' : c.reason === 'due' ? 'Due' : c.job ? 'Job' : 'No job'}
+                  tone={c.reason === 'overdue' ? 'fail' : c.reason === 'due' ? 'warn' : c.job ? 'info' : 'muted'}
+                />
+              </Rowed>
+
+              {open === c.siteId ? (
+                <View style={{ marginTop: t.space(2.5) }}>
+                  {f === undefined ? <Txt size="sm" tone="muted">Reading…</Txt> : f === null ? <Txt size="sm" tone="fail">Could not read this site.</Txt> : <FactsBody f={f} />}
+                </View>
+              ) : null}
+
+              <Rowed gap={2} style={{ marginTop: t.space(2) }}>
+                <Chip label={onDay ? 'On the day' : 'Add to my day'} selected={onDay} onPress={() => { if (!onDay) void addSite(c); }} />
+                <Chip label={open === c.siteId ? 'Hide' : 'Last service'} onPress={() => { void showFacts(c.siteId); }} />
+              </Rowed>
+            </Card>
+          );
+        })
+      )}
+    </>
+  );
+}
+
+/** The facts about a site, the way the question is asked in the ute. */
+function FactsBody({ f }: { f: SiteFacts }) {
+  const t = useTheme();
+  const line = (label: string, value: string, tone: 'muted' | 'warn' | 'fail' | 'pass' = 'muted') => (
+    <View style={{ marginTop: t.space(1.5) }}>
+      <Label>{label}</Label>
+      <Txt size="sm" tone={tone} style={{ lineHeight: 19 }}>{value}</Txt>
+    </View>
+  );
+  return (
+    <View>
+      <Divider />
+      {line('Last time', lastServiceLine(f))}
+      {f.lastJob ? line('Who', f.lastJob.who.length ? f.lastJob.who.join(', ') : 'Nobody named on the job', f.lastJob.who.length ? 'muted' : 'warn') : null}
+      {line('Hours', f.hours
+        ? `${f.hours.total} h — ${f.hours.byPerson.map((p) => `${p.name} ${p.hours} h`).join(', ')} (${f.hours.source === 'office-timesheet' ? 'office timesheet' : f.hours.source === 'schedule' ? 'office schedule' : 'this phone’s clock'})`
+        : f.clockedOnNote, f.hours ? 'muted' : 'warn')}
+      {f.lastRun ? line('Last routine on this phone', `${f.lastRun.routineLabel}${f.lastRun.technician ? ` by ${f.lastRun.technician}` : ''}, ${f.lastRun.daysAgo ?? '?'} days ago — ${f.lastRun.checksPassed} passed, ${f.lastRun.checksFailed} failed, ${f.lastRun.checksNotTested} not tested, ${f.lastRun.defectsRaised} defect${f.lastRun.defectsRaised === 1 ? '' : 's'}`) : null}
+      {line('On site', `${f.assetsTotal} asset${f.assetsTotal === 1 ? '' : 's'}: ${assetsLine(f)}`)}
+      {f.due.length ? line('Due', f.due.slice(0, 4).map((d) => `${d.routineLabel} (${FREQUENCY_LABEL[d.frequency as keyof typeof FREQUENCY_LABEL] ?? d.frequency}) — ${d.state}${d.daysUntilDue !== undefined ? d.daysUntilDue < 0 ? `, ${Math.abs(d.daysUntilDue)} days over` : `, in ${d.daysUntilDue} days` : ''}`).join('\n'), f.overdue ? 'fail' : 'muted') : null}
+      {line('Locked in', f.lockedInNote, f.lockedIn === 'booked' ? 'pass' : f.lockedIn === 'job-only' ? 'warn' : 'fail')}
+      {f.contact ? line('Contact', `${f.contact.name ?? ''}${f.contact.name && f.contact.phone ? ' · ' : ''}${f.contact.phone ?? ''}`) : null}
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The month — the planner as it was
+// ---------------------------------------------------------------------------
+
 type MonthChoice = '0' | '1' | '2';
 type TechChoice = '1' | '2' | '3' | '4';
 
-export default function WorkPlanScreen() {
+function MonthPlanner() {
   const t = useTheme();
   const [month, setMonth] = useState<MonthChoice>('1');
   const [techs, setTechs] = useState<TechChoice>('2');
@@ -69,177 +421,139 @@ export default function WorkPlanScreen() {
     }
   }, [month, techs]);
 
-  useEffect(() => { void load(); }, [load]);
+  useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const busyDays = plan?.days.filter((d) => d.visitCount > 0) ?? [];
   const quietDays = (plan?.days.length ?? 0) - busyDays.length;
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Work planner' }} />
-      <Screen>
+      <Segmented
+        value={month}
+        onChange={setMonth}
+        options={[
+          { value: '0', label: 'This month' },
+          { value: '1', label: 'Next month' },
+          { value: '2', label: 'The one after' },
+        ]}
+      />
+      <View style={{ gap: t.space(1.5) }}>
+        <Label>Technicians available</Label>
         <Segmented
-          value={month}
-          onChange={setMonth}
+          value={techs}
+          onChange={setTechs}
           options={[
-            { value: '0', label: 'This month' },
-            { value: '1', label: 'Next month' },
-            { value: '2', label: 'The one after' },
+            { value: '1', label: '1' },
+            { value: '2', label: '2' },
+            { value: '3', label: '3' },
+            { value: '4', label: '4' },
           ]}
         />
-        <View style={{ gap: t.space(1.5) }}>
-          <Label>Technicians available</Label>
-          <Segmented
-            value={techs}
-            onChange={setTechs}
-            options={[
-              { value: '1', label: '1' },
-              { value: '2', label: '2' },
-              { value: '3', label: '3' },
-              { value: '4', label: '4' },
-            ]}
-          />
-        </View>
+      </View>
 
-        {error ? (
-          <Banner tone="fail" title="The plan could not be built" body={error} />
-        ) : null}
+      {error ? <Banner tone="fail" title="The plan could not be built" body={error} /> : null}
+      {loading && !plan ? <Card><Txt tone="muted">Working out the month…</Txt></Card> : null}
 
-        {loading && !plan ? (
-          <Card><Txt tone="muted">Working out the month…</Txt></Card>
-        ) : null}
-
-        {plan ? (
-          <>
-            <Card>
-              <Txt weight="700" size="lg">{plan.window.label}</Txt>
-              <Txt size="sm" tone="muted" style={{ marginTop: 2 }}>{planHeadline(plan)}</Txt>
-              <Rowed gap={2} style={{ marginTop: t.space(3) }}>
-                <StatTile label="Visits" value={plan.summary.visits} />
-                <StatTile label="Hours (est.)" value={plan.summary.estimatedHours} tone="accent" />
-                <StatTile
-                  label="Load"
-                  value={`${Math.round(plan.summary.utilisation * 100)}%`}
-                  tone={plan.summary.utilisation > 0.95 ? 'fail' : plan.summary.utilisation > 0.8 ? 'warn' : 'default'}
-                />
-              </Rowed>
-              <Rowed gap={2} style={{ marginTop: t.space(2) }}>
-                <StatTile label="Working days" value={plan.summary.workingDays} />
-                <StatTile
-                  label="Urgent"
-                  value={plan.summary.urgentVisits}
-                  tone={plan.summary.urgentVisits ? 'fail' : 'default'}
-                />
-                <StatTile
-                  label="Unplanned"
-                  value={plan.summary.unplanned}
-                  tone={plan.summary.unplanned ? 'warn' : 'default'}
-                />
-              </Rowed>
-              <Txt size="xs" tone="faint" style={{ marginTop: t.space(2.5), lineHeight: 17 }}>
-                {ESTIMATE_CAVEAT}
-              </Txt>
-            </Card>
-
-            {plan.summary.urgentVisits ? (
-              <Banner
-                tone="fail"
-                title={`${plan.summary.urgentVisits} visit${plan.summary.urgentVisits === 1 ? '' : 's'} already outside tolerance`}
-                body="Placed on the earliest working day available and not batched by suburb. Being late costs more than the driving does."
+      {plan ? (
+        <>
+          <Card>
+            <Txt weight="700" size="lg">{plan.window.label}</Txt>
+            <Txt size="sm" tone="muted" style={{ marginTop: 2 }}>{planHeadline(plan)}</Txt>
+            <Rowed gap={2} style={{ marginTop: t.space(3) }}>
+              <StatTile label="Visits" value={plan.summary.visits} />
+              <StatTile label="Hours (est.)" value={plan.summary.estimatedHours} tone="accent" />
+              <StatTile
+                label="Load"
+                value={`${Math.round(plan.summary.utilisation * 100)}%`}
+                tone={plan.summary.utilisation > 0.95 ? 'fail' : plan.summary.utilisation > 0.8 ? 'warn' : 'default'}
               />
-            ) : null}
-
-            {coverage ? <CoverageNote coverage={coverage} /> : null}
-
-            <Rowed gap={2}>
-              <View style={{ flex: 1 }}>
-                <Button
-                  title={showWorkings ? 'Hide the reasoning' : 'How this was worked out'}
-                  variant="secondary"
-                  compact
-                  onPress={() => setShowWorkings((v) => !v)}
-                />
-              </View>
-              <Button title="Rebuild" variant="ghost" compact onPress={() => void load()} />
             </Rowed>
+            <Rowed gap={2} style={{ marginTop: t.space(2) }}>
+              <StatTile label="Working days" value={plan.summary.workingDays} />
+              <StatTile label="Urgent" value={plan.summary.urgentVisits} tone={plan.summary.urgentVisits ? 'fail' : 'default'} />
+              <StatTile label="Unplanned" value={plan.summary.unplanned} tone={plan.summary.unplanned ? 'warn' : 'default'} />
+            </Rowed>
+            <Txt size="xs" tone="faint" style={{ marginTop: t.space(2.5), lineHeight: 17 }}>{ESTIMATE_CAVEAT}</Txt>
+          </Card>
 
-            {showWorkings ? (
-              <Card>
-                {plan.notes.map((note) => (
-                  <Rowed key={note} gap={2} align="flex-start" style={{ marginBottom: t.space(2) }}>
-                    <MaterialCommunityIcons name="information-outline" size={16} color={t.color.textFaint} />
-                    <Txt size="sm" tone="muted" style={{ flex: 1, lineHeight: 19 }}>{note}</Txt>
-                  </Rowed>
-                ))}
-                {plan.clusters.length ? (
-                  <>
-                    <Divider />
-                    <Label>How the work was grouped</Label>
-                    {plan.clusters.map((cluster) => (
-                      <View key={cluster.id} style={{ marginTop: t.space(2) }}>
-                        <Rowed gap={2}>
-                          <Txt size="sm" weight="700">{cluster.label}</Txt>
-                          <Chip
-                            label={CLUSTER_METHOD_LABEL[cluster.method]}
-                            tone={cluster.method === 'locality' ? 'pass' : 'warn'}
-                          />
-                        </Rowed>
-                        <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>{cluster.basis}</Txt>
-                      </View>
-                    ))}
-                  </>
-                ) : null}
-              </Card>
-            ) : null}
+          {plan.summary.urgentVisits ? (
+            <Banner
+              tone="fail"
+              title={`${plan.summary.urgentVisits} visit${plan.summary.urgentVisits === 1 ? '' : 's'} already outside tolerance`}
+              body="Placed on the earliest working day available and not batched by suburb. Being late costs more than the driving does."
+            />
+          ) : null}
 
-            {busyDays.length ? (
-              <>
-                <H2>The month</H2>
-                {busyDays.map((day) => <DayCard key={day.date} day={day} />)}
-                {quietDays ? (
-                  <Txt size="sm" tone="faint" style={{ lineHeight: 19 }}>
-                    {quietDays} working day{quietDays === 1 ? '' : 's'} in {plan.window.label} carry no planned work.
-                    That is capacity for project work, callouts and the sites listed below as unplanned.
-                  </Txt>
-                ) : null}
-              </>
-            ) : (
-              <EmptyState
-                title={`Nothing planned for ${plan.window.label}`}
-                body={
-                  plan.summary.unplanned
-                    ? 'Everything due this window is in the list below, with the reason it could not be placed.'
-                    : 'Nothing falls due inside this window. Routines only plan once they have a service recorded to count from.'
-                }
-              />
-            )}
+          {coverage ? <CoverageNote coverage={coverage} /> : null}
 
-            {plan.unplanned.length ? <UnplannedSection plan={plan} /> : null}
-          </>
-        ) : null}
-      </Screen>
+          <Rowed gap={2}>
+            <View style={{ flex: 1 }}>
+              <Button title={showWorkings ? 'Hide the reasoning' : 'How this was worked out'} variant="secondary" compact onPress={() => setShowWorkings((v) => !v)} />
+            </View>
+            <Button title="Rebuild" variant="ghost" compact onPress={() => void load()} />
+          </Rowed>
+
+          {showWorkings ? (
+            <Card>
+              {plan.notes.map((note) => (
+                <Rowed key={note} gap={2} align="flex-start" style={{ marginBottom: t.space(2) }}>
+                  <MaterialCommunityIcons name="information-outline" size={16} color={t.color.textFaint} />
+                  <Txt size="sm" tone="muted" style={{ flex: 1, lineHeight: 19 }}>{note}</Txt>
+                </Rowed>
+              ))}
+              {plan.clusters.length ? (
+                <>
+                  <Divider />
+                  <Label>How the work was grouped</Label>
+                  {plan.clusters.map((cluster) => (
+                    <View key={cluster.id} style={{ marginTop: t.space(2) }}>
+                      <Rowed gap={2}>
+                        <Txt size="sm" weight="700">{cluster.label}</Txt>
+                        <Chip label={CLUSTER_METHOD_LABEL[cluster.method]} tone={cluster.method === 'locality' ? 'pass' : 'warn'} />
+                      </Rowed>
+                      <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>{cluster.basis}</Txt>
+                    </View>
+                  ))}
+                </>
+              ) : null}
+            </Card>
+          ) : null}
+
+          {busyDays.length ? (
+            <>
+              <H2>The month</H2>
+              {busyDays.map((day) => <DayCard key={day.date} day={day} />)}
+              {quietDays ? (
+                <Txt size="sm" tone="faint" style={{ lineHeight: 19 }}>
+                  {quietDays} working day{quietDays === 1 ? '' : 's'} in {plan.window.label} carry no planned work.
+                  That is capacity for project work, callouts and the sites listed below as unplanned.
+                </Txt>
+              ) : null}
+            </>
+          ) : (
+            <EmptyState
+              title={`Nothing planned for ${plan.window.label}`}
+              body={plan.summary.unplanned
+                ? 'Everything due this window is in the list below, with the reason it could not be placed.'
+                : 'Nothing falls due inside this window. Routines only plan once they have a service recorded to count from.'}
+            />
+          )}
+
+          {plan.unplanned.length ? <UnplannedSection plan={plan} /> : null}
+        </>
+      ) : null}
     </>
   );
 }
 
-/**
- * How much of the book the plan could see at all.
- *
- * "October looks quiet" means nothing without this. A site with no asset
- * register cannot be sized and a site with no suburb cannot be batched, and
- * both drop out of the month — so the count of each is shown above the month
- * rather than left in the database where nobody reads it.
- */
 function CoverageNote({ coverage }: { coverage: PlanCoverage }) {
   const missingAssets = coverage.sites - coverage.sitesWithAssets;
   const missingLocality = coverage.sites - coverage.sitesWithLocality;
   if (!coverage.sites || (missingAssets <= 0 && missingLocality <= 0)) return null;
-
   const gaps = [
     missingAssets > 0 ? `${missingAssets} have no asset register, so a visit to them cannot be sized` : null,
     missingLocality > 0 ? `${missingLocality} have neither a suburb nor a postcode, so they cannot be batched` : null,
   ].filter(Boolean).join('. ');
-
   return (
     <Banner
       tone="warn"
@@ -253,156 +567,53 @@ function CoverageNote({ coverage }: { coverage: PlanCoverage }) {
 
 function DayCard({ day }: { day: PlannedDay }) {
   const t = useTheme();
-  const tone = day.utilisation > 1 ? 'fail' : day.utilisation > 0.9 ? 'warn' : 'pass';
-
   return (
     <Card>
       <Rowed style={{ justifyContent: 'space-between' }}>
-        <View>
-          <Txt weight="700">{day.weekday} {day.dateAu}</Txt>
-          <Txt size="xs" tone="faint">
-            {day.clusterLabels.join(' · ') || 'No locality'}
-          </Txt>
-        </View>
-        <View style={{ alignItems: 'flex-end' }}>
-          <Txt weight="700" tone={tone}>{formatHours(day.hours)}</Txt>
-          <Txt size="xs" tone="faint">of {formatHours(day.capacityHours)} · estimated</Txt>
-        </View>
+        <Txt weight="700">{formatPlanDate(day.date)}</Txt>
+        <Txt size="sm" tone="muted">{day.visitCount} visit{day.visitCount === 1 ? '' : 's'} · {formatHours(day.hours)} est.</Txt>
       </Rowed>
-
-      <LoadBar fraction={day.utilisation} tone={tone} />
-
-      {day.technicians.filter((tech) => tech.visits.length).map((tech) => (
-        <View key={tech.index} style={{ marginTop: t.space(3), gap: t.space(2) }}>
-          <Rowed style={{ justifyContent: 'space-between' }}>
-            <Label>{tech.label}</Label>
-            <Txt size="xs" tone="faint">{formatHours(tech.hours)} estimated</Txt>
-          </Rowed>
-          {tech.visits.map((visit) => <VisitRow key={visit.id} visit={visit} />)}
+      {day.technicians.map((tech) => (
+        <View key={tech.index} style={{ marginTop: t.space(2) }}>
+          {day.technicians.length > 1 ? <Label>{tech.label}</Label> : null}
+          {tech.visits.map((v) => <VisitRow key={`${v.siteId}-${v.date}`} visit={v} />)}
         </View>
       ))}
     </Card>
   );
 }
 
-function LoadBar({ fraction, tone }: { fraction: number; tone: 'pass' | 'warn' | 'fail' }) {
-  const t = useTheme();
-  const colour = { pass: t.color.pass, warn: t.color.warn, fail: t.color.fail }[tone];
-  return (
-    <View
-      style={{
-        height: 6,
-        borderRadius: 3,
-        backgroundColor: t.color.surfaceAlt,
-        marginTop: t.space(2),
-        overflow: 'hidden',
-      }}
-    >
-      <View
-        style={{
-          width: `${Math.min(100, Math.max(0, fraction * 100))}%`,
-          height: 6,
-          backgroundColor: colour,
-        }}
-      />
-    </View>
-  );
-}
-
 function VisitRow({ visit }: { visit: PlannedVisit }) {
   const t = useTheme();
   return (
-    <Card
-      style={{ backgroundColor: t.color.surfaceAlt }}
-      onPress={() => router.push({ pathname: '/site/[id]', params: { id: visit.siteId } })}
-    >
-      <Rowed align="flex-start" gap={2}>
-        <MaterialCommunityIcons
-          name={visit.urgent ? 'alert-decagram-outline' : 'map-marker-outline'}
-          size={20}
-          color={visit.urgent ? t.color.fail : t.color.textFaint}
-        />
+    <View style={{ marginTop: t.space(1.5) }}>
+      <Rowed style={{ justifyContent: 'space-between' }} align="flex-start">
         <View style={{ flex: 1 }}>
-          <Txt weight="700">{visit.siteName}</Txt>
-          <Txt size="sm" tone="muted">
-            {visit.routines.map((r) => r.routineLabel ?? `${FREQUENCY_LABEL[r.frequency]} ${r.system}`).join(' · ')}
-          </Txt>
-          <Rowed gap={2} wrap style={{ marginTop: t.space(1.5) }}>
-            {visit.urgent ? <Chip label="Outside tolerance" tone="fail" /> : null}
-            {/* A breached routine that did not get the first day of the month.
-                The plan says overdue work goes first; where a shared visit or a
-                full day moved it, the office sees by how much. */}
-            {visit.urgent && visit.daysAfterEarliest ? (
-              <Chip label={`${visit.daysAfterEarliest} days after the first workable day`} tone="warn" />
-            ) : null}
-            <Chip label={`≈ ${formatHours(visit.hours.hours)} est.`} />
-            <Chip label={visit.clusterLabel} tone={visit.clusterMethod === 'locality' ? 'default' : 'warn'} />
-            {visit.daysOfMargin !== undefined && visit.daysOfMargin >= 0 ? (
-              <Chip
-                label={`${visit.daysOfMargin} day${visit.daysOfMargin === 1 ? '' : 's'} of margin`}
-                tone={visit.daysOfMargin < 5 ? 'warn' : 'default'}
-              />
-            ) : null}
-            {visit.hours.partial ? <Chip label="Estimate incomplete" tone="warn" /> : null}
-          </Rowed>
-          {visit.hours.partial ? (
-            <Txt size="xs" tone="warn" style={{ marginTop: t.space(1.5), lineHeight: 17 }}>
-              Not counted in the estimate: {visit.hours.notCosted.join(', ')}. The real visit is longer than this.
-            </Txt>
-          ) : null}
-          <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5), lineHeight: 17 }}>
-            {visit.hours.basis.join(' · ')}
-          </Txt>
+          <Txt size="sm" weight="700">{visit.siteName}</Txt>
+          <Txt size="xs" tone="muted">{visit.routines.map((r) => `${r.routineLabel} (${FREQUENCY_LABEL[r.frequency]})`).join(' · ')}</Txt>
         </View>
+        <Txt size="sm" tone={visit.urgent ? 'fail' : 'muted'}>{formatHours(visit.hours.hours)}{visit.urgent ? ' · late' : ''}</Txt>
       </Rowed>
-    </Card>
+    </View>
   );
 }
 
 function UnplannedSection({ plan }: { plan: WorkPlan }) {
   const t = useTheme();
   const byReason = new Map<UnplannableReason, typeof plan.unplanned>();
-  for (const item of plan.unplanned) {
-    byReason.set(item.reason, [...(byReason.get(item.reason) ?? []), item]);
-  }
-
+  for (const u of plan.unplanned) byReason.set(u.reason, [...(byReason.get(u.reason) ?? []), u]);
   return (
     <>
-      <H2>Not planned</H2>
-      <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-        Everything due that could not be placed, with the reason. This list is the point of the screen as much as the
-        month is — work that quietly falls out of a plan is work nobody does.
-      </Txt>
-      {[...byReason.entries()].map(([reason, items]) => (
+      <H2>Could not be planned</H2>
+      {[...byReason].map(([reason, items]) => (
         <Card key={reason}>
-          <Rowed style={{ justifyContent: 'space-between' }}>
-            <Txt weight="700">{UNPLANNABLE_REASON_LABEL[reason]}</Txt>
-            <Chip label={String(items.length)} tone="warn" />
-          </Rowed>
-          <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5), lineHeight: 17 }}>
-            {items[0]?.detail}
-          </Txt>
-          <Divider />
-          {items.slice(0, 25).map((item) => (
-            <Rowed key={`${item.siteId}:${item.routineId}`} gap={2} align="flex-start" style={{ marginTop: t.space(1.5) }}>
-              <View style={{ flex: 1 }}>
-                <Txt size="sm" weight="600">{item.siteName ?? item.siteId}</Txt>
-                <Txt size="xs" tone="muted">
-                  {item.routineLabel ?? item.routineId}
-                  {/* Not every unplanned row has a frequency. One whose routine
-                      this build does not hold has none, and printing a guess
-                      here is printing it on the list the office acts on. */}
-                  {' · '}{item.frequency ? FREQUENCY_LABEL[item.frequency] : 'Frequency unknown'}
-                  {item.latestSafeDate ? ` · in tolerance until ${formatPlanDate(item.latestSafeDate)}` : ''}
-                </Txt>
-              </View>
-            </Rowed>
+          <Txt weight="700">{UNPLANNABLE_REASON_LABEL[reason]}</Txt>
+          {items.map((u, i) => (
+            <View key={`${u.siteId}-${u.routineId ?? i}`} style={{ marginTop: t.space(1.5) }}>
+              <Txt size="sm">{u.siteName ?? u.siteId}{u.routineLabel ? ` — ${u.routineLabel}` : ''}</Txt>
+              <Txt size="xs" tone="faint" style={{ lineHeight: 16 }}>{u.detail}</Txt>
+            </View>
           ))}
-          {items.length > 25 ? (
-            <Txt size="xs" tone="faint" style={{ marginTop: t.space(2) }}>
-              and {items.length - 25} more.
-            </Txt>
-          ) : null}
         </Card>
       ))}
     </>

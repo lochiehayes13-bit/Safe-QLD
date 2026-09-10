@@ -971,13 +971,12 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/work/plan', file: 'app/work/plan.tsx', tab: 'work', section: 'Planning',
-    label: 'Work planner', modes: OFFICE, openedFrom: ['/work'],
-    blurb: 'The month laid out day by day, with every hours figure marked as an estimate.',
-    terms: ['plan', 'planner', 'month', 'schedule', 'capacity'],
-    hiddenBecause:
-      'Deciding who goes where next month is not a decision made from a plant room, and a '
-      + 'technician acting on a draft plan that has not been agreed is worse than not seeing it. '
-      + "Today's run is the same question for the day you are actually in.",
+    label: 'Plan work', modes: BOTH, openedFrom: ['/work'],
+    blurb:
+      'Build tomorrow site by site — what was done there last time, by whom, how long it took, '
+      + 'whether anyone clocked on, how many assets of each type, and whether the client has it '
+      + 'locked in — then put the day on your Simpro schedule. The month planner is the second tab.',
+    terms: ['plan', 'planner', 'day', 'build my day', 'month', 'schedule', 'capacity', 'last service', 'history'],
   },
   {
     route: '/work/labels', file: 'app/work/labels.tsx', tab: 'work', section: 'Planning',

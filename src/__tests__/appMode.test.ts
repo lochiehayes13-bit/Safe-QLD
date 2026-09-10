@@ -90,13 +90,13 @@ describe('nothing is ever unreachable', () => {
   });
 
   it('refuses to count search as the proof, because you cannot search for a name you have never seen', () => {
-    const plan = reach('/work/plan', 'technician')!;
-    expect(plan.reachable).toBe(true);
-    expect(plan.channel).toBe('search');
-    expect(plan.proven).toBe(false);
+    const labels = reach('/work/labels', 'technician')!;
+    expect(labels.reachable).toBe(true);
+    expect(labels.channel).toBe('search');
+    expect(labels.proven).toBe(false);
 
     // And in the mode that does list it, the same route is proven.
-    expect(reach('/work/plan', 'office')).toMatchObject({ proven: true, channel: 'nav' });
+    expect(reach('/work/labels', 'office')).toMatchObject({ proven: true, channel: 'nav' });
   });
 
   it('gives the tap path for anything a mode does list, so a nav row can be checked against it', () => {
@@ -207,8 +207,8 @@ describe('technician mode', () => {
       '/quotes',
       '/site/quote',
       '/work/baselines',
+      // A batch job that ends at a label printer, so it happens in the workshop.
       '/work/labels',
-      '/work/plan',
       // How 897 sites are going is not a question anybody answers from a plant
       // room, and it is not actionable by the person standing in one. The site
       // in front of them already shows its own state in full.
@@ -240,7 +240,7 @@ describe('technician mode', () => {
     const tech = summarise('technician');
     const office = summarise('office');
     expect(tech.total).toBe(DESTINATIONS.length);
-    expect(tech.hidden).toBe(7);
+    expect(tech.hidden).toBe(6);
     expect(office.hidden).toBe(0);
     expect(tech.listed).toBeLessThan(office.listed);
   });
@@ -276,11 +276,14 @@ describe('the grouping', () => {
     }
   });
 
-  it('drops the whole planning section from a technician rather than leaving an empty heading', () => {
-    const techWork = navFor('technician').find((g) => g.tab === 'work')!;
-    const officeWork = navFor('office').find((g) => g.tab === 'work')!;
-    expect(techWork.sections.map((s) => s.title)).not.toContain('Planning');
-    expect(officeWork.sections.map((s) => s.title)).toContain('Planning');
+  it('leaves a technician the one planning screen they act on, and holds back the rest', () => {
+    // Building your own day is field work: it is done the afternoon before,
+    // from the same phone. Deciding who covers which suburb next month, and
+    // printing a batch of labels, are not, so those stay in the office.
+    const techPlanning = navFor('technician').find((g) => g.tab === 'work')!.sections.find((s) => s.title === 'Planning');
+    const officePlanning = navFor('office').find((g) => g.tab === 'work')!.sections.find((s) => s.title === 'Planning');
+    expect(techPlanning!.destinations.map((d) => d.route)).toEqual(['/work/plan']);
+    expect(officePlanning!.destinations.map((d) => d.route)).toEqual(expect.arrayContaining(['/work/plan', '/work/portfolio', '/work/labels']));
   });
 
   it('keeps every section it shows populated in both modes', () => {
@@ -295,8 +298,8 @@ describe('the grouping', () => {
 
 describe('finding a screen that is not in front of you', () => {
   it('finds a hidden screen by name and says it is hidden, rather than pretending it is gone', () => {
-    const hits = searchDestinations('work planner', 'technician');
-    expect(hits[0]!.destination.route).toBe('/work/plan');
+    const hits = searchDestinations('asset labels', 'technician');
+    expect(hits[0]!.destination.route).toBe('/work/labels');
     expect(hits[0]!.hidden).toBe(true);
     expect(hits[0]!.matched).toBe('name');
   });
