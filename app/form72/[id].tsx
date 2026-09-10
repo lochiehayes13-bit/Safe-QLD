@@ -3,9 +3,19 @@ import { Pressable, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
-  ISSUED_REFUSAL, getForm72, issueForm72, recordOccupierCopy, updateForm72,
+  ISSUED_REFUSAL, getForm72, issueForm72, linkForm72Job, recordForm72Attached, recordOccupierCopy, updateForm72,
   type Form72Patch, type StoredForm72,
 } from '@/db/form72Repo';
+import { listJobPage, type JobSummary } from '@/db/opsRepo';
+import { queueJobAttachment } from '@/simpro/sync';
+import {
+  FORM72_INBOX, form72AttachmentName, form72AttachmentSubject, form72EmailBody, rankJobsForForm,
+} from '@/domain/form72Link';
+import { qldIsoDay, qldMoment } from '@/domain/qldTime';
+import { attachmentContentKey } from '@/domain/outboundWork';
+import { describeActionFailure } from '@/domain/loadFailure';
+import * as MailComposer from 'expo-mail-composer';
+import { router } from 'expo-router';
 import {
   CALIBRATION_MONTHS, PART_RESULT_LABEL, deviceCalibration, elevationHeadKpa, frictionalLossKpa,
   overloadCheck, validateForm72,
@@ -110,6 +120,10 @@ export default function Form72Screen() {
   const [part, setPart] = useState<PartKey>('A');
   const [companyName, setCompanyName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [attaching, setAttaching] = useState(false);
+  const [pickingJob, setPickingJob] = useState(false);
+  const [siteJobs, setSiteJobs] = useState<JobSummary[]>([]);
+  const [typedJob, setTypedJob] = useState('');
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -148,6 +162,101 @@ export default function Form72Screen() {
   const blockers = issues.filter((i) => i.blocking);
   const cautions = issues.filter((i) => !i.blocking);
 
+  /**
+   * Puts the PDF on the Simpro job's attachments.
+   *
+   * Queued, not sent: the phone may have no signal in the pump room, and the
+   * queue carries it. The form remembers that it went, because "the office
+   * has it" and "I think I sent it" are different states and only one of
+   * them lets a technician stop worrying.
+   */
+  const attachToJob = useCallback(async (target: StoredForm72, quiet = false): Promise<boolean> => {
+    if (!target.jobExternalId) return false;
+    setAttaching(true);
+    try {
+      const html = form72Html({ form: target, systemLabel: target.systemLabel, companyName, generatedAt: nowIso(), overload: target.overload });
+      const file = await writePdf(form72AttachmentName(target).replace(/\.pdf$/i, ''), html);
+      if (file.printed) {
+        if (!quiet) showAlert('Printed, not attached', 'On the web the PDF is printed rather than written, so it cannot be queued onto the job from here. Do this from a phone.');
+        return false;
+      }
+      const filename = form72AttachmentName(target);
+      const row = await queueJobAttachment({
+        jobId: target.jobExternalId,
+        localUri: file.uri,
+        filename,
+        mimeType: 'application/pdf',
+        subject: form72AttachmentSubject(target),
+        sizeBytes: file.size,
+        key: attachmentContentKey({ jobId: target.jobExternalId, filename, sizeBytes: file.size }),
+      });
+      const at = nowIso();
+      await recordForm72Attached(target.id, at);
+      setForm((prev) => (prev && prev.id === target.id ? { ...prev, attachedAt: at } : prev));
+      if (!quiet) {
+        showAlert(
+          row.duplicate ? 'Already queued' : 'Queued for the job',
+          `The PDF is on Waiting to send for job ${target.jobExternalId}. It goes up with the next sync and shows on the job's attachments in Simpro.`,
+        );
+      }
+      return true;
+    } catch (e) {
+      showAlert('Not attached', describeActionFailure(e, 'attaching the form to the job'));
+      return false;
+    } finally {
+      setAttaching(false);
+    }
+  }, [companyName]);
+
+  const emailForm = useCallback(async () => {
+    if (!form) return;
+    setAttaching(true);
+    try {
+      const html = form72Html({ form, systemLabel: form.systemLabel, companyName, generatedAt: nowIso(), overload: form.overload });
+      const file = await writePdf(form72AttachmentName(form).replace(/\.pdf$/i, ''), html);
+      if (!(await MailComposer.isAvailableAsync())) {
+        showAlert('No mail app set up', `This phone has no email account configured. The form goes to ${FORM72_INBOX}; use Produce PDF and send it from wherever you can.`);
+        return;
+      }
+      const { status } = await MailComposer.composeAsync({
+        recipients: [FORM72_INBOX],
+        subject: form72AttachmentSubject(form),
+        body: form72EmailBody(form, form.jobExternalId),
+        attachments: file.printed ? [] : [file.uri],
+      });
+      showAlert(status === MailComposer.MailComposerStatus.SENT ? 'Sent' : 'Not sent',
+        status === MailComposer.MailComposerStatus.SENT ? `On its way to ${FORM72_INBOX}.` : 'The email was not sent.');
+    } catch (e) {
+      showAlert('Could not email it', describeActionFailure(e, 'emailing the form'));
+    } finally {
+      setAttaching(false);
+    }
+  }, [form, companyName]);
+
+  const openJobPicker = useCallback(async () => {
+    if (!form) return;
+    setPickingJob(true);
+    try {
+      const page = await listJobPage({ filter: 'all', today: qldIsoDay(nowIso()) ?? '', siteId: form.siteId, limit: 50 });
+      setSiteJobs(page.rows.filter((j) => j.externalId));
+    } catch (e) {
+      setSiteJobs([]);
+      showAlert('Could not list the jobs', describeActionFailure(e, 'reading the site\'s jobs'));
+    }
+  }, [form]);
+
+  const linkJob = useCallback(async (job: { externalId: string; title?: string } | null) => {
+    if (!form) return;
+    try {
+      await linkForm72Job(form.id, job);
+      setForm({ ...form, jobExternalId: job?.externalId.trim() || undefined, jobTitle: job?.title || undefined, attachedAt: undefined });
+      setPickingJob(false);
+      setTypedJob('');
+    } catch (e) {
+      showAlert('Not linked', describeActionFailure(e, 'linking the job'));
+    }
+  }, [form]);
+
   const onIssue = useCallback(() => {
     if (!form) return;
     if (blockers.length) {
@@ -169,7 +278,15 @@ export default function Form72Screen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              setForm(await issueForm72(form.id));
+              const issued = await issueForm72(form.id);
+              setForm(issued);
+              // The issued document is what the office files. Where the job
+              // is known it goes now, without another tap; where it is not,
+              // the Simpro card below says so and stays red until it does.
+              if (issued.jobExternalId) {
+                const went = await attachToJob(issued, true);
+                if (went) showAlert('Issued and queued for the job', `The PDF is on Waiting to send for job ${issued.jobExternalId}.`);
+              }
             } catch (e) {
               showAlert('Cannot issue', e instanceof Error ? e.message : String(e));
             }
@@ -279,6 +396,60 @@ export default function Form72Screen() {
           />
         </Rowed>
         {form.systemLabel ? <Txt size="sm" tone="muted">{form.systemLabel}</Txt> : null}
+      </Card>
+
+      <Card>
+        <Rowed style={{ justifyContent: 'space-between' }} align="flex-start">
+          <View style={{ flex: 1 }}>
+            <Label>Simpro job</Label>
+            {form.jobExternalId ? (
+              <Txt weight="700" style={{ marginTop: 4 }}>Job {form.jobExternalId}{form.jobTitle ? ` — ${form.jobTitle}` : ''}</Txt>
+            ) : (
+              <Txt weight="700" tone="warn" style={{ marginTop: 4 }}>Not linked to a job yet</Txt>
+            )}
+            <Txt size="sm" tone="muted" style={{ marginTop: 2 }}>
+              {form.attachedAt
+                ? `PDF queued for the job ${qldMoment(form.attachedAt) ?? ''}.`
+                : form.jobExternalId
+                  ? (locked ? 'Issued but not yet on the job.' : 'The PDF goes onto this job the moment the form is issued.')
+                  : 'The office files this form against the job the test was done under. Name it and the PDF attaches itself on issue.'}
+            </Txt>
+          </View>
+          <Chip label={form.attachedAt ? 'On the job' : form.jobExternalId ? 'Linked' : 'No job'} tone={form.attachedAt ? 'pass' : form.jobExternalId ? 'default' : 'warn'} />
+        </Rowed>
+
+        {pickingJob ? (
+          <View style={{ marginTop: t.space(3), gap: t.space(2) }}>
+            {rankJobsForForm(siteJobs.map((j) => ({
+              externalId: j.externalId!, title: j.title, status: j.status, statusName: j.statusName, scheduledFor: j.scheduledFor, completedAt: j.completedAt,
+            }))).slice(0, 8).map((j) => (
+              <Pressable key={j.externalId} onPress={() => { void linkJob({ externalId: j.externalId, title: j.title }); }} accessibilityRole="button">
+                <Txt weight="700">Job {j.externalId} — {j.title}</Txt>
+                <Txt size="sm" tone="muted">{j.statusName ?? j.status}{j.scheduledFor ? ` · ${formatAuDate(j.scheduledFor)}` : ''}</Txt>
+              </Pressable>
+            ))}
+            {siteJobs.length === 0 ? <Txt size="sm" tone="muted">No Simpro jobs for this site on the phone. Type the number.</Txt> : null}
+            <Rowed gap={2} align="flex-start">
+              <View style={{ flex: 1 }}>
+                <Field label="Or the job number" value={typedJob} onChangeText={setTypedJob} keyboardType="numeric" placeholder="41900" />
+              </View>
+            </Rowed>
+            <Rowed gap={2}>
+              <Chip label="Link this number" onPress={() => { if (/^\d+$/.test(typedJob.trim())) void linkJob({ externalId: typedJob.trim() }); }} />
+              <Chip label="Cancel" onPress={() => setPickingJob(false)} />
+            </Rowed>
+          </View>
+        ) : (
+          <Rowed gap={2} wrap style={{ marginTop: t.space(3) }}>
+            <Chip label={form.jobExternalId ? 'Change job' : 'Link to a job'} onPress={() => { void openJobPicker(); }} />
+            {form.jobExternalId ? (
+              <Chip label={form.attachedAt ? 'Queue the PDF again' : 'Attach PDF to job'} onPress={() => { void attachToJob(form); }} />
+            ) : null}
+            <Chip label={`Email to ${FORM72_INBOX.split('@')[0]}`} onPress={() => { void emailForm(); }} />
+            <Chip label="Open in hydrant flow tool" onPress={() => router.push({ pathname: '/tools/hydrant', params: { form72: form.id } })} />
+          </Rowed>
+        )}
+        {attaching ? <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5) }}>Working…</Txt> : null}
       </Card>
 
       {locked ? (

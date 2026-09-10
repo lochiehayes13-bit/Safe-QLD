@@ -1,6 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Linking, Pressable, ScrollView, View } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, useLocalSearchParams } from 'expo-router';
+import { getForm72, listForm72, type StoredForm72 } from '@/db/form72Repo';
+import { hasHydrantInputs, hydrantInputsFrom } from '@/domain/form72Link';
+import { formatAuDate } from '@/export/sheets';
+import { describeLoadFailure } from '@/domain/loadFailure';
 import {
   CONDUITS,
   OUTLETS,
@@ -67,7 +71,13 @@ const METER_UNITS: { id: FlowUnit; label: string }[] = [
 const num = (s: string): number => (/^-?\d*\.?\d+$/.test(s.trim()) ? Number(s.trim()) : Number.NaN);
 
 export default function HydrantScreen() {
+  const { form72: form72Param } = useLocalSearchParams<{ form72?: string }>();
   const [mode, setMode] = useState<Mode>('flow');
+  /** Which Form 72 the figures came from, and what each figure was read out of. */
+  const [loadedFrom, setLoadedFrom] = useState<{ form: StoredForm72; sources: string[] } | null>(null);
+  const [choosing, setChoosing] = useState(false);
+  const [forms, setForms] = useState<StoredForm72[]>([]);
+  const [formsFailed, setFormsFailed] = useState<string | null>(null);
 
   // Flow measurement
   const [outlet, setOutlet] = useState<OutletId>('square-edged');
@@ -123,10 +133,100 @@ export default function HydrantScreen() {
   const meteredLpm = metered.trim() === '' ? null : flowMeterToLpm(num(metered), meterUnit);
   const flowSource = meteredLpm !== null && meteredLpm > 0 ? 'flow meter' : 'pitot reading';
 
+  /**
+   * Fills the tabs from a finished Form 72.
+   *
+   * The form's own parts are read — static from Part D, the residual and
+   * the flow it was read at from the first Part D row, the duty and the
+   * rise from Part E — and every figure lands in the box it belongs in, so
+   * the Supply and Duty tabs answer straight away. Nothing the form does
+   * not hold is touched: a box already typed stays typed.
+   */
+  const applyForm = useCallback((form: StoredForm72) => {
+    const inputs = hydrantInputsFrom(form);
+    if (!hasHydrantInputs(inputs)) {
+      setLoadedFrom({ form, sources: ['This form holds no static, residual, flow or duty figures yet.'] });
+      return;
+    }
+    if (inputs.staticKpa !== undefined) setStaticKpa(String(inputs.staticKpa));
+    if (inputs.residualKpa !== undefined) setResidualKpa(String(inputs.residualKpa));
+    if (inputs.flowLpm !== undefined) { setMetered(String(inputs.flowLpm)); setMeterUnit('lpm'); }
+    if (inputs.requiredLps !== undefined) { setReqFlowLps(String(inputs.requiredLps)); setRefId(null); }
+    if (inputs.requiredKpa !== undefined) setReqPressure(String(inputs.requiredKpa));
+    if (inputs.riseM !== undefined) setRiseM(String(inputs.riseM));
+    if (inputs.hydrantRef) setHydrantRef(inputs.hydrantRef);
+    setLoadedFrom({ form, sources: inputs.sources });
+    setMode(inputs.residualKpa !== undefined ? 'supply' : 'duty');
+    setChoosing(false);
+  }, []);
+
+  // Opened from a Form 72's own screen: fill straight away. A form that is
+  // gone is said, not silently skipped.
+  useEffect(() => {
+    if (!form72Param) return;
+    let live = true;
+    void (async () => {
+      try {
+        const form = await getForm72(form72Param);
+        if (!live) return;
+        if (form) applyForm(form);
+        else setFormsFailed('That Form 72 is no longer on this phone.');
+      } catch (e) {
+        if (live) setFormsFailed(describeLoadFailure(e, 'the Form 72'));
+      }
+    })();
+    return () => { live = false; };
+  }, [form72Param, applyForm]);
+
+  const openChooser = async () => {
+    setChoosing(true);
+    setFormsFailed(null);
+    try {
+      setForms((await listForm72()).slice(0, 12));
+    } catch (e) {
+      setForms([]);
+      setFormsFailed(describeLoadFailure(e, 'the Form 72s on this phone'));
+    }
+  };
+
   return (
     <>
       <Stack.Screen options={{ title: 'Hydrant flow test' }} />
       <Screen>
+        {loadedFrom ? (
+          <Banner
+            tone="info"
+            title={`Filled from Form 72 — ${loadedFrom.form.siteName}${loadedFrom.form.testDate ? `, ${formatAuDate(loadedFrom.form.testDate)}` : ''}`}
+            body={loadedFrom.sources.join('\n')}
+          />
+        ) : null}
+        {formsFailed ? <Banner tone="fail" title="Could not read the form" body={formsFailed} /> : null}
+
+        {choosing ? (
+          <Card>
+            <Label>Which Form 72</Label>
+            {forms.length === 0 && !formsFailed ? (
+              <Txt size="sm" tone="muted" style={{ marginTop: 6 }}>No Form 72 on this phone yet. One is started from a site's Forms.</Txt>
+            ) : null}
+            {forms.map((f) => (
+              <Pressable key={f.id} onPress={() => applyForm(f)} style={{ paddingVertical: 10 }} accessibilityRole="button">
+                <Txt weight="700">{f.siteName}{f.systemLabel ? ` · ${f.systemLabel}` : ''}</Txt>
+                <Txt size="sm" tone="muted">
+                  {f.testDate ? formatAuDate(f.testDate) : 'No test date'} · {f.status === 'issued' ? 'issued' : 'draft'}
+                  {f.jobExternalId ? ` · job ${f.jobExternalId}` : ''}
+                </Txt>
+              </Pressable>
+            ))}
+            <Rowed gap={2} style={{ marginTop: 8 }}>
+              <Chip label="Close" onPress={() => setChoosing(false)} />
+            </Rowed>
+          </Card>
+        ) : (
+          <Rowed gap={2} wrap>
+            <Chip label={loadedFrom ? 'Load a different Form 72' : 'Load from a Form 72'} onPress={() => { void openChooser(); }} />
+          </Rowed>
+        )}
+
         <Segmented
           value={mode}
           onChange={setMode}

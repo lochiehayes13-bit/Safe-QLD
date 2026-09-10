@@ -3,6 +3,10 @@ import { View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { createForm72, deleteForm72, listForm72, type StoredForm72 } from '@/db/form72Repo';
+import { listJobPage } from '@/db/opsRepo';
+import { nowIso } from '@/db';
+import { qldIsoDay } from '@/domain/qldTime';
+import { autoLinkJob } from '@/domain/form72Link';
 import { getSite } from '@/db/repo';
 import { queryAssets } from '@/db/assetRepo';
 import { validateForm72, emptyForm72 } from '@/domain/form72';
@@ -70,7 +74,26 @@ export default function SiteForm72ListScreen() {
        */
       const blank = emptyForm72({ id: '', siteId: site.id, siteName: site.name, now: '' });
       const parts = applyForm72Prefill(blank, form72FromAssets(assets));
+      /*
+       * The job the test is under, where the site has exactly one open
+       * one. Two open jobs is a question the form screen asks; a guess here
+       * would file a statutory document against the wrong work. A read
+       * failure leaves the form unlinked rather than unmade.
+       */
+      let linked: { externalId: string; title: string } | undefined;
+      try {
+        const today = qldIsoDay(nowIso()) ?? '';
+        const page = await listJobPage({ filter: 'all', today, siteId: site.id, limit: 50 });
+        const pick = autoLinkJob(page.rows
+          .filter((j) => j.externalId)
+          .map((j) => ({ externalId: j.externalId!, title: j.title, status: j.status, scheduledFor: j.scheduledFor, completedAt: j.completedAt })));
+        if (pick) linked = { externalId: pick.externalId, title: pick.title };
+      } catch {
+        linked = undefined;
+      }
       const rec = await createForm72({
+        jobExternalId: linked?.externalId,
+        jobTitle: linked?.title,
         siteId: site.id,
         siteName: site.name,
         // The whole address, as the form prints it. The street alone left

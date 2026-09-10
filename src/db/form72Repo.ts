@@ -40,6 +40,11 @@ export interface StoredForm72 extends Form72 {
    * form, which is why it sits beside the parts rather than inside one.
    */
   overload?: { flowLps: number; pressureKpa: number };
+  /** The Simpro job the test was done under, where one has been named. */
+  jobExternalId?: string;
+  jobTitle?: string;
+  /** When the PDF was queued onto that job's attachments. */
+  attachedAt?: string;
 }
 
 interface Form72Row {
@@ -72,6 +77,9 @@ interface Form72Row {
   status: string;
   issuedAt: string | null;
   copyGivenAt: string | null;
+  jobExternalId: string | null;
+  jobTitle: string | null;
+  attachedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -172,6 +180,9 @@ function toForm(r: Form72Row): StoredForm72 {
     status: readStatus(r.status),
     issuedAt: r.issuedAt ?? undefined,
     copyGivenAt: r.copyGivenAt ?? undefined,
+    jobExternalId: r.jobExternalId || undefined,
+    jobTitle: r.jobTitle || undefined,
+    attachedAt: r.attachedAt ?? undefined,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
@@ -187,6 +198,9 @@ export async function createForm72(input: {
   licenseeName?: string;
   licenceNumber?: string;
   testDate?: string;
+  /** The Simpro job the test is being done under, where the site has one. */
+  jobExternalId?: string;
+  jobTitle?: string;
   /**
    * Parts the site's asset register can fill before anybody types: the
    * hydrants for Part D, the valve sets for Part G, the system descriptor.
@@ -210,6 +224,8 @@ export async function createForm72(input: {
     licenceNumber: input.licenceNumber ?? '',
     systemLabel: input.systemLabel ?? '',
     status: 'draft',
+    jobExternalId: input.jobExternalId,
+    jobTitle: input.jobTitle,
     ...(input.parts ?? {}),
   };
 
@@ -221,8 +237,8 @@ export async function createForm72(input: {
         sprinklerHydrostatic, sprinklerFlow, overloadFlowLps, overloadPressureKpa,
         criticalDefectsIdentified, repairsRequired, systemResult, systemNotes,
         licenseeName, licenceNumber, licenseeReportNumber, signature, status, issuedAt,
-        copyGivenAt, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        copyGivenAt, jobExternalId, jobTitle, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       record.id, record.siteId, record.siteName, record.siteAddress ?? '', record.contractor,
       record.systemLabel, record.testDate ?? null, record.testTime ?? null,
@@ -234,10 +250,34 @@ export async function createForm72(input: {
       writeTriState(record.criticalDefectsIdentified), writeTriState(record.repairsRequired),
       record.systemResult, record.systemNotes ?? '',
       record.licenseeName, record.licenceNumber, record.licenseeReportNumber ?? '',
-      record.signature ?? '', record.status, null, null, record.createdAt, record.updatedAt,
+      record.signature ?? '', record.status, null, null,
+      record.jobExternalId ?? null, record.jobTitle ?? null, record.createdAt, record.updatedAt,
     ],
   );
   return record;
+}
+
+/**
+ * Names, or clears, the Simpro job the form belongs to.
+ *
+ * Allowed on an issued form. Linking is filing, not editing: nothing on the
+ * document changes, and an issued form that was never linked is exactly the
+ * one that most needs to reach the job.
+ */
+export async function linkForm72Job(id: string, job: { externalId: string; title?: string } | null): Promise<void> {
+  const form = await getForm72(id);
+  if (!form) throw new Error('That Form 72 no longer exists.');
+  const db = await getDb();
+  await db.runAsync(
+    'UPDATE form_72 SET jobExternalId = ?, jobTitle = ?, updatedAt = ? WHERE id = ?',
+    [job?.externalId.trim() || null, job?.title?.trim() || null, nowIso(), id],
+  );
+}
+
+/** The PDF has been queued onto the job's attachments. */
+export async function recordForm72Attached(id: string, at: string = nowIso()): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE form_72 SET attachedAt = ?, updatedAt = ? WHERE id = ?', [at, nowIso(), id]);
 }
 
 export async function getForm72(id: string): Promise<StoredForm72 | null> {
@@ -272,7 +312,9 @@ export const ISSUED_REFUSAL = 'This Form 72 has been issued. The occupier is hol
  * it.
  */
 export type Form72Patch = Partial<Omit<
-  StoredForm72, 'id' | 'siteId' | 'createdAt' | 'updatedAt' | 'status' | 'issuedAt' | 'copyGivenAt'
+  StoredForm72,
+  'id' | 'siteId' | 'createdAt' | 'updatedAt' | 'status' | 'issuedAt' | 'copyGivenAt'
+  | 'jobExternalId' | 'jobTitle' | 'attachedAt'
 >>;
 
 /**
