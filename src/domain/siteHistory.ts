@@ -87,6 +87,36 @@ export interface OpenDefectRow {
   raisedAt: string;
   location: string;
   description: string;
+  /** The AS 1851 class, which makes a defect critical on its own. */
+  as1851Class?: string;
+  /** Limb (a) of the Queensland test: renders the installation inoperable. */
+  qldLimbInoperable?: boolean;
+  /** Limb (b): reasonably likely to significantly affect occupant safety. */
+  qldLimbAdverseImpact?: boolean;
+}
+
+/**
+ * Whether a defect counts as critical, on any of the three grounds.
+ *
+ * The card used to ask only whether somebody ticked Critical on site. The rest
+ * of the app has never asked only that — `isCriticalDefect` in outboundWork
+ * has counted the AS 1851 class and the two Queensland limbs since it was
+ * written, for the reason stated there: over-notifying costs a phone call and
+ * under-notifying is a statutory failure.
+ *
+ * A card that under-reports against the app's own rule is worse than one that
+ * says nothing, because it is the number that decides what goes in the van.
+ * The rule is stated once, here, and both callers use it.
+ */
+export function isCriticalOpenDefect(d: {
+  severity?: string;
+  as1851Class?: string;
+  qldLimbInoperable?: boolean;
+  qldLimbAdverseImpact?: boolean;
+}): boolean {
+  return d.severity === 'critical'
+    || d.as1851Class === 'critical'
+    || (d.qldLimbInoperable === true && d.qldLimbAdverseImpact === true);
 }
 
 export interface SiteFactsInput {
@@ -267,7 +297,7 @@ export function buildSiteFacts(input: SiteFactsInput): SiteFacts {
   const openRows = input.openDefects.filter((d) => d.status === 'open');
   const withDays = openRows.map((d) => ({
     ...d,
-    critical: d.severity === 'critical',
+    critical: isCriticalOpenDefect(d),
     days: daysBetween(qldIsoDay(d.raisedAt), input.today),
   }));
   // Critical first, then oldest. That is the order somebody would read them in.

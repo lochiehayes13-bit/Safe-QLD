@@ -141,18 +141,38 @@ export async function siteFacts(siteId: string, today: string, ownName = ''): Pr
   const [tally, openDefects] = await Promise.all([
     db.getFirstAsync<{ total: number; critical: number; oldest: string | null }>(
       `SELECT COUNT(*) AS total,
-              SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END) AS critical,
+              SUM(CASE WHEN severity = 'critical'
+                         OR as1851Class = 'critical'
+                         OR (qldLimbInoperable = 1 AND qldLimbAdverseImpact = 1)
+                       THEN 1 ELSE 0 END) AS critical,
               MIN(raisedAt) AS oldest
        FROM defect WHERE siteId = ? AND status = 'open'`,
       [siteId],
     ),
-    db.getAllAsync<OpenDefectRow>(
-      `SELECT status, severity, raisedAt, location, description FROM defect
-       WHERE siteId = ? AND status = 'open'
-       ORDER BY (severity = 'critical') DESC, raisedAt LIMIT 20`,
+    db.getAllAsync<Omit<OpenDefectRow, 'qldLimbInoperable' | 'qldLimbAdverseImpact'> & {
+      qldLimbInoperable: number; qldLimbAdverseImpact: number;
+    }>(
+      `SELECT status, severity, raisedAt, location, description,
+              as1851Class, qldLimbInoperable, qldLimbAdverseImpact
+       FROM defect WHERE siteId = ? AND status = 'open'
+       ORDER BY (severity = 'critical'
+                 OR as1851Class = 'critical'
+                 OR (qldLimbInoperable = 1 AND qldLimbAdverseImpact = 1)) DESC, raisedAt LIMIT 20`,
       [siteId],
     ),
   ]);
+
+  /*
+   * The two Queensland limbs are INTEGER columns, and the domain asks whether
+   * they are true. A 1 is not true in JavaScript, so without this the card
+   * would read every limb as unset and quietly lose the third ground a defect
+   * can be critical on — which is the ground it was just taught to count.
+   */
+  const openRows: OpenDefectRow[] = openDefects.map((d) => ({
+    ...d,
+    qldLimbInoperable: d.qldLimbInoperable === 1,
+    qldLimbAdverseImpact: d.qldLimbAdverseImpact === 1,
+  }));
 
   const lastJob: LastJobRow | undefined = lastJobRow?.externalId ? {
     externalId: lastJobRow.externalId,
@@ -185,7 +205,7 @@ export async function siteFacts(siteId: string, today: string, ownName = ''): Pr
     hours,
     lastRun: runRow ? { ...runRow, technician: runRow.technician ?? undefined } : undefined,
     assetCounts: counts,
-    openDefects,
+    openDefects: openRows,
     openTally: {
       total: tally?.total ?? 0,
       critical: tally?.critical ?? 0,

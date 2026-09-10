@@ -221,3 +221,73 @@ describe('a site with more open defects than the card samples', () => {
     expect(f?.open.oldestDays).toBeGreaterThan(2000);
   });
 });
+
+describe('what counts as critical on the facts card', () => {
+  it('counts a defect made critical by its AS 1851 class, not only by the tick', async () => {
+    /*
+     * The rest of the app has never asked only whether somebody ticked
+     * Critical on site. isCriticalDefect in outboundWork counts the AS 1851
+     * class and the two Queensland limbs as well, for the reason stated
+     * there: over-notifying costs a phone call, under-notifying is a
+     * statutory failure. A card that under-reports against the app's own rule
+     * is the number that decides what goes in the van.
+     */
+    const site = await createSite({ name: 'Fictional Tower' });
+    await createDefect({
+      siteId: site.id, location: 'Riser', description: 'Class critical, not ticked',
+      severity: 'non-critical', as1851Class: 'critical', status: 'open', photos: [],
+      raisedAt: '2026-09-01T00:00:00.000Z',
+    } as never);
+
+    const f = await siteFacts(site.id, TODAY);
+    expect(f?.open.critical).toBe(1);
+    expect(f?.open.worst?.critical).toBe(true);
+  });
+
+  it('counts a defect that meets both Queensland limbs', async () => {
+    const site = await createSite({ name: 'Fictional Tower' });
+    await createDefect({
+      siteId: site.id, location: 'Pump room', description: 'Inoperable and unsafe',
+      severity: 'non-critical', status: 'open', photos: [],
+      qldLimbInoperable: true, qldLimbAdverseImpact: true,
+      raisedAt: '2026-09-01T00:00:00.000Z',
+    } as never);
+
+    const f = await siteFacts(site.id, TODAY);
+    expect(f?.open.critical).toBe(1);
+  });
+
+  it('does not count one limb on its own, because the test is both', async () => {
+    const site = await createSite({ name: 'Fictional Tower' });
+    await createDefect({
+      siteId: site.id, location: 'Level 2', description: 'Inoperable only',
+      severity: 'non-critical', status: 'open', photos: [],
+      qldLimbInoperable: true, qldLimbAdverseImpact: false,
+      raisedAt: '2026-09-01T00:00:00.000Z',
+    } as never);
+
+    const f = await siteFacts(site.id, TODAY);
+    expect(f?.open.total).toBe(1);
+    expect(f?.open.critical).toBe(0);
+  });
+
+  it('agrees between the count and the row it names', async () => {
+    // The count comes from SQL and the named one from a sampled row read back
+    // through the domain. Two paths to the same rule is two chances to drift.
+    const site = await createSite({ name: 'Fictional Tower' });
+    await createDefect({
+      siteId: site.id, location: 'Old', description: 'Ordinary and old',
+      severity: 'non-critical', status: 'open', photos: [], raisedAt: '2024-01-01T00:00:00.000Z',
+    } as never);
+    await createDefect({
+      siteId: site.id, location: 'Switch room', description: 'Class critical',
+      severity: 'non-critical', as1851Class: 'critical', status: 'open', photos: [],
+      raisedAt: '2026-09-01T00:00:00.000Z',
+    } as never);
+
+    const f = await siteFacts(site.id, TODAY);
+    expect(f?.open.critical).toBe(1);
+    // Critical sorts ahead of the older ordinary one.
+    expect(f?.open.worst?.location).toBe('Switch room');
+  });
+});
