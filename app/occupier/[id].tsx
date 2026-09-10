@@ -31,6 +31,8 @@ import {
   Banner, Button, Card, Chip, Divider, Field, H2, Rowed, Screen, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { safeFileName } from '@/export/fileNames';
+import { JobFileCard } from '@/components/JobFileCard';
 import { useRecordPatch } from '@/hooks/useRecordPatch';
 import { describeLoadFailure } from '@/domain/loadFailure';
 import { showAlert } from '@/components/alert';
@@ -227,19 +229,28 @@ export default function OccupierStatementScreen() {
    * document itself carries the warning, so an unfinished one cannot be
    * mistaken for a complete one.
    */
+  /*
+   * One builder for the statement, so the copy that is shared and the copy the
+   * office receives are the same document.
+   */
+  const statementPdf = useCallback(async () => {
+    if (!rec) throw new Error('The statement is not loaded.');
+    const prefs = await loadPrefs();
+    const html = occupierStatementHtml({
+      statement: rec,
+      companyName: prefs.companyName,
+      preparedBy: prefs.technicianName || undefined,
+      generatedAt: nowIso(),
+    });
+    const name = `occupier-statement-${(rec.premisesName || 'premises').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`;
+    return writePdf(name, html);
+  }, [rec]);
+
   const exportPdf = async () => {
     if (!rec) return;
     setExporting(true);
     try {
-      const prefs = await loadPrefs();
-      const html = occupierStatementHtml({
-        statement: rec,
-        companyName: prefs.companyName,
-        preparedBy: prefs.technicianName || undefined,
-        generatedAt: nowIso(),
-      });
-      const name = `occupier-statement-${(rec.premisesName || 'premises').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`;
-      const file = await writePdf(name, html);
+      const file = await statementPdf();
       const shared = await shareFile(file, 'Occupier statement');
       if (!shared) {
         const notice = notSharedNotice(file.name, 'statement');
@@ -416,6 +427,21 @@ export default function OccupierStatementScreen() {
           title={issues.length ? 'Print the draft for the occupier' : 'Print the statement'}
           onPress={exportPdf}
           loading={exporting}
+        />
+
+        <JobFileCard
+          siteId={rec.siteId}
+          jobExternalId={rec.jobExternalId ?? undefined}
+          jobTitle={rec.jobTitle ?? undefined}
+          attachedAt={rec.attachedAt ?? undefined}
+          what="occupier statement"
+          filename={`${safeFileName(`Occupier statement ${rec.premisesName || 'premises'}`, 'occupier-statement')}.pdf`}
+          subject={`Occupier statement — ${rec.premisesName || 'premises'}`}
+          buildFile={statementPdf}
+          onPickJob={(job) => patch({ jobExternalId: job?.externalId ?? null, jobTitle: job?.title ?? null })}
+          onAttached={(at) => patch({ attachedAt: at })}
+          disabled={!rec.signedAt}
+          disabledWhy="The statement goes on the job once it has been signed. An unsigned copy on a Simpro job reads as the final one."
         />
 
         <Card>

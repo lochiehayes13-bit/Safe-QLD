@@ -94,6 +94,13 @@ export interface BaselineData {
   testerNames: string;
   testDate: string;
 
+  /** The Simpro job this record belongs to, if one has been picked. */
+  jobExternalId?: string;
+  /** That job's title, so the record still names it after the mirror moves on. */
+  jobTitle?: string;
+  /** When the spreadsheet was queued onto the job. */
+  attachedAt?: string;
+
   createdAt: string;
   updatedAt: string;
 }

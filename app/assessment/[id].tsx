@@ -28,8 +28,10 @@ import {
   Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Segmented, StatTile, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { safeFileName } from '@/export/fileNames';
+import { JobFileCard } from '@/components/JobFileCard';
 import { useRecordPatch } from '@/hooks/useRecordPatch';
-import { describeLoadFailure } from '@/domain/loadFailure';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { showAlert } from '@/components/alert';
 
 /**
@@ -127,10 +129,14 @@ export default function AssessmentScreen() {
     await updateFinding(finding.id, next);
   };
 
-  const produce = async () => {
-    if (!assessment || !site) return;
-    setBusy(true);
-    try {
+  /*
+   * One builder, so the report that is shared and the one filed on the job are
+   * the same document. It resequences and re-reads the findings first: the
+   * findings cite photographs by number, and a register produced from stale
+   * sequence numbers cites the wrong ones.
+   */
+  const reportPdf = useCallback(async () => {
+    if (!assessment || !site) throw new Error('The assessment is not loaded.');
       await resequence(assessment.id);
       const fresh = await listFindings(assessment.id);
       setFindings(fresh);
@@ -180,17 +186,24 @@ export default function AssessmentScreen() {
         statement: assessment.statement,
         openDefectCaution: caution,
       });
-      const file = await writePdf(
+      return writePdf(
         `${assessment.reportReference || 'effectiveness-report'}-${site.name}`,
         html,
       );
+  }, [assessment, site, caution]);
+
+  const produce = async () => {
+    if (!assessment || !site) return;
+    setBusy(true);
+    try {
+      const file = await reportPdf();
       const shared = await shareFile(file, 'Fire system effectiveness report');
       if (!shared) {
         const notice = notSharedNotice(file.name, 'report');
         showAlert(notice.title, notice.body);
       }
     } catch (e) {
-      showAlert('Could not produce the report', e instanceof Error ? e.message : String(e));
+      showAlert('Could not produce the report', describeActionFailure(e, 'producing the report'));
     } finally {
       setBusy(false);
     }
@@ -413,6 +426,21 @@ export default function AssessmentScreen() {
         <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
           Findings renumber on issue so the register has no gaps in it.
         </Txt>
+
+        <JobFileCard
+          siteId={assessment.siteId}
+          jobExternalId={assessment.jobExternalId}
+          jobTitle={assessment.jobTitle}
+          attachedAt={assessment.attachedAt}
+          what="effectiveness report"
+          filename={`${safeFileName(assessment.reportReference || `Effectiveness report ${site?.name ?? ''}`, 'effectiveness-report')}.pdf`}
+          subject={`Fire system effectiveness report${assessment.reportReference ? ` ${assessment.reportReference}` : ''}${site?.name ? ` — ${site.name}` : ''}`}
+          buildFile={reportPdf}
+          onPickJob={(job) => patch({ jobExternalId: job?.externalId, jobTitle: job?.title })}
+          onAttached={(at) => patch({ attachedAt: at })}
+          disabled={!site}
+          disabledWhy={site ? undefined : 'The site this assessment belongs to is not on this phone yet. Sync first.'}
+        />
       </Screen>
     </>
   );

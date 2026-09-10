@@ -744,6 +744,18 @@ export interface ImpairmentRecord {
   alternativeMeasures?: string;
   isolatedAssets: string[];
   notes?: string;
+  /** The Simpro job this impairment belongs to, if one has been picked. */
+  jobExternalId?: string;
+  /** That job's title, kept here so the record still names it in words. */
+  jobTitle?: string;
+  /** When the notice was queued onto the job. */
+  attachedAt?: string;
+  /**
+   * When the responsible person was handed the notice. Separate from
+   * `attachedAt`: telling the building and telling the office are different
+   * obligations and they fail in different ways.
+   */
+  noticeIssuedAt?: string;
 }
 
 interface ImpairmentRow extends Omit<ImpairmentRecord, 'isolatedAssets' | 'responsibleNotified' | 'brigadeNotified' | 'monitoringNotified' | 'fireWatchInPlace' | 'signagePlaced'> {
@@ -814,7 +826,8 @@ export async function updateImpairment(id: string, patch: Partial<ImpairmentReco
   const vals: (string | number | null)[] = [];
 
   for (const f of ['scope', 'reason', 'expectedRestoreAt', 'restoredAt', 'technician',
-    'responsibleName', 'alternativeMeasures', 'notes'] as const) {
+    'responsibleName', 'alternativeMeasures', 'notes',
+    'jobExternalId', 'jobTitle', 'attachedAt', 'noticeIssuedAt'] as const) {
     if (patch[f] !== undefined) { sets.push(`${f} = ?`); vals.push((patch[f] as string | undefined) ?? null); }
   }
   for (const f of ['responsibleNotified', 'brigadeNotified', 'monitoringNotified',

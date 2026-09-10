@@ -19,6 +19,8 @@ import {
   Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { safeFileName } from '@/export/fileNames';
+import { JobFileCard } from '@/components/JobFileCard';
 import { useRecordPatch } from '@/hooks/useRecordPatch';
 import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { showAlert } from '@/components/alert';
@@ -99,11 +101,24 @@ export default function BaselineScreen() {
     }
   };
 
+  /*
+   * One builder, so what is shared and what is filed on the job cannot differ.
+   * The report learned this the hard way: two call sites building the same
+   * document drift, and the copy the office receives stops being the copy the
+   * client was handed.
+   */
+  const workbook = useCallback(() => {
+    if (!b) throw new Error('The baseline record is not loaded.');
+    return Promise.resolve(
+      writeXlsx(`Baseline Data - ${b.premisesName || site?.name || 'Site'}`, [baselineSheet(b)]),
+    );
+  }, [b, site]);
+
   const exportForm = async () => {
     if (!b) return;
     setBusy(true);
     try {
-      const file = writeXlsx(`Baseline Data - ${b.premisesName || site?.name || 'Site'}`, [baselineSheet(b)]);
+      const file = await workbook();
       const shared = await shareFile(file, 'Baseline data');
       if (!shared) {
         const notice = notSharedNotice(file.name, 'spreadsheet');
@@ -414,6 +429,19 @@ export default function BaselineScreen() {
             <Field label="Test date" value={b.testDate} onChangeText={(v) => update({ testDate: v })} placeholder="YYYY-MM-DD" />
           </>
         ))}
+
+        <JobFileCard
+          siteId={b.siteId}
+          jobExternalId={b.jobExternalId}
+          jobTitle={b.jobTitle}
+          attachedAt={b.attachedAt}
+          what="baseline workbook"
+          filename={`${safeFileName(`Baseline Data ${b.premisesName || site?.name || 'Site'}`, 'baseline')}.xlsx`}
+          subject={`Baseline data — ${b.premisesName || site?.name || 'Site'}`}
+          buildFile={workbook}
+          onPickJob={(job) => update({ jobExternalId: job?.externalId, jobTitle: job?.title })}
+          onAttached={(at) => update({ attachedAt: at })}
+        />
 
         <Divider />
         <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>

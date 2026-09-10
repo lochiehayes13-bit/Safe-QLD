@@ -30,6 +30,12 @@ export interface Assessment {
   summary: string;
   statement: string;
   status: 'draft' | 'issued';
+  /** The Simpro job this report belongs to, if one has been picked. */
+  jobExternalId?: string;
+  /** That job's title, so the record still names it after the mirror moves on. */
+  jobTitle?: string;
+  /** When the report was queued onto the job. */
+  attachedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -148,6 +154,7 @@ export async function updateAssessment(id: string, patch: Partial<Assessment>): 
     'reportReference', 'jobReference', 'assessmentType', 'scopeLabel', 'boundary',
     'attendanceDate', 'issueDate', 'assessedBy', 'preparedBy', 'clientName',
     'systemDescription', 'panelStatus', 'summary', 'statement', 'status',
+    'jobExternalId', 'jobTitle', 'attachedAt',
   ];
   for (const key of allowed) {
     if (patch[key] === undefined) continue;

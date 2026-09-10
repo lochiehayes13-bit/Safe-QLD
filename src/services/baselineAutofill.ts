@@ -83,9 +83,16 @@ export function autofillBaseline(current: BaselineData, src: AutofillSource): Au
    *
    * The inner `string extends ...` check excludes literal unions such as
    * installType, so a free-text value can never be written into an enum field.
+   *
+   * `-?` is what keeps the optional fields out. A mapped type carries the
+   * optionality of what it maps, so once the record gained `jobExternalId?`
+   * the union picked up a bare `undefined` alongside the field names — and
+   * `b[undefined]` is not something this can be asked to write to. Stripping
+   * the modifier leaves the conditional to do the excluding, which it already
+   * does: `string | undefined` does not extend `string`.
    */
   type StringField = {
-    [K in keyof BaselineData]: BaselineData[K] extends string
+    [K in keyof BaselineData]-?: BaselineData[K] extends string
       ? string extends BaselineData[K]
         ? K
         : never

@@ -36,6 +36,12 @@ export interface OccupierStatement {
   signature?: string | null;
   signedAt?: string | null;
   sentToCommissionerAt?: string | null;
+  /** The Simpro job this statement belongs to, if one has been picked. */
+  jobExternalId?: string | null;
+  /** That job's title, so the record still names it after the mirror moves on. */
+  jobTitle?: string | null;
+  /** When the statement was queued onto the job. */
+  attachedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -48,6 +54,7 @@ const COLUMNS = [
   'occupierName', 'occupierPhone', 'premisesName', 'premisesAddress',
   'periodStart', 'periodEnd', 'rows', 'signedBy', 'signedPosition',
   'signature', 'signedAt', 'sentToCommissionerAt',
+  'jobExternalId', 'jobTitle', 'attachedAt',
 ] as const;
 
 type Column = (typeof COLUMNS)[number];

@@ -47,6 +47,10 @@ const COLUMNS = [
   'fullAlarmCurrentA', 'quiescentCurrentA', 'primaryPowerV', 'batteryVoltage', 'batteryAh',
   'batteryStandbyHours', 'batteryManufactureDate', 'batteryInstallDate',
   'confirmations', 'zoneResults', 'testerNames', 'testDate',
+  // The v28 job link. Kept in the same list as everything else so a whole-record
+  // save cannot leave it behind, which is what a separate update path would do
+  // the first time somebody added a field and forgot.
+  'jobExternalId', 'jobTitle', 'attachedAt',
 ] as const;
 
 function serialise(b: BaselineData): (string | null)[] {
