@@ -31,6 +31,21 @@ function parse<T>(json: string, fallback: T): T {
   }
 }
 
+/**
+ * A nullable column, read back as absent.
+ *
+ * Two things arrive here that mean "there is no job on this record": SQL NULL,
+ * which the driver hands over as `null` while the type says `undefined`; and
+ * the literal string "null", which is what the serialiser wrote before it knew
+ * these columns could be absent. The second is the one that matters — it is
+ * truthy, so a record nobody had linked came back claiming to be on a job
+ * called "null". Rows written that way are still on disk and migrations here
+ * are append-only, so the read is where they get put right.
+ */
+function absent(v: string | null | undefined): string | undefined {
+  return v === null || v === undefined || v === '' || v === 'null' ? undefined : v;
+}
+
 function hydrate(row: BaselineRow): BaselineData {
   return {
     ...row,
@@ -38,6 +53,9 @@ function hydrate(row: BaselineRow): BaselineData {
     equipment: parse<Record<string, YesNo>>(row.equipment, {}),
     confirmations: parse<Record<string, YesNo>>(row.confirmations, {}),
     zoneResults: parse<ZoneTestRow[]>(row.zoneResults, []),
+    jobExternalId: absent(row.jobExternalId),
+    jobTitle: absent(row.jobTitle),
+    attachedAt: absent(row.attachedAt),
   };
 }
 
@@ -53,11 +71,41 @@ const COLUMNS = [
   'jobExternalId', 'jobTitle', 'attachedAt',
 ] as const;
 
+type Column = (typeof COLUMNS)[number];
+
+/** The four columns that hold a repeating table or a checklist as JSON. */
+const JSON_COLUMNS = new Set<Column>(['speakerCircuits', 'equipment', 'confirmations', 'zoneResults']);
+
+/**
+ * The columns that are allowed to be absent.
+ *
+ * Everything else on this form is TEXT NOT NULL DEFAULT '' — a field nobody
+ * filled in is an empty string, and that is the right answer for a form. The
+ * job link is not a form field: a baseline that has not been put on a job has
+ * no job, and that is a different fact from "the job is blank".
+ */
+const NULLABLE_COLUMNS = new Set<Column>(['jobExternalId', 'jobTitle', 'attachedAt']);
+
+/**
+ * The record as a row, in COLUMNS order.
+ *
+ * This used to decide what to write by looking at the runtime type: a string
+ * went in as itself and anything else went through JSON.stringify. That worked
+ * for as long as every column was a TEXT NOT NULL the form always filled, and
+ * broke the moment something was allowed to be absent — because
+ * `JSON.stringify(undefined ?? null)` is not SQL NULL, it is the four-letter
+ * string "null", and "null" is truthy. A baseline nobody had linked to
+ * anything came back claiming to be on a job called "null", and the card
+ * offered to send the workbook to it.
+ *
+ * So the columns say what they are instead of the values being guessed at.
+ */
 function serialise(b: BaselineData): (string | null)[] {
   return COLUMNS.map((c) => {
     const v = b[c];
-    if (typeof v === 'string') return v;
-    return JSON.stringify(v ?? null);
+    if (JSON_COLUMNS.has(c)) return JSON.stringify(v ?? null);
+    if (NULLABLE_COLUMNS.has(c)) return typeof v === 'string' && v !== '' ? v : null;
+    return typeof v === 'string' ? v : '';
   });
 }
 
