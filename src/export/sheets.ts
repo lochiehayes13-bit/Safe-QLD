@@ -12,7 +12,7 @@ import type {
 } from '@/domain/types';
 import { DEVICE_TYPE_LABEL } from '@/parsers/deviceType';
 import type { Cell, Row, Sheet } from './xlsx';
-import { qldDay } from '@/domain/qldTime';
+import { qldDay, qldIsoDay } from '@/domain/qldTime';
 
 /**
  * Builds the workbook layouts the app exports.
@@ -144,7 +144,37 @@ export interface ReportBundle {
   panel?: Panel;
   testRows: TestRow[];
   checkRows: CheckRow[];
+  /**
+   * Every defect at the site, this visit's and the ones that were already
+   * there. Kept whole for the spreadsheet, which is a working document.
+   *
+   * The printed report must not treat them as one list — see `raisedOnVisit`.
+   * A report that counts eleven defects on the front page when the technician
+   * raised two is a document the customer stops believing, and it is the
+   * statutory record of what was done on the day.
+   */
   defects: Defect[];
+}
+
+/**
+ * The defects this visit actually raised.
+ *
+ * By the report they were raised on, which is the reliable link and is set on
+ * every defect the sheet, the routine run and the bulk test create. A defect
+ * raised at the site on the same day by another path counts too — that is the
+ * same visit by any reasonable reading — and everything else was already
+ * there when the technician walked in.
+ */
+export function raisedOnVisit(bundle: Pick<ReportBundle, 'report' | 'defects'>): Defect[] {
+  const { report, defects } = bundle;
+  return defects.filter((d) => d.reportId === report.id
+    || (!d.reportId && qldIsoDay(d.raisedAt) === report.serviceDate));
+}
+
+/** The ones that were already outstanding, and still are. */
+export function outstandingBefore(bundle: Pick<ReportBundle, 'report' | 'defects'>): Defect[] {
+  const raised = new Set(raisedOnVisit(bundle).map((d) => d.id));
+  return bundle.defects.filter((d) => !raised.has(d.id) && d.status === 'open');
 }
 
 /**

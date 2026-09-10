@@ -1,6 +1,10 @@
 import type { CauseEffectRule, Panel, TestRow } from '@/domain/types';
 import { DEVICE_TYPE_LABEL } from '@/parsers/deviceType';
-import { formatAuDate, matrixColumns, reportCustomer, reportSiteContact, type ReportBundle } from './sheets';
+import {
+  formatAuDate, matrixColumns, outstandingBefore, raisedOnVisit, reportCustomer, reportSiteContact,
+  type ReportBundle,
+} from './sheets';
+import { qldIsoDay } from '@/domain/qldTime';
 
 /**
  * HTML report templates rendered to PDF by expo-print.
@@ -135,6 +139,12 @@ export function serviceReportHtml(
   resolvePhoto: PhotoResolver = (p) => p,
 ): string {
   const { site, report, panel, testRows, checkRows, defects } = b;
+  // Two lists, never one. What this visit raised is the count on the front
+  // page and the table under Defects; what was already outstanding is its own
+  // table, so a customer reading the record of a two-defect service does not
+  // see eleven and stop believing the document.
+  const raised = raisedOnVisit(b);
+  const outstanding = outstandingBefore(b);
 
   const pass = testRows.filter((r) => r.result === 'pass').length;
   const fail = testRows.filter((r) => r.result === 'fail').length;
@@ -183,7 +193,7 @@ export function serviceReportHtml(
   <div class="stat"><div class="k">Fail</div><div class="v">${fail}</div></div>
   <div class="stat"><div class="k">N/A</div><div class="v">${na}</div></div>
   <div class="stat"><div class="k">Not tested</div><div class="v">${untested}</div></div>
-  <div class="stat"><div class="k">Defects</div><div class="v">${defects.length}</div></div>
+  <div class="stat"><div class="k">Defects raised</div><div class="v">${raised.length}</div></div>
 </div>
 
 ${checkRows.length ? `<h2>Panel &amp; system checks</h2>
@@ -217,15 +227,27 @@ ${testRows.length ? `<table>
   </tr>`).join('')}</tbody>
 </table>` : '<div class="empty">No devices were added to this test sheet.</div>'}
 
-${defects.length ? `<h2>Defects</h2>
+${raised.length ? `<h2>Defects raised on this visit</h2>
 <table>
   <thead><tr><th style="width:11%">Severity</th><th style="width:10%">Status</th>
   <th style="width:22%">Location</th><th>Description</th><th style="width:10%">Raised</th></tr></thead>
-  <tbody>${defects.map((d) => `<tr>
+  <tbody>${raised.map((d) => `<tr>
     <td><span class="pill ${d.severity === 'critical' ? 'crit' : 'non'}">${d.severity === 'critical' ? 'CRITICAL' : 'NON-CRITICAL'}</span></td>
     <td>${esc(d.status)}</td>
     <td>${esc(d.location)}</td>
     <td>${esc(d.description)}${d.photos.length ? `<div class="photos">${d.photos.map((p) => `<img src="${esc(resolvePhoto(p))}"/>`).join('')}</div>` : ''}</td>
+    <td>${esc(formatAuDate(d.raisedAt))}</td>
+  </tr>`).join('')}</tbody>
+</table>` : ''}
+
+${outstanding.length ? `<h2>Still outstanding from earlier visits</h2>
+<table>
+  <thead><tr><th style="width:11%">Severity</th><th style="width:22%">Location</th>
+  <th>Description</th><th style="width:10%">Raised</th></tr></thead>
+  <tbody>${outstanding.map((d) => `<tr>
+    <td><span class="pill ${d.severity === 'critical' ? 'crit' : 'non'}">${d.severity === 'critical' ? 'CRITICAL' : 'NON-CRITICAL'}</span></td>
+    <td>${esc(d.location)}</td>
+    <td>${esc(d.description)}</td>
     <td>${esc(formatAuDate(d.raisedAt))}</td>
   </tr>`).join('')}</tbody>
 </table>` : ''}
@@ -259,8 +281,8 @@ ${statutory ? `<h2>Record of maintenance</h2>
   ${defects.filter((d) => d.status === 'open').length
     ? `<tr><td>Corrective action required</td><td>${defects.filter((d) => d.status === 'open').map((d) => `${esc(d.location)}: ${esc(d.description)}`).join('<br/>')}</td></tr>`
     : ''}
-  ${defects.filter((d) => d.status === 'rectified').length
-    ? `<tr><td>Repairs made</td><td>${defects.filter((d) => d.status === 'rectified').map((d) => `${esc(formatAuDate(d.rectifiedAt))} — ${esc(d.location)}: ${esc(d.description)}`).join('<br/>')}</td></tr>`
+  ${defects.filter((d) => d.status === 'rectified' && qldIsoDay(d.rectifiedAt) === report.serviceDate).length
+    ? `<tr><td>Repairs made</td><td>${defects.filter((d) => d.status === 'rectified' && qldIsoDay(d.rectifiedAt) === report.serviceDate).map((d) => `${esc(formatAuDate(d.rectifiedAt))} — ${esc(d.location)}: ${esc(d.description)}`).join('<br/>')}</td></tr>`
     : ''}
   <tr><td>Hardcopy left on site</td><td>${statutory.hardcopyLeftOnSite ? 'Yes' : 'Not stated'}</td></tr>
 </table>
