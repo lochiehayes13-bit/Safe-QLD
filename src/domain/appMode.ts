@@ -323,11 +323,11 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/work/leave', file: 'app/work/leave.tsx', tab: 'today', section: 'Ask the office',
-    label: 'Leave request', modes: BOTH, openedFrom: ['/shortcuts'],
+    label: 'Book leave', modes: BOTH, openedFrom: ['/shortcuts'],
     blurb:
-      'Annual, sick, RDO or unpaid, working days counted, emailed to the supervisor with '
-      + 'accounts copied in.',
-    terms: ['leave', 'annual', 'sick', 'rdo', 'holiday', 'day off', 'unpaid'],
+      'Annual, sick, RDO or unpaid: pick the day and it goes onto your own Simpro schedule '
+      + 'as a seven-to-three block, so the roster and Simpro Mobile both show it.',
+    terms: ['leave', 'annual', 'sick', 'rdo', 'holiday', 'day off', 'unpaid', 'book', 'roster'],
   },
   {
     route: '/suggest', file: 'app/suggest.tsx', tab: 'today', section: 'Ask the office',

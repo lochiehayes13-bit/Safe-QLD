@@ -202,6 +202,21 @@ export async function startEntry(input: ClockStart, at: string = nowIso()): Prom
 }
 
 /**
+ * Writes an entry that is already closed, without touching whatever is open.
+ *
+ * A day of leave is this: a block from seven to three on a day that has not
+ * come yet, sent up as an activity schedule. It is not a clock-on — the
+ * person is not starting anything now — so it must not close the entry they
+ * are actually running, which `startEntry` would.
+ */
+export async function insertClosedEntry(entry: ClockEntry, at: string = nowIso()): Promise<ClockEntry> {
+  if (!entry.endedAt) throw new Error('insertClosedEntry needs an entry with an end');
+  const db = await getDb();
+  await writeEntry(db, entry, at);
+  return (await getEntry(entry.id))!;
+}
+
+/**
  * Clocks off. Returns every entry closed: empty when nothing was open, one
  * in the ordinary case, and one per day after a midnight split — the piece
  * dated yesterday is as much a send as the one dated today.
