@@ -209,6 +209,9 @@ export const MODULES: AppModule[] = [
     keywords: ['po', 'order', 'supplier', 'vendor', 'received', 'parts on order', 'delivery'] },
 
   // -- Forms and records ---------------------------------------------------
+  { href: '/swms', label: 'SWMS and JSEA', icon: 'clipboard-check-outline', group: 'Forms and records',
+    blurb: 'Today’s safe work method statement, read with the crew and signed on the phone.',
+    keywords: ['swms', 'jsea', 'jsa', 'safe work method', 'safety', 'hazard', 'risk assessment', 'permit'] },
   { href: '/work/reports', label: 'Reports', icon: 'file-document-outline', group: 'Forms and records',
     blurb: 'Every service report on this device, newest first.',
     keywords: ['test sheets', 'service report'] },
@@ -290,6 +293,7 @@ export const MODULE_GROUPS: ModuleGroup[] = [
  */
 export const DEFAULT_SHORTCUTS: string[] = [
   '/work/timesheets',
+  '/swms',
   '/work/rfi',
   '/work/leave',
   '/library',

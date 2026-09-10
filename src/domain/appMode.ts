@@ -273,6 +273,20 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['job', 'briefing', 'attendance'],
   },
   {
+    route: '/swms', file: 'app/swms/index.tsx', tab: 'today', section: 'Before you start',
+    label: 'Safe work method statements', modes: BOTH, openedFrom: ['/shortcuts'],
+    blurb:
+      'The statement for today’s work, chosen from what is due at the site, read step by step with '
+      + 'the crew and signed on the phone.',
+    terms: ['swms', 'jsea', 'jsa', 'safe work', 'method statement', 'safety', 'hazard', 'risk', 'permit', 'high risk'],
+  },
+  {
+    route: '/swms/[id]', file: 'app/swms/[id].tsx', tab: 'today', section: 'Before you start',
+    label: 'The statement', needsContext: true, modes: BOTH, openedFrom: ['/swms'],
+    blurb: 'One day’s statement: the steps, this site’s own answers, and everybody’s signature.',
+    terms: ['swms', 'jsea', 'sign', 'steps', 'hazards', 'controls'],
+  },
+  {
     route: '/work/impairments', file: 'app/work/impairments.tsx', tab: 'today', section: 'Against a clock',
     label: 'Impairments', modes: BOTH, openedFrom: ['/work'],
     blurb: 'Systems currently out of service, with the clock running on each.',
