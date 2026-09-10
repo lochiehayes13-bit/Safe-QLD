@@ -186,14 +186,14 @@ export default function CableTablesScreen() {
         <Card>
           <Label>Why you type these in</Label>
           <Txt size="sm" tone="muted" style={{ marginTop: t.space(2), lineHeight: 20 }}>
-            Current-carrying capacity tables are Standards Australia's, licensed per copy, and this app is public — so it
-            carries the method and none of the figures. What it does carry is real: resistance at the conductor's operating
-            temperature, the reactive part of a volt drop, and the short-circuit constant derived from the metal's own
+            Current-carrying capacity tables are Standards Australia&rsquo;s, licensed per copy, and this app is public — so it
+            carries the method and none of the figures. What it does carry is real: resistance at the conductor&rsquo;s operating
+            temperature, the reactive part of a volt drop, and the short-circuit constant derived from the metal&rsquo;s own
             properties rather than looked up.
           </Txt>
           <Divider />
           <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-            Every table records where its figures were read. "Where did this 63 A come from" has one honest answer six
+            Every table records where its figures were read. &ldquo;Where did this 63 A come from&rdquo; has one honest answer six
             months later if the table says, and none if it does not.
           </Txt>
           <View style={{ height: t.space(3) }} />

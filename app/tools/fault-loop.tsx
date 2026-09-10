@@ -239,7 +239,7 @@ export default function FaultLoopScreen() {
           </Txt>
           <Divider />
           <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-            The loop is worked at the conductor's operating temperature, not at 20 °C. A warm conductor has more
+            The loop is worked at the conductor&rsquo;s operating temperature, not at 20 °C. A warm conductor has more
             resistance and passes less fault current, so working it cold produces a circuit that disconnects on paper.
           </Txt>
           <View style={{ height: t.space(3) }} />

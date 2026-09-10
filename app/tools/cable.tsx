@@ -5,8 +5,7 @@ import { candidateRows, listCableTables, listDeratingEntries } from '@/db/cableR
 import type { CableTable, DeratingEntry } from '@/domain/cableTables';
 import { INSULATION_PRESETS } from '@/domain/cableTables';
 import {
-  DEFAULT_DROP_LIMIT_PERCENT, DEFAULT_OVERLOAD_RATIO, PHASE_LABEL, adiabaticK,
-  designCurrent, sizeCable,
+  DEFAULT_DROP_LIMIT_PERCENT, DEFAULT_OVERLOAD_RATIO, PHASE_LABEL, designCurrent, sizeCable,
   type CandidateRow, type CircuitPhase, type DeratingFactor, type DeratingKind,
   type SizedCandidate, type SizingResult,
 } from '@/calc/cable';
@@ -325,9 +324,9 @@ export default function CableSizingScreen() {
               <Label>What this carries and what it does not</Label>
               <Txt size="sm" tone="muted" style={{ marginTop: t.space(2), lineHeight: 20 }}>
                 The capacity figures are yours, from the table named above. Everything worked from them is computed here:
-                resistance at the conductor's operating temperature rather than at bench temperature, the reactive part of
+                resistance at the conductor&rsquo;s operating temperature rather than at bench temperature, the reactive part of
                 the volt drop wherever your table gives a reactance, and the short-circuit constant derived from the
-                metal's own properties.
+                metal&rsquo;s own properties.
               </Txt>
               <Divider />
               <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
