@@ -454,13 +454,14 @@ export async function createReport(input: Omit<ServiceReport, 'id' | 'createdAt'
   await db.runAsync(
     `INSERT INTO report (id,siteId,panelId,title,frequency,serviceDate,technicianName,technicianLicence,
        companyName,witnessName,signatureTechnician,signatureWitness,status,notes,createdAt,updatedAt,
-       jobNumber,customerName,siteContactName,siteContactPhone)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       jobNumber,customerName,siteContactName,siteContactPhone,jobExternalId,jobTitle)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     r.id, r.siteId, r.panelId ?? null, r.title, r.frequency, r.serviceDate,
     r.technicianName ?? null, r.technicianLicence ?? null, r.companyName ?? null,
     r.witnessName ?? null, r.signatureTechnician ?? null, r.signatureWitness ?? null,
     r.status, r.notes ?? null, r.createdAt, r.updatedAt,
     r.jobNumber ?? null, r.customerName ?? null, r.siteContactName ?? null, r.siteContactPhone ?? null,
+    r.jobExternalId ?? null, r.jobTitle ?? null,
   );
   return r;
 }
@@ -469,7 +470,8 @@ export async function updateReport(id: string, patch: Partial<ServiceReport>): P
   const db = await getDb();
   const fields = ['title', 'frequency', 'serviceDate', 'technicianName', 'technicianLicence', 'companyName',
     'witnessName', 'signatureTechnician', 'signatureWitness', 'status', 'notes',
-    'jobNumber', 'customerName', 'siteContactName', 'siteContactPhone'] as const;
+    'jobNumber', 'customerName', 'siteContactName', 'siteContactPhone',
+    'jobExternalId', 'jobTitle', 'attachedAt'] as const;
   const sets: string[] = [];
   const vals: SqlValue[] = [];
   for (const f of fields) {
@@ -738,13 +740,14 @@ export async function createDefect(input: Omit<Defect, 'id' | 'raisedAt'> & { id
   await db.runAsync(
     `INSERT INTO defect (id,siteId,reportId,pointId,location,description,severity,status,raisedAt,rectifiedAt,photos,notes,
        defectCode,as1851Class,qldLimbInoperable,qldLimbAdverseImpact,noticeIssuedAt,noticeRecipient,
-       verbalNotifiedAt,verbalNotifiedTo,rectificationDueAt,interimMeasures,extentOfImpairment)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       verbalNotifiedAt,verbalNotifiedTo,rectificationDueAt,interimMeasures,extentOfImpairment,priority)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     d.id, d.siteId, d.reportId ?? null, d.pointId ?? null, d.location, d.description,
     d.severity, d.status, d.raisedAt, d.rectifiedAt ?? null, JSON.stringify(d.photos ?? []), d.notes ?? null,
     d.defectCode ?? null, d.as1851Class ?? 'non-critical', fromBool(d.qldLimbInoperable), fromBool(d.qldLimbAdverseImpact),
     d.noticeIssuedAt ?? null, d.noticeRecipient ?? null, d.verbalNotifiedAt ?? null, d.verbalNotifiedTo ?? null,
     d.rectificationDueAt ?? null, d.interimMeasures ?? null, d.extentOfImpairment ?? null,
+    d.priority ?? null,
   );
   return d;
 }
@@ -755,7 +758,7 @@ export async function updateDefect(id: string, patch: Partial<Defect>): Promise<
   const vals: SqlValue[] = [];
   for (const f of ['location', 'description', 'severity', 'status', 'rectifiedAt', 'notes',
     'defectCode', 'as1851Class', 'noticeIssuedAt', 'noticeRecipient', 'verbalNotifiedAt',
-    'verbalNotifiedTo', 'rectificationDueAt', 'interimMeasures', 'extentOfImpairment'] as const) {
+    'verbalNotifiedTo', 'rectificationDueAt', 'interimMeasures', 'extentOfImpairment', 'priority'] as const) {
     if (patch[f] !== undefined) { sets.push(`${f} = ?`); vals.push((patch[f] as string | undefined) ?? null); }
   }
   if (patch.photos !== undefined) { sets.push('photos = ?'); vals.push(JSON.stringify(patch.photos)); }

@@ -314,6 +314,7 @@ export default function BulkTestScreen() {
               location: def.location,
               description: def.description,
               severity: def.severity,
+              priority: def.priority,
               status: 'open',
               photos: def.photos,
               notes: def.notes,

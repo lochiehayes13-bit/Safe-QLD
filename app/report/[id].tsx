@@ -4,9 +4,9 @@ import { Stack, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
-  addAssetRowsToReport, addCheckRows, addPointsToReport, assetIdsOnReport, getPanel, getReport, getSite,
-  listCheckRows, listDefects, listTestRows, queryPoints, recordTestRowOnAsset, setTestResult, updateCheckRow,
-  updateReport, updateTestRow,
+  addAssetRowsToReport, addCheckRows, addPointsToReport, assetIdsOnReport, createDefect, getPanel, getReport,
+  getSite, listCheckRows, listDefects, listTestRows, queryPoints, recordTestRowOnAsset, setTestResult,
+  updateCheckRow, updateReport, updateTestRow,
 } from '@/db/repo';
 import { queryAssets, setTestSheetEventDetail, type AssetRecord } from '@/db/assetRepo';
 import { getCustomer, listJobsFor, readJobJson, scheduledJobExternalIds } from '@/db/mirrorRepo';
@@ -17,10 +17,16 @@ import { jobToOffer, type JobOffer } from '@/domain/reportJobMatch';
 import { qldIsoDay } from '@/domain/qldTime';
 import { DEVICE_TYPE_LABEL, DEFAULT_TEST_METHOD } from '@/parsers/deviceType';
 import { SERVICE_ROUTINES, type ServiceRoutine } from '@/seed/serviceRoutines';
+import { assetTypeById, type SystemKind } from '@/seed/assetTypes';
+import {
+  SEVERITY_LABEL, defectsForSystem, searchDefects, type DefectCode,
+} from '@/seed/defectLibrary';
 import { checkSheet, defectSheet, reportCoverSheet, testResultSheet, type ReportBundle } from '@/export/sheets';
 import { serviceReportHtml } from '@/export/pdf';
 import { shareFile, writePdf, writeXlsx } from '@/export/files';
 import { notSharedNotice } from '@/export/shareOutcome';
+import { safeFileName } from '@/export/fileNames';
+import { JobFileCard } from '@/components/JobFileCard';
 import {
   CERTIFICATION_STATEMENT, validateMaintenanceRecord, type MaintenanceRecord,
 } from '@/domain/qldCompliance';
@@ -28,7 +34,7 @@ import { loadPrefs } from '@/app-prefs';
 import { nowIso } from '@/db';
 import { useTheme } from '@/theme';
 import {
-  Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Segmented, Txt,
+  Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, SearchBox, Segmented, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
 import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
@@ -160,6 +166,18 @@ export default function ReportScreen() {
     return assets.filter((a) => isServiceable(a) && !held.has(a.id)).length;
   }, [assets, rows]);
 
+  /**
+   * The row whose failure has not been written up yet.
+   *
+   * Marking a device FAIL on the sheet used to write the result and stop.
+   * The site's defect list stayed empty, the customer's report printed a
+   * failed device with no defect against it, and the office never saw the
+   * work — while the routine run and the bulk test, doing the same thing,
+   * both raised one. So the sheet asks, once, the moment the fail is marked.
+   */
+  const [raiseFor, setRaiseFor] = useState<TestRow | null>(null);
+  const [raiseQuery, setRaiseQuery] = useState('');
+
   const mark = async (row: TestRow, result: TestResult) => {
     // A second tap on the result already marked is a glove, not a decision:
     // re-writing it would only move the row's tested time.
@@ -173,6 +191,44 @@ export default function ReportScreen() {
     await setTestResult(row.id, result);
     // A row from the register carries its result back to the register.
     if (row.assetId) await recordTestRowOnAsset(row, result, technician, at);
+    if (result === 'fail') {
+      setRaiseQuery('');
+      setRaiseFor(row);
+    }
+  };
+
+  /**
+   * Raises the defect the failure means, from the library.
+   *
+   * The library's wording is what the customer's report prints and what the
+   * office quotes from, so it is offered rather than typed. `reportId` is set
+   * on the way in: it is what lets this visit's defects be told from the ones
+   * that were already outstanding when the technician walked in.
+   */
+  const raiseDefect = async (row: TestRow, code: DefectCode) => {
+    if (!report) return;
+    const asset = row.assetId ? assets.find((a) => a.id === row.assetId) : undefined;
+    try {
+      await createDefect({
+        siteId: report.siteId,
+        reportId: report.id,
+        pointId: row.assetId,
+        location: asset
+          ? [asset.level, asset.room, asset.name || assetTypeById(asset.assetTypeId)?.label].filter(Boolean).join(' ')
+          : [row.zoneText, row.deviceText].filter(Boolean).join(' — ') || row.pointRef || 'Location not recorded',
+        description: [code.reportWording, row.comment?.trim()].filter(Boolean).join(' '),
+        severity: code.severity === 'critical' ? 'critical' : 'non-critical',
+        priority: code.severity === 'critical' ? undefined : code.severity,
+        defectCode: code.code,
+        as1851Class: code.severity === 'critical' ? 'critical' : 'non-critical',
+        status: 'open',
+        photos: [],
+      });
+      setRaiseFor(null);
+      await load();
+    } catch (e) {
+      showAlert('Defect not raised', describeActionFailure(e, 'raising the defect'));
+    }
   };
 
   const comment = async (row: TestRow, text: string) => {
@@ -257,11 +313,22 @@ export default function ReportScreen() {
     void load();
   };
 
+  /*
+   * Writes land immediately and a failure is said out loud.
+   *
+   * This used to be `void updateReport(...)`: a write that threw landed
+   * nowhere, the screen kept showing the value, and the report on the phone
+   * did not have it. A record that quietly does not save is worse than one
+   * that refuses to.
+   */
   const patchReport = (patch: Partial<ServiceReport>) => {
     if (!report) return;
     setReport({ ...report, ...patch });
     if (patch.technicianName !== undefined) setTechnician(patch.technicianName);
-    void updateReport(report.id, patch);
+    void updateReport(report.id, patch).catch((e: unknown) => {
+      showAlert('Not saved', describeActionFailure(e, 'saving the report'));
+      void load();
+    });
   };
 
   /**
@@ -361,17 +428,24 @@ export default function ReportScreen() {
     return { site, report, panel: panel ?? undefined, testRows: rows, checkRows: checks, defects };
   };
 
+  /** The PDF itself, so the share sheet and the job attachment cannot differ. */
+  const reportPdf = async () => {
+    const b = bundle();
+    if (!b) throw new Error('The report is not loaded.');
+    const html = serviceReportHtml(b, nowIso(), {
+      qdcCompliance: qdcAffirmed,
+      inProperWorkingOrder: workingOrder,
+      hardcopyLeftOnSite: hardcopyLeft,
+    });
+    return writePdf(`${b.report.title} - ${b.site.name}`, html);
+  };
+
   const exportPdf = async () => {
     const b = bundle();
     if (!b) return;
     setBusy(true);
     try {
-      const html = serviceReportHtml(b, nowIso(), {
-        qdcCompliance: qdcAffirmed,
-        inProperWorkingOrder: workingOrder,
-        hardcopyLeftOnSite: hardcopyLeft,
-      });
-      const file = await writePdf(`${b.report.title} - ${b.site.name}`, html);
+      const file = await reportPdf();
       const shared = await shareFile(file, 'Service report');
       if (!shared) {
         const notice = notSharedNotice(file.name, 'report');
@@ -478,6 +552,34 @@ export default function ReportScreen() {
                 </>
               )}
             </View>
+
+            {raiseFor ? (
+              <View style={{ paddingHorizontal: t.space(4), paddingBottom: t.space(2) }}>
+                <Card>
+                  <Label>Write up the failure</Label>
+                  <Txt size="sm" tone="muted" style={{ marginTop: t.space(1), lineHeight: 19 }}>
+                    {[raiseFor.zoneText, raiseFor.deviceText].filter(Boolean).join(' — ') || raiseFor.pointRef}
+                  </Txt>
+                  <Txt size="sm" tone="muted" style={{ marginTop: t.space(1), lineHeight: 19 }}>
+                    A failed device with no defect against it does not reach the customer’s report, the site’s defect
+                    list or the office.
+                  </Txt>
+                  <SearchBox value={raiseQuery} onChange={setRaiseQuery} placeholder="battery, obstruction, no alarm" />
+                  {defectChoices(raiseFor, assets, raiseQuery).map((c) => (
+                    <Card key={c.code} onPress={() => { void raiseDefect(raiseFor, c); }}>
+                      <Rowed align="flex-start">
+                        <View style={{ flex: 1 }}>
+                          <Txt size="sm" weight="600">{c.code}</Txt>
+                          <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{c.reportWording}</Txt>
+                        </View>
+                        <Chip label={SEVERITY_LABEL[c.severity]} tone={c.severity === 'critical' ? 'fail' : 'warn'} />
+                      </Rowed>
+                    </Card>
+                  ))}
+                  <Button title="Not a defect — just record the fail" variant="ghost" onPress={() => setRaiseFor(null)} />
+                </Card>
+              </View>
+            ) : null}
 
             <FlatList
               data={shown}
@@ -683,6 +785,27 @@ export default function ReportScreen() {
               <Button title="Spreadsheet" variant="secondary" style={{ flex: 1 }} onPress={exportXlsx} loading={busy} />
             </Rowed>
 
+            {/*
+              The report is the record produced on every single service, and
+              until this card existed it had no way of reaching Simpro at all:
+              it stayed on the phone that made it unless somebody emailed it to
+              themselves. It goes on the job as an attachment, never as a note.
+            */}
+            <JobFileCard
+              siteId={report.siteId}
+              jobExternalId={report.jobExternalId}
+              jobTitle={report.jobTitle}
+              attachedAt={report.attachedAt}
+              what="service report"
+              filename={`${safeFileName(`${report.title} ${site?.name ?? ''}`.trim(), 'service-report')}.pdf`}
+              subject={`${report.title}${site ? ` — ${site.name}` : ''}`}
+              buildFile={reportPdf}
+              onPickJob={(job: { externalId: string; title?: string } | null) => patchReport({ jobExternalId: job?.externalId, jobTitle: job?.title })}
+              onAttached={(at: string) => patchReport({ attachedAt: at })}
+              disabled={report.status !== 'complete'}
+              disabledWhy="Mark the report complete first. A draft on the job file reads as the finished record of a service."
+            />
+
             <Button
               title={report.status === 'complete' ? 'Reopen as draft' : 'Mark complete'}
               variant="secondary"
@@ -721,6 +844,22 @@ export default function ReportScreen() {
  * a failure with no comment and there was nowhere on this screen to write
  * one — the sheet asked for something it gave no way to supply.
  */
+/**
+ * The defect codes worth offering for a failed row.
+ *
+ * Narrowed to the system the device belongs to where the row came from the
+ * register, because a hydrant code on a smoke detector is noise. A typed
+ * search searches the whole library, since the narrowing is a convenience and
+ * not a rule.
+ */
+function defectChoices(row: TestRow, assets: AssetRecord[], query: string): DefectCode[] {
+  if (query.trim()) return searchDefects(query).slice(0, 8);
+  const asset = row.assetId ? assets.find((a) => a.id === row.assetId) : undefined;
+  const system = asset ? assetTypeById(asset.assetTypeId)?.system : undefined;
+  const narrowed = system ? defectsForSystem(system as SystemKind) : [];
+  return (narrowed.length ? narrowed : searchDefects('')).slice(0, 8);
+}
+
 function TestRowItem({
   row, index, onMark, onComment,
 }: {

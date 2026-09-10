@@ -241,6 +241,9 @@ export default function RunRoutineScreen() {
                   : site.name,
                 description: [code.reportWording, a.comment?.trim()].filter(Boolean).join(' '),
                 severity: code.severity === 'critical' ? 'critical' : 'non-critical',
+                // The library rates every code; keeping the grade is what lets
+                // the worst of the non-critical work sort to the top.
+                priority: code.severity === 'critical' ? undefined : code.severity,
                 status: 'open',
                 photos: [],
                 notes: `${code.code} · raised from ${routine.label}, ${test.label}`,

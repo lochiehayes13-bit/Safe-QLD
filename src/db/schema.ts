@@ -26,6 +26,7 @@ import { MIGRATION_V24 } from './schemaV24';
 import { MIGRATION_V25 } from './schemaV25';
 import { MIGRATION_V26 } from './schemaV26';
 import { MIGRATION_V27 } from './schemaV27';
+import { MIGRATION_V28 } from './schemaV28';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -363,6 +364,7 @@ export const MIGRATIONS: string[] = [
   // v27 — the Simpro job a Form 72 belongs to, and when its PDF reached the
   // job's attachments
   MIGRATION_V27,
+  MIGRATION_V28,
 ];
 
 /**

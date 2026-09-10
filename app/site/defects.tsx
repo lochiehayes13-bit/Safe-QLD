@@ -147,7 +147,7 @@ export default function SiteDefectsScreen() {
             )
           }
           renderItem={({ item }) => (
-            <Card>
+            <Card onPress={() => router.push({ pathname: '/defect/[id]', params: { id: item.id } })}>
               <Rowed gap={2} wrap>
                 <Chip label={item.severity === 'critical' ? 'CRITICAL' : 'Non-critical'} tone={item.severity === 'critical' ? 'fail' : 'warn'} />
                 <Chip label={item.status} tone={item.status === 'open' ? 'default' : 'pass'} />
@@ -156,6 +156,15 @@ export default function SiteDefectsScreen() {
               <Txt weight="700" style={{ marginTop: t.space(1.5) }}>{item.location}</Txt>
               <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{item.description}</Txt>
               <Txt size="xs" tone="faint" style={{ marginTop: 4 }}>Raised {formatAuDate(item.raisedAt)}</Txt>
+              {item.severity === 'critical' && !item.noticeIssuedAt ? (
+                <Button
+                  title="The occupier’s notice is not written"
+                  variant="secondary"
+                  compact
+                  style={{ marginTop: t.space(2.5) }}
+                  onPress={() => router.push({ pathname: '/work/notice/[id]', params: { id: item.id } })}
+                />
+              ) : null}
               {item.status === 'open' ? (
                 <Button
                   title="Mark rectified"

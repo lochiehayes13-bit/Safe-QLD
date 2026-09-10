@@ -299,6 +299,18 @@ export interface ServiceReport {
   customerName?: string;
   siteContactName?: string;
   siteContactPhone?: string;
+  /**
+   * The Simpro job this report belongs to, so its PDF can be filed on it.
+   *
+   * Not the same thing as `jobNumber` above, and the two must never be
+   * conflated: that one is free text a technician types for the customer's
+   * copy and can hold anything, this one is Simpro's own id and is set only
+   * by picking a job from the list.
+   */
+  jobExternalId?: string;
+  jobTitle?: string;
+  /** When the PDF was queued onto that job's attachments. */
+  attachedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -362,6 +374,18 @@ export interface Defect {
   location: string;
   description: string;
   severity: DefectSeverity;
+  /**
+   * How bad the non-critical ones are, from the library's own rating.
+   *
+   * `severity` carries the statutory test — critical or not — because the
+   * Queensland obligations hang off that word and nothing else may blur it.
+   * The picker has always offered four grades though, and High, Medium and Low
+   * all landed as "non-critical" with the grade thrown away between the screen
+   * and the row. This is where it lives now, so the worst work sorts first and
+   * a quote can be priced by it. Absent on a critical defect: there is no
+   * grade above critical.
+   */
+  priority?: 'high' | 'medium' | 'low';
   status: DefectStatus;
   raisedAt: string;
   rectifiedAt?: string;

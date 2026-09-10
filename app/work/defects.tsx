@@ -128,7 +128,7 @@ export default function DefectsScreen() {
           renderItem={({ item }) => {
             const days = ageDays(item.raisedAt);
             return (
-              <Card>
+              <Card onPress={() => router.push({ pathname: '/defect/[id]', params: { id: item.id } })}>
                 <Rowed align="flex-start" gap={2}>
                   <View style={{ flex: 1 }}>
                     <Rowed gap={2} wrap>
@@ -144,6 +144,15 @@ export default function DefectsScreen() {
                     </Txt>
                   </View>
                 </Rowed>
+                {item.severity === 'critical' && !item.noticeIssuedAt ? (
+                  <Button
+                    title="The occupier's notice is not written"
+                    variant="secondary"
+                    compact
+                    style={{ marginTop: t.space(2.5) }}
+                    onPress={() => router.push({ pathname: '/work/notice/[id]', params: { id: item.id } })}
+                  />
+                ) : null}
                 {item.status === 'open' ? (
                   <Rowed gap={2} style={{ marginTop: t.space(2.5) }}>
                     <Button

@@ -772,6 +772,15 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['defects', 'outstanding', 'open', 'faults'],
   },
   {
+    route: '/defect/[id]', file: 'app/defect/[id].tsx', tab: 'work', section: 'Records',
+    label: 'Defect', needsContext: true, modes: BOTH,
+    openedFrom: ['/work/defects', '/site/defects'],
+    blurb:
+      'One defect, still editable: the wording, where it is, how bad, photographs added afterwards, '
+      + 'and those photographs onto a Simpro job any day after the fact.',
+    terms: ['defect', 'fault', 'edit', 'photo', 'rectify', 'reword', 'severity'],
+  },
+  {
     route: '/work/outbound', file: 'app/work/outbound.tsx', tab: 'work', section: 'Records',
     label: 'Send to the office', modes: BOTH, openedFrom: ['/work'],
     blurb: 'A finished service and the defects it raised, pushed to the Simpro job as notes.',

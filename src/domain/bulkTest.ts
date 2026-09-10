@@ -263,6 +263,8 @@ export interface PlannedDefect {
   location: string;
   description: string;
   severity: 'critical' | 'non-critical';
+  /** The library's own grade, kept for the non-critical ones. See Defect. */
+  priority?: 'high' | 'medium' | 'low';
   defectCode?: string;
   photos: string[];
   notes: string;
@@ -276,6 +278,7 @@ export function defectFor(asset: AssetRecord, fail: FailDetail): PlannedDefect {
     location: locationOf(asset),
     description: finalWording(fail),
     severity: recordSeverity(fail.severity),
+    priority: fail.severity === 'critical' ? undefined : fail.severity,
     defectCode: fail.defectCode,
     photos: fail.photos,
     notes: [

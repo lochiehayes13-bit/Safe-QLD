@@ -246,13 +246,18 @@ export default function NewDefectScreen() {
       const observation = extra.trim();
       const description = own || [selected.reportWording, observation].filter(Boolean).join(' ');
       const technicianNote = observation ? `Technician note: ${observation}` : undefined;
-      const critical = (severity ?? selected.severity) === 'critical';
+      const grade = severity ?? selected.severity;
+      const critical = grade === 'critical';
       const defect = await createDefect({
         siteId,
         pointId: params.assetId,
         location: location.trim() || 'Location not recorded',
         description,
         severity: critical ? 'critical' : 'non-critical',
+        // The grade the technician picked, kept. Critical is carried by
+        // `severity` because the statutory tests hang off that word; High,
+        // Medium and Low used to land identically and vanish.
+        priority: critical ? undefined : grade,
         status: 'open',
         photos,
         // The library code and the AS 1851 class go on the record itself, not
