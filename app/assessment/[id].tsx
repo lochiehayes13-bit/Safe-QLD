@@ -131,13 +131,20 @@ export default function AssessmentScreen() {
 
   /*
    * One builder, so the report that is shared and the one filed on the job are
-   * the same document. It resequences and re-reads the findings first: the
-   * findings cite photographs by number, and a register produced from stale
-   * sequence numbers cites the wrong ones.
+   * the same document.
+   *
+   * `renumber` is the difference between issuing it and taking a copy of it.
+   * Producing a report resequences the findings and the register keeps that
+   * numbering — which is why the button that does it asks first. Filing the
+   * same document on a Simpro job must not: it is a copy going to the office,
+   * not an act of issuing, and it had no business quietly renumbering an
+   * assessment somebody was still working on. The card called this directly
+   * and got the renumber for free, behind the confirmation rather than
+   * through it.
    */
-  const reportPdf = useCallback(async () => {
+  const reportPdf = useCallback(async (renumber = false) => {
     if (!assessment || !site) throw new Error('The assessment is not loaded.');
-      await resequence(assessment.id);
+      if (renumber) await resequence(assessment.id);
       const fresh = await listFindings(assessment.id);
       setFindings(fresh);
       const prefs = await loadPrefs();
@@ -196,7 +203,7 @@ export default function AssessmentScreen() {
     if (!assessment || !site) return;
     setBusy(true);
     try {
-      const file = await reportPdf();
+      const file = await reportPdf(true);
       const shared = await shareFile(file, 'Fire system effectiveness report');
       if (!shared) {
         const notice = notSharedNotice(file.name, 'report');
@@ -435,7 +442,8 @@ export default function AssessmentScreen() {
           what="effectiveness report"
           filename={`${safeFileName(assessment.reportReference || `Effectiveness report ${site?.name ?? ''}`, 'effectiveness-report')}.pdf`}
           subject={`Fire system effectiveness report${assessment.reportReference ? ` ${assessment.reportReference}` : ''}${site?.name ? ` — ${site.name}` : ''}`}
-          buildFile={reportPdf}
+          // Without the renumber: filing a copy is not issuing.
+          buildFile={() => reportPdf(false)}
           onPickJob={(job) => patch({ jobExternalId: job?.externalId, jobTitle: job?.title })}
           onAttached={(at) => patch({ attachedAt: at })}
           disabled={!site}

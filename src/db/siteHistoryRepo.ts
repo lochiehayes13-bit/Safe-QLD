@@ -126,19 +126,33 @@ export async function siteFacts(siteId: string, today: string, ownName = ''): Pr
   ]);
 
   /*
-   * What is still open at the site, now.
+   * What is still open at the site, now — counted by the database, sampled for
+   * the one it names.
    *
-   * Capped, because the count is what the card shows and the rows are only
-   * used to find the oldest and the worst — a site with two hundred open
-   * defects does not need two hundred rows read to answer either question,
-   * and the order below puts the ones that decide those answers first.
+   * The count has to be a COUNT. Reading a capped list and taking its length
+   * is how a site with three hundred open defects reports two hundred, and the
+   * comment that used to sit here claimed the cap could not affect the number
+   * while the code took the number straight off the capped list.
+   *
+   * The sample is capped and ordered so the rows that decide "the worst" come
+   * first: critical before the rest, oldest before newer. Twenty is plenty to
+   * name one.
    */
-  const openDefects = await db.getAllAsync<OpenDefectRow>(
-    `SELECT status, severity, raisedAt, location, description FROM defect
-     WHERE siteId = ? AND status = 'open'
-     ORDER BY (severity = 'critical') DESC, raisedAt LIMIT 200`,
-    [siteId],
-  );
+  const [tally, openDefects] = await Promise.all([
+    db.getFirstAsync<{ total: number; critical: number; oldest: string | null }>(
+      `SELECT COUNT(*) AS total,
+              SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END) AS critical,
+              MIN(raisedAt) AS oldest
+       FROM defect WHERE siteId = ? AND status = 'open'`,
+      [siteId],
+    ),
+    db.getAllAsync<OpenDefectRow>(
+      `SELECT status, severity, raisedAt, location, description FROM defect
+       WHERE siteId = ? AND status = 'open'
+       ORDER BY (severity = 'critical') DESC, raisedAt LIMIT 20`,
+      [siteId],
+    ),
+  ]);
 
   const lastJob: LastJobRow | undefined = lastJobRow?.externalId ? {
     externalId: lastJobRow.externalId,
@@ -172,6 +186,11 @@ export async function siteFacts(siteId: string, today: string, ownName = ''): Pr
     lastRun: runRow ? { ...runRow, technician: runRow.technician ?? undefined } : undefined,
     assetCounts: counts,
     openDefects,
+    openTally: {
+      total: tally?.total ?? 0,
+      critical: tally?.critical ?? 0,
+      oldestRaisedAt: tally?.oldest ?? undefined,
+    },
     due: due.map((d) => ({
       routineId: d.routineId,
       routineLabel: routineById(d.routineId)?.label ?? d.routineId,

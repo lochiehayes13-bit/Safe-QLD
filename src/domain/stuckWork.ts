@@ -93,7 +93,18 @@ export function assessQueue(items: readonly QueueItem[], now: string): StuckWork
   for (const item of items) {
     if (item.status === 'failed') { failed += 1; stuck(item); continue; }
     if (item.status === 'unknown') { unknown += 1; stuck(item); continue; }
-    if (item.status !== 'pending') continue;
+    /*
+     * A row still marked as being sent is normally a row being sent right now,
+     * and saying so would be noise. The exception is a run that was killed
+     * mid-send: the claim stays on the row until the next run puts it back,
+     * and `recoverSending` does exactly that at the start of every flush — so
+     * this is only ever a gap between a kill and the next run.
+     *
+     * It is still a gap. A phone killed mid-send and not opened for a week
+     * shows a clean strip on the morning it is opened, while the row sits
+     * claimed and unsent. Old enough to be stale is old enough to say.
+     */
+    if (item.status !== 'pending' && item.status !== 'sending') continue;
     const made = Date.parse(item.createdAt);
     /*
      * A createdAt that will not parse is treated as stale rather than ignored.

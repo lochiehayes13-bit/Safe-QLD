@@ -177,3 +177,47 @@ describe('open defects on the facts card', () => {
     expect(f?.open.worst).toBeUndefined();
   });
 });
+
+describe('a site with more open defects than the card samples', () => {
+  it('counts every one of them, not just the ones it read', async () => {
+    /*
+     * The sample is capped so the card can name the worst one without reading
+     * three hundred rows. Counting that capped list is how three hundred open
+     * defects becomes twenty on the card — and the comment that used to sit on
+     * the query claimed the cap could not affect the number while the code
+     * took the number straight off it.
+     */
+    const site = await createSite({ name: 'Fictional Tower' });
+    for (let i = 0; i < 45; i++) {
+      await createDefect({
+        siteId: site.id, location: `Level ${i}`, description: 'Detector faulty',
+        severity: i === 44 ? 'critical' : 'non-critical', status: 'open', photos: [],
+        raisedAt: `2026-0${1 + (i % 8)}-1${i % 10}T00:00:00.000Z`,
+      });
+    }
+
+    const f = await siteFacts(site.id, TODAY);
+    expect(f?.open.total).toBe(45);
+    expect(f?.open.critical).toBe(1);
+  });
+
+  it('finds the oldest across all of them, not the oldest it happened to read', async () => {
+    const site = await createSite({ name: 'Fictional Tower' });
+    await createDefect({
+      siteId: site.id, location: 'Ancient', description: 'Long outstanding',
+      severity: 'non-critical', status: 'open', photos: [], raisedAt: '2019-01-01T00:00:00.000Z',
+    });
+    for (let i = 0; i < 30; i++) {
+      await createDefect({
+        siteId: site.id, location: `Level ${i}`, description: 'Recent',
+        severity: 'critical', status: 'open', photos: [], raisedAt: '2026-09-01T00:00:00.000Z',
+      });
+    }
+
+    const f = await siteFacts(site.id, TODAY);
+    expect(f?.open.total).toBe(31);
+    // The 2019 one is a non-critical, so the critical-first ordering pushes it
+    // out of the sample entirely. The count and the age still have to see it.
+    expect(f?.open.oldestDays).toBeGreaterThan(2000);
+  });
+});

@@ -98,7 +98,19 @@ export interface SiteFactsInput {
   hours: HoursRow[];
   lastRun?: RunRow;
   assetCounts: { system: string; count: number }[];
+  /**
+   * A sample of what is open, newest-irrelevant: critical first, then oldest.
+   * Used to name one of them. Never counted — see `openTally`.
+   */
   openDefects: OpenDefectRow[];
+  /**
+   * The counts, done by the database over every open row.
+   *
+   * Separate from the sample because the sample is capped, and counting a
+   * capped list is how a site with three hundred open defects reports two
+   * hundred. Optional so a caller with a short list can just pass the rows.
+   */
+  openTally?: { total: number; critical: number; oldestRaisedAt?: string };
   due: DueRow[];
   nextJob?: NextJobRow;
   contact?: { name?: string; phone?: string };
@@ -263,13 +275,19 @@ export function buildSiteFacts(input: SiteFactsInput): SiteFacts {
     Number(b.critical) - Number(a.critical) || (b.days ?? -1) - (a.days ?? -1)
   ));
   const worstRow = ranked[0];
+  const fromSample = withDays.reduce<number | undefined>(
+    (max, d) => (d.days === undefined ? max : Math.max(max ?? 0, d.days)),
+    undefined,
+  );
   const open: SiteFacts['open'] = {
-    total: openRows.length,
-    critical: withDays.filter((d) => d.critical).length,
-    oldestDays: withDays.reduce<number | undefined>(
-      (max, d) => (d.days === undefined ? max : Math.max(max ?? 0, d.days)),
-      undefined,
-    ),
+    // The database's count where there is one: the sample above is capped, and
+    // a capped list counted is how three hundred open defects becomes two
+    // hundred on the card.
+    total: input.openTally?.total ?? openRows.length,
+    critical: input.openTally?.critical ?? withDays.filter((d) => d.critical).length,
+    oldestDays: input.openTally?.oldestRaisedAt !== undefined
+      ? daysBetween(qldIsoDay(input.openTally.oldestRaisedAt), input.today)
+      : fromSample,
     worst: worstRow ? {
       location: worstRow.location,
       description: worstRow.description,

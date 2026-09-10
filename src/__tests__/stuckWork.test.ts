@@ -24,8 +24,26 @@ const item = (over: Partial<QueueItem> = {}): QueueItem => ({
 });
 
 describe('reading the queue', () => {
+  it('says nothing about a row that is being sent right now', () => {
+    // A claim held by a run in flight is the queue working, not a fault.
+    const s = assessQueue([item({ status: 'sending', createdAt: ago(60_000) })], NOW);
+    expect(s.clear).toBe(true);
+  });
+
+  it('does say something about a claim nothing has picked up in a day', () => {
+    /*
+     * A run killed mid-send leaves the claim on the row. `recoverSending` puts
+     * it back at the start of the next flush — but a phone killed and not
+     * opened for a week shows a clean strip on the morning it is opened, while
+     * the row sits claimed and unsent.
+     */
+    const s = assessQueue([item({ status: 'sending', createdAt: ago(3 * STALE_AFTER_MS) })], NOW);
+    expect(s.waiting).toBe(1);
+    expect(s.clear).toBe(false);
+  });
+
   it('says nothing about a queue that is simply working', () => {
-    const s = assessQueue([item(), item(), item({ status: 'sending' })], NOW);
+    const s = assessQueue([item(), item(), item({ status: 'sending', createdAt: ago(30_000) })], NOW);
     expect(s.clear).toBe(true);
     expect(stuckWords(s)).toBeUndefined();
   });
