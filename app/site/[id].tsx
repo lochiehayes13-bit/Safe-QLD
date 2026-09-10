@@ -56,6 +56,21 @@ export default function SiteScreen() {
   // The office's side of this site — the customer, the counts and what is
   // owed — read from the mirror beside the phone's own records.
   const [office, setOffice] = useState<{ stats: CustomerStats; quoteCount: number; customers: SiteCustomer[] } | null>(null);
+
+  /**
+   * Which of the site's records is being chosen from, and what it holds.
+   *
+   * Tapping "Occupier statement" used to open the first one there was, or
+   * make one if there was none — so looking created a record, and next year
+   * the same tap opened last year's signed statement to be typed over. A
+   * statutory record is per period, not per site. So the row asks: here is
+   * what this site has, open one, or start a new one for this period.
+   */
+  const [chooser, setChooser] = useState<null | {
+    kind: 'baseline' | 'occupier' | 'assessment';
+    rows: { id: string; title: string; detail: string }[];
+  }>(null);
+
   // The people the office lists at this site, from the contact mirror —
   // more than the one site contact the site record itself carries.
   const [people, setPeople] = useState<ContactRecord[]>([]);
@@ -299,10 +314,117 @@ export default function SiteScreen() {
     }
   };
 
+  const openRecords = async (kind: 'baseline' | 'occupier' | 'assessment') => {
+    if (!site) return;
+    try {
+      if (kind === 'baseline') {
+        const rows = await listBaselines(site.id);
+        setChooser({
+          kind,
+          rows: rows.map((r) => ({
+            id: r.id,
+            title: r.premisesName || site.name,
+            detail: `Last touched ${formatAuDate(qldIsoDay(r.updatedAt) ?? r.updatedAt)}`,
+          })),
+        });
+      } else if (kind === 'occupier') {
+        const rows = await listOccupierStatements(site.id);
+        setChooser({
+          kind,
+          rows: rows.map((r) => ({
+            id: r.id,
+            title: r.periodStart || r.periodEnd
+              ? `${r.periodStart ? formatAuDate(r.periodStart) : '?'} to ${r.periodEnd ? formatAuDate(r.periodEnd) : '?'}`
+              : 'No period set',
+            detail: r.signedAt ? `Signed by ${r.signedBy || 'the occupier'}` : 'Not signed',
+          })),
+        });
+      } else {
+        const rows = await listAssessments(site.id);
+        setChooser({
+          kind,
+          rows: rows.map((r) => ({
+            id: r.id,
+            title: r.reportReference || r.scopeLabel || site.name,
+            detail: r.attendanceDate ? `Attended ${formatAuDate(r.attendanceDate)}` : 'No attendance date',
+          })),
+        });
+      }
+    } catch (e) {
+      showAlert('Could not read them', describeActionFailure(e, 'reading the records'));
+    }
+  };
+
+  /** Starts a new one, which is now the only way one gets made. */
+  const startRecord = async (kind: 'baseline' | 'occupier' | 'assessment') => {
+    if (!site) return;
+    setChooser(null);
+    try {
+      if (kind === 'baseline') {
+        const rec = await createBaseline(site.id);
+        router.push({ pathname: '/baseline/[id]', params: { id: rec.id } });
+      } else if (kind === 'occupier') {
+        const rec = await createOccupierStatement(site.id, {
+          premisesName: site.name,
+          premisesAddress: site.address ?? '',
+        });
+        router.push({ pathname: '/occupier/[id]', params: { id: rec.id } });
+      } else {
+        const rec = await createAssessment({
+          siteId: site.id,
+          clientName: site.clientName ?? '',
+          scopeLabel: site.name,
+          attendanceDate: qldIsoDay(nowIso()) ?? '',
+        });
+        router.push({ pathname: '/assessment/[id]', params: { id: rec.id } });
+      }
+    } catch (e) {
+      showAlert('Not started', describeActionFailure(e, 'starting the record'));
+    }
+  };
+
+  const CHOOSER_LABEL = {
+    baseline: { what: 'baseline record', route: '/baseline/[id]' as const },
+    occupier: { what: 'occupier statement', route: '/occupier/[id]' as const },
+    assessment: { what: 'effectiveness assessment', route: '/assessment/[id]' as const },
+  };
+
   return (
     <>
       <Stack.Screen options={{ title: site.name }} />
       <Screen>
+        {chooser ? (
+          <Card>
+            <Label>{CHOOSER_LABEL[chooser.kind].what}</Label>
+            {chooser.rows.length === 0 ? (
+              <Txt size="sm" tone="muted" style={{ marginTop: t.space(1), lineHeight: 19 }}>
+                None on this site yet.
+              </Txt>
+            ) : null}
+            {chooser.rows.map((r) => (
+              <Card
+                key={r.id}
+                onPress={() => {
+                  const route = CHOOSER_LABEL[chooser.kind].route;
+                  setChooser(null);
+                  router.push({ pathname: route, params: { id: r.id } });
+                }}
+              >
+                <Txt weight="600">{r.title}</Txt>
+                <Txt size="sm" tone="muted">{r.detail}</Txt>
+              </Card>
+            ))}
+            <Rowed gap={2}>
+              <Button
+                title={`New ${CHOOSER_LABEL[chooser.kind].what}`}
+                style={{ flex: 1 }}
+                onPress={() => { void startRecord(chooser.kind); }}
+              />
+              <Button title="Close" variant="ghost" onPress={() => setChooser(null)} />
+            </Rowed>
+          </Card>
+        ) : null}
+
         {site.address || site.suburb ? (
           <Txt tone="muted" size="sm">
             {[site.address, site.suburb, site.state, site.postcode].filter(Boolean).join(' ')}
@@ -520,11 +642,7 @@ export default function SiteScreen() {
           icon="clipboard-text-outline"
           title="Baseline data"
           subtitle="Commissioning record, filled from this site's own data"
-          onPress={async () => {
-            const existing = await listBaselines(site.id);
-            const rec = existing[0] ?? (await createBaseline(site.id));
-            router.push({ pathname: '/baseline/[id]', params: { id: rec.id } });
-          }}
+          onPress={() => { void openRecords('baseline'); }}
         />
         <NavRow
           icon="table-large"
@@ -566,14 +684,7 @@ export default function SiteScreen() {
           icon="file-certificate-outline"
           title="Occupier statement"
           subtitle="Annual declaration, filled from this site's own register and defects"
-          onPress={async () => {
-            const existing = await listOccupierStatements(site.id);
-            const rec = existing[0] ?? (await createOccupierStatement(site.id, {
-              premisesName: site.name,
-              premisesAddress: site.address ?? '',
-            }));
-            router.push({ pathname: '/occupier/[id]', params: { id: rec.id } });
-          }}
+          onPress={() => { void openRecords('occupier'); }}
         />
         <NavRow
           icon="history"
@@ -585,19 +696,7 @@ export default function SiteScreen() {
           icon="clipboard-search-outline"
           title="Effectiveness assessment"
           subtitle="Visual and advisory — recommendations for a project, not a service"
-          onPress={async () => {
-            const existing = await listAssessments(site.id);
-            // One assessment per site until there is a reason for more: a
-            // second one raised by accident is a second report reference the
-            // client has to reconcile.
-            const rec = existing[0] ?? (await createAssessment({
-              siteId: site.id,
-              clientName: site.clientName ?? '',
-              scopeLabel: site.name,
-              attendanceDate: qldIsoDay(nowIso()) ?? '',
-            }));
-            router.push({ pathname: '/assessment/[id]', params: { id: rec.id } });
-          }}
+          onPress={() => { void openRecords('assessment'); }}
         />
         <NavRow
           icon="alert-octagon-outline"
