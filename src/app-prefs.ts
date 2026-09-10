@@ -195,3 +195,26 @@ export async function loadPrefs(): Promise<Prefs> {
 export async function savePrefs(prefs: Prefs): Promise<void> {
   await AsyncStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
 }
+
+/**
+ * Change some settings without writing back the ones you were not changing.
+ *
+ * Every screen that edits preferences used to hold the whole blob in state
+ * from the moment it loaded and write all of it back on each change. Two
+ * screens doing that is a clobber waiting to happen, and the theme lock made
+ * it happen: it is set from Settings, persisted on its own, and the very next
+ * edit on that same screen — a name, a rate, anything — wrote the blob it had
+ * read before the lock and quietly put the theme back to following the phone.
+ * The home screen's tile order has the same shape and the same hazard in the
+ * other direction.
+ *
+ * So a change is a change. The patch is merged onto what is actually on disk
+ * at the moment of writing, rather than onto a snapshot that may be an hour
+ * old.
+ */
+export async function patchPrefs(patch: Partial<Prefs>): Promise<Prefs> {
+  const onDisk = await loadPrefs();
+  const next = { ...onDisk, ...patch };
+  await savePrefs(next);
+  return next;
+}

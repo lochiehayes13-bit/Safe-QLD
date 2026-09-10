@@ -2,7 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { attachmentQueueSummary, queueHealth } from '@/db/opsRepo';
+import { queueHealth } from '@/db/opsRepo';
 import { assessQueue, stuckWords, type StuckWords } from '@/domain/stuckWork';
 import { nowIso } from '@/db';
 import { useTheme } from '@/theme';
@@ -27,8 +27,10 @@ export function StuckWorkStrip(): React.ReactElement | null {
 
   const look = useCallback(async () => {
     try {
-      const [rows, attachments] = await Promise.all([queueHealth(), attachmentQueueSummary()]);
-      setWords(stuckWords(assessQueue(rows, attachments, nowIso())));
+      // One read. queueHealth already covers attachments — they are rows of
+      // the same table — and reading the summary as well counted each failed
+      // photograph twice.
+      setWords(stuckWords(assessQueue(await queueHealth(), nowIso())));
     } catch {
       /*
        * A read that fails says nothing rather than crying wolf. The queue not

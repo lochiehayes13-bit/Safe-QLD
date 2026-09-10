@@ -8,7 +8,7 @@ import { defectsAwaitingNotice } from '@/db/repo';
 import { listScheduleFor } from '@/db/scheduleRepo';
 import { nowIso } from '@/db';
 import type { Defect } from '@/domain/types';
-import { loadPrefs, savePrefs, type Prefs } from '@/app-prefs';
+import { loadPrefs, patchPrefs, type Prefs } from '@/app-prefs';
 import {
   MODULES, MODULE_GROUPS, moveShortcut, resolveShortcuts, toggleShortcut, type AppModule, type ModuleGroup,
 } from '@/domain/modules';
@@ -96,11 +96,13 @@ export default function HomeScreen() {
   const update = (next: string[]) => {
     if (!prefs) return;
     animateNextLayout();
-    const merged = { ...prefs, shortcuts: next };
-    setPrefs(merged);
+    setPrefs({ ...prefs, shortcuts: next });
     // The tiles move on screen whatever happens; if the write fails they move
     // back on the next visit, which looked like the app ignoring the change.
-    void savePrefs(merged).catch((e: unknown) => setFailed(describeLoadFailure(e, 'your tile order')));
+    // Merged onto what is on disk rather than written as a whole blob, so
+    // reordering tiles cannot undo a setting changed on another screen.
+    void patchPrefs({ shortcuts: next })
+      .catch((e: unknown) => setFailed(describeLoadFailure(e, 'your tile order')));
   };
 
   return (

@@ -11,7 +11,7 @@ import { clearKey as clearAiKey, hasKey as hasAiKey, storeKey as storeAiKey } fr
 import { clearPlacesKey, hasPlacesKey, storePlacesKey } from '@/geo/placesKey';
 import { PRIVACY_NOTE } from '@/ai/grounding';
 import { JOB_RECORDS_PRIVACY_NOTE } from '@/ai/jobBrief';
-import { loadPrefs, savePrefs, DEFAULT_PREFS, type Prefs } from '@/app-prefs';
+import { loadPrefs, patchPrefs, DEFAULT_PREFS, type Prefs } from '@/app-prefs';
 import { clearExports, exportsSize } from '@/export/files';
 import { listPhotoFiles } from '@/export/photoFiles';
 import { photoStorageReport } from '@/db/photoRepo';
@@ -148,11 +148,21 @@ export default function SettingsScreen() {
     void attachmentQueueSummary().then(setAttachments);
   }, [auto.record.lastRunAt]);
 
+  /*
+   * The change goes on screen at once and is merged onto what is on disk.
+   *
+   * This used to write the whole blob back from this screen's own copy of it,
+   * which is a clobber the moment anything else writes a preference — and the
+   * theme lock is exactly that: chosen here, persisted on its own, and undone
+   * by the next edit on this screen writing a snapshot taken before it.
+   */
   const update = useCallback((patch: Partial<Prefs>) => {
-    setPrefs((prev) => {
-      const next = { ...prev, ...patch };
-      void savePrefs(next);
-      return next;
+    setPrefs((prev) => ({ ...prev, ...patch }));
+    void patchPrefs(patch).catch(() => {
+      /*
+       * The field keeps what was typed and the next visit shows what is
+       * stored, which is the same shape every other write on this screen has.
+       */
     });
   }, []);
 
@@ -363,9 +373,10 @@ export default function SettingsScreen() {
    * sync as switched off.
    */
   const setAutoSync = async (on: boolean) => {
-    const next = { ...prefs, autoSync: on };
-    setPrefs(next);
-    await savePrefs(next);
+    setPrefs((prev) => ({ ...prev, autoSync: on }));
+    // Awaited, and merged onto disk: the task registration below reads the
+    // stored value back, and the comment above is about exactly that race.
+    await patchPrefs({ autoSync: on });
     if (on) {
       void registerAutoSyncTask();
       void runAutoSync('foreground');

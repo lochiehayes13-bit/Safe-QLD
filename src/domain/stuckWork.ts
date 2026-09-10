@@ -31,6 +31,7 @@ import { qldMoment } from '@/domain/qldTime';
 export interface QueueItem {
   createdAt: string;
   status: 'pending' | 'sending' | 'sent' | 'failed' | 'unknown';
+  /** 'attachment', 'defect', 'service-record' — what the row is carrying. */
   kind?: string;
 }
 
@@ -49,21 +50,33 @@ export interface StuckWork {
   unknown: number;
   /** Pending, and queued more than STALE_AFTER_MS ago. */
   waiting: number;
+  /** How many of the stuck things are photographs, for the wording. */
+  photos: number;
   /** The oldest thing that is stuck, whichever kind it is. */
   oldestAt?: string;
   /** True where there is nothing to say. */
   clear: boolean;
 }
 
-export function assessQueue(
-  items: readonly QueueItem[],
-  attachments: { pending: number; unknown: number; failed: number } | undefined,
-  now: string,
-): StuckWork {
+/**
+ * Everything comes from the queue rows, and only from them.
+ *
+ * This used to take the attachment summary as well and add it on top. Both
+ * read the same table — `attachmentQueueSummary` is a GROUP BY over
+ * `sync_queue WHERE kind = 'attachment'`, and the rows here are every non-sent
+ * row of that same table — so an attachment arrived through both doors and
+ * every failed photograph was reported as two. A count a technician can see is
+ * wrong is worse than no count.
+ *
+ * Reading the rows alone also dates them, which the summary could not: a
+ * photograph stuck since Tuesday can now be the oldest thing on the strip.
+ */
+export function assessQueue(items: readonly QueueItem[], now: string): StuckWork {
   const asAt = Date.parse(now);
   let failed = 0;
   let unknown = 0;
   let waiting = 0;
+  let photos = 0;
   let oldest: number | undefined;
 
   const note = (at: string) => {
@@ -72,9 +85,14 @@ export function assessQueue(
     if (oldest === undefined || t < oldest) oldest = t;
   };
 
+  const stuck = (item: QueueItem) => {
+    if (item.kind === 'attachment') photos += 1;
+    note(item.createdAt);
+  };
+
   for (const item of items) {
-    if (item.status === 'failed') { failed += 1; note(item.createdAt); continue; }
-    if (item.status === 'unknown') { unknown += 1; note(item.createdAt); continue; }
+    if (item.status === 'failed') { failed += 1; stuck(item); continue; }
+    if (item.status === 'unknown') { unknown += 1; stuck(item); continue; }
     if (item.status !== 'pending') continue;
     const made = Date.parse(item.createdAt);
     /*
@@ -84,23 +102,15 @@ export function assessQueue(
      */
     if (!Number.isFinite(made) || (Number.isFinite(asAt) && asAt - made > STALE_AFTER_MS)) {
       waiting += 1;
-      note(item.createdAt);
+      stuck(item);
     }
   }
-
-  /*
-   * Attachments are counted but not dated. They live in their own table with
-   * its own summary, which gives totals rather than rows — and a photograph
-   * that will not upload is the same problem to a technician as a note that
-   * will not send, so it belongs in the same sentence.
-   */
-  failed += attachments?.failed ?? 0;
-  unknown += attachments?.unknown ?? 0;
 
   return {
     failed,
     unknown,
     waiting,
+    photos,
     oldestAt: oldest === undefined ? undefined : new Date(oldest).toISOString(),
     clear: failed === 0 && unknown === 0 && waiting === 0,
   };
@@ -128,6 +138,9 @@ export function stuckWords(s: StuckWork): StuckWords | undefined {
   if (s.waiting) parts.push(`${s.waiting} still waiting to go`);
 
   const since = s.oldestAt ? qldMoment(s.oldestAt) : undefined;
+  const photos = s.photos
+    ? ` ${s.photos === 1 ? 'One is a photograph' : `${s.photos} of them are photographs`}.`
+    : '';
   const worst = s.failed > 0 ? 'fail' : 'warn';
 
   return {
@@ -136,7 +149,7 @@ export function stuckWords(s: StuckWork): StuckWords | undefined {
       ? 'Work has not reached the office'
       : 'Work is still waiting to reach the office',
     body: [
-      `${parts.join(', ')}.`,
+      `${parts.join(', ')}.${photos}`,
       since ? `The oldest has been sitting since ${since}.` : '',
       s.failed
         ? 'It is not in Simpro. Open Waiting to send and either fix it or say what happened.'

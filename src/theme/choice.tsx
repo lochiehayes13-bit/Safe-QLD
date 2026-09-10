@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useColorScheme } from 'react-native';
-import { loadPrefs, savePrefs } from '@/app-prefs';
+import { loadPrefs, patchPrefs } from '@/app-prefs';
 
 /**
  * Whether the app follows the phone, or is told.
@@ -63,8 +63,7 @@ export function ThemeChoiceProvider({ children }: { children: React.ReactNode })
 
   const setChoice = useCallback((next: ThemeChoice) => {
     setLocal(next);
-    void loadPrefs()
-      .then((p) => savePrefs({ ...p, theme: next }))
+    void patchPrefs({ theme: next })
       .catch(() => {
         /*
          * The screen has already changed colour. A failure to write means it
