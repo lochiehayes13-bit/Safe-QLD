@@ -77,7 +77,7 @@ interface CalculatorDef {
  * A technician asks "how big a battery" rather than "battery calculator", so
  * the terms carry the question as well as the name.
  */
-const CALCULATORS: CalculatorDef[] = [
+export const CALCULATORS: CalculatorDef[] = [
   {
     title: 'Battery sizing',
     body: 'Sizes a standby battery from measured quiescent and alarm currents to the Australian formula, and shows its working. Standby defaults to 72 hours — the familiar 24 hours applies only where the power-supply-failure signal is continuously monitored.',
@@ -93,7 +93,7 @@ const CALCULATORS: CalculatorDef[] = [
   {
     title: 'Cable volt drop',
     body: 'Volt drop for a run, using copper at 75 °C rather than the 20 °C bench figure, and counting DC and single-phase runs twice for the return path.',
-    route: '/tools/electrical',
+    route: '/tools/voltdrop',
     terms: ['volt drop', 'voltage drop', 'cable', 'csa', 'copper', 'resistance', 'run length'],
   },
   {
@@ -117,7 +117,7 @@ const CALCULATORS: CalculatorDef[] = [
   {
     title: 'Units and conversions',
     body: 'Conversions a fire technician actually reaches for, each showing the factor used.',
-    route: '/tools/units',
+    route: '/tools/converter',
     terms: ['convert', 'conversion', 'unit', 'kpa', 'psi', 'metre', 'feet', 'litre'],
   },
 ];

@@ -1,4 +1,6 @@
-import { ANSWER_THRESHOLD, COVERAGE, KIND_LABEL, ask, explainQuery } from '@/domain/ask';
+import { readdirSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { ANSWER_THRESHOLD, CALCULATORS, COVERAGE, KIND_LABEL, ask, explainQuery } from '@/domain/ask';
 import { DEFECT_LIBRARY } from '@/seed/defectLibrary';
 
 /**
@@ -170,5 +172,50 @@ describe('the standards catalogue', () => {
     const e = explainQuery('can i still use this extinguisher');
     expect(e.readings).toContain('whether equipment can stay in service');
     expect(e.alsoSearched.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * A search result that goes nowhere.
+ *
+ * The ask bar is how a technician finds a tool without knowing what the app
+ * calls it, and two of its answers pointed at screens that do not exist:
+ * '/tools/electrical' for the volt drop tool, which lives at '/tools/voltdrop',
+ * and '/tools/units' for the converter. Typing "volt drop" found the right
+ * answer, tapped it, and landed on the unmatched-route screen — the one thing
+ * worse than not finding it, because the technician now believes the tool was
+ * removed.
+ *
+ * Route strings are not checked by the typechecker, so this is what checks them.
+ */
+describe('every answer the ask bar gives has a screen behind it', () => {
+  const APP = join(__dirname, '..', '..', 'app');
+
+  function screens(dir: string, out: string[] = []): string[] {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) screens(full, out);
+      else if (/\.tsx$/.test(entry) && !entry.startsWith('_')) out.push(full);
+    }
+    return out;
+  }
+
+  /** The route a file answers to, with group folders and index stripped as expo-router does. */
+  const routes = screens(APP).map((f) => {
+    const r = `/${relative(APP, f).replace(/\.tsx$/, '')}`.replace(/\/index$/, '').replace(/\/\([^/]+\)/g, '');
+    return r || '/';
+  });
+
+  it('found the screens it means to check against', () => {
+    expect(routes.length).toBeGreaterThan(30);
+    expect(routes).toContain('/tools/voltdrop');
+  });
+
+  it('has no answer pointing at a route with no file', () => {
+    const matches = (route: string) => routes.some((r) => new RegExp(
+      `^${r.replace(/\[\.\.\.[^\]]+\]/g, '.+').replace(/\[[^\]]+\]/g, '[^/]+')}$`,
+    ).test(route));
+    const dead = CALCULATORS.filter((topic) => !matches(topic.route)).map((topic) => `${topic.title} → ${topic.route}`);
+    expect(dead).toEqual([]);
   });
 });
