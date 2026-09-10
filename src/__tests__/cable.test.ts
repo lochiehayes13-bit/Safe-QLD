@@ -1,4 +1,5 @@
 import {
+  SINGLE_PHASE_VC_FACTOR,
   CABLE_OVERLOAD_ALLOWANCE, MATERIALS, PROTECTIVE_RATINGS_A, STANDARD_SIZES_MM2,
   adiabaticK, combineDerating, coordinate, deratedCapacity, minimumFaultSize,
   resistancePerMetre, sizeCable, voltDrop, withstandTimeS,
@@ -230,10 +231,32 @@ describe('volt drop', () => {
 
   it('prefers the table figure over its own, and says it did', () => {
     const computed = voltDrop({ ...run, phase: 'single' })!;
-    const tabled = voltDrop({ ...run, phase: 'single', mvPerAmpMetre: 11.2 })!;
+    const tabled = voltDrop({ ...run, phase: 'three', mvPerAmpMetre: 11.2 })!;
     expect(tabled.mvPerAmpMetre).toBe(11.2);
     expect(tabled.fromTable).toBe(true);
     expect(computed.fromTable).toBe(false);
+  });
+
+  it('converts a three-phase table figure for a single-phase run, as the standard says to', () => {
+    /*
+     * Every voltage drop table in AS/NZS 3008.1.1 is three-phase, and its own
+     * note says to multiply by 1.155 for single phase — the current goes out
+     * and back down two conductors instead of being shared across three.
+     * Using the figure unchanged under-reports the drop by 15.5%, which is
+     * the direction that puts an undersized cable in a wall.
+     */
+    const three = voltDrop({ ...run, phase: 'three', mvPerAmpMetre: 11.2 })!;
+    const single = voltDrop({ ...run, phase: 'single', mvPerAmpMetre: 11.2 })!;
+    expect(single.mvPerAmpMetre).toBeCloseTo(11.2 * SINGLE_PHASE_VC_FACTOR, 3);
+    expect(single.dropVolts).toBeCloseTo(three.dropVolts * SINGLE_PHASE_VC_FACTOR, 3);
+    expect(voltDrop({ ...run, phase: 'dc', mvPerAmpMetre: 11.2 })!.mvPerAmpMetre)
+      .toBeCloseTo(11.2 * SINGLE_PHASE_VC_FACTOR, 3);
+  });
+
+  it('leaves a table that is already single-phase alone', () => {
+    // A manufacturer's catalogue often prints single-phase mV/A·m directly.
+    const single = voltDrop({ ...run, phase: 'single', mvPerAmpMetre: 11.2, mvIsThreePhase: false })!;
+    expect(single.mvPerAmpMetre).toBe(11.2);
   });
 
   it('adds the reactive part only where there is an angle to add it at', () => {

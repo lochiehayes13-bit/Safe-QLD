@@ -112,6 +112,49 @@ def arrangement(label: str) -> str:
     return " > ".join(p for p in parts if p and p.lower() not in CONDUCTOR_WORDS)
 
 
+def normalise_table(table: dict[str, Any]) -> None:
+    """Put a table into the one shape everything downstream expects.
+
+    Two of the transcriptions describe the same page differently, and both
+    readings are defensible — which is exactly why they have to be reconciled
+    here rather than in the app.
+
+    The first is the key column.  Most tables list it as column 1 and give one
+    value per remaining column; a few omit it from the column list and give a
+    value for every column.  Left alone, the second kind reads one column to
+    the left of where it should, so every figure in it is wrong by a whole
+    arrangement.
+
+    The second is the sub-heading.  A table printed in blocks — the MIMS
+    voltage groups, say — has a row that is a heading rather than data, with no
+    figures on it.  It is folded into the keys of the rows beneath it, so a row
+    still says which block it belongs to and the same conductor size can appear
+    once per block without the two colliding.
+    """
+    columns = table.get("columns") or []
+    rows = table.get("rows") or []
+    if not columns or not rows:
+        return
+
+    if all(isinstance(r.get("values"), list) and len(r["values"]) == len(columns) for r in rows):
+        key_label = str(table.get("meta", {}).get("key_column") or "Conductor size")
+        table["columns"] = [{"n": 1, "label": key_label, "unit": None}] + [
+            {**c, "n": i + 2} for i, c in enumerate(columns)
+        ]
+
+    group = ""
+    kept: list[dict[str, Any]] = []
+    for row in rows:
+        values = row.get("values")
+        if isinstance(values, list) and values and all(v is None for v in values):
+            group = str(row.get("key") or "").strip()
+            continue
+        if group and ":" not in str(row.get("key") or ""):
+            row = {**row, "key": f"{group}: {row.get('key')}"}
+        kept.append(row)
+    table["rows"] = kept
+
+
 def check_table(table: dict[str, Any], doc: str) -> list[str]:
     problems: list[str] = []
     ref = table.get("ref", "?")
@@ -232,6 +275,7 @@ def main() -> int:
         with open(os.path.join(args.src, name), encoding="utf-8") as fh:
             payload = json.load(fh)
         for table in payload.get("tables", []):
+            normalise_table(table)
             problems = check_table(table, doc)
             all_problems.extend(problems)
             tables.append(

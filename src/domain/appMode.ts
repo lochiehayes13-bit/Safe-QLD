@@ -600,6 +600,15 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['cable tables', 'as 3008', 'current rating', 'amps', 'mv/a/m', 'derating factor', 'import'],
   },
   {
+    route: '/tools/sizing', file: 'app/tools/sizing.tsx', tab: 'tools', section: 'Calculators',
+    label: 'Size it from a description', modes: BOTH, openedFrom: ['/tools', '/tools/cable'],
+    blurb:
+      'Say what you are installing in a sentence and get the cable and the breaker back, worked off '
+      + 'the standard’s own tables with the words it read printed beside them.',
+    terms: ['cable', 'size', 'sizing', 'chat', 'describe', 'ask', 'breaker', 'as 3008', 'install',
+      'what size cable', 'submain', 'mains'],
+  },
+  {
     route: '/tools/wiring', file: 'app/tools/wiring.tsx', tab: 'tools', section: 'Calculators',
     label: 'Wiring rules tables', modes: BOTH, openedFrom: ['/tools', '/tools/cable', '/tools/cable-tables'],
     blurb:

@@ -351,6 +351,12 @@ export const PHASE_LABEL: Record<CircuitPhase, string> = {
  */
 export const DEFAULT_DROP_LIMIT_PERCENT = 5;
 
+/**
+ * Three-phase Vc to single-phase Vc, from AS/NZS 3008.1.1's own note under the
+ * voltage drop tables. √3 out and back over √3 shared, which is 2/√3.
+ */
+export const SINGLE_PHASE_VC_FACTOR = 1.155;
+
 export interface VoltDropInput {
   amps: number;
   /** One-way run length in metres. The out-and-back is handled here. */
@@ -371,6 +377,15 @@ export interface VoltDropInput {
   reactanceOhmPerKm?: number;
   /** Overrides everything above with a mV/A·m figure read straight from a table. */
   mvPerAmpMetre?: number;
+  /**
+   * Whether that table figure is a three-phase one. AS/NZS 3008's voltage drop
+   * tables are, and its own note says to multiply by 1.155 for single phase —
+   * because the current goes out and back down two conductors rather than
+   * being shared across three. Left true by default, since a mV/A·m figure
+   * copied from anywhere in that standard is a three-phase figure; set false
+   * for a manufacturer's single-phase table.
+   */
+  mvIsThreePhase?: boolean;
   limitPercent?: number;
 }
 
@@ -419,7 +434,11 @@ export function voltDrop(input: VoltDropInput): VoltDropResult | null {
   let fromTable: boolean;
 
   if (input.mvPerAmpMetre !== undefined && Number.isFinite(input.mvPerAmpMetre) && input.mvPerAmpMetre > 0) {
-    mv = input.mvPerAmpMetre;
+    // The standard's own conversion, not an approximation of one: a
+    // three-phase Vc used unchanged on a single-phase circuit under-reports
+    // the drop by 15.5%, which is the wrong direction to be wrong in.
+    const singlePhase = (input.mvIsThreePhase ?? true) && phase !== 'three';
+    mv = singlePhase ? input.mvPerAmpMetre * SINGLE_PHASE_VC_FACTOR : input.mvPerAmpMetre;
     resistanceOnly = false;
     fromTable = true;
   } else {
@@ -738,6 +757,8 @@ export interface CandidateRow {
   /** Capacity as printed in the office's table, before any derating. */
   tableAmps: number;
   mvPerAmpMetre?: number;
+  /** See VoltDropInput.mvIsThreePhase. Defaults to true, as the standard's do. */
+  mvIsThreePhase?: boolean;
   reactanceOhmPerKm?: number;
   /** Where the row was read from. Carried through to the answer. */
   source: string;
@@ -817,6 +838,7 @@ export function sizeCable(input: SizingInput): SizingResult {
       powerFactor: input.powerFactor,
       reactanceOhmPerKm: row.reactanceOhmPerKm,
       mvPerAmpMetre: row.mvPerAmpMetre,
+      mvIsThreePhase: row.mvIsThreePhase,
       limitPercent: input.limitPercent,
     });
 

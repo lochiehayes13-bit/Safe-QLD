@@ -5,15 +5,20 @@ import { candidateRows, listCableTables, listDeratingEntries } from '@/db/cableR
 import type { CableTable, DeratingEntry } from '@/domain/cableTables';
 import { INSULATION_PRESETS } from '@/domain/cableTables';
 import {
-  DEFAULT_DROP_LIMIT_PERCENT, DEFAULT_OVERLOAD_RATIO, PHASE_LABEL, designCurrent, sizeCable,
+  DEFAULT_DROP_LIMIT_PERCENT, DEFAULT_OVERLOAD_RATIO, DERATING_KINDS, DERATING_LABEL, PHASE_LABEL,
+  designCurrent, sizeCable,
   type CandidateRow, type CircuitPhase, type DeratingFactor, type DeratingKind,
   type SizedCandidate, type SizingResult,
 } from '@/calc/cable';
+import {
+  candidateRowsFor, capacityColumns, deratingFor, describeColumn, wiringCoverage,
+  type CapacityColumn, type WiringDerating,
+} from '@/domain/wiringCables';
 import { describeLoadFailure } from '@/domain/loadFailure';
 import { useTheme } from '@/theme';
 import {
-  Banner, Button, Card, Chip, Divider, EmptyState, Field, H2, Label, ResultBlock,
-  Rowed, Screen, Segmented, StatusPill, Txt,
+  Banner, Button, Card, Chip, Divider, Field, H2, Label, ResultBlock,
+  Rowed, Screen, SearchBox, Segmented, StatusPill, Txt,
 } from '@/components/ui';
 
 /**
@@ -32,20 +37,40 @@ import {
  * missed on volt drop by a hair or was never close, and that difference is
  * what decides between shortening the run and buying bigger cable.
  *
- * **Every figure names its source.** The capacity numbers are the office's
- * own, loaded from their licensed copy or a manufacturer's catalogue; the app
- * carries none. So the answer prints where each one came from, and a phone
- * with no tables loaded says exactly that instead of producing a confident
- * size out of nothing.
+ * **Every figure names its source.** The capacity numbers come from the
+ * standard's own tables, which the app now carries from the company's licensed
+ * copy, or from a table the office loaded themselves — a manufacturer's
+ * catalogue, or a newer edition. Either way the answer prints the table, the
+ * column and the page it was read from, because "16 mm²" with nothing behind
+ * it is not something a designer can defend.
+ *
+ * The cable is chosen by column rather than by table, because a table is not
+ * one answer. Table 4 alone holds twenty-seven arrangements — spaced in air,
+ * touching, in conduit in a wall, buried direct, wrapped in insulation — and
+ * the widest and narrowest of them differ by more than a factor of two.
  */
 export default function CableSizingScreen() {
   const t = useTheme();
 
   const [tables, setTables] = useState<CableTable[]>([]);
   const [entries, setEntries] = useState<DeratingEntry[]>([]);
-  const [rows, setRows] = useState<CandidateRow[]>([]);
+  const [officeRows, setOfficeRows] = useState<CandidateRow[]>([]);
   const [tableId, setTableId] = useState<string>();
   const [failed, setFailed] = useState<string | null>(null);
+
+  // Which book the figures come from. The standard's own tables are on the
+  // phone; the office's are whatever they loaded themselves.
+  const [bookKind, setBookKind] = useState<'standard' | 'office'>('standard');
+  const [cores, setCores] = useState<string>('');
+  const [insulation, setInsulation] = useState<string>('');
+  const [columnId, setColumnId] = useState<string>('');
+  const [arrangementQuery, setArrangementQuery] = useState('');
+
+  // Derating from the standard: 583 conditions, so they are opened one kind at
+  // a time and searched, rather than drawn as six hundred chips.
+  const [openDerating, setOpenDerating] = useState<DeratingKind | null>(null);
+  const [deratingQuery, setDeratingQuery] = useState('');
+  const [chosenStandardDerating, setChosenStandardDerating] = useState<string[]>([]);
 
   const [amps, setAmps] = useState('20');
   const [watts, setWatts] = useState('');
@@ -79,16 +104,16 @@ export default function CableSizingScreen() {
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
-  /** The chosen table's sizes, reloaded whenever the table changes. */
+  /** The office table's sizes, reloaded whenever that table changes. */
   const loadRows = useCallback(async () => {
     if (!tableId) {
-      setRows([]);
+      setOfficeRows([]);
       return;
     }
     try {
-      setRows(await candidateRows(tableId));
+      setOfficeRows(await candidateRows(tableId));
     } catch (e) {
-      setRows([]);
+      setOfficeRows([]);
       setFailed(describeLoadFailure(e, 'the sizes in that table'));
     }
   }, [tableId]);
@@ -96,6 +121,37 @@ export default function CableSizingScreen() {
   useFocusEffect(useCallback(() => { void loadRows(); }, [loadRows]));
 
   const table = useMemo(() => tables.find((x) => x.id === tableId), [tables, tableId]);
+
+  // ---- The standard's own tables, narrowed the way a person narrows them ----
+
+  const allColumns = useMemo(() => capacityColumns(), []);
+  const coreOptions = useMemo(
+    () => [...new Set(allColumns.map((c) => c.cores).filter(Boolean))],
+    [allColumns],
+  );
+  const activeCores = cores || coreOptions[0] || '';
+  const insulationOptions = useMemo(
+    () => [...new Set(allColumns.filter((c) => c.cores === activeCores).map((c) => c.insulation).filter(Boolean))],
+    [allColumns, activeCores],
+  );
+  const activeInsulation = insulation && insulationOptions.includes(insulation) ? insulation : (insulationOptions[0] ?? '');
+  const arrangements = useMemo(() => {
+    const q = arrangementQuery.trim().toLowerCase();
+    return allColumns
+      .filter((c) => c.cores === activeCores && (!activeInsulation || c.insulation === activeInsulation))
+      .filter((c) => !q || describeColumn(c).toLowerCase().includes(q));
+  }, [allColumns, activeCores, activeInsulation, arrangementQuery]);
+  const column: CapacityColumn | undefined = useMemo(
+    () => arrangements.find((c) => c.id === columnId) ?? arrangements[0],
+    [arrangements, columnId],
+  );
+  const standard = useMemo(() => (column ? candidateRowsFor(column) : { rows: [], dropNote: '' }), [column]);
+  const coverage = useMemo(() => wiringCoverage(), []);
+
+  const usingStandard = bookKind === 'standard' && Boolean(column);
+  const rows = usingStandard ? standard.rows : officeRows;
+  const material = usingStandard ? column!.material : table?.material ?? 'copper';
+  const operatingC = usingStandard ? column!.operatingC : table?.operatingC ?? 75;
 
   /**
    * The design current.
@@ -116,15 +172,25 @@ export default function CableSizingScreen() {
     return Number.isFinite(typed) ? typed : 0;
   }, [amps, watts, volts, phase, powerFactor]);
 
+  const standardDerating = useMemo<WiringDerating[]>(
+    () => (['ambient', 'grouping', 'thermal-insulation', 'depth', 'soil', 'harmonics', 'other'] as DeratingKind[])
+      .flatMap((k) => deratingFor(k))
+      .filter((f) => chosenStandardDerating.includes(f.id)),
+    [chosenStandardDerating],
+  );
+
   const derating = useMemo<DeratingFactor[]>(
-    () => entries
-      .filter((e) => chosenDerating.includes(e.id))
-      .map((e) => ({ kind: e.kind as DeratingKind, condition: e.condition, factor: e.factor, source: e.source })),
-    [entries, chosenDerating],
+    () => [
+      ...entries
+        .filter((e) => chosenDerating.includes(e.id))
+        .map((e) => ({ kind: e.kind as DeratingKind, condition: e.condition, factor: e.factor, source: e.source })),
+      ...standardDerating.map((f) => ({ kind: f.kind, condition: f.condition, factor: f.factor, source: f.source })),
+    ],
+    [entries, chosenDerating, standardDerating],
   );
 
   const result = useMemo<SizingResult | null>(() => {
-    if (!table) return null;
+    if (!rows.length) return null;
     const pf = parseFloat(powerFactor);
     const ratio = parseFloat(overload);
     const start = parseFloat(startC);
@@ -134,8 +200,8 @@ export default function CableSizingScreen() {
       lengthM: parseFloat(length) || 0,
       supplyVolts: parseFloat(volts) || 0,
       phase,
-      material: table.material,
-      operatingC: table.operatingC,
+      material,
+      operatingC,
       powerFactor: Number.isFinite(pf) ? pf : 1,
       limitPercent: parseFloat(limit) || DEFAULT_DROP_LIMIT_PERCENT,
       overloadRatio: Number.isFinite(ratio) && ratio > 0 ? ratio : DEFAULT_OVERLOAD_RATIO,
@@ -146,7 +212,7 @@ export default function CableSizingScreen() {
         : undefined,
     });
   }, [
-    table, rows, designCurrentA, length, volts, phase, powerFactor, limit, overload,
+    rows, material, operatingC, designCurrentA, length, volts, phase, powerFactor, limit, overload,
     derating, faultOn, faultA, clearingTime, startC, finalC,
   ]);
 
@@ -158,16 +224,7 @@ export default function CableSizingScreen() {
       <Screen>
         {failed ? <Banner tone="fail" title="Could not read the tables" body={failed} /> : null}
 
-        {tables.length === 0 ? (
-          <>
-            <EmptyState
-              title="No cable tables loaded here yet"
-              body="This calculator runs off tables the office has loaded — a manufacturer's catalogue, or a newer edition than the one that ships. The standard's own tables are already on the phone and can be read straight from the book: open the wiring rules tables."
-            />
-            <Button title="Wiring rules tables" onPress={() => router.push('/tools/wiring')} />
-            <Button title="Load your own table" variant="secondary" onPress={() => router.push('/tools/cable-tables')} />
-          </>
-        ) : (
+        {(
           <>
             <ResultBlock
               label="Smallest size that passes every check"
@@ -184,7 +241,7 @@ export default function CableSizingScreen() {
             {chosen ? (
               <Banner
                 tone="pass"
-                title={`${chosen.row.areaMm2} mm² ${table?.insulation ?? ''} ${table?.material === 'aluminium' ? 'aluminium' : 'copper'}`}
+                title={`${chosen.row.areaMm2} mm² ${usingStandard ? column!.insulation.replace(/\s*\(See Note[^)]*\)/i, '') : table?.insulation ?? ''} ${material === 'aluminium' ? 'aluminium' : 'copper'}`}
                 body={`Read from ${chosen.row.source}. Longest run at this size and load is about ${chosen.drop?.maxLengthM ?? '—'} m.`}
               />
             ) : result?.refusal ? (
@@ -200,16 +257,95 @@ export default function CableSizingScreen() {
             ) : null}
 
             <H2>Which cable</H2>
-            <Rowed gap={2} wrap>
-              {tables.map((x) => (
-                <Chip key={x.id} label={x.label} selected={tableId === x.id} onPress={() => setTableId(x.id)} />
-              ))}
-            </Rowed>
-            {table ? (
-              <Txt size="sm" tone="faint">
-                {rows.length} size{rows.length === 1 ? '' : 's'} · {table.operatingC} °C conductor · {table.source}
-              </Txt>
+            {tables.length ? (
+              <Segmented
+                value={bookKind}
+                onChange={setBookKind}
+                options={[
+                  { value: 'standard', label: 'The standard' },
+                  { value: 'office', label: 'Your tables' },
+                ]}
+              />
             ) : null}
+
+            {bookKind === 'standard' ? (
+              <>
+                <Label>Cable</Label>
+                <Rowed gap={2} wrap>
+                  {coreOptions.map((c) => (
+                    <Chip
+                      key={c}
+                      label={c.replace(/\s*\(See Note[^)]*\)/i, '')}
+                      selected={activeCores === c}
+                      onPress={() => { setCores(c); setInsulation(''); setColumnId(''); }}
+                    />
+                  ))}
+                </Rowed>
+
+                {insulationOptions.length > 1 ? (
+                  <>
+                    <Label>Insulation</Label>
+                    <Rowed gap={2} wrap>
+                      {insulationOptions.map((i) => (
+                        <Chip
+                          key={i}
+                          label={i.replace(/\s*\(See Note[^)]*\)/i, '').slice(0, 40)}
+                          selected={activeInsulation === i}
+                          onPress={() => { setInsulation(i); setColumnId(''); }}
+                        />
+                      ))}
+                    </Rowed>
+                  </>
+                ) : null}
+
+                <Label>Installed how</Label>
+                {arrangements.length > 6 ? (
+                  <SearchBox value={arrangementQuery} onChange={setArrangementQuery} placeholder="conduit, buried, touching, insulation" />
+                ) : null}
+                {arrangements.slice(0, 24).map((c) => (
+                  <Card key={c.id} onPress={() => setColumnId(c.id)}>
+                    <Rowed align="flex-start">
+                      <View style={{ flex: 1 }}>
+                        <Txt size="sm" weight={column?.id === c.id ? '700' : '400'}>
+                          {c.installMethod}{c.conductorForm ? ` · ${c.conductorForm.toLowerCase()}` : ''}
+                        </Txt>
+                        <Txt size="xs" tone="faint">
+                          {c.material === 'aluminium' ? 'Aluminium' : 'Copper'} · {c.sizes} sizes · {c.ref}
+                        </Txt>
+                      </View>
+                      {column?.id === c.id ? <StatusPill label="Using" tone="pass" /> : null}
+                    </Rowed>
+                  </Card>
+                ))}
+                {arrangements.length > 24 ? (
+                  <Txt size="xs" tone="faint">{arrangements.length - 24} more — search to narrow them.</Txt>
+                ) : null}
+                {column ? (
+                  <Txt size="sm" tone="faint" style={{ lineHeight: 18 }}>
+                    {rows.length} size{rows.length === 1 ? '' : 's'} · {column.operatingC} °C conductor
+                    {column.referenceAmbient ? ` · rated at ${column.referenceAmbient}` : ''}
+                    {'\n'}{column.source}
+                    {'\n'}{standard.dropNote}
+                  </Txt>
+                ) : null}
+                {column?.problems.length ? (
+                  <Banner tone="warn" title="Read this table against the book" body={column.problems.join('\n\n')} />
+                ) : null}
+              </>
+            ) : (
+              <>
+                <Rowed gap={2} wrap>
+                  {tables.map((x) => (
+                    <Chip key={x.id} label={x.label} selected={tableId === x.id} onPress={() => setTableId(x.id)} />
+                  ))}
+                </Rowed>
+                {table ? (
+                  <Txt size="sm" tone="faint">
+                    {rows.length} size{rows.length === 1 ? '' : 's'} · {table.operatingC} °C conductor · {table.source}
+                  </Txt>
+                ) : null}
+              </>
+            )}
 
             <H2>The load</H2>
             <Rowed gap={2} align="flex-start">
@@ -237,17 +373,64 @@ export default function CableSizingScreen() {
             ) : null}
 
             <H2>Where it runs</H2>
-            {entries.length === 0 ? (
+            <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+              Nothing is derated until you say so. A cable sized without them is sized as though it were alone in free
+              air at the temperature its table assumes, which is almost never where it is.
+            </Txt>
+
+            {/*
+              Six hundred conditions, opened one kind at a time. Drawn as chips
+              they would be a wall nobody reads to the end of, and the
+              condition a technician wants is found by typing the words on it —
+              "6 circuits", "45", "buried" — rather than by scrolling.
+            */}
+            <Rowed gap={2} wrap>
+              {DERATING_KINDS.filter((k) => deratingFor(k).length).map((k) => (
+                <Chip
+                  key={k}
+                  label={DERATING_LABEL[k]}
+                  selected={openDerating === k}
+                  onPress={() => { setOpenDerating(openDerating === k ? null : k); setDeratingQuery(''); }}
+                />
+              ))}
+            </Rowed>
+
+            {openDerating ? (
               <Card>
-                <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-                  No derating factors loaded, so this is being sized as though the cable were in free air at the
-                  temperature its table assumes. Load the factors from your own copy and they are offered here.
-                </Txt>
-                <View style={{ height: t.space(3) }} />
-                <Button title="Load derating factors" variant="secondary" compact onPress={() => router.push('/tools/cable-tables')} />
+                <Label>{DERATING_LABEL[openDerating]}</Label>
+                <SearchBox value={deratingQuery} onChange={setDeratingQuery} placeholder="Type what is true on site" />
+                {deratingFor(openDerating)
+                  .filter((f) => {
+                    const q = deratingQuery.trim().toLowerCase();
+                    return !q || f.condition.toLowerCase().includes(q);
+                  })
+                  .slice(0, 20)
+                  .map((f) => (
+                    <Card key={f.id} onPress={() => setChosenStandardDerating(
+                      chosenStandardDerating.includes(f.id)
+                        ? chosenStandardDerating.filter((id) => id !== f.id)
+                        : [...chosenStandardDerating, f.id],
+                    )}
+                    >
+                      <Rowed align="flex-start">
+                        <View style={{ flex: 1 }}>
+                          <Txt size="sm" weight={chosenStandardDerating.includes(f.id) ? '700' : '400'} style={{ lineHeight: 18 }}>
+                            {f.condition}
+                          </Txt>
+                          <Txt size="xs" tone="faint">{f.tableRef}</Txt>
+                        </View>
+                        <Txt size="lg" weight="700" tone={chosenStandardDerating.includes(f.id) ? 'accent' : 'muted'}>
+                          {f.factor}
+                        </Txt>
+                      </Rowed>
+                    </Card>
+                  ))}
               </Card>
-            ) : (
+            ) : null}
+
+            {entries.length ? (
               <>
+                <Label>Your own factors</Label>
                 <Rowed gap={2} wrap>
                   {entries.map((e) => (
                     <Chip
@@ -262,12 +445,20 @@ export default function CableSizingScreen() {
                     />
                   ))}
                 </Rowed>
-                <Txt size="sm" tone="muted">
-                  Combined factor {result ? result.derating.factor.toFixed(3) : '1.000'}
-                  {result?.derating.applied.length ? ` — ${result.derating.applied.map((f) => f.condition).join(' × ')}` : ' — nothing derating it'}
-                </Txt>
               </>
-            )}
+            ) : null}
+
+            <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+              Combined factor {result ? result.derating.factor.toFixed(3) : '1.000'}
+              {result?.derating.applied.length
+                ? ` — ${result.derating.applied.map((f) => `${f.factor}`).join(' × ')}`
+                : ' — nothing derating it'}
+            </Txt>
+            {result?.derating.applied.length ? (
+              <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
+                {result.derating.applied.map((f) => f.condition).join('\n')}
+              </Txt>
+            ) : null}
 
             <H2>The limits</H2>
             <Rowed gap={2} align="flex-start">
@@ -324,19 +515,23 @@ export default function CableSizingScreen() {
             <Card>
               <Label>What this carries and what it does not</Label>
               <Txt size="sm" tone="muted" style={{ marginTop: t.space(2), lineHeight: 20 }}>
-                The capacity figures are yours, from the table named above. Everything worked from them is computed here:
-                resistance at the conductor&rsquo;s operating temperature rather than at bench temperature, the reactive part of
-                the volt drop wherever your table gives a reactance, and the short-circuit constant derived from the
+                The capacity figures come from the table named above — {coverage.columns} cable-and-installation columns
+                across {coverage.tables} tables of AS/NZS 3008.1.1, from the company&rsquo;s licensed copy, or from a table
+                the office loaded. Everything worked from them is computed here: resistance at the conductor&rsquo;s
+                operating temperature rather than at bench temperature, and the short-circuit constant derived from the
                 metal&rsquo;s own properties.
               </Txt>
               <Divider />
               <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-                Where your table gives a mV/A·m figure it is used instead of the computed one, because it accounts for
-                stranding and lay-up that a nominal cross-section does not. The volt drop tool next door is for 24 V fire
-                circuits and holds a flat 75 °C figure; the two differ by under 2 %, with that one on the conservative side.
+                The volt drop uses the standard&rsquo;s own mV/A·m figure at the conductor temperature this cable runs at,
+                which accounts for stranding and lay-up that a nominal cross-section does not. Those tables are
+                three-phase; on a single-phase run the figure is multiplied by 1.155, as the note under them says. The
+                volt drop tool next door is for 24 V fire circuits and holds a flat 75 °C figure; the two differ by under
+                2 %, with that one on the conservative side.
               </Txt>
               <View style={{ height: t.space(3) }} />
-              <Button title="Wiring rules tables" variant="secondary" onPress={() => router.push('/tools/wiring')} />
+              <Button title="Describe it instead" variant="secondary" onPress={() => router.push('/tools/sizing')} />
+              <Button title="Wiring rules tables" variant="ghost" onPress={() => router.push('/tools/wiring')} />
               <Button title="Cable tables" variant="ghost" onPress={() => router.push('/tools/cable-tables')} />
             </Card>
           </>

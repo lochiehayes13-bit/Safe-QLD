@@ -94,6 +94,12 @@ const CALCULATORS: ToolDef[] = [
     body: 'Your own current-carrying capacity figures, searched by size or by what they carry, each one saying where it was read.',
   },
   {
+    href: '/tools/sizing',
+    icon: 'message-text-outline',
+    title: 'Size it from a description',
+    body: 'Say what you are installing in a sentence — the cable and the breaker come back off the standard’s tables, with the words it read.',
+  },
+  {
     href: '/tools/wiring',
     icon: 'book-open-page-variant-outline',
     title: 'Wiring rules tables',

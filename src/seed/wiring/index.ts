@@ -177,6 +177,11 @@ export function searchWiringTables(query: string, limit = 40): WiringHit[] {
  */
 export function rowSizeMm2(row: WiringRow): number | undefined {
   const tail = row.key.includes(':') ? row.key.slice(row.key.lastIndexOf(':') + 1) : row.key;
+  // An aerial conductor is named by its construction — "7/1.00" is seven
+  // strands of one millimetre, not seven square millimetres — and reading the
+  // first number as an area would size a run against a conductor a third of
+  // the size it thinks it has.
+  if (/^\s*\d+\s*\/\s*\d/.test(tail)) return undefined;
   const m = /(\d+(?:\.\d+)?)/.exec(tail);
   if (!m) return undefined;
   const n = Number(m[1]);
