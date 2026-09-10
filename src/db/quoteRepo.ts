@@ -361,7 +361,8 @@ export async function updateQuote(id: string, patch: QuotePatch): Promise<void> 
   };
 
   if (patch.reference !== undefined) put('reference', patch.reference);
-  if (patch.jobReference !== undefined) put('jobReference', patch.jobReference ?? '');
+  // Present-with-undefined is how the screen says "take it off the job".
+  if ('jobReference' in patch) put('jobReference', patch.jobReference ?? '');
   if (patch.clientName !== undefined) put('clientName', patch.clientName);
   if (patch.siteName !== undefined) put('siteName', patch.siteName);
   if (patch.siteAddress !== undefined) put('siteAddress', patch.siteAddress ?? '');

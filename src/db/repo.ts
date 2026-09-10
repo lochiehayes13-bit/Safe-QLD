@@ -475,7 +475,11 @@ export async function updateReport(id: string, patch: Partial<ServiceReport>): P
   const sets: string[] = [];
   const vals: SqlValue[] = [];
   for (const f of fields) {
-    if (patch[f] !== undefined) { sets.push(`${f} = ?`); vals.push((patch[f] as string | undefined) ?? null); }
+    // Present-with-undefined clears, absent leaves alone — the same rule the
+    // flags below have always used, and the one Unlink depends on: a screen
+    // taking a report off its job sends `{ jobExternalId: undefined }`, and
+    // `!== undefined` read that as "not mentioned" and did nothing.
+    if (f in patch) { sets.push(`${f} = ?`); vals.push((patch[f] as string | undefined) ?? null); }
   }
   for (const f of REPORT_FLAGS) {
     // A key present with undefined clears the answer; a key absent leaves it alone.

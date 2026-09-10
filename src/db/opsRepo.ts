@@ -846,7 +846,10 @@ export async function updateImpairment(id: string, patch: Partial<ImpairmentReco
   for (const f of ['scope', 'reason', 'expectedRestoreAt', 'restoredAt', 'technician',
     'responsibleName', 'alternativeMeasures', 'notes',
     'jobExternalId', 'jobTitle', 'attachedAt', 'noticeIssuedAt'] as const) {
-    if (patch[f] !== undefined) { sets.push(`${f} = ?`); vals.push((patch[f] as string | undefined) ?? null); }
+    // A key present with undefined clears the column; a key absent leaves it
+    // alone. `!== undefined` cannot tell those apart, so Unlink — which is a
+    // screen saying `{ jobExternalId: undefined }` — did nothing at all.
+    if (f in patch) { sets.push(`${f} = ?`); vals.push((patch[f] as string | undefined) ?? null); }
   }
   for (const f of ['responsibleNotified', 'brigadeNotified', 'monitoringNotified',
     'fireWatchInPlace', 'signagePlaced'] as const) {

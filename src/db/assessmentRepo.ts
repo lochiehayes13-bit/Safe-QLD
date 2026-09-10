@@ -157,7 +157,10 @@ export async function updateAssessment(id: string, patch: Partial<Assessment>): 
     'jobExternalId', 'jobTitle', 'attachedAt',
   ];
   for (const key of allowed) {
-    if (patch[key] === undefined) continue;
+    // A key present with undefined clears the column; a key absent leaves it
+    // alone. Skipping on undefined made Unlink a no-op that the screen
+    // nonetheless reported as done.
+    if (!(key in patch)) continue;
     fields.push(`${key} = ?`);
     values.push((patch[key] as string | undefined) ?? null);
   }
