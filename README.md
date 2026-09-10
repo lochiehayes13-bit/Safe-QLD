@@ -57,6 +57,16 @@ volt drop, Ohm's law and power, unit conversion, resistor decoding, device
 addressing, and an end-of-line reference. Each shows its working and cites its
 source.
 
+**Cable sizing.** The four checks that decide a mains cable — capacity where it
+is actually installed, volt drop at the far end, Ib ≤ In ≤ Iz, and whether the
+conductor survives a fault for as long as the device takes to clear it. It
+returns the smallest size that passes and, underneath, every size it rejected
+with the check that stopped it. The current-carrying capacity tables are
+licensed per copy and none of them is in this repository: the office loads its
+own figures once from its own copy or a manufacturer's catalogue, every table
+records where its figures were read, and the answer prints that source. The
+arithmetic around them is computed rather than quoted — see below.
+
 **Parts.** 11,865 part numbers from every supplier Safe QLD buys from, taken from their own
 public product APIs and storefronts rather than transcribed from PDFs. Scan a
 tag or type a code and the app tries the asset register, then serials, then the
@@ -142,6 +152,17 @@ Some deliberate choices:
   interpolated across a curve that is not linear.
 - **Volt drop uses copper at 75 °C**, not the 20 °C bench figure, and counts DC
   and single-phase runs twice for the return path.
+- **Cable sizing carries no capacity table and computes everything else.**
+  Conductor resistance comes from the metal's resistivity at the conductor's own
+  operating temperature; the reactive part of a volt drop is added wherever the
+  loaded table gives a reactance; and the adiabatic short-circuit constant is
+  derived from resistivity and volumetric heat capacity rather than looked up.
+  Fed the insulation temperatures, that derivation returns 115 for copper in
+  PVC, 76 for aluminium, and 143 and 94 for XLPE — the published figures, which
+  is the evidence it is a derivation and not a transcription. The test asserts
+  all four. Two figures are defaults rather than facts, both editable on screen:
+  the volt drop percentage the job is held to, and the ratio of a protective
+  device's conventional tripping current to its rating.
 - **There is no universal end-of-line table**, because one would be wrong on
   most sites. EOL varies by panel, card and configured mode, and several
   Australian panels sense current or voltage bands rather than resistance.

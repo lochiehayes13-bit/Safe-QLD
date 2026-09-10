@@ -99,29 +99,46 @@ export default function StandardScreen() {
             : `${clauses.length} of ${doc.clauses.length} clauses`}
         </H2>
 
-        {!clauses.length ? (
+        {/*
+          * Two different empty states, and telling them apart matters. A
+          * document whose index nobody has read in yet is not a document that
+          * failed to match a search, and saying "nothing matches" about a
+          * document holding nothing would send somebody looking for a typo in
+          * their own search box.
+          */}
+        {!doc.clauses.length ? (
+          <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
+            No clause index has been read in for this one yet. This register only carries clause
+            numbers taken from the documents themselves, so rather than guess at them it says
+            nothing — the note above says what the app does with this standard instead.
+          </Txt>
+        ) : !clauses.length ? (
           <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
             Nothing in this document matches that. The index holds clause numbers and titles, not
             the standard's wording, so a phrase from inside a clause will not be found here.
           </Txt>
         ) : null}
 
-        <Card>
-          {clauses.map((c, i) => (
-            <View key={`${c.ref}-${i}`}>
-              {i > 0 ? <Divider /> : null}
-              <ClauseRow clause={c} docId={doc.id} />
-            </View>
-          ))}
-        </Card>
+        {clauses.length ? (
+          <Card>
+            {clauses.map((c, i) => (
+              <View key={`${c.ref}-${i}`}>
+                {i > 0 ? <Divider /> : null}
+                <ClauseRow clause={c} docId={doc.id} />
+              </View>
+            ))}
+          </Card>
+        ) : null}
 
         <Card>
           <Txt size="sm" weight="700">The wording is not held here</Txt>
           <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5), lineHeight: 17 }}>
-            {written} of {doc.clauses.length} clauses carry a description written for this app. The
-            standard's own text is licensed per copy and is not in this application — open your own
-            copy at the clause above. Clause numbers and titles were read out of the document
-            itself, so they can be cited with confidence.
+            {doc.clauses.length
+              ? `${written} of ${doc.clauses.length} clauses carry a description written for this app. `
+              : ''}
+            The standard's own text is licensed per copy and is not in this application — open your
+            own copy at the clause you need. Clause numbers and titles here were read out of the
+            document itself, so they can be cited with confidence.
           </Txt>
           <View style={{ height: t.space(3) }} />
           <Button
