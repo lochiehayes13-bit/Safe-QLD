@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { createDefect, listSites } from '@/db/repo';
+import { createDefect, listSitePicks, type SitePick } from '@/db/repo';
 import { newId } from '@/db';
 import { listJobsFor } from '@/db/mirrorRepo';
 import type { JobRecord } from '@/db/opsRepo';
@@ -22,11 +22,11 @@ import {
   DEFECT_LIBRARY, SEVERITY_LABEL, defectComponents, defectsForSystem, searchDefects,
   type DefectCode, type Severity,
 } from '@/seed/defectLibrary';
-import type { Site } from '@/domain/types';
 import { useDraft } from '@/hooks/useDraft';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
 import { showAlert } from '@/components/alert';
+import { SitePicker } from '@/components/SitePicker';
 
 /**
  * Defect capture.
@@ -44,7 +44,7 @@ export default function NewDefectScreen() {
   const [search, setSearch] = useState('');
   const [system, setSystem] = useState<SystemKind | null>(null);
   const [component, setComponent] = useState<string | null>(null);
-  const [sites, setSites] = useState<Site[]>([]);
+  const [sites, setSites] = useState<SitePick[]>([]);
   const [saving, setSaving] = useState(false);
   /**
    * The office's open jobs at the chosen site, and which of them the
@@ -108,7 +108,7 @@ export default function NewDefectScreen() {
   const siteId = d.siteId;
 
   React.useEffect(() => {
-    void listSites().then((list) => {
+    void listSitePicks().then((list) => {
       setSites(list);
       if (!siteId && list.length === 1) setSiteId(list[0]!.id);
     });
@@ -451,14 +451,7 @@ export default function NewDefectScreen() {
             ) : null}
 
             {sites.length > 1 ? (
-              <>
-                <H2>Site</H2>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2) }}>
-                  {sites.map((s) => (
-                    <Chip key={s.id} label={s.name} selected={siteId === s.id} onPress={() => setSiteId(s.id)} />
-                  ))}
-                </ScrollView>
-              </>
+              <SitePicker sites={sites} value={siteId} onChange={setSiteId} />
             ) : null}
 
             <Field label="Location" value={location} onChangeText={setLocation} placeholder="Level 3, east corridor, near stair 2" />

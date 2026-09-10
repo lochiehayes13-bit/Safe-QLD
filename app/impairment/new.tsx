@@ -1,15 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { View } from 'react-native';
 import { Stack, router } from 'expo-router';
-import { listSites } from '@/db/repo';
+import { listSitePicks, type SitePick } from '@/db/repo';
 import { createImpairment } from '@/db/opsRepo';
 import { SYSTEM_LABELS, activeSystems, type SystemKind } from '@/seed/assetTypes';
-import type { Site } from '@/domain/types';
 import { loadPrefs } from '@/app-prefs';
 import { useTheme } from '@/theme';
 import { describeActionFailure } from '@/domain/loadFailure';
-import { Banner, Button, Chip, Field, H2, Screen, Txt } from '@/components/ui';
+import { Banner, Button, Chip, Field, H2, Screen } from '@/components/ui';
 import { showAlert } from '@/components/alert';
+import { SitePicker } from '@/components/SitePicker';
 
 /**
  * Declaring an impairment.
@@ -21,7 +21,7 @@ import { showAlert } from '@/components/alert';
  */
 export default function NewImpairmentScreen() {
   const t = useTheme();
-  const [sites, setSites] = useState<Site[]>([]);
+  const [sites, setSites] = useState<SitePick[]>([]);
   const [siteId, setSiteId] = useState<string>();
   const [system, setSystem] = useState<SystemKind>('detection');
   const [scope, setScope] = useState('');
@@ -31,7 +31,7 @@ export default function NewImpairmentScreen() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    void listSites().then((s) => {
+    void listSitePicks().then((s) => {
       setSites(s);
       if (s.length === 1) setSiteId(s[0]!.id);
     });
@@ -76,14 +76,7 @@ export default function NewImpairmentScreen() {
         />
 
         {sites.length > 1 ? (
-          <>
-            <H2>Site</H2>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2) }}>
-              {sites.map((s) => (
-                <Chip key={s.id} label={s.name} selected={siteId === s.id} onPress={() => setSiteId(s.id)} />
-              ))}
-            </ScrollView>
-          </>
+          <SitePicker sites={sites} value={siteId} onChange={setSiteId} />
         ) : null}
 
         <H2>System affected</H2>
