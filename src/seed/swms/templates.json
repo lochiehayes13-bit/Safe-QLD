@@ -640,8 +640,19 @@
   ],
   "review": {
    "cleared": false,
-   "reason": "The second review never ran \u2014 the run that would have read this statement stopped before reaching it. Nobody has checked whether the corrections landed.",
-   "findings": []
+   "reason": "A reviewer read this statement and would not sign it.",
+   "findings": [
+    "[fatal] steps[3].hazards[2] names \"Sprinkler pipe, gas line, hydraulic riser or comms behind the sheet\" and no control in the step addresses any of them. The eight controls cover concealed electrical cable, post-tensioned tendons, reinforcement\u2026",
+    "[fatal] steps[1].hazards[3] names \"Friable pipe lagging in the riser you are drilling beside\" and nothing in the document controls it. Every asbestos control keys off drilling INTO asbestos, not beside it. steps[1].controls[0] stops the job only\u2026",
+    "[fatal] The document puts drilling into switchboard backing squarely in scope \u2014 whenRequired opens \"Any time you put a bit into a wall, ceiling, slab, riser or switchboard backing in a building built before 1990\" \u2014 and steps[1].hazards[1] names\u2026",
+    "[fatal] steps[5] is the access step for work whose entire purpose is putting a person's head and shoulders up against a ceiling or slab soffit, and it never names crush or entrapment between the platform and the structure overhead.",
+    "[serious] steps[5].controls[2] permits a platform ladder as an equivalent to a guardrailed platform for this work: \"Work off a platform with guardrails \u2014 scissor lift, mobile scaffold or a platform ladder with a handrail.\" That contradicts the two\u2026",
+    "[serious] steps[0].hazards[1] names \"Register exists but was last reviewed before the refurbishment that put the ceiling in\" and none of the six controls in the step tells the crew what to do about it. controls[0] deals with there being no register\u2026",
+    "[serious] steps[10] (\"Make the penetration good\") is rated initialRisk \"high\", residualRisk \"low\", and that is unsupportable on the document's own published key. whenRequired sets out the grid explicitly and says consequence is rated \"for the\u2026",
+    "[serious] Noise appears nowhere in any of the twelve steps. Rotary hammering and core drilling in a hard-surfaced plant room is well over the 85 dB(A) eight-hour exposure standard and percussion exceeds the 140 dB(C) peak, and the whole apparatus\u2026",
+    "[serious] Heat illness is never named or controlled, in a statement that mandates the exact combination that causes it. ppe[3] requires \"Type 5 Category III disposable coveralls, no external pockets, cuffs taped, where any ACM is present or\u2026",
+    "[serious] The document claims WHS Reg s 291(f) \u2014 \"Construction work that is carried out in or near a confined space\" \u2014 as one of its five HRCW triggers, and handles it entirely in the whenRequired prose."
+   ]
   }
  },
  {
@@ -2918,8 +2929,15 @@
   ],
   "review": {
    "cleared": false,
-   "reason": "The second review never ran \u2014 the run that would have read this statement stopped before reaching it. Nobody has checked whether the corrections landed.",
-   "findings": []
+   "reason": "A reviewer read this statement and would not sign it.",
+   "findings": [
+    "[fatal] The statement declares powered mobile plant as an applicable HRCW category and then never controls it. hrcw[4] asserts s 291(o) \u2014 \"is carried out in an area at a workplace in which there is any movement of powered mobile plant\" \u2014 applies\u2026",
+    "[fatal] steps[8].hazards[3] reads \"Oxygen displacement in the bay or in any low point it drains into\". Every control in the step stops at the bay wall: controls[1] \"Discharge outdoors or in the purpose-built bay\"; controls[3] \"Bunded bay with\u2026",
+    "[fatal] controls[3] requires \"Retrieval harness and line on the entrant, anchored outside the space, wherever the access shape allows one to be used and hauled\" \u2014 so where the shape does not allow one, there is none. controls[7] then accepts a\u2026",
+    "[serious] The control reads \"Vent the manifold and confirm the manifold gauge reads zero before the union is cracked. Stand to the side of the union, not over it.\" It never says where the vented agent goes.",
+    "[serious] steps[2].hazards[3] is \"Discharge noise causing hearing damage and disorientation\". The step rates initialRisk extreme and carries eleven controls \u2014 none is hearing protection, none mentions noise, and the step has no ppe-level control at\u2026",
+    "[serious] steps[1] names \"Damaged valve, bent actuator or stripped neck thread\" (hazards[2]) and \"Unknown or mixed agent\" (hazards[4]) and controls neither. The eliminate control at controls[0] condemns only for \"Pitted, bulged, fire-damaged\u2026"
+   ]
   }
  },
  {
@@ -5336,8 +5354,15 @@
   ],
   "review": {
    "cleared": false,
-   "reason": "The second review never ran \u2014 the run that would have read this statement stopped before reaching it. Nobody has checked whether the corrections landed.",
-   "findings": []
+   "reason": "A reviewer read this statement and would not sign it.",
+   "findings": [
+    "[fatal] The step names \"Unrestrained booster hose at pressure\" as a hazard and then never controls it. All ten controls in steps[9] address other things: controls[0] bleeds stored energy before spanner work, controls[1] puts \"barriers, or the\u2026",
+    "[fatal] The rescue procedure for the single most likely way someone dies on this job depends on a control the document knows may not exist and never requires.",
+    "[serious] One control instructs what another prohibits, and the dangerous version is the one sitting in the step a crew is reading at the time. steps[5].controls[8] is written as an absolute: \"Standing instruction, no exceptions: on any real alarm\u2026",
+    "[serious] The statement names hydrogen gassing at the start batteries twice \u2014 steps[6].hazards[3] \"Battery gassing hydrogen, acid on the terminals\" and steps[12].hazards[5] \"Diesel and oil, and hydrogen off gassing batteries\" \u2014 and controls the\u2026",
+    "[serious] steps[4].hazards[3] names \"Snakes, spiders, wasps and vermin in a pit that has been shut for twelve months\" and steps[4] controls it sensibly for prevention (controls[4] torch and tap before a hand goes in, controls[7] gloves and boots).",
+    "[serious] A hazard of this work that the step never names at all. steps[8] is \"Charge the line and flow the hydrant at full bore\", and cracking the landing valve at full bore is exactly what drops system pressure and auto-starts the electric pump\u2026"
+   ]
   }
  },
  {
@@ -6700,8 +6725,16 @@
   ],
   "review": {
    "cleared": false,
-   "reason": "The second review never ran \u2014 the run that would have read this statement stopped before reaching it. Nobody has checked whether the corrections landed.",
-   "findings": []
+   "reason": "A reviewer read this statement and would not sign it.",
+   "findings": [
+    "[fatal] The document names electric shock twice and responds to it never. steps[3].hazards[2] is \"Live 240 V and above at the pressure switch enclosure, tamper switch, jockey pump and fire pump controller\".",
+    "[fatal] steps[2].controls[1] instructs \"have the wet vac in the room and plugged in \u2014 not in the van \u2014 before any water runs\" and controls[2] instructs \"Task light on the valve set\". steps[5] then deliberately runs \"Hundreds of litres of black\u2026",
+    "[serious] steps[8].controls[1] is \"Fire pump and jockey pump controllers back to AUTO... and then stand there and watch the jockey cut in and cut out on its own pressure settings\", and it sits at index 1. steps[8].controls[2] \u2014 \"Walk the isolation\u2026",
+    "[serious] steps[8] is the step where the gong is deliberately sounded (\"Run the alarm test valve and prove the whole chain: water motor gong, pressure switch, FIP alarm\", controls[3]) and where both pumps are returned to AUTO and run (controls[1]).",
+    "[serious] steps[7] (\"Refill, vent and re-pressurise\") is rated initialRisk \"high\" and residualRisk \"low\". Two of its seven controls are engineering (fill through the bypass, vent at the high point); the controls standing between a worker and the\u2026",
+    "[serious] steps[1].hazards[3] is \"Isolating at a point that also kills the hydrant supply\", and steps[4].controls[0] then instructs the crew to actually shut it: \"shut every supply on it \u2014 town main, tank and pump, alarm valve bypass, hydrant\u2026",
+    "[serious] steps[6].controls[1] permits an EWP to be used under this statement (\"work off a rated industrial platform ladder or an EWP with the Safe QLD heights statement attached\"), hrcw[4] claims s 291(o) powered mobile plant for this statement\u2026"
+   ]
   }
  },
  {
@@ -7430,8 +7463,15 @@
   ],
   "review": {
    "cleared": false,
-   "reason": "The second review never ran \u2014 the run that would have read this statement stopped before reaching it. Nobody has checked whether the corrections landed.",
-   "findings": []
+   "reason": "A reviewer read this statement and would not sign it.",
+   "findings": [
+    "[fatal] steps[7].controls[0] names the only isolation points as \"the booster isolation valve, or the section stop valve in the valve room\" and controls[1] then says \"Drain or vent to a safe point ... and prove zero on the gauge before a cap or a\u2026",
+    "[fatal] The hazard is stated as \"Pump room noise while the pump runs\" and the only control that answers it is steps[7].controls[7], PPE: \"Hearing protection on before the pump starts, at the class recorded for that plant room.\" The statement\u2026",
+    "[fatal] whenRequired lists the lone-visit workload as \"Booster services, hydrant flow tests at the street, carpark detectors and heads, basement plant rooms, and after-hours call-outs\", and steps[7] duly covers the flow gauge (controls[5]) and \"A\u2026",
+    "[serious] The step names \"The lift going to fire mode with the technician on B3\" as a hazard and then never controls it. All eight controls in steps[11] are about calling for help, being struck on the frontage, the missed check-in, water, CO, the\u2026",
+    "[serious] The statement lets one person work \"on a footpath that is properly closed\" (whenRequired, hard line 1; repeated at steps[12].controls[0], \"devices behind the kerb line or on a closed footpath\"), and steps[5].hazards[3] names \"Bags, drums\u2026",
+    "[serious] The personal CO monitor is listed at level \"engineering\". It is not an engineering control \u2014 it changes nothing about the atmosphere, it only warns \u2014 and putting it at that level ranks a detection device above every administrative control\u2026"
+   ]
   }
  }
 ]
