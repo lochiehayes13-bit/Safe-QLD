@@ -50,6 +50,47 @@ const files = screens(APP).map((f) => {
   return { path: relative(REPO, f), text, code: code(text) };
 });
 
+/**
+ * Whether the promise this call returns has a .catch of its own.
+ *
+ * "A .catch within six lines" was the first attempt, and it is satisfied by
+ * any .catch that happens to be nearby — including one on a completely
+ * different call three lines below. A write left unhandled directly above a
+ * caught reload reads as handled, which is the precise arrangement this check
+ * exists to find.
+ *
+ * So the call's own chain is walked instead: from the open bracket to its
+ * match, then along whatever is attached to it — `.then(...).catch(...)` is
+ * caught, a bare call followed by an unrelated statement is not.
+ *
+ * `from` is the index just after the call's opening bracket.
+ */
+function caught(code: string, from: number): boolean {
+  let i = from;
+  let depth = 1;
+  while (i < code.length && depth > 0) {
+    const ch = code[i];
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth -= 1;
+    i += 1;
+  }
+  // Then any number of chained calls, until something that is not one.
+  for (;;) {
+    const rest = code.slice(i);
+    const link = /^\s*\.\s*([A-Za-z_$][\w$]*)\s*\(/.exec(rest);
+    if (!link) return false;
+    if (link[1] === 'catch') return true;
+    i += link[0].length;
+    depth = 1;
+    while (i < code.length && depth > 0) {
+      const ch = code[i];
+      if (ch === '(') depth += 1;
+      else if (ch === ')') depth -= 1;
+      i += 1;
+    }
+  }
+}
+
 describe('record screens', () => {
   it('found the screens it meant to check', () => {
     // A vacuous pass here would hide every assertion below it.
@@ -229,10 +270,9 @@ describe('record screens', () => {
       for (const call of f.code.matchAll(/\bvoid\s+([A-Za-z_$][\w$]*)\s*\(/g)) {
         const name = call[1] ?? '';
         if (!stored.has(name) || !isWrite.test(name)) continue;
-        // The statement it sits in, near enough: a caught write says .catch
-        // within a few lines of the call.
-        const near = f.code.slice(call.index).split('\n').slice(0, 6).join('\n');
-        if (!/\.catch\s*\(/.test(near)) loose.push(`${f.path}: void ${name}(`);
+        if (!caught(f.code, (call.index ?? 0) + call[0].length)) {
+          loose.push(`${f.path}: void ${name}(`);
+        }
       }
     }
     expect(loose).toEqual([]);
