@@ -600,6 +600,15 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['cable tables', 'as 3008', 'current rating', 'amps', 'mv/a/m', 'derating factor', 'import'],
   },
   {
+    route: '/tools/wiring', file: 'app/tools/wiring.tsx', tab: 'tools', section: 'Calculators',
+    label: 'Wiring rules tables', modes: BOTH, openedFrom: ['/tools', '/tools/cable', '/tools/cable-tables'],
+    blurb:
+      'Every numbered table in AS/NZS 3008.1.1 and the sizing tables of AS/NZS 3000, searched by what is '
+      + 'in the column headings rather than by table number.',
+    terms: ['as 3008', 'as 3000', 'wiring rules', 'table', 'tables', 'current carrying capacity', 'derating',
+      'volt drop', 'reactance', 'resistance', 'earth fault loop', 'maximum demand', 'appendix c', 'standard'],
+  },
+  {
     route: '/tools/fault-loop', file: 'app/tools/fault-loop.tsx', tab: 'tools', section: 'Calculators',
     label: 'Fault loop and earthing', modes: BOTH, openedFrom: ['/tools'],
     blurb: 'The check a long run fails silently: too little fault current to move the magnetic element, so the device takes seconds.',

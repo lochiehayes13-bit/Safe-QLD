@@ -198,6 +198,7 @@ export default function CableTablesScreen() {
           </Txt>
           <View style={{ height: t.space(3) }} />
           <Button title="Open the sizing calculator" variant="secondary" onPress={() => router.push('/tools/cable')} />
+          <Button title="The standard’s own tables" variant="ghost" onPress={() => router.push('/tools/wiring')} />
         </Card>
       </Screen>
     </>

@@ -94,6 +94,12 @@ const CALCULATORS: ToolDef[] = [
     body: 'Your own current-carrying capacity figures, searched by size or by what they carry, each one saying where it was read.',
   },
   {
+    href: '/tools/wiring',
+    icon: 'book-open-page-variant-outline',
+    title: 'Wiring rules tables',
+    body: 'Every table in AS/NZS 3008 and the sizing tables of AS/NZS 3000, searched by what is in the column headings.',
+  },
+  {
     href: '/tools/fault-loop',
     icon: 'flash-alert-outline',
     title: 'Fault loop and earthing',

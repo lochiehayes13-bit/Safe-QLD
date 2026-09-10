@@ -161,10 +161,11 @@ export default function CableSizingScreen() {
         {tables.length === 0 ? (
           <>
             <EmptyState
-              title="No cable tables loaded"
-              body="This app works the AS/NZS 3008 method and carries none of its figures — they are licensed per copy and this app is public. Load your own table once and every calculation here runs off it, with the source printed under the answer."
+              title="No cable tables loaded here yet"
+              body="This calculator runs off tables the office has loaded — a manufacturer's catalogue, or a newer edition than the one that ships. The standard's own tables are already on the phone and can be read straight from the book: open the wiring rules tables."
             />
-            <Button title="Load a table" onPress={() => router.push('/tools/cable-tables')} />
+            <Button title="Wiring rules tables" onPress={() => router.push('/tools/wiring')} />
+            <Button title="Load your own table" variant="secondary" onPress={() => router.push('/tools/cable-tables')} />
           </>
         ) : (
           <>
@@ -335,7 +336,8 @@ export default function CableSizingScreen() {
                 circuits and holds a flat 75 °C figure; the two differ by under 2 %, with that one on the conservative side.
               </Txt>
               <View style={{ height: t.space(3) }} />
-              <Button title="Cable tables" variant="secondary" onPress={() => router.push('/tools/cable-tables')} />
+              <Button title="Wiring rules tables" variant="secondary" onPress={() => router.push('/tools/wiring')} />
+              <Button title="Cable tables" variant="ghost" onPress={() => router.push('/tools/cable-tables')} />
             </Card>
           </>
         )}
