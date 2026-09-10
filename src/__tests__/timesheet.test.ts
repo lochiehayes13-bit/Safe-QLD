@@ -303,16 +303,28 @@ describe('copying the previous day', () => {
   let n = 0;
   const ids = () => `new-${++n}`;
 
-  it('carries the jobs, times and allowances but not the report number or notes', () => {
-    const entries = [day('2026-09-07', { serviceReportNumber: 'SR-1', comments: 'did a thing', extras: ['Call-out'] })];
+  it('carries every field of every row, since a week of the same work is what it is for', () => {
+    const entries = [day('2026-09-07', {
+      serviceReportNumber: 'SR-1', comments: 'Service', extras: ['Call-out'], hourKind: 'ot', hoursOverride: '7.5',
+    })];
     const [copied] = copyDay(entries, '2026-09-07', '2026-09-08', ids);
-    expect({ job: copied!.jobNumber, start: copied!.startTime, extras: copied!.extras, sr: copied!.serviceReportNumber, notes: copied!.comments })
-      .toEqual({ job: '43747', start: '06:30', extras: ['Call-out'], sr: '', notes: '' });
+    expect(copied).toEqual({ ...entries[0], id: 'new-1', date: '2026-09-08' });
   });
 
-  it('never copies a day off', () => {
+  it('gives each copy its own id and day, and its own list of allowances', () => {
+    const entries = [day('2026-09-07', { extras: ['Travel'] }), day('2026-09-07', { jobNumber: '43748' })];
+    const copied = copyDay(entries, '2026-09-07', '2026-09-08', ids);
+    expect(copied.map((c) => c.date)).toEqual(['2026-09-08', '2026-09-08']);
+    expect(new Set(copied.map((c) => c.id)).size).toBe(2);
+    // A shared array would have yesterday's chips toggling today's.
+    copied[0]!.extras!.push('Meal allowance');
+    expect(entries[0]!.extras).toEqual(['Travel']);
+  });
+
+  it('copies a day off too, because the button says the day', () => {
     const entries = [setLeave(blankEntry('x', '2026-09-07'), 'annual', 7.6)];
-    expect(copyDay(entries, '2026-09-07', '2026-09-08', ids)).toEqual([]);
+    const [copied] = copyDay(entries, '2026-09-07', '2026-09-08', ids);
+    expect(copied).toMatchObject({ annual: '7.6', date: '2026-09-08' });
   });
 
   it('finds the nearest earlier day that has entries', () => {

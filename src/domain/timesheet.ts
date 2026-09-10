@@ -359,28 +359,26 @@ export function dayWorkedHours(entries: TimesheetEntry[], date: string): number 
 }
 
 /**
- * Yesterday's shape, on today.
+ * Yesterday, on today.
  *
- * The same rule as copying a week: jobs, sites, times, the ordinary/overtime
- * choice and the extras carry over, because that is the shape of the day.
- * The service report number, the comments and any leave do not, because each
- * of those asserts something happened, and it has not happened yet today.
+ * Every row and every field: the job, the site, the times, the
+ * ordinary/overtime choice, the allowances, the report number, the notes,
+ * the override and any leave. It used to carry the shape and drop the
+ * words, on the reasoning that a report number and a note assert something
+ * that has not happened yet — which is true, and still left a technician
+ * retyping "Service" onto five identical days. A week of the same work is
+ * the case this button exists for, and what comes across is on the screen
+ * to read and change.
+ *
+ * Only the id and the date are new, because two rows cannot share an id and
+ * the row is being put on another day.
  */
 export function copyDay(
   entries: TimesheetEntry[], fromDate: string, toDate: string, newId: () => string,
 ): TimesheetEntry[] {
   return entries
-    .filter((e) => e.date === fromDate && !leaveOf(e))
-    .map((e) => ({
-      ...blankEntry(newId(), toDate),
-      jobNumber: e.jobNumber,
-      siteName: e.siteName,
-      siteId: e.siteId,
-      startTime: e.startTime,
-      finishTime: e.finishTime,
-      hourKind: e.hourKind,
-      extras: [...(e.extras ?? [])],
-    }));
+    .filter((e) => e.date === fromDate)
+    .map((e) => ({ ...e, id: newId(), date: toDate, extras: [...(e.extras ?? [])] }));
 }
 
 /** The nearest earlier date in the week that has at least one entry, or null. */

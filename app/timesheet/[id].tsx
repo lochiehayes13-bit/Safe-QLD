@@ -334,9 +334,27 @@ function JobEntry({
   return (
     <View style={{ marginTop: t.space(3), paddingTop: t.space(3), borderTopWidth: 1, borderTopColor: t.color.border, gap: t.space(2) }}>
       <Rowed gap={2} align="flex-start">
-        <View style={{ flex: 1 }}>
-          <Txt weight="700" numberOfLines={1}>{entry.siteName || entry.jobNumber || 'Untitled job'}</Txt>
-          {entry.jobNumber && entry.siteName ? <Txt size="xs" tone="faint">Job {entry.jobNumber}</Txt> : null}
+        {/*
+          * The row's own name, typed rather than read.
+          *
+          * It fills itself in from the job picker, and most rows are a site.
+          * Plenty are not: a day of SERVICE, a day in the workshop, a
+          * call-out with no job number yet. Those rows read "Untitled job" on
+          * a sheet somebody signs, and the only way to say otherwise was to
+          * pick a job that was not the work.
+          */}
+        <View style={{ flex: 1, gap: 2 }}>
+          <TextInput
+            value={entry.siteName}
+            onChangeText={(v) => onChange({ ...entry, siteName: v })}
+            placeholder="Untitled job"
+            placeholderTextColor={t.color.textFaint}
+            style={{
+              color: t.color.text, fontSize: t.font.size.md, fontWeight: '700',
+              paddingVertical: 2, paddingHorizontal: 0, minHeight: 28,
+            }}
+          />
+          {entry.jobNumber ? <Txt size="xs" tone="faint">Job {entry.jobNumber}</Txt> : null}
         </View>
         <Txt weight="800" tone={hours ? 'accent' : 'faint'} style={{ fontFamily: t.font.mono }}>{hours || '—'} h</Txt>
         <Pressable onPress={onRemove} hitSlop={10}><MaterialCommunityIcons name="close-circle-outline" size={22} color={t.color.textFaint} /></Pressable>
