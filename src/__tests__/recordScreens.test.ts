@@ -98,13 +98,31 @@ describe('record screens', () => {
      * stop, and nothing happens at all. Reading the result is the whole fix, so
      * that is what is checked — a call whose answer goes nowhere is the bug.
      */
+    /*
+     * Asked the other way round. It used to require the literal shape
+     * `= await shareFile(`, which is what every caller here happens to write —
+     * but it means a perfectly correct `if (!(await shareFile(file, 'x')))`
+     * would be reported as dropping the answer, and a `=` pushed past thirty
+     * characters by a longer name would too. A guard that fails on correct
+     * code gets loosened by whoever hits it, and then it is gone.
+     *
+     * What is actually wrong is the call standing alone as a statement, its
+     * answer going nowhere. So that is what is looked for: an await whose
+     * result nothing receives, recognised by what sits in front of it being
+     * the end of the previous statement rather than something expecting a
+     * value.
+     */
     const ignored: string[] = [];
     for (const f of files) {
       for (const call of f.code.matchAll(/\bshareFile\s*\(/g)) {
-        const before = f.code.slice(Math.max(0, call.index - 30), call.index);
+        const before = f.code.slice(0, call.index);
         // An import names it too; only a call has an `await` in front of it.
         if (!/await\s*$/.test(before)) continue;
-        if (!/=\s*await\s*$/.test(before)) ignored.push(`${f.path}@${call.index}`);
+        const upto = before.replace(/\s*await\s*$/, '').trimEnd();
+        // Nothing at all, or the end of the statement before it: the answer
+        // is going nowhere. Anything else — `=`, `(`, `!`, `return`, `&&` —
+        // is something that receives it.
+        if (upto === '' || /[;{}>]$/.test(upto)) ignored.push(`${f.path}@${call.index}`);
       }
     }
     expect(ignored).toEqual([]);

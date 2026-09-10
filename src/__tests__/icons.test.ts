@@ -49,23 +49,36 @@ describe('every icon name draws something', () => {
 
   it('has no name the font does not know', () => {
     /*
-     * Anything written as `icon="..."`, `icon: '...'` or `name="..."` on an
-     * icon component. Names built by concatenation are out of reach here and
-     * are the reason the glyph map is worth having at all — but every one of
-     * those in this app resolves to a literal in the same table, which this
-     * does see.
+     * Two shapes. A plain attribute — `icon="chevron-up"`, `icon: 'ruler'` —
+     * and anything inside a JSX expression container on an icon or name prop.
+     *
+     * The second is what the first version of this check missed. It only read
+     * a literal sitting immediately after the brace, so every
+     * `name={x === 'email' ? 'email-outline' : 'phone-outline'}` in the app —
+     * ten of them, about fourteen distinct names — went unchecked, including
+     * one this same commit wrote. A guard that reports safety over a third of
+     * the icons in the app is worse than none.
+     *
+     * Reading everything inside the braces means excluding what is plainly not
+     * an icon: a string being compared against (`x === 'email'`) and a string
+     * indexing a type (`ComponentProps<...>['name']`). Both are recognisable
+     * from the character in front of them, and both were real in this tree.
      */
     const bad: string[] = [];
     for (const f of files) {
       const text = readFileSync(f, 'utf8')
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .replace(/^\s*\/\/.*$/gm, '');
-      const found = [
-        ...text.matchAll(/\bicon(?:Name)?\s*[=:]\s*['"]([a-z0-9-]+)['"]/g),
-        ...text.matchAll(/\bicon(?:Name)?\s*=\s*\{\s*['"]([a-z0-9-]+)['"]/g),
-        ...text.matchAll(/<MaterialCommunityIcons[^>]*?\bname\s*=\s*['"]([a-z0-9-]+)['"]/g),
-        ...text.matchAll(/<MaterialCommunityIcons[^>]*?\bname\s*=\s*\{\s*['"]([a-z0-9-]+)['"]/g),
-      ].map((m) => m[1] ?? '');
+
+      const found: string[] = [];
+      for (const m of text.matchAll(/\bicon(?:Name)?\s*[=:]\s*['"]([a-z0-9-]+)['"]/g)) {
+        found.push(m[1] ?? '');
+      }
+      for (const braced of text.matchAll(/\b(?:icon|iconName|name)\s*=\s*\{([^}]*)\}/g)) {
+        for (const s of (braced[1] ?? '').matchAll(/(===|!==|==|!=|\[)?\s*['"]([a-z0-9-]+)['"]/g)) {
+          if (!s[1]) found.push(s[2] ?? '');
+        }
+      }
 
       for (const name of found) {
         if (!name || glyphs.has(name)) continue;
@@ -75,13 +88,23 @@ describe('every icon name draws something', () => {
     expect(bad).toEqual([]);
   });
 
-  it('actually looked at a decent number of names', () => {
-    // A regex that stopped matching would pass the check above silently.
-    let seen = 0;
+  it('actually looked at a decent number of names, in both shapes', () => {
+    // A regex that stopped matching would pass the check above silently, and
+    // the braced half is pinned separately because that is the half that was
+    // missing and would go missing again unnoticed.
+    let plain = 0;
+    let braced = 0;
     for (const f of files) {
-      seen += [...readFileSync(f, 'utf8').matchAll(/\bicon(?:Name)?\s*[=:]\s*['"]([a-z0-9-]+)['"]/g)].length;
+      const text = readFileSync(f, 'utf8');
+      plain += [...text.matchAll(/\bicon(?:Name)?\s*[=:]\s*['"]([a-z0-9-]+)['"]/g)].length;
+      for (const b of text.matchAll(/\b(?:icon|iconName|name)\s*=\s*\{([^}]*)\}/g)) {
+        for (const s of (b[1] ?? '').matchAll(/(===|!==|==|!=|\[)?\s*['"]([a-z0-9-]+)['"]/g)) {
+          if (!s[1]) braced += 1;
+        }
+      }
     }
-    expect(seen).toBeGreaterThan(150);
+    expect(plain).toBeGreaterThan(150);
+    expect(braced).toBeGreaterThan(20);
   });
 });
 

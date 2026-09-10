@@ -89,6 +89,15 @@ describe('imports resolve to files that are in the repository', () => {
       const specs = [
         ...text.matchAll(/(?<!["`])(?:from|import)\s*\(?\s*'((?:\.|@\/)[^']*)'/g),
         ...text.matchAll(/require\s*\(\s*'((?:\.|@\/)[^']*)'/g),
+        /*
+         * Double quotes too. Nothing in this tree writes an import that way —
+         * the linter would reject it — so this half has never had anything to
+         * find. It is here because the check above says it covers imports, and
+         * a check whose reach is narrower than its own description is the kind
+         * that gets trusted for something it never did.
+         */
+        ...text.matchAll(/(?<!['`])(?:from|import)\s*\(?\s*"((?:\.|@\/)[^"]*)"/g),
+        ...text.matchAll(/require\s*\(\s*"((?:\.|@\/)[^"]*)"/g),
       ].map((m) => m[1] ?? '');
 
       for (const spec of specs) {
