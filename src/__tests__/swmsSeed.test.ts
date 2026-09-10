@@ -58,21 +58,21 @@ describe('the shipped statements', () => {
      * a method statement that silently stops being offered is the one nobody
      * notices until a principal contractor asks for it.
      *
-     * Six here, and four more to come: the hydrant flow, height, hot work,
-     * confined space, electrical and live-testing statements have each been
-     * through drafting, an adversarial review by a reader whose job was to
-     * refuse to sign, and a correction pass that checked every legal citation
-     * against legislation.qld.gov.au. Extinguisher cylinders, traffic and
-     * lone work, asbestos and silica, and live sprinkler work are still in
-     * that pipeline and are not shipped half-checked.
+     * All ten, each through drafting, an adversarial review by a reader whose
+     * job was to refuse to sign it, and a correction pass that checked every
+     * legal citation against legislation.qld.gov.au.
      */
     expect(templates.map((t) => t.id).sort()).toEqual([
+      'asbestos-silica',
       'confined-space',
       'electrical',
+      'extinguisher-cylinders',
       'heights',
       'hot-work',
       'hydrant-flow',
       'live-testing',
+      'sprinkler-wet',
+      'traffic-lone',
     ]);
   });
 
