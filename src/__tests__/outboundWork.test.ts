@@ -793,6 +793,28 @@ describe('what is deliberately never pushed', () => {
     expect(WITHHELD_FROM_SIMPRO.every((w) => w.why.trim().length > 40)).toBe(true);
   });
 
+  it('does not tell a technician a document is withheld when the app files it', () => {
+    /*
+     * It used to. The list said occupier statements, critical defect notices
+     * and the Form 72 were never pushed, and the Form 72 had been attaching
+     * itself to the job since v27 — with the report, the quote, the baseline,
+     * the assessment, the statement and the impairment notice following it.
+     * A screen that tells a technician the office cannot have the document
+     * they just filed is worse than a screen that says nothing.
+     *
+     * The distinction that survives is the true one: never as a job note,
+     * because a note reads as the notice having been given.
+     */
+    const forms = WITHHELD_FROM_SIMPRO.find((w) => w.what.toLowerCase().includes('form 72'));
+    expect(forms?.what.toLowerCase()).toContain('as job notes');
+    expect(forms?.why.toLowerCase()).toContain('attachment');
+
+    const pushed = PUSHED_TO_SIMPRO.map((p) => `${p.what} ${p.how}`.toLowerCase()).join(' | ');
+    for (const doc of ['form 72', 'occupier statement', 'impairment notice', 'baseline', 'service report']) {
+      expect(pushed).toContain(doc);
+    }
+  });
+
   it('is honest about which note limit is a fact and which is a judgement', () => {
     /*
      * The subject figure is certain — this app's own client cuts there. The

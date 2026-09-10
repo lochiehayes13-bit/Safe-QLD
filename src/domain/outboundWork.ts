@@ -506,9 +506,11 @@ export const WITHHELD_FROM_SIMPRO: { what: string; why: string }[] = [
       + 'the push owes the office the same courtesy in the other direction.',
   },
   {
-    what: 'Occupier statements, critical defect notices to the occupier, and Form 72',
-    why: 'These are issued to the occupier and copied to the Commissioner. Filing a copy as a job note would '
-      + 'read as the notice having been given, when giving it is a separate act with its own record.',
+    what: 'Occupier statements, critical defect notices and Form 72, as job notes',
+    why: 'A note in the job\'s activity feed reads as the notice having been given, and giving it is a '
+      + 'separate act with its own record — handed to the occupier, or copied to the Commissioner. The '
+      + 'document itself does go up, as an attachment on the job, from the screen that made it: that is the '
+      + 'office holding a copy, which is not the same claim.',
   },
   {
     what: 'Photographs of a defect with no Simpro job, or whose file is no longer on the phone',
@@ -555,6 +557,14 @@ export const PUSHED_TO_SIMPRO: { what: string; how: string }[] = [
     how: 'One status change per pick, sent as a PATCH of the status id the office already uses. The job is '
       + 'read first and nothing is sent where it already wears that status, so a retry cannot move it twice. '
       + 'Stage, dates and scheduling are never touched.',
+  },
+  {
+    what: 'The documents this app makes, as job attachments',
+    how: 'One job attachment per document, queued from the screen that made it and only onto a job somebody '
+      + 'picked: the service report, the Form 72 flow certificate, the occupier statement, the baseline '
+      + 'workbook, the effectiveness report, the quotation, the critical defect notice and the impairment '
+      + 'notice. Filing a copy is not giving the notice, and the record keeps the two apart — a document '
+      + 'carries when it went to the job separately from when it was issued to the person it is addressed to.',
   },
   {
     what: 'Materials used, onto a cost centre',

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Pressable, View } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   appendixFFields,
@@ -42,14 +42,65 @@ function initialLoads(): LoadItem[] {
   ];
 }
 
+/**
+ * The loads a baseline record can hand over.
+ *
+ * A baseline holds two measured totals — what the panel draws quiescent and
+ * what it draws in full alarm — and not the itemised list this screen is built
+ * around. That is not a shortcoming of the record: those two numbers are what
+ * a technician measures at the panel, and they are more truthful than a list
+ * of nameplate figures added up.
+ *
+ * So they arrive as a single measured line, labelled as measured, and the
+ * screen's own list is replaced rather than added to. Mixing a measured total
+ * with the default itemised list would double the panel.
+ */
+function measuredLoads(quiescentA: number, alarmA: number): LoadItem[] {
+  return [{
+    id: nextId(),
+    label: 'Measured at the panel (from the baseline record)',
+    quantity: 1,
+    standbyMa: quiescentA * 1000,
+    alarmMa: alarmA * 1000,
+    note: 'Taken from the baseline data form rather than added up from nameplates.',
+  }];
+}
+
+/** A number off a form field, where a blank and a nonsense entry both mean "not given". */
+function handedOver(v: string | undefined): number | undefined {
+  if (!v) return undefined;
+  const n = parseFloat(v);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 export default function BatteryCalculatorScreen() {
   const t = useTheme();
-  const [mode, setMode] = useState<CalcMode>('design');
-  const [loads, setLoads] = useState<LoadItem[]>(initialLoads);
+  /*
+   * Opened from the baseline record, with its measured currents.
+   *
+   * The baseline form asks for the quiescent current, the full alarm current
+   * and the battery that is installed, and then had nowhere to send them: the
+   * technician read the three numbers off the form and typed them into this
+   * screen by hand, which is where a decimal point goes missing. Arriving with
+   * an installed battery also means the answer wanted is the service one — is
+   * what is in there big enough — not the design one.
+   */
+  const params = useLocalSearchParams<{ quiescentA?: string; alarmA?: string; installedAh?: string; from?: string }>();
+  const handed = {
+    quiescent: handedOver(params.quiescentA),
+    alarm: handedOver(params.alarmA),
+    installed: handedOver(params.installedAh),
+  };
+  const fromBaseline = handed.quiescent !== undefined && handed.alarm !== undefined;
+
+  const [mode, setMode] = useState<CalcMode>(fromBaseline && handed.installed !== undefined ? 'service' : 'design');
+  const [loads, setLoads] = useState<LoadItem[]>(
+    fromBaseline ? () => measuredLoads(handed.quiescent!, handed.alarm!) : initialLoads,
+  );
   const [monitored, setMonitored] = useState(true);
   const [alarmMinutes, setAlarmMinutes] = useState('30');
   const [ageing, setAgeing] = useState(L_DESIGN);
-  const [installedAh, setInstalledAh] = useState('');
+  const [installedAh, setInstalledAh] = useState(handed.installed !== undefined ? String(handed.installed) : '');
   const [panelMaxAh, setPanelMaxAh] = useState('');
   const [psuOutput, setPsuOutput] = useState('');
   const [psuCharge, setPsuCharge] = useState('');
@@ -106,6 +157,17 @@ export default function BatteryCalculatorScreen() {
     <>
       <Stack.Screen options={{ title: 'FIP battery' }} />
       <Screen>
+        {fromBaseline ? (
+          <Banner
+            tone="info"
+            title="Filled from the baseline record"
+            body={
+              `The quiescent and full alarm currents came off the baseline form for ${params.from || 'this site'}, `
+              + 'as one measured line rather than a list of nameplate figures. Edit them here if you measured '
+              + 'again — nothing you change is written back to the record.'
+            }
+          />
+        ) : null}
         <Segmented
           value={mode}
           onChange={setMode}

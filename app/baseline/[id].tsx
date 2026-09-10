@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, View } from 'react-native';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getBaseline, saveBaseline } from '@/db/baselineRepo';
 import { getSite, listPanels, listZones, queryPoints } from '@/db/repo';
@@ -19,6 +19,7 @@ import {
   Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
+import { loadPrefs } from '@/app-prefs';
 import { safeFileName } from '@/export/fileNames';
 import { JobFileCard } from '@/components/JobFileCard';
 import { useRecordPatch } from '@/hooks/useRecordPatch';
@@ -82,11 +83,20 @@ export default function BaselineScreen() {
         listPanels(site.id),
       ]);
       const panel = panels[0];
+      /*
+       * The tester's name is the one field the phone always knows and the form
+       * never filled. `autofillBaseline` has taken it since it was written and
+       * nothing ever passed it, so "Tester name" was the field a technician
+       * typed on every record while the button said it had filled everything
+       * it could.
+       */
+      const prefs = await loadPrefs();
       const { baseline, filled } = autofillBaseline(b, {
         site,
         zones,
         points,
         systemType: panel ? [panel.brand, panel.model].filter(Boolean).join(' ') : undefined,
+        technicianName: prefs.technicianName || undefined,
       });
       setB(baseline);
       await saveBaseline(baseline);
@@ -333,6 +343,34 @@ export default function BaselineScreen() {
                 <Field label="Standby" value={b.batteryStandbyHours} onChangeText={(v) => update({ batteryStandbyHours: v })} keyboardType="numeric" suffix="hr" />
               </View>
             </Rowed>
+            {/*
+              * The three numbers above are exactly what the battery calculator
+              * asks for, and the hint on the alarm current has claimed since
+              * this form was written that the calculator can supply it. There
+              * was no way to get there: a technician read the figures off this
+              * screen and typed them into that one, which is where a decimal
+              * point goes missing.
+              */}
+            <Button
+              title="Check the battery against these figures"
+              variant="secondary"
+              disabled={!b.fullAlarmCurrentA.trim() || !b.quiescentCurrentA.trim()}
+              onPress={() => router.push({
+                pathname: '/tools/battery',
+                params: {
+                  quiescentA: b.quiescentCurrentA.trim(),
+                  alarmA: b.fullAlarmCurrentA.trim(),
+                  installedAh: b.batteryAh.trim(),
+                  from: b.premisesName || site?.name || '',
+                },
+              })}
+            />
+            {!b.fullAlarmCurrentA.trim() || !b.quiescentCurrentA.trim() ? (
+              <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+                Measure the quiescent and full alarm currents first — the calculator has nothing to size against
+                without them.
+              </Txt>
+            ) : null}
             <Field
               label="Battery manufacture date"
               value={b.batteryManufactureDate}
