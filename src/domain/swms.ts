@@ -119,6 +119,35 @@ export interface SwmsTemplate {
   references: string[];
   siteSpecificPrompts: string[];
   suggestFor?: SwmsSuggestion;
+  /**
+   * Whether a reviewer has cleared this statement to be signed, and what they
+   * said if not.
+   *
+   * These were drafted, reviewed by somebody whose job was to refuse to sign
+   * them, and corrected. The check on whether those corrections actually
+   * landed is a second read — and that read came back after the statements had
+   * already shipped, saying no. It found named hazards with no control against
+   * them: a technician sent up a pole into a ceiling holding live busway, a
+   * hot-work document with no mention of gaseous suppression, an emergency
+   * section with no response for electric shock in a statement about working
+   * near lighting circuits.
+   *
+   * A statement nobody has cleared is still worth reading — they are
+   * substantially right and better than the nothing that came before. It is
+   * not worth signing, because a signature says the document describes how the
+   * work will actually be done, and a crew that signs one believes the hazards
+   * in it are the hazards there are.
+   */
+  review?: TemplateReview;
+}
+
+export interface TemplateReview {
+  /** True only where a reviewer read the corrected statement and would sign it. */
+  cleared: boolean;
+  /** Why it is not cleared, in a sentence. */
+  reason: string;
+  /** What the reviewer would not sign it over. Empty where nobody has read it. */
+  findings: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +243,14 @@ export interface MergedSwms {
   residualRisk?: RiskLevel;
   /** True when any part of the day is high-risk construction work. */
   highRisk: boolean;
+  /**
+   * The chosen statements no reviewer has cleared for signature.
+   *
+   * Carried on the merge rather than checked at the screen so that every path
+   * to a signature passes it — the record's own validation, the button, and
+   * the PDF all read the same list.
+   */
+  notCleared: { id: string; title: string; reason: string; findings: string[] }[];
 }
 
 /**
@@ -241,6 +278,19 @@ export function mergeSwms(templates: readonly SwmsTemplate[]): MergedSwms {
     prompts: dedupe(templates.flatMap((t) => t.siteSpecificPrompts ?? [])),
     residualRisk: worstRisk(steps.map((s) => s.residualRisk)),
     highRisk: templates.some((t) => (t.hrcw ?? []).length > 0),
+    /*
+     * A statement with no review record at all counts as not cleared. Silence
+     * is not a clearance, and treating a missing field as approval is how a
+     * statement added tomorrow would be signable before anybody read it.
+     */
+    notCleared: templates
+      .filter((t) => !t.review?.cleared)
+      .map((t) => ({
+        id: t.id,
+        title: t.title,
+        reason: t.review?.reason ?? 'No reviewer has read this statement.',
+        findings: t.review?.findings ?? [],
+      })),
   };
   return merged;
 }
@@ -301,6 +351,29 @@ export function validateSwms(record: SwmsRecord, merged: MergedSwms): SwmsIssue[
   if (!record.templateIds.length) {
     issues.push({ blocking: true, what: 'No method statement chosen', fix: 'Pick the work you are doing today.' });
   }
+
+  /*
+   * A statement no reviewer has cleared cannot be signed.
+   *
+   * Blocking, and first in the list, because it is not about this crew or this
+   * day — it is about the document itself. Everything else here is something a
+   * technician can fix in the next two minutes; this one they cannot, and the
+   * honest thing is to say so rather than let them sign and find out later
+   * that the hazard they were hurt by was named in the document with nothing
+   * written against it.
+   */
+  for (const t of merged.notCleared) {
+    issues.push({
+      blocking: true,
+      what: `"${t.title}" has not been cleared for signature`,
+      fix: t.findings.length
+        ? `${t.reason} What is unresolved: ${t.findings.join(' · ')}. Read it and work to it if it helps, `
+          + 'but it cannot be signed as the statement for this work until those are answered.'
+        : `${t.reason} Read it and work to it if it helps, but it cannot be signed as the statement for `
+          + 'this work until somebody has.',
+    });
+  }
+
   if (!record.date) {
     issues.push({ blocking: true, what: 'No date', fix: 'A statement covers one day. Set the day.' });
   }

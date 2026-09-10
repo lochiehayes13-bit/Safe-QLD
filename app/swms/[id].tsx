@@ -329,6 +329,25 @@ export default function SwmsRecordScreen() {
           </Txt>
         </Card>
 
+        {merged.notCleared.length ? (
+          <Banner
+            tone="fail"
+            title={merged.notCleared.length === 1
+              ? 'This statement has not been cleared for signature'
+              : `${merged.notCleared.length} of these statements have not been cleared for signature`}
+            body={[
+              merged.notCleared.map((n) => {
+                const head = `${n.title} — ${n.reason}`;
+                return n.findings.length ? `${head}\n${n.findings.map((f) => `  • ${f}`).join('\n')}` : head;
+              }).join('\n\n'),
+              '',
+              'Read it and use it to brief the crew if it helps. It cannot be signed as the statement for this '
+              + 'work: a signature says the document describes how the work will actually be done, and a hazard '
+              + 'named in it with nothing written against it is the opposite of that.',
+            ].join('\n')}
+          />
+        ) : null}
+
         {merged.highRisk ? (
           <Banner
             tone="fail"

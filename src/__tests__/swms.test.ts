@@ -74,6 +74,15 @@ const HEIGHTS: SwmsTemplate = {
   suggestFor: { systems: ['detection'], routineIds: ['det-annual'], words: ['ceiling'] },
 };
 
+/*
+ * Both fixtures carry a clearance, because these tests are about the other
+ * rules. A statement with no review record is not signable at all — that is
+ * its own rule and it has its own tests below.
+ */
+const CLEARED = { cleared: true, reason: 'Reviewed and cleared.', findings: [] };
+HOT.review = CLEARED;
+HEIGHTS.review = CLEARED;
+
 const TEMPLATES = [HOT, HEIGHTS];
 
 function record(over: Partial<SwmsRecord> = {}): SwmsRecord {
@@ -279,5 +288,82 @@ describe('the words on the screens', () => {
     expect(stillCovers(signed, '2026-09-11')).toBe(false);
     expect(stillCovers(ready(), '2026-09-10')).toBe(false);
     expect(SWMS_REVIEW_TRIGGERS.length).toBeGreaterThan(3);
+  });
+});
+
+/**
+ * A statement nobody has cleared for signature.
+ *
+ * These were drafted, reviewed by somebody whose job was to refuse to sign
+ * them, and corrected. The check on whether the corrections landed is a second
+ * read, and it came back after they had shipped, saying no — named hazards
+ * with nothing written against them. Reading one is still useful. Signing one
+ * says the document describes how the work will actually be done.
+ */
+describe('a statement no reviewer has cleared', () => {
+  const uncleared = (over: Partial<SwmsTemplate['review']> = {}): SwmsTemplate => ({
+    ...HOT,
+    id: 'uncleared',
+    title: 'Something nobody signed off',
+    review: { cleared: false, reason: 'A reviewer would not sign it.', findings: ['[fatal] A hazard with no control'], ...over },
+  });
+
+  const complete = (templateIds: string[]): SwmsRecord => ({
+    id: 'r1', templateIds, title: 'Today', siteId: 's1', siteName: 'Tower',
+    date: '2026-09-10', answers: { 'Where is the isolation point': 'Panel 1' },
+    addedHazards: [], ticked: [], ppeChecked: [], permits: [],
+    workers: [{ name: 'Sam', signature: 'data:sig' }],
+    status: 'draft', createdAt: '', updatedAt: '',
+  } as unknown as SwmsRecord);
+
+  it('cannot be signed, however complete the record is', () => {
+    const merged = mergeSwms([uncleared()]);
+    const record = complete(['uncleared']);
+    // Every step read, every prompt answered, signed by the crew.
+    record.ticked = merged.steps.map((s) => s.key);
+    record.permits = merged.permits.map((permit) => ({ permit, held: true }));
+    record.answers = Object.fromEntries(merged.prompts.map((q) => [q, 'answered']));
+    record.ppeChecked = [...merged.ppe];
+
+    expect(canSign(record, merged)).toBe(false);
+    expect(whyNotSigned(record, merged)).toContain('has not been cleared for signature');
+  });
+
+  it('says what the reviewer would not sign it over', () => {
+    const merged = mergeSwms([uncleared()]);
+    const why = whyNotSigned(complete(['uncleared']), merged) ?? '';
+    // Leads with the clearance, ahead of anything about this crew or this day:
+    // the others a technician can fix in two minutes, this one they cannot.
+    expect(why).toContain('has not been cleared for signature');
+    expect(why).toContain('A hazard with no control');
+  });
+
+  it('says so differently when nobody has read it at all', () => {
+    // An unread statement and a rejected one are different situations, and a
+    // technician should be able to tell which one is in front of them.
+    const merged = mergeSwms([uncleared({ reason: 'The second review never ran.', findings: [] })]);
+    const why = whyNotSigned(complete(['uncleared']), merged) ?? '';
+    expect(why).toContain('never ran');
+    expect(why).toContain('cannot be signed');
+  });
+
+  it('treats a statement with no review record as not cleared', () => {
+    // Silence is not a clearance. A statement added tomorrow must not be
+    // signable purely because nobody remembered to record a review.
+    const bare = { ...HOT, id: 'bare', review: undefined };
+    const merged = mergeSwms([bare]);
+    expect(merged.notCleared.map((n) => n.id)).toEqual(['bare']);
+    expect(canSign(complete(['bare']), merged)).toBe(false);
+  });
+
+  it('blocks the whole day when one of several statements is uncleared', () => {
+    // A JSEA covering three jobs is one document with one signature on it.
+    const merged = mergeSwms([HOT, uncleared()]);
+    expect(merged.notCleared.map((n) => n.id)).toEqual(['uncleared']);
+    expect(canSign(complete(['hot-work', 'uncleared']), merged)).toBe(false);
+  });
+
+  it('leaves a cleared statement alone', () => {
+    expect(mergeSwms([HOT, HEIGHTS]).notCleared).toEqual([]);
   });
 });

@@ -8,6 +8,33 @@ import { openMigrated, type NodeSqliteDb } from './support/nodeSqlite';
 
 jest.mock('@/db/index', () => jest.requireActual('./support/nodeSqlite'));
 
+/*
+ * The shipped statements carry a clearance here, and only here.
+ *
+ * None of them is cleared for signature in the seed itself — a second reviewer
+ * read the corrected statements and would not sign them, which is asserted
+ * against the real seed at the bottom of this file. These tests are about the
+ * repository's signing mechanics: that it stamps a time, that a double tap
+ * does not restamp it, that a signed record stops being editable. Those are
+ * worth testing whatever the content review says, and testing them against
+ * documents that can never be signed would mean testing nothing.
+ */
+jest.mock('@/seed/swms', () => {
+  const real = jest.requireActual('@/seed/swms') as { SWMS_TEMPLATES: { id: string }[] };
+  const cleared = real.SWMS_TEMPLATES.map((t) => ({
+    ...t,
+    review: { cleared: true, reason: 'Cleared for the purposes of this test.', findings: [] },
+  }));
+  return {
+    ...real,
+    SWMS_TEMPLATES: cleared,
+    // The repository resolves by id, and the real templateById closes over the
+    // real array — so replacing only the array would leave every lookup
+    // returning an uncleared statement.
+    templateById: (id: string) => cleared.find((t) => t.id === id),
+  };
+});
+
 /**
  * Storing a statement, on the migrated database.
  *
@@ -150,5 +177,51 @@ describe('signing', () => {
     await expect(signSwms('nope')).rejects.toThrow('That statement no longer exists.');
     await expect(updateSwms('nope', { notes: 'x' })).rejects.toThrow('That statement no longer exists.');
     await expect(linkSwmsJob('nope', null)).rejects.toThrow('That statement no longer exists.');
+  });
+});
+
+/**
+ * What the real seed says about itself.
+ *
+ * The statements above are mocked as cleared so the repository's mechanics can
+ * be tested. This is the one place that looks at what actually ships — and
+ * what actually ships is ten statements none of which a reviewer has cleared
+ * for signature. That is deliberate, not an oversight: they were drafted,
+ * reviewed, and corrected, and the read that checks whether the corrections
+ * landed came back saying no, naming hazards that appear in the text with
+ * nothing written against them.
+ *
+ * When they are fixed, this test is what has to change, and changing it should
+ * take somebody to the findings.
+ */
+describe('the statements as they actually ship', () => {
+  const actual = jest.requireActual('@/seed/swms') as { SWMS_TEMPLATES: { id: string; review?: { cleared: boolean; reason: string; findings: string[] } }[] };
+
+  it('ships ten of them', () => {
+    expect(actual.SWMS_TEMPLATES).toHaveLength(10);
+  });
+
+  it('records a review state for every one, cleared or not', () => {
+    // A statement with no review record at all is treated as uncleared, but
+    // silence is not the same as a recorded refusal and should not pass for it.
+    for (const t of actual.SWMS_TEMPLATES) {
+      expect(t.review).toBeDefined();
+      expect(typeof t.review!.cleared).toBe('boolean');
+      expect(t.review!.reason.length).toBeGreaterThan(20);
+    }
+  });
+
+  it('has none of them cleared for signature yet', () => {
+    expect(actual.SWMS_TEMPLATES.filter((t) => t.review?.cleared).map((t) => t.id)).toEqual([]);
+  });
+
+  it('says what the reviewer would not sign, where a reviewer got to it', () => {
+    // Five were re-read and refused with reasons; five were never reached
+    // because the run stopped. Both are uncleared, and the record says which.
+    const withFindings = actual.SWMS_TEMPLATES.filter((t) => (t.review?.findings.length ?? 0) > 0);
+    expect(withFindings.length).toBeGreaterThanOrEqual(5);
+    for (const t of withFindings) {
+      expect(t.review!.findings.join(' ')).toMatch(/\[(fatal|serious)\]/);
+    }
   });
 });

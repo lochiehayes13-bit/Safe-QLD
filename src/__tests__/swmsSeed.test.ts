@@ -11,11 +11,14 @@ import { CONTROL_LEVEL_ORDER, RISK_ORDER, type SwmsTemplate } from '@/domain/swm
  * it, and is wrong at the moment somebody relies on it.
  *
  * These were drafted, then adversarially reviewed by readers whose job was to
- * refuse to sign them, then corrected against the reviews. That process caught
- * things no test could — a missing gaseous-suppression step, an 11 m hot work
- * clearance taken from the American standard rather than AS 1674.1. What it
- * cannot do is stay caught: the next edit to this content will be made by a
- * person in a hurry. So the mechanical half of it is written down here.
+ * refuse to sign them, then corrected against the reviews. A second read then
+ * checked whether the corrections landed, and on the five statements it reached
+ * the answer was no — see data/swms-review/. So none of them is cleared for
+ * signature, and mergeSwms says so on every path to a signature.
+ *
+ * What that process caught, no test could have. What no review can do is stay
+ * caught: the next edit to this content will be made by a person in a hurry. So
+ * the mechanical half of it is written down here.
  */
 
 const templates = SWMS_TEMPLATES as readonly SwmsTemplate[];
