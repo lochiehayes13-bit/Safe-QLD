@@ -2,7 +2,9 @@ import { getDb } from './index';
 import { assetCountsBySystem } from './assetRepo';
 import { dueAtSite } from './routineRunRepo';
 import { routineById } from '@/seed/serviceRoutines';
-import { buildSiteFacts, type HoursRow, type LastJobRow, type NextJobRow, type RunRow, type SiteFacts } from '@/domain/siteHistory';
+import { buildSiteFacts, type HoursRow, type LastJobRow, type NextJobRow, type RunRow, type SiteFacts,
+  type OpenDefectRow,
+} from '@/domain/siteHistory';
 import { entryMinutes } from '@/domain/clockOn';
 import { routineDue } from '@/domain/schedule';
 
@@ -123,6 +125,21 @@ export async function siteFacts(siteId: string, today: string, ownName = ''): Pr
     dueAtSite(siteId, today),
   ]);
 
+  /*
+   * What is still open at the site, now.
+   *
+   * Capped, because the count is what the card shows and the rows are only
+   * used to find the oldest and the worst — a site with two hundred open
+   * defects does not need two hundred rows read to answer either question,
+   * and the order below puts the ones that decide those answers first.
+   */
+  const openDefects = await db.getAllAsync<OpenDefectRow>(
+    `SELECT status, severity, raisedAt, location, description FROM defect
+     WHERE siteId = ? AND status = 'open'
+     ORDER BY (severity = 'critical') DESC, raisedAt LIMIT 200`,
+    [siteId],
+  );
+
   const lastJob: LastJobRow | undefined = lastJobRow?.externalId ? {
     externalId: lastJobRow.externalId,
     title: lastJobRow.title,
@@ -154,6 +171,7 @@ export async function siteFacts(siteId: string, today: string, ownName = ''): Pr
     hours,
     lastRun: runRow ? { ...runRow, technician: runRow.technician ?? undefined } : undefined,
     assetCounts: counts,
+    openDefects,
     due: due.map((d) => ({
       routineId: d.routineId,
       routineLabel: routineById(d.routineId)?.label ?? d.routineId,

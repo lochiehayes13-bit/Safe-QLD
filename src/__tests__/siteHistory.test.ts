@@ -1,4 +1,4 @@
-import { assetsLine, buildSiteFacts, lastServiceLine, techniciansOf, type SiteFactsInput } from '@/domain/siteHistory';
+import { assetsLine, buildSiteFacts, lastServiceLine, openDefectsLine, techniciansOf, type SiteFactsInput } from '@/domain/siteHistory';
 
 /**
  * What a technician wants to know about a site before they go.
@@ -11,7 +11,7 @@ import { assetsLine, buildSiteFacts, lastServiceLine, techniciansOf, type SiteFa
 
 const base: SiteFactsInput = {
   siteId: 's1', siteName: 'Tower', suburb: 'Milton', today: '2026-09-10',
-  hours: [], assetCounts: [], due: [],
+  hours: [], assetCounts: [], due: [], openDefects: [],
 };
 
 describe('the last job', () => {
@@ -119,5 +119,92 @@ describe('locked in with the client', () => {
     const f = buildSiteFacts(base);
     expect(f.lockedIn).toBe('none');
     expect(f.lockedInNote).toContain('office raises one');
+  });
+});
+
+/**
+ * What is still open at the site, as opposed to what the last visit raised.
+ *
+ * The card said "3 defects" against the last routine and stopped there, which
+ * tells a technician nothing about whether those three were fixed the same
+ * afternoon or have been sitting since March. Those are different days' work
+ * and different things in the van.
+ */
+describe('what is still open', () => {
+  const raised = (over: Partial<{ status: string; severity: string; raisedAt: string; location: string; description: string }> = {}) => ({
+    status: 'open', severity: 'non-critical', raisedAt: '2026-09-01T00:00:00.000Z',
+    location: 'Level 3', description: 'Detector faulty', ...over,
+  });
+
+  it('counts only what is still open', () => {
+    const f = buildSiteFacts({
+      ...base,
+      openDefects: [raised(), raised(), raised({ status: 'rectified' })],
+    });
+    // The repository only selects open rows; the domain refuses to trust that.
+    expect(f.open.total).toBe(2);
+  });
+
+  it('counts the critical ones separately, because they are a different job', () => {
+    const f = buildSiteFacts({
+      ...base,
+      openDefects: [raised({ severity: 'critical' }), raised(), raised()],
+    });
+    expect(f.open.critical).toBe(1);
+    expect(f.open.total).toBe(3);
+  });
+
+  it('names the oldest, which is the number that makes somebody ring the office', () => {
+    const f = buildSiteFacts({
+      ...base,
+      today: '2026-09-10',
+      openDefects: [raised({ raisedAt: '2026-09-08T00:00:00.000Z' }), raised({ raisedAt: '2025-03-01T00:00:00.000Z' })],
+    });
+    expect(f.open.oldestDays).toBeGreaterThan(500);
+  });
+
+  it('picks the critical one to name, ahead of an older non-critical', () => {
+    // Read in the order somebody would read them in.
+    const f = buildSiteFacts({
+      ...base,
+      openDefects: [
+        raised({ raisedAt: '2024-01-01T00:00:00.000Z', location: 'Ancient' }),
+        raised({ severity: 'critical', location: 'Pump room' }),
+      ],
+    });
+    expect(f.open.worst?.location).toBe('Pump room');
+    expect(f.open.worst?.critical).toBe(true);
+  });
+
+  it('says nothing at all when nothing is open', () => {
+    // "0 defects outstanding" on three hundred rows is a column of noise that
+    // hides the four rows that matter.
+    const f = buildSiteFacts({ ...base, openDefects: [] });
+    expect(f.open.total).toBe(0);
+    expect(f.open.worst).toBeUndefined();
+    expect(openDefectsLine(f)).toBe('');
+  });
+
+  it('ages the oldest in the units a person would use', () => {
+    const at = (iso: string) => openDefectsLine(buildSiteFacts({
+      ...base, today: '2026-09-10', openDefects: [raised({ raisedAt: iso })],
+    }));
+    expect(at('2026-09-05T00:00:00.000Z')).toContain('5 days old');
+    expect(at('2026-06-01T00:00:00.000Z')).toContain('months old');
+    expect(at('2025-01-01T00:00:00.000Z')).toContain('year');
+  });
+
+  it('leads with the critical count in the line, since that is what changes the day', () => {
+    const f = buildSiteFacts({
+      ...base, openDefects: [raised({ severity: 'critical' }), raised(), raised()],
+    });
+    expect(openDefectsLine(f)).toContain('1 critical of 3');
+  });
+
+  it('survives a raisedAt it cannot read rather than reporting a wrong age', () => {
+    const f = buildSiteFacts({ ...base, openDefects: [raised({ raisedAt: 'not a date' })] });
+    expect(f.open.total).toBe(1);
+    expect(f.open.oldestDays).toBeUndefined();
+    expect(openDefectsLine(f)).toBe('1 defect still open');
   });
 });

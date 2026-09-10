@@ -1,5 +1,5 @@
 import { planCandidates, siteFacts } from '@/db/siteHistoryRepo';
-import { createSite } from '@/db/repo';
+import { createDefect, createSite } from '@/db/repo';
 import { upsertJob } from '@/db/opsRepo';
 import { createAsset, seedReferenceData } from '@/db/assetRepo';
 import { recordRoutineRun } from '@/db/routineRunRepo';
@@ -123,5 +123,57 @@ describe('planCandidates', () => {
     expect((await planCandidates(TODAY, '%')).map((c) => c.siteName)).toEqual(['Other Place']);
     expect((await planCandidates(TODAY, 'zzz'))).toEqual([]);
     expect((await planCandidates(TODAY, 'th'))[0]?.reason).toBe('search');
+  });
+});
+
+/**
+ * What is still open at the site, read off the defect table.
+ *
+ * The card carried "3 defects raised" against the last routine and stopped
+ * there, which says nothing about whether those three were fixed the same
+ * afternoon or have been sitting since March. Those are different days' work.
+ */
+describe('open defects on the facts card', () => {
+  it('counts what is open, not what was ever raised', async () => {
+    const site = await createSite({ name: 'Fictional Tower' });
+    await createDefect({
+      siteId: site.id, location: 'Level 3', description: 'Detector faulty',
+      severity: 'non-critical', status: 'open', photos: [], raisedAt: '2026-08-01T00:00:00.000Z',
+    });
+    await createDefect({
+      siteId: site.id, location: 'Level 4', description: 'Sounder silent',
+      severity: 'non-critical', status: 'rectified', photos: [], raisedAt: '2026-08-01T00:00:00.000Z',
+    });
+
+    const f = await siteFacts(site.id, TODAY);
+    expect(f?.open.total).toBe(1);
+    expect(f?.open.critical).toBe(0);
+  });
+
+  it('names the critical one and ages the oldest', async () => {
+    const site = await createSite({ name: 'Fictional Tower' });
+    await createDefect({
+      siteId: site.id, location: 'Riser', description: 'Old fault',
+      severity: 'non-critical', status: 'open', photos: [], raisedAt: '2025-01-01T00:00:00.000Z',
+    });
+    await createDefect({
+      siteId: site.id, location: 'Pump room', description: 'Pump will not start on test',
+      severity: 'critical', status: 'open', photos: [], raisedAt: '2026-09-01T00:00:00.000Z',
+    });
+
+    const f = await siteFacts(site.id, TODAY);
+    expect(f?.open.total).toBe(2);
+    expect(f?.open.critical).toBe(1);
+    // Critical first, whatever its age — that is the order somebody reads in.
+    expect(f?.open.worst?.location).toBe('Pump room');
+    // And the oldest is still the oldest, for the line that says how long.
+    expect(f?.open.oldestDays).toBeGreaterThan(500);
+  });
+
+  it('is empty and says nothing for a site with nothing outstanding', async () => {
+    const site = await createSite({ name: 'Fictional Tower' });
+    const f = await siteFacts(site.id, TODAY);
+    expect(f?.open.total).toBe(0);
+    expect(f?.open.worst).toBeUndefined();
   });
 });

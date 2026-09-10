@@ -17,7 +17,7 @@ import { syncJobDetail } from '@/simpro/sync';
 import { SCHEDULE_BOOK_KIND, notBeforeFrom } from '@/domain/scheduling';
 import { addDays } from '@/domain/clockOn';
 import { qldIsoDay } from '@/domain/qldTime';
-import { assetsLine, lastServiceLine, type SiteFacts } from '@/domain/siteHistory';
+import { assetsLine, lastServiceLine, openDefectsLine, type SiteFacts } from '@/domain/siteHistory';
 import {
   DAY_END, DAY_START, bookingsFor, dayHeadline, layOutDay, moveStop, type BusyBlock, type DaySite,
 } from '@/domain/dayBuilder';
@@ -470,6 +470,22 @@ function FactsBody({ f }: { f: SiteFacts }) {
         ? `${f.hours.total} h — ${f.hours.byPerson.map((p) => `${p.name} ${p.hours} h`).join(', ')} (${f.hours.source === 'office-timesheet' ? 'office timesheet' : f.hours.source === 'schedule' ? 'office schedule' : 'this phone’s clock'})`
         : f.clockedOnNote, f.hours ? 'muted' : 'warn')}
       {f.lastRun ? line('Last routine on this phone', `${f.lastRun.routineLabel}${f.lastRun.technician ? ` by ${f.lastRun.technician}` : ''}, ${f.lastRun.daysAgo ?? '?'} days ago — ${f.lastRun.checksPassed} passed, ${f.lastRun.checksFailed} failed, ${f.lastRun.checksNotTested} not tested, ${f.lastRun.defectsRaised} defect${f.lastRun.defectsRaised === 1 ? '' : 's'}`) : null}
+      {/*
+        * What is still broken, as opposed to what the last visit raised.
+        * "3 defects raised" against a routine says nothing about whether they
+        * were fixed the same afternoon or have been sitting since March, and
+        * that is the fact that decides what goes in the van.
+        */}
+      {f.open.total ? line(
+        'Still open',
+        [
+          openDefectsLine(f),
+          f.open.worst
+            ? `Worst: ${f.open.worst.location || 'no location given'} — ${f.open.worst.description}`
+            : '',
+        ].filter(Boolean).join('\n'),
+        f.open.critical ? 'fail' : 'warn',
+      ) : null}
       {line('On site', `${f.assetsTotal} asset${f.assetsTotal === 1 ? '' : 's'}: ${assetsLine(f)}`)}
       {f.due.length ? line('Due', f.due.slice(0, 4).map((d) => `${d.routineLabel} (${FREQUENCY_LABEL[d.frequency as keyof typeof FREQUENCY_LABEL] ?? d.frequency}) — ${d.state}${d.daysUntilDue !== undefined ? d.daysUntilDue < 0 ? `, ${Math.abs(d.daysUntilDue)} days over` : `, in ${d.daysUntilDue} days` : ''}`).join('\n'), f.overdue ? 'fail' : 'muted') : null}
       {line('Locked in', f.lockedInNote, f.lockedIn === 'booked' ? 'pass' : f.lockedIn === 'job-only' ? 'warn' : 'fail')}

@@ -74,6 +74,21 @@ export interface NextJobRow {
   scheduled?: { date: string; staffName?: string; startTime?: string; endTime?: string };
 }
 
+/**
+ * What is still broken at a site, as the phone holds it.
+ *
+ * The one fact that changes what goes in the van, and the one the last visit's
+ * numbers cannot give you: "3 defects raised last time" says nothing about
+ * whether they were fixed the same afternoon or have been sitting since March.
+ */
+export interface OpenDefectRow {
+  status: string;
+  severity: string;
+  raisedAt: string;
+  location: string;
+  description: string;
+}
+
 export interface SiteFactsInput {
   siteId: string;
   siteName: string;
@@ -83,6 +98,7 @@ export interface SiteFactsInput {
   hours: HoursRow[];
   lastRun?: RunRow;
   assetCounts: { system: string; count: number }[];
+  openDefects: OpenDefectRow[];
   due: DueRow[];
   nextJob?: NextJobRow;
   contact?: { name?: string; phone?: string };
@@ -113,6 +129,20 @@ export interface SiteFacts {
   /** Why clockedOn is what it is, in a sentence. */
   clockedOnNote: string;
   lastRun?: RunRow & { daysAgo?: number };
+  /**
+   * What is still open at the site, now.
+   *
+   * `oldestDays` is the number that makes a technician ring the office: a
+   * defect open for four hundred days is a conversation, not a work order.
+   * `worst` names one of them, because a count is an abstraction and a
+   * location is a thing you can picture on the drive over.
+   */
+  open: {
+    total: number;
+    critical: number;
+    oldestDays?: number;
+    worst?: { location: string; description: string; days?: number; critical: boolean };
+  };
   assets: { system: string; label: string; count: number }[];
   assetsTotal: number;
   /** Due and overdue routines first, then the nearest upcoming ones. */
@@ -213,6 +243,41 @@ export function buildSiteFacts(input: SiteFactsInput): SiteFacts {
     .sort((a, b) => DUE_ORDER[a.state] - DUE_ORDER[b.state] || (a.daysUntilDue ?? 9e9) - (b.daysUntilDue ?? 9e9));
   const overdue = due.filter((d) => d.state === 'overdue').length;
 
+  /*
+   * What is still open, now — not what the last visit raised.
+   *
+   * "3 defects raised last time" says nothing about whether they were fixed
+   * the same afternoon or have been sitting since March, and those are
+   * different days' work. The oldest one is the number that makes somebody
+   * ring the office; the worst one is named because a count is an abstraction
+   * and a location is something you can picture on the drive over.
+   */
+  const openRows = input.openDefects.filter((d) => d.status === 'open');
+  const withDays = openRows.map((d) => ({
+    ...d,
+    critical: d.severity === 'critical',
+    days: daysBetween(qldIsoDay(d.raisedAt), input.today),
+  }));
+  // Critical first, then oldest. That is the order somebody would read them in.
+  const ranked = [...withDays].sort((a, b) => (
+    Number(b.critical) - Number(a.critical) || (b.days ?? -1) - (a.days ?? -1)
+  ));
+  const worstRow = ranked[0];
+  const open: SiteFacts['open'] = {
+    total: openRows.length,
+    critical: withDays.filter((d) => d.critical).length,
+    oldestDays: withDays.reduce<number | undefined>(
+      (max, d) => (d.days === undefined ? max : Math.max(max ?? 0, d.days)),
+      undefined,
+    ),
+    worst: worstRow ? {
+      location: worstRow.location,
+      description: worstRow.description,
+      days: worstRow.days,
+      critical: worstRow.critical,
+    } : undefined,
+  };
+
   let lockedIn: SiteFacts['lockedIn'] = 'none';
   let lockedInNote: string;
   if (input.nextJob?.scheduled) {
@@ -242,6 +307,7 @@ export function buildSiteFacts(input: SiteFactsInput): SiteFacts {
     clockedOn,
     clockedOnNote,
     lastRun: input.lastRun ? { ...input.lastRun, daysAgo: daysBetween(qldIsoDay(input.lastRun.completedAt), input.today) } : undefined,
+    open,
     assets,
     assetsTotal,
     due,
@@ -268,6 +334,28 @@ export function lastServiceLine(f: SiteFacts): string {
     return `Last service ${when}${f.lastRun.technician ? ` by ${f.lastRun.technician}` : ''} — ${f.lastRun.routineLabel}`;
   }
   return 'No service recorded on this phone';
+}
+
+/**
+ * What is still open, in one line for a list row.
+ *
+ * Empty where nothing is, because "0 defects outstanding" on three hundred
+ * rows is a column of noise that hides the four rows that matter.
+ */
+export function openDefectsLine(f: SiteFacts): string {
+  const { total, critical, oldestDays } = f.open;
+  if (!total) return '';
+  const head = critical
+    ? `${critical} critical of ${total} still open`
+    : `${total} defect${total === 1 ? '' : 's'} still open`;
+  if (oldestDays === undefined) return head;
+  // Under a fortnight is last visit's work; a year is a conversation.
+  const age = oldestDays >= 365
+    ? `oldest ${Math.floor(oldestDays / 365)} year${oldestDays >= 730 ? 's' : ''} old`
+    : oldestDays >= 60
+      ? `oldest ${Math.floor(oldestDays / 30)} months old`
+      : `oldest ${oldestDays} day${oldestDays === 1 ? '' : 's'} old`;
+  return `${head}, ${age}`;
 }
 
 /** "3 detection, 12 extinguishers, 2 hydrants" */
