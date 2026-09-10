@@ -8,7 +8,7 @@ import { jobCount, openJobPicks, searchJobPicks, type JobPick } from '@/db/opsRe
 import {
   DEFAULT_EXTRAS, LEAVE_KINDS, LEAVE_LABEL, STANDARD_DAY_HOURS,
   blankEntry, copyDay, dayName, dayWorkedHours, entryHours, filterJobOptions, jobOptions, mergeJobOptions,
-  leaveOf, previousDayWithEntries, setLeave, timesheetTotals, toggleExtra, usualTimes, weekDates,
+  isWeekendDay, leaveOf, previousDayWithEntries, setLeave, timesheetTotals, toggleExtra, usualTimes, weekDates,
   type HourKind, type JobOption, type LeaveKind, type Timesheet, type TimesheetEntry,
 } from '@/domain/timesheet';
 import {
@@ -104,6 +104,10 @@ export default function TimesheetScreen() {
   }, []);
 
   const totals = useMemo(() => (sheet ? timesheetTotals(sheet) : null), [sheet]);
+  // Saturday and Sunday stay folded until tapped, unless something is already
+  // on them. Kept per date rather than as one flag, so opening Saturday does
+  // not unfold Sunday as well.
+  const [openWeekend, setOpenWeekend] = useState<Record<string, boolean>>({});
   const days = useMemo(() => (sheet ? weekDates(sheet.weekStarting) : []), [sheet]);
   const options = useMemo(
     () => jobOptions(history.filter((h) => h.id !== id), jobs.map((j) => ({
@@ -218,6 +222,9 @@ export default function TimesheetScreen() {
 
         {days.map((date, i) => (
           <Reveal key={date} index={1 + i}>
+          {isWeekendDay(date) && !openWeekend[date] && !sheet.entries.some((e) => e.date === date) ? (
+            <WeekendRow date={date} theme={t} onOpen={() => setOpenWeekend((o) => ({ ...o, [date]: true }))} />
+          ) : (
           <DayCard
             date={date}
             entries={sheet.entries.filter((e) => e.date === date)}
@@ -238,6 +245,7 @@ export default function TimesheetScreen() {
             onRemove={(entryId) => setEntries(sheet.entries.filter((e) => e.id !== entryId))}
             canDuplicate={previousDayWithEntries(sheet.entries, date) !== null}
           />
+          )}
           </Reveal>
         ))}
 
@@ -280,6 +288,33 @@ export default function TimesheetScreen() {
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * A weekend day with nothing on it.
+ *
+ * One line, not a card: most weeks nobody works Saturday, and a full card
+ * for each of two empty days is what made the sheet a long scroll. Tapping
+ * it opens the ordinary day, and a day that gets an entry stays open on its
+ * own.
+ */
+function WeekendRow({ date, theme: t, onOpen }: { date: string; theme: Theme; onOpen: () => void }) {
+  return (
+    <Pressable
+      onPress={onOpen}
+      accessibilityRole="button"
+      accessibilityLabel={`Add hours for ${dayName(date)} ${formatAuDate(date)}`}
+      style={{
+        flexDirection: 'row', alignItems: 'center', gap: t.space(2),
+        paddingVertical: t.space(2.5), paddingHorizontal: t.space(3),
+        borderRadius: t.radius.md, borderWidth: 1, borderStyle: 'dashed', borderColor: t.color.border,
+      }}
+    >
+      <Txt weight="700" tone="muted">{dayName(date)}</Txt>
+      <Txt size="sm" tone="faint" style={{ flex: 1 }}>{formatAuDate(date)}</Txt>
+      <Txt size="sm" tone="accent" weight="700">Worked? Tap to add</Txt>
+    </Pressable>
+  );
+}
 
 function DayCard({
   date, entries, theme: t, extraChoices, onAdd, onQuickAdd, onDuplicate, onLeave, onChange, onRemove, canDuplicate,

@@ -152,6 +152,42 @@ export function dayName(isoDate: string): string {
   return Number.isNaN(d.getTime()) ? '' : (DAY_NAMES[d.getUTCDay()] ?? '');
 }
 
+/**
+ * The day the company's pay week starts on. 3 is Wednesday, as JavaScript
+ * counts days from Sunday.
+ *
+ * Wednesday to Tuesday is how Safe QLD's payroll runs, and a sheet that
+ * starts on Monday puts the last two days of one pay week onto the next
+ * sheet — which is how hours go missing from a pay run. This is the one
+ * place the start day lives; the sheet, the copy-forward and the export all
+ * read the week from `weekStarting`, so a sheet made under the old Monday
+ * rule still opens and reads correctly as the week it was.
+ */
+export const WEEK_START_DAY = 3;
+
+/** The ISO date the pay week holding `isoDay` starts on. */
+export function weekStartFor(isoDay: string, startDay = WEEK_START_DAY): string | undefined {
+  const noon = new Date(`${isoDay}T12:00:00Z`);
+  if (Number.isNaN(noon.getTime())) return undefined;
+  const back = (noon.getUTCDay() - startDay + 7) % 7;
+  noon.setUTCDate(noon.getUTCDate() - back);
+  return noon.toISOString().slice(0, 10);
+}
+
+/**
+ * Saturday or Sunday.
+ *
+ * The sheet folds these away until they are wanted: most weeks they hold
+ * nothing, and two empty cards a week is a lot of scrolling past nothing on a
+ * phone at the end of a Friday.
+ */
+export function isWeekendDay(isoDay: string): boolean {
+  const d = new Date(`${isoDay}T12:00:00Z`);
+  if (Number.isNaN(d.getTime())) return false;
+  const day = d.getUTCDay();
+  return day === 0 || day === 6;
+}
+
 /** The seven ISO dates of the week beginning on the given date. */
 export function weekDates(weekStarting: string): string[] {
   // All UTC. The old version built the start date at local midnight and then
