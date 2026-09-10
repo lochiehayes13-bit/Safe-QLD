@@ -181,7 +181,7 @@ export default function BookLeaveScreen() {
         {prefs && !employeeId ? (
           <Card onPress={() => router.push('/signin')}>
             <Txt weight="700">Sign in as yourself first</Txt>
-            <Txt size="sm" tone="muted">A day off has to go on somebody's schedule, and this phone is not yet anybody in Simpro.</Txt>
+            <Txt size="sm" tone="muted">A day off has to go on somebody’s schedule, and this phone is not yet anybody in Simpro.</Txt>
           </Card>
         ) : null}
 
