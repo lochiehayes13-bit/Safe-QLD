@@ -24,6 +24,7 @@ import { MIGRATION_V22 } from './schemaNeeds';
 import { MIGRATION_V23 } from './schemaV23';
 import { MIGRATION_V24 } from './schemaV24';
 import { MIGRATION_V25 } from './schemaV25';
+import { MIGRATION_V26 } from './schemaV26';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -352,6 +353,11 @@ export const MIGRATIONS: string[] = [
   // status the office actually holds rather than one matched by name
   // against a list pinned in code
   MIGRATION_V25,
+
+  // v26 — the office's own cable tables, so the AS/NZS 3008 sizing has
+  // figures to work on without this repository carrying anybody's licensed
+  // ones
+  MIGRATION_V26,
 ];
 
 /**
