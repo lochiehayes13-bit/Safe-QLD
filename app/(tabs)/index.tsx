@@ -20,6 +20,7 @@ import { describeLoadFailure } from '@/domain/loadFailure';
 import { Bounce, Reveal, animateNextLayout } from '@/components/motion';
 import { UpdateBanner } from '@/components/UpdateBanner';
 import { SyncStrip } from '@/components/SyncStrip';
+import { StuckWorkStrip } from '@/components/StuckWorkStrip';
 
 /**
  * Home — the company hub.
@@ -118,6 +119,7 @@ export default function HomeScreen() {
       {notices.length ? <NoticeBanner notices={notices} /> : null}
       <UpdateBanner />
       <SyncStrip />
+      <StuckWorkStrip />
 
       {prefs && !prefs.technicianName.trim() ? <NamePrompt /> : null}
       {upNext && upNext.rows.length ? <UpNext label={upNext.label} rows={upNext.rows} /> : null}

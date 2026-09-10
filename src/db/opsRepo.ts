@@ -1234,6 +1234,24 @@ export async function abandonSync(id: string, error: string): Promise<void> {
   );
 }
 
+/**
+ * The queue's state, without its contents.
+ *
+ * The home screen needs to know whether anything is stuck, and every existing
+ * read for that returns whole rows — payloads included, which on a batch of
+ * defect notes and a work-completed note is a lot of JSON to load in order to
+ * count to three. This selects the three columns the answer needs.
+ *
+ * Sent rows are left out: they are the queue working, and on a phone that has
+ * been in service a while they are nearly all of it.
+ */
+export async function queueHealth(): Promise<{ createdAt: string; status: SyncEntry['status']; kind: string }[]> {
+  const db = await getDb();
+  return db.getAllAsync<{ createdAt: string; status: SyncEntry['status']; kind: string }>(
+    "SELECT createdAt, status, kind FROM sync_queue WHERE status <> 'sent' ORDER BY createdAt",
+  );
+}
+
 export async function pendingSyncCount(): Promise<number> {
   const db = await getDb();
   const row = await db.getFirstAsync<{ n: number }>("SELECT COUNT(*) AS n FROM sync_queue WHERE status = 'pending'");

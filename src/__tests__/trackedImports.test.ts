@@ -19,6 +19,10 @@ import { join, posix } from 'node:path';
  *
  * So the question is asked of git rather than of the disk. What is tracked is
  * what the runner will get.
+ *
+ * Which means a new file has to be `git add`ed before this passes, even while
+ * it is still being written. That is the point rather than a nuisance: the
+ * moment something committed depends on it, it has to be going up too.
  */
 
 const REPO = join(__dirname, '..', '..');
