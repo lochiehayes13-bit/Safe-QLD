@@ -579,6 +579,156 @@ export function withstandTimeS(areaMm2: number, k: number, faultA: number): numb
 }
 
 // ---------------------------------------------------------------------------
+// Earth fault loop
+// ---------------------------------------------------------------------------
+
+/**
+ * How far past its rating a protective device has to be pushed to trip at once.
+ *
+ * These are the IEC 60898 tripping curves — the letter printed on the front of
+ * the breaker, and the reason a Type C on a long run will sit there during an
+ * earth fault that a Type B would have cleared. Product data, on every
+ * datasheet, and the multiplier is an editable input anyway because a fuse or
+ * a motor-rated device is neither.
+ */
+export const CURVE_MULTIPLIER: Record<'B' | 'C' | 'D', number> = { B: 5, C: 10, D: 20 };
+
+export interface LoopInput {
+  /**
+   * Ze — the impedance of everything upstream of the board, from the supply
+   * authority's figure or a measurement at the origin.
+   */
+  supplyOhms: number;
+  lengthM: number;
+  /** The active conductor. */
+  activeMm2: number;
+  /** The earth, which is usually smaller and usually the larger half of R2. */
+  earthMm2: number;
+  material: ConductorMaterial;
+  /** The conductor temperature to work at. Its operating rating, not 20 °C. */
+  operatingC: number;
+  /** Uo — the voltage to earth. */
+  phaseVolts: number;
+}
+
+export interface LoopResult {
+  /** R1 + R2 — the loop out along the active and back along the earth. */
+  circuitOhms: number;
+  /** Zs — everything, including the supply. */
+  totalOhms: number;
+  /** Uo ÷ Zs. */
+  faultCurrentA: number;
+}
+
+/**
+ * The earth fault loop, from the supply to the far end and back.
+ *
+ * Worked at the conductor's operating temperature rather than at 20 °C, which
+ * is the conservative direction: a warm conductor has more resistance, so less
+ * fault current flows and the device is slower to see it. Working it cold
+ * produces a loop that disconnects on paper.
+ *
+ * The earth conductor is usually the smaller of the two and therefore the
+ * larger half of R1 + R2, which is why it is a separate input rather than
+ * assumed equal to the active. Assuming them equal is how a 6 mm² active with
+ * a 2.5 mm² earth passes a check it fails.
+ */
+export function faultLoop(input: LoopInput): LoopResult | null {
+  const rActive = resistancePerMetre(input.activeMm2, input.material, input.operatingC);
+  const rEarth = resistancePerMetre(input.earthMm2, input.material, input.operatingC);
+  if (rActive === null || rEarth === null) return null;
+  if (!Number.isFinite(input.lengthM) || input.lengthM < 0) return null;
+  if (!Number.isFinite(input.supplyOhms) || input.supplyOhms < 0) return null;
+  if (!Number.isFinite(input.phaseVolts) || input.phaseVolts <= 0) return null;
+
+  const circuitOhms = (rActive + rEarth) * input.lengthM;
+  const totalOhms = circuitOhms + input.supplyOhms;
+  if (totalOhms <= 0) return null;
+
+  return {
+    circuitOhms: round(circuitOhms, 4),
+    totalOhms: round(totalOhms, 4),
+    faultCurrentA: round(input.phaseVolts / totalOhms, 1),
+  };
+}
+
+export interface DisconnectionInput {
+  faultCurrentA: number;
+  deviceRatingA: number;
+  /** How many times its rating the device needs to trip instantly. */
+  multiplier: number;
+  phaseVolts: number;
+}
+
+export interface DisconnectionResult {
+  /** The current the device needs to see. */
+  tripCurrentA: number;
+  /** The largest loop impedance that still delivers it. */
+  maxLoopOhms: number;
+  ok: boolean;
+  /** How much fault current there is above what is needed, as a percentage. */
+  marginPercent: number;
+  reason: string;
+}
+
+/**
+ * Whether the device actually sees enough fault current to trip at once.
+ *
+ * This is the check a long run fails silently. Everything else about the
+ * circuit is fine — the cable carries the load, the volt drop is inside the
+ * limit, the breaker matches — and the earth fault at the far end draws too
+ * little current to move the magnetic element, so the device falls back to its
+ * thermal curve and takes seconds instead of milliseconds.
+ *
+ * `maxLoopOhms` is Uo ÷ (multiplier × In), which is where the printed maximum
+ * loop impedance figures come from in the first place. Computing it means the
+ * answer holds for whatever device and whatever supply voltage are in front of
+ * you, rather than only for the rows somebody tabulated.
+ */
+export function disconnects(input: DisconnectionInput): DisconnectionResult | null {
+  const { faultCurrentA, deviceRatingA, multiplier, phaseVolts } = input;
+  if (![faultCurrentA, deviceRatingA, multiplier, phaseVolts].every(Number.isFinite)) return null;
+  if (deviceRatingA <= 0 || multiplier <= 0 || phaseVolts <= 0 || faultCurrentA < 0) return null;
+
+  const tripCurrentA = deviceRatingA * multiplier;
+  const maxLoopOhms = phaseVolts / tripCurrentA;
+  const ok = faultCurrentA >= tripCurrentA;
+  const marginPercent = ((faultCurrentA - tripCurrentA) / tripCurrentA) * 100;
+
+  return {
+    tripCurrentA: round(tripCurrentA, 1),
+    maxLoopOhms: round(maxLoopOhms, 3),
+    ok,
+    marginPercent: round(marginPercent, 1),
+    reason: ok
+      ? `${round(faultCurrentA, 0)} A of fault current against the ${round(tripCurrentA, 0)} A this device needs.`
+      : `Only ${round(faultCurrentA, 0)} A of fault current, and this device needs ${round(tripCurrentA, 0)} A to trip at once. It will fall back to its thermal curve and take seconds.`,
+  };
+}
+
+/**
+ * The longest run that still disconnects.
+ *
+ * The number worth having when a check fails, because the answer is almost
+ * never "use a different breaker" — it is "how much of this run can stay".
+ */
+export function maxLengthForDisconnection(
+  input: Omit<LoopInput, 'lengthM'> & { deviceRatingA: number; multiplier: number },
+): number | null {
+  const rActive = resistancePerMetre(input.activeMm2, input.material, input.operatingC);
+  const rEarth = resistancePerMetre(input.earthMm2, input.material, input.operatingC);
+  if (rActive === null || rEarth === null) return null;
+  if (!Number.isFinite(input.phaseVolts) || input.phaseVolts <= 0) return null;
+  if (!Number.isFinite(input.deviceRatingA) || input.deviceRatingA <= 0) return null;
+  if (!Number.isFinite(input.multiplier) || input.multiplier <= 0) return null;
+
+  const maxLoop = input.phaseVolts / (input.deviceRatingA * input.multiplier);
+  const forCircuit = maxLoop - input.supplyOhms;
+  if (forCircuit <= 0) return 0;
+  return round(forCircuit / (rActive + rEarth), 1);
+}
+
+// ---------------------------------------------------------------------------
 // The whole chain
 // ---------------------------------------------------------------------------
 

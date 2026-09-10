@@ -600,6 +600,18 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['cable tables', 'as 3008', 'current rating', 'amps', 'mv/a/m', 'derating factor', 'import'],
   },
   {
+    route: '/tools/fault-loop', file: 'app/tools/fault-loop.tsx', tab: 'tools', section: 'Calculators',
+    label: 'Fault loop and earthing', modes: BOTH, openedFrom: ['/tools'],
+    blurb: 'The check a long run fails silently: too little fault current to move the magnetic element, so the device takes seconds.',
+    terms: ['fault loop', 'zs', 'ze', 'impedance', 'disconnection', 'earth', 'earthing', 'adiabatic', 'as 3000'],
+  },
+  {
+    route: '/tools/max-demand', file: 'app/tools/max-demand.tsx', tab: 'tools', section: 'Calculators',
+    label: 'Maximum demand', modes: BOTH, openedFrom: ['/tools'],
+    blurb: 'Per phase rather than averaged, because the supply is sized on its worst phase and averaging trips a main.',
+    terms: ['maximum demand', 'diversity', 'main switch', 'supply', 'phase balance', 'as 3000'],
+  },
+  {
     route: '/tools/ohms', file: 'app/tools/ohms.tsx', tab: 'tools', section: 'Calculators',
     label: 'Electrical', modes: BOTH, openedFrom: ['/tools'],
     blurb: "Ohm's law, power and battery runtime — the arithmetic that turns up daily.",

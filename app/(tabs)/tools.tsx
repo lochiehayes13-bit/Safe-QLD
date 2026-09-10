@@ -94,6 +94,18 @@ const CALCULATORS: ToolDef[] = [
     body: 'Your own current-carrying capacity figures, searched by size or by what they carry, each one saying where it was read.',
   },
   {
+    href: '/tools/fault-loop',
+    icon: 'flash-alert-outline',
+    title: 'Fault loop and earthing',
+    body: 'Whether the device sees enough fault current to trip at once, how much of the run can stay, and the earth conductor that survives it.',
+  },
+  {
+    href: '/tools/max-demand',
+    icon: 'gauge-full',
+    title: 'Maximum demand',
+    body: 'What the main is sized on — counted per phase, with the one load worth moving named where moving it helps.',
+  },
+  {
     href: '/tools/ohms',
     icon: 'omega',
     title: 'Electrical',

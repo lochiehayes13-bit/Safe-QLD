@@ -67,6 +67,15 @@ own figures once from its own copy or a manufacturer's catalogue, every table
 records where its figures were read, and the answer prints that source. The
 arithmetic around them is computed rather than quoted — see below.
 
+**Fault loop and maximum demand.** The earth fault loop worked at the
+conductor's operating temperature, whether the device sees enough fault current
+to trip at once, how much of the run can stay when it does not, and the earth
+conductor that survives the fault. Maximum demand counted per phase rather than
+averaged — a supply is sized on its worst phase, and where moving one load would
+lower the answer the screen names the load and the phase. Neither uses a printed
+table: a maximum loop impedance is the supply voltage over the current the
+device needs, which is how the printed figures are derived in the first place.
+
 **Parts.** 11,865 part numbers from every supplier Safe QLD buys from, taken from their own
 public product APIs and storefronts rather than transcribed from PDFs. Scan a
 tag or type a code and the app tries the asset register, then serials, then the
