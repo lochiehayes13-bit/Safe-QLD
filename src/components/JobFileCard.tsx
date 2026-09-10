@@ -60,8 +60,15 @@ export function JobFileCard({
   buildFile: () => Promise<WrittenFile>;
   /** Stores the job on the record. Null clears it. */
   onPickJob: (job: { externalId: string; title?: string } | null) => Promise<void> | void;
-  /** Stores when it went. */
-  onAttached: (at: string) => Promise<void> | void;
+  /**
+   * Stores when it went, and clears it when the job changes.
+   *
+   * Takes undefined for that second case: a document that reached job 41207
+   * has not reached 41208, and a card that kept the stamp across a change
+   * showed a green "Sent" against a job the file was never sent to. That is
+   * the exact claim this card exists to make truthfully.
+   */
+  onAttached: (at: string | undefined) => Promise<void> | void;
   /** Set where the document is not ready to be filed — unsigned, unfinished. */
   disabled?: boolean;
   disabledWhy?: string;
@@ -170,7 +177,17 @@ export function JobFileCard({
             <Card
               key={j.id}
               onPress={() => {
-                void onPickJob(j.externalId ? { externalId: j.externalId, title: j.title } : null);
+                const picked = j.externalId ? { externalId: j.externalId, title: j.title } : null;
+                void onPickJob(picked);
+                /*
+                 * The stamp belongs to the job it was sent to. Changing the
+                 * job makes "Sent on the 3rd" a statement about a job this
+                 * file never reached, so it goes with the job it described.
+                 * Done here rather than in each screen's handler because five
+                 * screens remembering the same rule is five chances to forget
+                 * it, and the sixth will.
+                 */
+                if (attachedAt && picked?.externalId !== jobExternalId) void onAttached(undefined);
                 setPicking(false);
               }}
             >
@@ -184,7 +201,11 @@ export function JobFileCard({
               <Button
                 title="Unlink"
                 variant="ghost"
-                onPress={() => { void onPickJob(null); setPicking(false); }}
+                onPress={() => {
+                  void onPickJob(null);
+                  if (attachedAt) void onAttached(undefined);
+                  setPicking(false);
+                }}
               />
             ) : null}
           </Rowed>

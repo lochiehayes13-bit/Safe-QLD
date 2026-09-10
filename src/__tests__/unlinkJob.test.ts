@@ -2,6 +2,8 @@ import { createImpairment, getImpairment, updateImpairment, upsertJob } from '@/
 import { createReport, getReport, updateReport, createSite } from '@/db/repo';
 import { createAssessment, getAssessment, updateAssessment } from '@/db/assessmentRepo';
 import { createQuote, getQuote, updateQuote } from '@/db/quoteRepo';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { openMigrated, type NodeSqliteDb } from './support/nodeSqlite';
 
 jest.mock('@/db/index', () => jest.requireActual('./support/nodeSqlite'));
@@ -111,5 +113,53 @@ describe('a quotation taken off its job', () => {
 
     await updateQuote(q.id, { jobReference: undefined });
     expect((await getQuote(q.id))?.jobReference).toBeFalsy();
+  });
+});
+
+/**
+ * The "Sent" stamp belongs to the job it was sent to.
+ *
+ * Filing a document records when it went. Changing the job afterwards left
+ * that stamp in place, so the card showed a green "Sent on the 3rd" against a
+ * job the file had never reached — the precise claim this card exists to make
+ * truthfully, made falsely. JobFileCard clears it on any job change now, which
+ * only works because a patch carrying undefined actually clears the column.
+ */
+describe('changing the job a document was filed on', () => {
+  it('clears when it went, on every record that carries the card', async () => {
+    const site = await createSite({ name: 'Fictional Tower' });
+
+    const rec = await createImpairment({ siteId: site.id, system: 'Sprinkler system' });
+    await updateImpairment(rec.id, { jobExternalId: '21456', attachedAt: '2026-09-03T00:00:00.000Z' });
+    await updateImpairment(rec.id, { jobExternalId: '21999', jobTitle: 'Other job', attachedAt: undefined });
+    const imp = await getImpairment(rec.id);
+    expect(imp?.jobExternalId).toBe('21999');
+    expect(imp?.attachedAt).toBeFalsy();
+
+    const r = await createReport({ siteId: site.id, title: 'Annual', frequency: 'annual', serviceDate: '2026-09-10', status: 'draft' } as never);
+    await updateReport(r.id, { jobExternalId: '21456', attachedAt: '2026-09-03T00:00:00.000Z' });
+    await updateReport(r.id, { jobExternalId: '21999', attachedAt: undefined });
+    const rep = await getReport(r.id);
+    expect(rep?.jobExternalId).toBe('21999');
+    expect(rep?.attachedAt).toBeFalsy();
+
+    const a = await createAssessment({ siteId: site.id });
+    await updateAssessment(a.id, { jobExternalId: '21456', attachedAt: '2026-09-03T00:00:00.000Z' });
+    await updateAssessment(a.id, { jobExternalId: '21999', attachedAt: undefined });
+    const ass = await getAssessment(a.id);
+    expect(ass?.jobExternalId).toBe('21999');
+    expect(ass?.attachedAt).toBeFalsy();
+  });
+
+  it('is the card that decides it, not each screen remembering', () => {
+    /*
+     * Five screens carry this card. Five handlers each remembering to clear
+     * the stamp is five chances to forget, and the sixth screen will. The rule
+     * lives in the card, and this is the check that it stays there.
+     */
+    const card = readFileSync(join(__dirname, '..', 'components', 'JobFileCard.tsx'), 'utf8');
+    expect(card).toMatch(/onAttached\(undefined\)/);
+    // And on both routes out of the picker: choosing a different job, and Unlink.
+    expect([...card.matchAll(/onAttached\(undefined\)/g)]).toHaveLength(2);
   });
 });

@@ -805,7 +805,7 @@ export default function ReportScreen() {
               subject={`${report.title}${site ? ` — ${site.name}` : ''}`}
               buildFile={reportPdf}
               onPickJob={(job: { externalId: string; title?: string } | null) => patchReport({ jobExternalId: job?.externalId, jobTitle: job?.title })}
-              onAttached={(at: string) => patchReport({ attachedAt: at })}
+              onAttached={(at: string | undefined) => patchReport({ attachedAt: at })}
               disabled={report.status !== 'complete'}
               disabledWhy="Mark the report complete first. A draft on the job file reads as the finished record of a service."
             />
