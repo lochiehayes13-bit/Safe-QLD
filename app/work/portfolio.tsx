@@ -201,7 +201,7 @@ export default function PortfolioScreen() {
         <Stack.Screen options={{ title: 'Portfolio' }} />
         <Screen>
           <EmptyState
-            icon={failed ? 'database-alert-outline' : undefined}
+            icon={failed ? 'database-alert-outline' : 'book-open-page-variant-outline'}
             title={failed ? 'The book could not be read' : 'Nothing loaded'}
             body={failed ?? 'The portfolio could not be built from what is in the app.'}
             action={<Button title="Try again" onPress={() => void load()} />}
@@ -361,6 +361,7 @@ export default function PortfolioScreen() {
             </>
           ) : (
             <EmptyState
+          icon="poll"
               title="Nothing scored"
               body="No site in the book carries an overdue routine, an open defect or a statutory clock that this app can see. Check the coverage figure at the top before reading that as good news."
             />
@@ -428,6 +429,7 @@ export default function PortfolioScreen() {
             </>
           ) : (
             <EmptyState
+          icon="scale-balance"
               title="Every site can be judged"
               body="Every site in the book carries a service history with a schedule behind it."
             />

@@ -247,6 +247,7 @@ export default function PointsScreen() {
             ListEmptyComponent={
               failed ? null : (
                 <EmptyState
+          icon="dots-hexagon"
                   title={debounced ? 'Nothing matched' : 'No points'}
                   body={
                     debounced

@@ -48,7 +48,8 @@ export default function PromisesScreen() {
               <Button title="Add" onPress={add} disabled={!what.trim()} />
             </View>
           }
-          ListEmptyComponent={<EmptyState title="Nothing outstanding" body="Anything you commit to on site can go here so it does not rely on memory." />}
+          ListEmptyComponent={<EmptyState
+          icon="handshake-outline" title="Nothing outstanding" body="Anything you commit to on site can go here so it does not rely on memory." />}
           renderItem={({ item }) => (
             <Card>
               <Rowed gap={3}>

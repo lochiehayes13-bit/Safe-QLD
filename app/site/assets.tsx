@@ -104,6 +104,7 @@ export default function SiteAssetsScreen() {
           removeClippedSubviews
           ListEmptyComponent={
             <EmptyState
+          icon="clipboard-list-outline"
               title={debounced || system ? 'Nothing matched' : 'No assets recorded'}
               body="Build the register as you go — extinguishers, lights, hydrants, doors, pumps. Each one keeps its own history."
             />

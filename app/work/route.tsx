@@ -181,6 +181,7 @@ export default function RouteScreen() {
 
         {!route.stops.length && !route.unplaceable.length ? (
           <EmptyState
+          icon="map-marker-path"
             title={scope === 'today' ? 'Nothing scheduled today' : 'Nothing open'}
             body={
               scope === 'today'

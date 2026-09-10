@@ -259,7 +259,8 @@ export default function BookLeaveScreen() {
 
         <H2>Coming up</H2>
         {upcoming.length === 0 ? (
-          <EmptyState title="No leave booked" body="Anything booked from here, or already on your Simpro schedule, is listed here." />
+          <EmptyState
+          icon="beach" title="No leave booked" body="Anything booked from here, or already on your Simpro schedule, is listed here." />
         ) : (
           upcoming.map((row) => (
             <Card key={`${row.date}-${row.state}`}>

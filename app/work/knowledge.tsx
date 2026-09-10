@@ -101,6 +101,7 @@ export default function KnowledgeScreen() {
           ListEmptyComponent={
             failed ? <Banner tone="fail" title="The notes could not be read" body={failed} /> : (
             <EmptyState
+          icon="note-text-outline"
               title={search ? 'Nothing matched' : 'No notes yet'}
               body="Panel quirks, difficult sites, access tricks, common faults — the things that normally live in one person's head."
             />

@@ -147,7 +147,8 @@ export default function ZonesScreen() {
           data={zones}
           keyExtractor={(z) => z.id}
           contentContainerStyle={{ paddingHorizontal: t.space(4), paddingBottom: t.space(20) }}
-          ListEmptyComponent={<EmptyState title="No zones" body="Import a config or device list that carries zone data." />}
+          ListEmptyComponent={<EmptyState
+          icon="shape-outline" title="No zones" body="Import a config or device list that carries zone data." />}
           renderItem={({ item }) => (
             <View
               style={{

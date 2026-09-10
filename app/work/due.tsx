@@ -79,6 +79,7 @@ export default function LapsedScreen() {
           ListEmptyComponent={
             loading || failed ? null : (
               <EmptyState
+          icon="calendar-check-outline"
                 title="Nothing lapsed"
                 body="No routine with a recorded history has gone past its window. This does not cover routines never recorded at a site — those are on each site's own due list, and a site with no history at all will look quiet here."
               />

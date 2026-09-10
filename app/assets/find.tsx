@@ -167,6 +167,7 @@ export default function FindScreen() {
 
               {nothing ? (
                 <EmptyState
+          icon="magnify-close"
                   title="Nothing found"
                   body="Try part of the code, the serial from the label, or a word from the location text."
                 />
@@ -174,6 +175,7 @@ export default function FindScreen() {
 
               {debounced.trim().length < 2 ? (
                 <EmptyState
+          icon="magnify"
                   title="Search everything at once"
                   body="Asset codes, serial numbers, part numbers and device text are all searched together — you do not have to know which kind of thing you are holding."
                 />

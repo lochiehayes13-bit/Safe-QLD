@@ -173,6 +173,7 @@ export default function MeasurementTrendScreen() {
 
         {!built.series.length ? (
           <EmptyState
+          icon="chart-line"
             title="No measurements recorded"
             body={
               'Nothing on this asset’s timeline carries a number. Trends are built from the values '

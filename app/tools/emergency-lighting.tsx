@@ -175,6 +175,7 @@ function DischargeView() {
 
       {!entered ? (
         <EmptyState
+          icon="pencil-outline"
           title="Enter the result"
           body="Minutes illuminated and how the test ended. Nothing is assumed from a blank."
         />
@@ -474,7 +475,8 @@ function BatteryView() {
       />
 
       {!result ? (
-        <EmptyState title="Enter the install date" body="Off the fitting, the battery label, or the register." />
+        <EmptyState
+          icon="calendar-edit" title="Enter the install date" body="Off the fitting, the battery label, or the register." />
       ) : !result.known ? (
         <>
           <Banner tone="warn" title="Date not read" body={result.reason} />
@@ -592,7 +594,8 @@ function SpacingView() {
       </Txt>
 
       {!result ? (
-        <EmptyState title="Enter the room" body="Length, width and how many emergency luminaires are in it. Exit signs on their own do not count." />
+        <EmptyState
+          icon="floor-plan" title="Enter the room" body="Length, width and how many emergency luminaires are in it. Exit signs on their own do not count." />
       ) : !result.known ? (
         <>
           <Banner tone="warn" title="This app will not answer that" body={result.reason} />

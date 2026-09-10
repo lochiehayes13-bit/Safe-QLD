@@ -141,6 +141,7 @@ export default function SiteDefectsScreen() {
           ListEmptyComponent={
             failed ? null : (
               <EmptyState
+          icon="alert-circle-check-outline"
                 title={status === 'open' ? 'Nothing outstanding here' : 'No defects recorded'}
                 body="Defects raised on this site appear here until they are cleared."
               />

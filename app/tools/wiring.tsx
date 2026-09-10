@@ -72,6 +72,7 @@ export default function WiringTablesScreen() {
 
         {results.length === 0 ? (
           <EmptyState
+          icon="magnify-close"
             title="Nothing matched"
             body="Try the words on the column heading: unenclosed, enclosed in conduit, buried direct, trefoil, ambient."
           />

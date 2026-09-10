@@ -100,7 +100,8 @@ export default function SiteDueScreen() {
           refreshing={loading}
           ListEmptyComponent={
             loading || failed ? null
-              : <EmptyState title="No routines" body="No service routines are defined for this build." />
+              : <EmptyState
+          icon="calendar-clock" title="No routines" body="No service routines are defined for this build." />
           }
           renderItem={({ item }) => <DueRow due={item} siteId={siteId} />}
         />

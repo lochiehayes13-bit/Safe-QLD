@@ -83,6 +83,7 @@ export function DevicePicker({
           removeClippedSubviews
           ListEmptyComponent={
             <EmptyState
+          icon="magnify-close"
               title="Nothing matched"
               body="Try the part number on its own. Devices without a published current figure are deliberately not offered here."
             />

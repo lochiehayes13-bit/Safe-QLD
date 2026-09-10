@@ -381,6 +381,7 @@ export default function SiteQuoteScreen() {
           <Banner tone="fail" title="The defects could not be read" body={failed} />
         ) : loading ? null : !defects.length ? (
           <EmptyState
+          icon="alert-circle-check-outline"
             title="No open defects"
             body="There is nothing outstanding at this site to quote for."
           />

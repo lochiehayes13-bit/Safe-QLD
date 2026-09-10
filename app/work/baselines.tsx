@@ -77,6 +77,7 @@ export default function BaselinesScreen() {
           )}
           ListEmptyComponent={failed ? null : (
             <EmptyState
+          icon="file-table-outline"
               title="No baseline data yet"
               body="Baseline data records what the system looked like when it was commissioned, so later services have something to test against."
             />

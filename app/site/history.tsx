@@ -118,6 +118,7 @@ export default function SiteHistoryScreen() {
           <Banner tone="fail" title="The history could not be read" body={failed} />
         ) : !runs.length ? (
           <EmptyState
+          icon="history"
             title="Nothing recorded here yet"
             body="A routine run from this app is recorded automatically. Services carried out before the app was in use are not here unless they were imported."
           />

@@ -134,6 +134,7 @@ export default function CatalogueScreen() {
           removeClippedSubviews
           ListEmptyComponent={
             <EmptyState
+          icon="bookshelf"
               title={seeding ? 'Loading the catalogue' : total === 0 ? 'Catalogue not loaded' : 'Nothing matched'}
               body={
                 seeding

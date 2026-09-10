@@ -54,7 +54,8 @@ export default function DefectLibraryScreen() {
         <Txt size="sm" tone="muted">{shown.length} shown</Txt>
 
         {shown.length ? shown.map((d) => <DefectCard key={d.code} defect={d} />) : (
-          <EmptyState title="Nothing matched" body="Try a shorter search or clear the system filter." />
+          <EmptyState
+          icon="magnify-close" title="Nothing matched" body="Try a shorter search or clear the system filter." />
         )}
       </Screen>
     </>

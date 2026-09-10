@@ -257,6 +257,7 @@ export default function LabelsScreen() {
             }
             ListEmptyComponent={
               <EmptyState
+          icon="map-marker-off-outline"
                 title="No sites yet"
                 body="Add a site and its assets first. There is nothing to label until there is a register."
               />
@@ -370,6 +371,7 @@ export default function LabelsScreen() {
           }
           ListEmptyComponent={
             <EmptyState
+          icon="tag-outline"
               title={
                 filter === 'needs' ? 'Everything here has a tag'
                   : filter === 'ready' ? 'Nothing is tagged yet'

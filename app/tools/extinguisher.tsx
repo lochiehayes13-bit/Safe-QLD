@@ -386,6 +386,7 @@ function DueView({ type }: { type: ExtinguisherType }) {
 
       {!entered ? (
         <EmptyState
+          icon="calendar-edit"
           title="Enter a date"
           body="The date stamped on the cylinder is the one that matters. Without it the schedule can only be counted forward from the last service, which carries any lateness with it."
         />
@@ -549,6 +550,7 @@ function WeightView({ type }: { type: ExtinguisherType }) {
 
       {!entered ? (
         <EmptyState
+          icon="scale"
           title="Weigh it"
           body="Tare off the stamping, gross off the scales, both in grams. A kilogram figure entered here reads as a very light extinguisher."
         />

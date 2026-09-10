@@ -163,7 +163,8 @@ export default function StockScreen() {
           keyExtractor={(i) => i.id}
           contentContainerStyle={{ padding: t.space(4), paddingTop: 0, gap: t.space(2), paddingBottom: t.space(20) }}
           ListEmptyComponent={
-            active ? <EmptyState title="Nothing recorded" body="Add the parts you actually carry, with a minimum, and the app will tell you when you are running out." /> : null
+            active ? <EmptyState
+          icon="package-variant-closed" title="Nothing recorded" body="Add the parts you actually carry, with a minimum, and the app will tell you when you are running out." /> : null
           }
           renderItem={({ item }) => {
             const isLow = item.quantity <= item.minimum;

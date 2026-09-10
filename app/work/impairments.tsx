@@ -51,7 +51,8 @@ export default function ImpairmentsScreen() {
           data={items}
           keyExtractor={(i) => i.id}
           contentContainerStyle={{ padding: t.space(4), paddingTop: 0, gap: t.space(3), paddingBottom: t.space(20) }}
-          ListEmptyComponent={failed ? null : <EmptyState title="No systems impaired" body="Declaring an impairment here keeps the clock and the notifications visible until the system is back." />}
+          ListEmptyComponent={failed ? null : <EmptyState
+          icon="shield-check-outline" title="No systems impaired" body="Declaring an impairment here keeps the clock and the notifications visible until the system is back." />}
           renderItem={({ item }) => {
             const outstanding = impairmentOutstanding(item);
             return (

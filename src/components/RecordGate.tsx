@@ -82,6 +82,7 @@ export function RecordGate({
   return (
     <Screen>
       <EmptyState
+        icon="file-question-outline"
         title={`That ${what} is not on this device`}
         body={why
           ?? `It may have been deleted, or the link may have come from a share pack or another `

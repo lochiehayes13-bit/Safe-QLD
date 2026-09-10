@@ -40,7 +40,8 @@ export default function ReportsScreen() {
           keyExtractor={(r) => r.id}
           contentContainerStyle={{ padding: t.space(4), gap: t.space(3), paddingBottom: t.space(20) }}
           ListHeaderComponent={failed ? <Banner tone="fail" title="This list could not be read" body={failed} /> : null}
-          ListEmptyComponent={failed ? null : <EmptyState title="No test sheets yet" body="Open a site and start one. It stays on this device until you export or share it." />}
+          ListEmptyComponent={failed ? null : <EmptyState
+          icon="clipboard-text-outline" title="No test sheets yet" body="Open a site and start one. It stays on this device until you export or share it." />}
           renderItem={({ item }) => (
             <Card onPress={() => router.push({ pathname: '/report/[id]', params: { id: item.id } })}>
               <Rowed align="flex-start">

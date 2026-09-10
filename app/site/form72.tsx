@@ -167,6 +167,7 @@ export default function SiteForm72ListScreen() {
 
       {!forms.length ? (
         <EmptyState
+          icon="file-certificate-outline"
           title="No Form 72 for this site yet"
           body={'This is the department’s form for periodic testing and maintenance of a '
             + 'hydrant or sprinkler system. Start one and it fills in from the site, its asset '

@@ -110,11 +110,13 @@ export default function WhoAmIScreen() {
           ListEmptyComponent={
             people.length === 0 ? (
               <EmptyState
+          icon="account-group-outline"
                 title="No staff list on this phone yet"
                 body="It comes down from Simpro with the next sync. Once the office connection is set up in Settings, it arrives on its own."
               />
             ) : (
-              <EmptyState title="Nobody matches" body="Try fewer letters." />
+              <EmptyState
+          icon="account-search-outline" title="Nobody matches" body="Try fewer letters." />
             )
           }
         />

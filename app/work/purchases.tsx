@@ -109,6 +109,7 @@ export default function PurchasesScreen() {
           )}
           ListEmptyComponent={failed ? null : (
             <EmptyState
+          icon="cart-outline"
               title="Nothing on order"
               body="Requests raised from van stock or from a defect's quote lines appear here before they go to the office."
             />

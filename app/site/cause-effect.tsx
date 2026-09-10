@@ -192,6 +192,7 @@ export default function CauseEffectScreen() {
           ))
         ) : (
           <EmptyState
+          icon="sitemap-outline"
             title="No cause and effect recorded"
             body="Add each cause and the outputs it operates. The matrix exports as a landscape PDF or a spreadsheet."
           />

@@ -131,6 +131,7 @@ export default function OccupierIndexScreen() {
 
       {!rows.length ? (
         <EmptyState
+          icon="file-document-outline"
           title="No occupier statements yet"
           body={'One is raised from a site — open the site and choose Occupier statement. It fills '
             + "in from that site's own register and defect history."}

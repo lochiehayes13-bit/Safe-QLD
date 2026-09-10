@@ -402,6 +402,7 @@ export default function RunRoutineScreen() {
           <H2>Assets</H2>
           {!applicable.length ? (
             <EmptyState
+          icon="format-list-checks"
               title="No assets for this system yet"
               body="Add them to the site's register first, or import a device list. System checks above can still be recorded."
             />

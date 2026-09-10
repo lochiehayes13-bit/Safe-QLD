@@ -160,6 +160,7 @@ export default function QuotesScreen() {
 
       {loaded && !rows.length ? (
         <EmptyState
+          icon="file-document-edit-outline"
           title="No quotes raised yet"
           body={'A quote comes off a site’s open defects — open the site and choose Quote. The '
             + 'lines come from the defect codes and the hours from the rate card.'}

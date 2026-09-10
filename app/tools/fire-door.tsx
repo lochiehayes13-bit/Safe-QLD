@@ -189,6 +189,7 @@ function FrlView() {
 
       {!entered ? (
         <EmptyState
+          icon="keyboard-outline"
           title="Type what the tag says"
           body="Exactly what is stamped on it. Nothing here is inferred from a blank, and a two-element shorthand is not accepted as an FRL."
         />
@@ -700,6 +701,7 @@ function GapView() {
 
       {readings.length === 0 ? (
         <EmptyState
+          icon="ruler"
           title="Enter the measurements"
           body="All of them. The limits that apply here are written against a mean, not against the worst point you found."
         />

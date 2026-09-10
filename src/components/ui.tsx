@@ -506,6 +506,20 @@ export function Rowed({
   );
 }
 
+/**
+ * The screen with nothing on it.
+ *
+ * The icon is required, and that is the whole change worth explaining. It used
+ * to default to a sun, and fifty-eight of the app's eighty-three empty states
+ * took the default — so "no sites on this phone yet, sync first", "nothing on
+ * order", "no zones", "that record is not on this device" and "weigh it" all
+ * drew the same cheerful sun. An icon that means nothing in particular is
+ * worse than no icon: it reads as reassurance on screens that are asking for
+ * something, and it makes fifty-eight different situations look like one.
+ *
+ * Making it required is what stops the fifty-ninth. There is no sensible
+ * default for "what is this screen about", so the type refuses to invent one.
+ */
 export function EmptyState({
   title,
   body,
@@ -515,12 +529,12 @@ export function EmptyState({
   title: string;
   body?: string;
   action?: React.ReactNode;
-  icon?: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+  icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 }) {
   const t = useTheme();
   return (
     <View style={{ alignItems: 'center', paddingVertical: t.space(10), paddingHorizontal: t.space(6), gap: t.space(2) }}>
-      <IconPlate icon={icon ?? 'weather-sunny'} size={64} muted />
+      <IconPlate icon={icon} size={64} muted />
       <Txt size="lg" weight="800" style={{ marginTop: t.space(2), textAlign: 'center', letterSpacing: -0.3 }}>{title}</Txt>
       {body ? <Txt tone="muted" style={{ textAlign: 'center', lineHeight: 21 }}>{body}</Txt> : null}
       {action ? <View style={{ marginTop: t.space(2) }}>{action}</View> : null}

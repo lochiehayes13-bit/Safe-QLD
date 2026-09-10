@@ -54,6 +54,7 @@ export default function RecurringScreen() {
           ListEmptyComponent={
             failed ? null : (
             <EmptyState
+          icon="repeat-off"
               title="Nothing failing repeatedly"
               body="Once assets have a few services behind them, anything failing more than once will show up here."
             />

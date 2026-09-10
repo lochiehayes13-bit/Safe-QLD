@@ -188,6 +188,7 @@ export default function MaxDemandScreen() {
         <H2>{rows.length ? `${rows.length} load group${rows.length === 1 ? '' : 's'}` : 'Nothing on the board yet'}</H2>
         {rows.length === 0 ? (
           <EmptyState
+          icon="playlist-plus"
             title="Nothing added"
             body="Each row is a group of loads and the assessment applied to it. The assessments come from the maximum demand table in your own copy — this does the arithmetic around them, per phase."
           />

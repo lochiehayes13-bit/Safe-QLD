@@ -124,7 +124,8 @@ export default function DefectsScreen() {
           keyExtractor={(d) => d.id}
           contentContainerStyle={{ padding: t.space(4), paddingTop: 0, gap: t.space(3), paddingBottom: t.space(20) }}
           ListHeaderComponent={failed ? <Banner tone="fail" title="This list could not be read" body={failed} /> : null}
-          ListEmptyComponent={failed ? null : <EmptyState title={status === 'open' ? 'Nothing outstanding' : 'No defects recorded'} body="Defects raised on site appear here until they are cleared." />}
+          ListEmptyComponent={failed ? null : <EmptyState
+          icon="alert-circle-check-outline" title={status === 'open' ? 'Nothing outstanding' : 'No defects recorded'} body="Defects raised on site appear here until they are cleared." />}
           renderItem={({ item }) => {
             const days = ageDays(item.raisedAt);
             return (

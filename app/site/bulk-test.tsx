@@ -516,6 +516,7 @@ export default function BulkTestScreen() {
               <Txt tone="faint" size="sm" style={{ textAlign: 'center', marginTop: t.space(4) }}>Nothing matches.</Txt>
             ) : failed ? null : (
               <EmptyState
+          icon="clipboard-list-outline"
                 title="No assets on this site's register"
                 body="Add them, import a device list, or sync from Simpro first. There is nothing to test until the register has something on it."
               />

@@ -131,6 +131,7 @@ export default function CoverageScreen() {
           ListEmptyComponent={
             loading || failed ? null : (
               <EmptyState
+          icon="check-decagram-outline"
                 title="Nothing outstanding"
                 body="Every asset that was attempted has since been tested. Assets of a type no routine names are listed above instead, because they are never attempted at all."
               />

@@ -355,7 +355,8 @@ function DayBuilder() {
         {stops.length ? <Chip label="Start again" onPress={() => setStops([])} /> : null}
       </Rowed>
       {stops.length === 0 ? (
-        <EmptyState title="Nothing on the day yet" body="Add sites from the list below. Each one is sized from its register and laid out from seven." />
+        <EmptyState
+          icon="calendar-blank-outline" title="Nothing on the day yet" body="Add sites from the list below. Each one is sized from its register and laid out from seven." />
       ) : (
         layout.stops.map((stop, i) => (
           <Card key={stop.siteId}>
@@ -407,6 +408,7 @@ function DayBuilder() {
       <SearchBox value={query} onChange={setQuery} placeholder="A site, a suburb, an address" />
       {candidates.length === 0 ? (
         <EmptyState
+          icon="clipboard-list-outline"
           title={query ? 'Nothing matched' : 'Nothing due and no open jobs'}
           body={query ? 'Try fewer letters.' : 'Sites appear here when a routine is due or overdue, or the office has an open job at them. Search for any other site.'}
         />
@@ -621,6 +623,7 @@ function MonthPlanner() {
             </>
           ) : (
             <EmptyState
+          icon="calendar-month-outline"
               title={`Nothing planned for ${plan.window.label}`}
               body={plan.summary.unplanned
                 ? 'Everything due this window is in the list below, with the reason it could not be placed.'

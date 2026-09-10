@@ -241,6 +241,7 @@ export default function OutboundScreen() {
 
       {!runs.length ? (
         <EmptyState
+          icon="cloud-check-outline"
           title="No recorded services yet"
           body="Run a routine and record it, and it shows here ready to go to the office."
         />

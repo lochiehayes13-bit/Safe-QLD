@@ -711,6 +711,7 @@ export default function SiteScreen() {
           panels.map((p) => <PanelCard key={p.id} panel={p} />)
         ) : (
           <EmptyState
+          icon="alarm-light-outline"
             title="No panels yet"
             body="Import a device list exported from the panel's programming tool, or add points by hand."
             action={

@@ -135,11 +135,13 @@ export default function CableTablesScreen() {
 
             {totalRows === 0 ? (
               <EmptyState
+          icon="table-large"
                 title="No figures loaded yet"
                 body="This app carries no standard's tables — they are licensed per copy and this one is public. Add a table, paste the sizes out of your own copy or a manufacturer's catalogue, and everything here and in the sizing calculator runs off them."
               />
             ) : hits.length === 0 ? (
-              <EmptyState title="Nothing matched" body="A bare number means a size or a capacity. Try one word of the installation method instead." />
+              <EmptyState
+          icon="magnify-close" title="Nothing matched" body="A bare number means a size or a capacity. Try one word of the installation method instead." />
             ) : (
               hits.map((h) => <RatingRow key={h.rating.id} hit={h} />)
             )}
@@ -162,6 +164,7 @@ export default function CableTablesScreen() {
 
             {tables.length === 0 && !adding ? (
               <EmptyState
+          icon="table-large"
                 title="No tables yet"
                 body="A table is one cable construction installed one way — which is how the printed tables are laid out, and how you will look for the figure again."
               />
@@ -533,6 +536,7 @@ function DeratingTab({ entries, onChanged }: { entries: DeratingEntry[]; onChang
 
       {entries.length === 0 ? (
         <EmptyState
+          icon="table-large"
           title="No factors yet"
           body="Ambient temperature, grouping, thermal insulation, depth of burial. Type them once and every sizing offers them."
         />
