@@ -457,6 +457,28 @@ export function voltDrop(input: VoltDropInput): VoltDropResult | null {
 }
 
 /**
+ * The current a load of a given power will actually draw.
+ *
+ * The design current is what everything else hangs off, and on site it does
+ * not arrive as amps — it arrives as a kilowatt figure on a nameplate. The
+ * power factor belongs in here rather than only in the volt drop: a 3 kW motor
+ * at 0.8 draws a quarter more current than 3 kW of heating does, and the cable
+ * feels the current.
+ *
+ * `electrical.ts` has the same arithmetic for the fire tools without the DC
+ * case; this one keeps the three phase kinds in one type so a screen does not
+ * have to translate between two of them.
+ */
+export function designCurrent(watts: number, volts: number, phase: CircuitPhase, powerFactor = 1): number | null {
+  if (![watts, volts].every(Number.isFinite)) return null;
+  if (volts <= 0 || watts < 0) return null;
+  const pf = clampPf(powerFactor, phase);
+  const denominator = phase === 'three' ? Math.sqrt(3) * volts * pf : volts * pf;
+  if (denominator <= 0) return null;
+  return round(watts / denominator, 2);
+}
+
+/**
  * Power factor, kept inside the physics.
  *
  * A DC circuit has no phase angle, so anything but 1 there is a mistake in the

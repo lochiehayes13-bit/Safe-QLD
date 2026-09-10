@@ -588,6 +588,18 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['volt drop', 'cable', 'sounder', 'run', 'voltage'],
   },
   {
+    route: '/tools/cable', file: 'app/tools/cable.tsx', tab: 'tools', section: 'Calculators',
+    label: 'Cable sizing', modes: BOTH, openedFrom: ['/tools', '/tools/cable-tables'],
+    blurb: 'The four checks that decide a cable, run against the office\'s own capacity tables rather than against figures nobody can account for.',
+    terms: ['cable', 'sizing', 'current carrying capacity', 'ccc', 'as 3008', 'as 3000', 'derating', 'submain', 'wiring rules'],
+  },
+  {
+    route: '/tools/cable-tables', file: 'app/tools/cable-tables.tsx', tab: 'tools', section: 'Calculators',
+    label: 'Cable tables', modes: BOTH, openedFrom: ['/tools', '/tools/cable'],
+    blurb: 'The capacity figures themselves: loaded once from the office\'s licensed copy, searched by size or by what they carry.',
+    terms: ['cable tables', 'as 3008', 'current rating', 'amps', 'mv/a/m', 'derating factor', 'import'],
+  },
+  {
     route: '/tools/ohms', file: 'app/tools/ohms.tsx', tab: 'tools', section: 'Calculators',
     label: 'Electrical', modes: BOTH, openedFrom: ['/tools'],
     blurb: "Ohm's law, power and battery runtime — the arithmetic that turns up daily.",

@@ -82,6 +82,18 @@ const CALCULATORS: ToolDef[] = [
     body: 'Whether the device at the far end still sees enough voltage, and the smallest conductor that gets it there.',
   },
   {
+    href: '/tools/cable',
+    icon: 'cable-data',
+    title: 'Cable sizing',
+    body: 'Capacity where it is installed, volt drop, breaker coordination and fault withstand — every size it rejected, with the check that stopped it.',
+  },
+  {
+    href: '/tools/cable-tables',
+    icon: 'table-search',
+    title: 'Cable tables',
+    body: 'Your own current-carrying capacity figures, searched by size or by what they carry, each one saying where it was read.',
+  },
+  {
     href: '/tools/ohms',
     icon: 'omega',
     title: 'Electrical',
