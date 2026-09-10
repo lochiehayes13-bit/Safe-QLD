@@ -1,4 +1,6 @@
-import { WEEK_START_DAY, isWeekendDay, weekDates, weekStartFor } from '@/domain/timesheet';
+import {
+  WEEK_START_DAY, blankEntry, isWeekendDay, nextTimesFor, weekDates, weekStartFor, type TimesheetEntry,
+} from '@/domain/timesheet';
 
 /**
  * The pay week runs Wednesday to Tuesday.
@@ -55,5 +57,40 @@ describe('the weekend', () => {
 
   it('is not an unreadable day', () => {
     expect(isWeekendDay('nope')).toBe(false);
+  });
+});
+
+describe('the times a second job opens with', () => {
+  const usual = { start: '06:30', finish: '14:30' };
+  const entry = (id: string, date: string, startTime: string, finishTime: string): TimesheetEntry => ({
+    ...blankEntry(id, date), startTime, finishTime,
+  });
+
+  it('uses the usual day for the first job on a date', () => {
+    expect(nextTimesFor([], '2026-09-09', usual)).toEqual(usual);
+    expect(nextTimesFor([entry('a', '2026-09-08', '06:30', '14:30')], '2026-09-09', usual)).toEqual(usual);
+  });
+
+  it('starts the next one when the last one on that day finished', () => {
+    const entries = [entry('a', '2026-09-09', '06:30', '10:00')];
+    expect(nextTimesFor(entries, '2026-09-09', usual)).toEqual({ start: '10:00', finish: '18:00' });
+  });
+
+  it('follows the latest finish, not the last one typed', () => {
+    const entries = [
+      entry('a', '2026-09-09', '06:30', '12:00'),
+      entry('b', '2026-09-09', '06:30', '09:00'),
+    ];
+    expect(nextTimesFor(entries, '2026-09-09', usual).start).toBe('12:00');
+  });
+
+  it('ignores an entry whose finish cannot be read, rather than starting at midnight', () => {
+    const entries = [entry('a', '2026-09-09', '06:30', 'lunchtime')];
+    expect(nextTimesFor(entries, '2026-09-09', usual)).toEqual(usual);
+  });
+
+  it('does not run a job past the end of the day', () => {
+    const entries = [entry('a', '2026-09-09', '06:30', '23:30')];
+    expect(nextTimesFor(entries, '2026-09-09', usual)).toEqual({ start: '23:30', finish: '23:59' });
   });
 });

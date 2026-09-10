@@ -94,3 +94,49 @@ describe('the bookings a day becomes', () => {
     expect(plan.payloads).toEqual([]);
   });
 });
+
+describe('the office already has you somewhere', () => {
+  it('lays a stop after a block rather than over it, and says which one moved it', () => {
+    const layout = layOutDay(
+      [
+        { siteId: 's1', siteName: 'Fictional Tower', estimateHours: 2, job: { externalId: '1001' } },
+        { siteId: 's2', siteName: 'Fictional Clinic', estimateHours: 1, job: { externalId: '1002' } },
+      ],
+      { busy: [{ start: '07:00', end: '09:00', label: 'Job 41900' }] },
+    );
+    expect(layout.stops[0]).toMatchObject({ start: '09:00', end: '11:00', pushedBy: 'Job 41900' });
+    // The second is clear of it, so it runs straight on from the first.
+    expect(layout.stops[1]).toMatchObject({ start: '11:20', end: '12:20' });
+    expect(layout.stops[1]!.pushedBy).toBeUndefined();
+  });
+
+  it('clears two blocks in a row rather than landing on the second', () => {
+    const layout = layOutDay(
+      [{ siteId: 's1', siteName: 'A', estimateHours: 1, job: { externalId: '1' } }],
+      {
+        busy: [
+          { start: '07:00', end: '08:00', label: 'first' },
+          { start: '08:00', end: '10:30', label: 'second' },
+        ],
+      },
+    );
+    expect(layout.stops[0]).toMatchObject({ start: '10:30', pushedBy: 'second' });
+  });
+
+  it('ignores a block it cannot read the times of', () => {
+    const layout = layOutDay(
+      [{ siteId: 's1', siteName: 'A', estimateHours: 1, job: { externalId: '1' } }],
+      { busy: [{ start: 'all day', end: '', label: 'nonsense' }] },
+    );
+    expect(layout.stops[0]!.start).toBe('07:00');
+  });
+
+  it('still counts the overrun against the shift after being pushed', () => {
+    const layout = layOutDay(
+      [{ siteId: 's1', siteName: 'A', estimateHours: 4, job: { externalId: '1' } }],
+      { busy: [{ start: '07:00', end: '13:00', label: 'a long one' }] },
+    );
+    expect(layout.stops[0]).toMatchObject({ start: '13:00', end: '17:00' });
+    expect(layout.overrunHours).toBe(1.5);
+  });
+});

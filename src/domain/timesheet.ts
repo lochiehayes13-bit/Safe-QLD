@@ -388,6 +388,34 @@ export function toggleExtra(entry: TimesheetEntry, label: string): TimesheetEntr
   };
 }
 
+/**
+ * The times a job added to a day should open with.
+ *
+ * The first job of a day opens at the times this person usually starts and
+ * finishes. The second one opened at the same times, which is never right:
+ * nobody works two jobs from 06:30 to 14:30, and the technician had to
+ * retype both boxes on every job after the first. So a later job opens when
+ * the last one on that day finished, and runs for as long as the usual day
+ * is long — a starting point that is right often enough to leave alone.
+ */
+export function nextTimesFor(
+  entries: readonly TimesheetEntry[],
+  date: string,
+  usual: { start: string; finish: string },
+): { start: string; finish: string } {
+  const finishes = entries
+    .filter((e) => e.date === date)
+    .map((e) => parseTime(e.finishTime))
+    .filter((m): m is number => m !== null);
+  if (!finishes.length) return { ...usual };
+
+  const last = Math.max(...finishes);
+  const from = parseTime(usual.start);
+  const to = parseTime(usual.finish);
+  const span = from !== null && to !== null && to > from ? to - from : 8 * 60;
+  return { start: formatTime(last), finish: formatTime(Math.min(last + span, 23 * 60 + 59)) };
+}
+
 /** Worked hours on a date, leave excluded. */
 export function dayWorkedHours(entries: TimesheetEntry[], date: string): number {
   const total = entries.filter((e) => e.date === date).reduce((n, e) => n + entryHours(e), 0);

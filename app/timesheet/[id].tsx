@@ -5,10 +5,19 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as MailComposer from 'expo-mail-composer';
 import { getTimesheet, listTimesheets, saveTimesheet } from '@/db/timesheetRepo';
 import { jobCount, openJobPicks, searchJobPicks, type JobPick } from '@/db/opsRepo';
+import { deleteEntry, insertClosedEntry, listEntriesBetween } from '@/db/clockRepo';
+import { listSetupActivities } from '@/db/moreRepo';
+import { queueClockEntry } from '@/simpro/outboundMore';
+import {
+  bookableLeaveKind, buildLeaveEntry, isLeaveEntry, leaveActivityFor, leaveKind as leaveKindById,
+  type OfficeActivity,
+} from '@/domain/leaveBooking';
+import { loadPrefs } from '@/app-prefs';
 import {
   DEFAULT_EXTRAS, LEAVE_KINDS, LEAVE_LABEL, STANDARD_DAY_HOURS,
   blankEntry, copyDay, dayName, dayWorkedHours, entryHours, filterJobOptions, jobOptions, mergeJobOptions,
-  isWeekendDay, leaveOf, previousDayWithEntries, setLeave, timesheetTotals, toggleExtra, usualTimes, weekDates,
+  isWeekendDay, leaveOf, nextTimesFor, previousDayWithEntries, setLeave, timesheetTotals, toggleExtra, usualTimes,
+  weekDates,
   type HourKind, type JobOption, type LeaveKind, type Timesheet, type TimesheetEntry,
 } from '@/domain/timesheet';
 import {
@@ -54,6 +63,13 @@ export default function TimesheetScreen() {
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState<{ date: string } | null>(null);
   const [heldJobs, setHeldJobs] = useState<number | null>(null);
+  // The days off already on this person's Simpro schedule, and the office's
+  // own activity names to book against. Without both, a day marked off on the
+  // sheet is a day the office never hears about.
+  const [leaveDays, setLeaveDays] = useState<string[]>([]);
+  const [activities, setActivities] = useState<OfficeActivity[]>([]);
+  const [employeeId, setEmployeeId] = useState('');
+  const [bookingLeave, setBookingLeave] = useState(false);
 
   /*
    * One read, not three. The week, the job list and the history each used to be
@@ -82,12 +98,99 @@ export default function TimesheetScreen() {
       setJobs(jobList);
       setHistory(past);
       setHeldJobs(jobsHeld);
+
+      // What the office already holds for the days on this sheet, so a day
+      // marked off here is not booked onto the schedule twice.
+      const week = found ? weekDates(found.weekStarting) : [];
+      const [prefs, synced] = await Promise.all([loadPrefs(), listSetupActivities()]);
+      setEmployeeId(prefs.simproEmployeeId.trim());
+      setActivities(synced.map((a) => ({ id: a.id, name: a.name })));
+      if (week.length) {
+        const booked = (await listEntriesBetween(week[0]!, week[week.length - 1]!)).filter(isLeaveEntry);
+        setLeaveDays(booked.map((e) => e.date));
+      } else {
+        setLeaveDays([]);
+      }
     } catch (e) {
       setFailed(describeLoadFailure(e, 'this timesheet'));
     }
   }, [id]);
 
   useEffect(() => { void load(); }, [load]);
+
+  /**
+   * The days off on this sheet that the office's calendar has never heard of.
+   *
+   * A public holiday is not among them: nobody applies for Anzac Day, and
+   * booking one as leave would have it counted twice. A day already on the
+   * schedule drops off the list the moment it is booked.
+   */
+  const unbookedLeave = useMemo(() => {
+    if (!sheet) return [];
+    const out: { date: string; activity: OfficeActivity; kindId: string }[] = [];
+    for (const e of sheet.entries) {
+      const leave = leaveOf(e);
+      if (!leave) continue;
+      if (leaveDays.includes(e.date)) continue;
+      const kind = bookableLeaveKind(leave.kind);
+      if (!kind) continue;
+      const activity = leaveActivityFor(kind, activities);
+      if (!activity) continue;
+      if (out.some((x) => x.date === e.date)) continue;
+      out.push({ date: e.date, activity, kindId: kind.id });
+    }
+    return out.sort((a, b) => a.date.localeCompare(b.date));
+  }, [sheet, leaveDays, activities]);
+
+  /**
+   * Books them, one at a time, and says what happened.
+   *
+   * The same path the leave screen uses — a closed clock entry queued to the
+   * office's activity schedule — so there is one way a day off reaches Simpro
+   * rather than two that disagree. A day the office refuses is taken back off
+   * the phone rather than left looking booked.
+   */
+  const bookLeaveDays = async () => {
+    if (!unbookedLeave.length) return;
+    if (!employeeId) {
+      showAlert(
+        'Not signed in as yourself',
+        'Booking a day off needs to know whose Simpro schedule it goes on. Sign in from Settings, then try again.',
+      );
+      return;
+    }
+    setBookingLeave(true);
+    const done: string[] = [];
+    const refused: string[] = [];
+    try {
+      for (const day of unbookedLeave) {
+        const kind = leaveKindById(day.kindId);
+        if (!kind) continue;
+        const built = buildLeaveEntry({ id: newId(), employeeId, date: day.date, kind, activity: day.activity });
+        if ('refused' in built) {
+          refused.push(`${dayName(day.date)}: ${built.refused}`);
+          continue;
+        }
+        const entry = await insertClosedEntry(built.entry);
+        const outcome = await queueClockEntry(entry);
+        if (outcome.status === 'not-ready') {
+          await deleteEntry(entry.id);
+          refused.push(`${dayName(day.date)}: ${outcome.why}`);
+          continue;
+        }
+        done.push(`${dayName(day.date)} ${formatAuDate(day.date)} — ${day.activity.name}`);
+      }
+      await load();
+      showAlert(
+        done.length ? `${done.length} day${done.length === 1 ? '' : 's'} on the way to Simpro` : 'Nothing booked',
+        [done.join('\n'), refused.length ? `Not booked:\n${refused.join('\n')}` : ''].filter(Boolean).join('\n\n'),
+      );
+    } catch (e) {
+      showAlert('Not booked', describeActionFailure(e, 'booking the days off'));
+    } finally {
+      setBookingLeave(false);
+    }
+  };
 
   const persist = useCallback((next: Timesheet) => {
     setSheet(next);
@@ -121,10 +224,14 @@ export default function TimesheetScreen() {
   const extraChoices = useMemo(() => {
     const used = new Set<string>();
     for (const h of history) for (const e of h.entries) for (const x of e.extras ?? []) used.add(x);
+    // Including this sheet: an allowance typed on Wednesday has to still be a
+    // chip on Thursday, and the history read does not include the week being
+    // edited.
+    for (const e of sheet?.entries ?? []) for (const x of e.extras ?? []) used.add(x);
     const out = [...DEFAULT_EXTRAS];
     for (const x of used) if (!out.some((y) => y.toLowerCase() === x.toLowerCase())) out.push(x);
     return out;
-  }, [history]);
+  }, [history, sheet]);
 
   // Every hook this screen has must run before the gate below: on the first
   // render there is no sheet yet, and a hook that only runs once the record
@@ -134,8 +241,11 @@ export default function TimesheetScreen() {
 
   const addJob = (date: string, opt: JobOption | null) => {
     const entry = blankEntry(newId(), date);
-    entry.startTime = times.start;
-    entry.finishTime = times.finish;
+    // The first job of a day opens at the usual times; a later one opens when
+    // the last one finished, because nobody works two jobs 06:30 to 14:30.
+    const opening = nextTimesFor(sheet.entries, date, times);
+    entry.startTime = opening.start;
+    entry.finishTime = opening.finish;
     if (opt) { entry.jobNumber = opt.jobNumber; entry.siteName = opt.siteName; entry.siteId = opt.siteId; }
     setEntries([...sheet.entries, entry]);
     setPicking(null);
@@ -219,6 +329,28 @@ export default function TimesheetScreen() {
           </Rowed>
         </Card>
         </Reveal>
+
+        {unbookedLeave.length ? (
+          <Card>
+            <Txt weight="700">
+              {unbookedLeave.length} day{unbookedLeave.length === 1 ? '' : 's'} off on this sheet the office cannot see
+            </Txt>
+            <Txt size="sm" tone="muted" style={{ marginTop: t.space(1), lineHeight: 19 }}>
+              {unbookedLeave.map((l) => `${dayName(l.date)} ${formatAuDate(l.date)} — ${l.activity.name}`).join('\n')}
+            </Txt>
+            <Txt size="sm" tone="muted" style={{ marginTop: t.space(2), lineHeight: 19 }}>
+              Marking a day off here puts the hours on your pay. It does not put the day on your Simpro schedule, so
+              the person building next week’s run still has you available.
+            </Txt>
+            <Button
+              title="Put them on my Simpro schedule"
+              variant="secondary"
+              loading={bookingLeave}
+              onPress={() => { void bookLeaveDays(); }}
+              style={{ marginTop: t.space(3) }}
+            />
+          </Card>
+        ) : null}
 
         {days.map((date, i) => (
           <Reveal key={date} index={1 + i}>
@@ -365,6 +497,11 @@ function JobEntry({
   entry, theme: t, extraChoices, onChange, onRemove,
 }: { entry: TimesheetEntry; theme: Theme; extraChoices: string[]; onChange: (e: TimesheetEntry) => void; onRemove: () => void }) {
   const [open, setOpen] = useState(false);
+  // The allowance a technician has that nobody wrote down. Typing one adds it
+  // to this entry and, because the chips are built from what has been used
+  // before, it is a chip from then on.
+  const [newExtra, setNewExtra] = useState('');
+  const [addingExtra, setAddingExtra] = useState(false);
   const hours = entryHours(entry);
   return (
     <View style={{ marginTop: t.space(3), paddingTop: t.space(3), borderTopWidth: 1, borderTopColor: t.color.border, gap: t.space(2) }}>
@@ -435,7 +572,30 @@ function JobEntry({
                 const on = (entry.extras ?? []).some((y) => y.toLowerCase() === x.toLowerCase());
                 return <Chip key={x} label={x} selected={on} onPress={() => onChange(toggleExtra(entry, x))} />;
               })}
+              <Chip label={addingExtra ? 'Never mind' : '+ Another'} onPress={() => { setAddingExtra((a) => !a); setNewExtra(''); }} />
             </View>
+            {addingExtra ? (
+              <View style={{ gap: t.space(1.5) }}>
+                <LabeledInput
+                  label="What is it called"
+                  value={newExtra}
+                  onChange={setNewExtra}
+                  placeholder="Confined space, standby, meal"
+                  theme={t}
+                />
+                <Chip
+                  label="Add it"
+                  selected={Boolean(newExtra.trim())}
+                  onPress={() => {
+                    const label = newExtra.trim();
+                    if (!label) return;
+                    onChange(toggleExtra(entry, label));
+                    setNewExtra('');
+                    setAddingExtra(false);
+                  }}
+                />
+              </View>
+            ) : null}
           </View>
 
           <LabeledInput label="Report #" value={entry.serviceReportNumber} onChange={(v) => onChange({ ...entry, serviceReportNumber: v })} theme={t} />

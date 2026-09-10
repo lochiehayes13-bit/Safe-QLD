@@ -37,6 +37,25 @@ export interface DayStop extends DaySite {
   bookable: boolean;
   /** Why it cannot go on the schedule, where it cannot. */
   why?: string;
+  /**
+   * Set where the stop had to move because the office already has this
+   * person somewhere else at that hour. The words the screen prints.
+   */
+  pushedBy?: string;
+}
+
+/**
+ * Something already on this person's calendar that day.
+ *
+ * The office books work too, and a day builder that lays a fresh day from
+ * seven o'clock over the top of it produces a technician double-booked at
+ * eight, on somebody else's job, with nothing on either screen saying so.
+ */
+export interface BusyBlock {
+  start: string;
+  end: string;
+  /** What it is, for the line that says why the day starts at nine. */
+  label: string;
 }
 
 export interface DayLayout {
@@ -72,19 +91,47 @@ export function blockMinutes(estimateHours: number): number {
   return Math.max(MIN_BLOCK_MINUTES, Math.round((estimateHours * 60) / 15) * 15);
 }
 
+/**
+ * Lays the day out around what is already booked.
+ *
+ * The busy blocks come from the office's own calendar for this person on
+ * this day. A stop that would land on top of one is moved to after it,
+ * rather than being drawn over it: the calendar is the office's, the day
+ * being built is a proposal, and the proposal loses.
+ */
 export function layOutDay(
   sites: readonly DaySite[],
-  options: { start?: string; end?: string; travelMinutes?: number } = {},
+  options: { start?: string; end?: string; travelMinutes?: number; busy?: readonly BusyBlock[] } = {},
 ): DayLayout {
   const startAt = toMinutes(options.start ?? DAY_START) ?? toMinutes(DAY_START)!;
   const endAt = toMinutes(options.end ?? DAY_END) ?? toMinutes(DAY_END)!;
   const travel = Math.max(0, options.travelMinutes ?? DEFAULT_TRAVEL_MINUTES);
+  const busy = (options.busy ?? [])
+    .map((b) => ({ from: toMinutes(b.start), to: toMinutes(b.end), label: b.label }))
+    .filter((b): b is { from: number; to: number; label: string } => b.from !== undefined && b.to !== undefined && b.to > b.from)
+    .sort((a, b) => a.from - b.from);
+
+  /** Pushes past every block the given span would land on, and says which. */
+  const clear = (from: number, minutes: number): { from: number; pushedBy?: string } => {
+    let at = from;
+    let pushedBy: string | undefined;
+    // Repeated because clearing one block can land on the next.
+    for (let pass = 0; pass < busy.length + 1; pass += 1) {
+      const hit = busy.find((b) => at < b.to && at + minutes > b.from);
+      if (!hit) break;
+      at = hit.to;
+      pushedBy = hit.label;
+    }
+    return { from: at, pushedBy };
+  };
 
   let cursor = startAt;
   const stops: DayStop[] = sites.map((site, i) => {
     const travelMinutes = i === 0 ? 0 : travel;
     cursor += travelMinutes;
     const minutes = blockMinutes(site.estimateHours);
+    const cleared = clear(cursor, minutes);
+    cursor = cleared.from;
     const start = toClock(cursor);
     cursor += minutes;
     const end = toClock(cursor);
@@ -97,6 +144,7 @@ export function layOutDay(
       travelMinutes,
       bookable,
       why: bookable ? undefined : 'No open Simpro job at this site, so there is no schedule to put a block on. Ask the office to raise one.',
+      pushedBy: cleared.pushedBy,
     };
   });
 

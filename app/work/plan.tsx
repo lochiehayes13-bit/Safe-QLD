@@ -3,6 +3,7 @@ import { View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { loadPrefs, type Prefs } from '@/app-prefs';
+import { clearDayDraft, draftIsCurrent, loadDayDraft, saveDayDraft } from '@/day-draft';
 import { nowIso } from '@/db';
 import { planCandidates, siteFacts, type PlanCandidate } from '@/db/siteHistoryRepo';
 import { buildWorkPlan, planCoverage, type PlanCoverage } from '@/db/planRepo';
@@ -10,6 +11,7 @@ import { assetCountsBySystem } from '@/db/assetRepo';
 import { costCentresForJob } from '@/db/clockRepo';
 import { localJobId } from '@/db/mirrorRepo';
 import { queueScheduleChange, undoScheduleChange } from '@/db/scheduleChangeRepo';
+import { listScheduleFor } from '@/db/scheduleRepo';
 import { simproConfigFromPrefs } from '@/simpro/config';
 import { syncJobDetail } from '@/simpro/sync';
 import { SCHEDULE_BOOK_KIND, notBeforeFrom } from '@/domain/scheduling';
@@ -17,7 +19,7 @@ import { addDays } from '@/domain/clockOn';
 import { qldIsoDay } from '@/domain/qldTime';
 import { assetsLine, lastServiceLine, type SiteFacts } from '@/domain/siteHistory';
 import {
-  DAY_END, DAY_START, bookingsFor, dayHeadline, layOutDay, moveStop, type DaySite,
+  DAY_END, DAY_START, bookingsFor, dayHeadline, layOutDay, moveStop, type BusyBlock, type DaySite,
 } from '@/domain/dayBuilder';
 import {
   CLUSTER_METHOD_LABEL, ESTIMATE_CAVEAT, UNPLANNABLE_REASON_LABEL, estimateVisitHours, formatHours, formatPlanDate,
@@ -98,6 +100,13 @@ function DayBuilder() {
   const [booking, setBooking] = useState(false);
   const [booked, setBooked] = useState<{ rowId: string; siteName: string; start: string; end: string; notBefore: string }[]>([]);
   const [now, setNow] = useState(() => Date.now());
+  // What the office already has this person doing that day. The layout works
+  // around it rather than over it.
+  const [busy, setBusy] = useState<BusyBlock[]>([]);
+  // Until the draft has been read, an empty day is "not loaded yet" rather
+  // than "nothing on it", and writing an empty draft over a real one here is
+  // exactly how the day would be lost a second time.
+  const [draftLoaded, setDraftLoaded] = useState(false);
 
   const employeeId = prefs?.simproEmployeeId.trim() ?? '';
   const ownName = prefs?.technicianName ?? '';
@@ -108,13 +117,77 @@ function DayBuilder() {
       const p = await loadPrefs();
       setPrefs(p);
       setCandidates(await planCandidates(today, query));
+
+      // The half-built day comes back. See @/day-draft: it is written to the
+      // handset as it is edited, because a day is built between other things.
+      const draft = await loadDayDraft();
+      if (draftIsCurrent(draft, today) && draft) {
+        setStops((current) => (current.length ? current : draft.stops.map((x) => ({ ...x }))));
+        setDate((current) => (current === today ? draft.date : current));
+      }
+      setDraftLoaded(true);
     } catch (e) {
       setCandidates([]);
+      setDraftLoaded(true);
       setFailed(describeLoadFailure(e, 'the sites'));
     }
   }, [today, query]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+
+  // The draft follows the day, so switching to the month view and back, or
+  // walking out to the Jobs tab, no longer throws it away.
+  useEffect(() => {
+    if (!draftLoaded) return;
+    if (!stops.length) {
+      void clearDayDraft();
+      return;
+    }
+    void saveDayDraft({
+      date,
+      savedAt: nowIso(),
+      stops: stops.map((s) => ({ siteId: s.siteId, siteName: s.siteName, estimateHours: s.estimateHours, job: s.job })),
+    });
+  }, [draftLoaded, date, stops]);
+
+  /**
+   * What the office already has booked for this person on the chosen day.
+   *
+   * Read every time the day changes. Without it the builder laid a fresh day
+   * from seven o'clock over the top of the office's own blocks, and the
+   * technician found out by being in two places at eight.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    const read = async () => {
+      if (!date || (!employeeId && !ownName)) {
+        setBusy([]);
+        return;
+      }
+      try {
+        const blocks = await listScheduleFor({
+          staffId: employeeId || undefined,
+          staffName: employeeId ? undefined : ownName,
+          from: date,
+          to: date,
+        });
+        if (cancelled) return;
+        setBusy(blocks
+          .filter((b) => b.startTime && b.endTime)
+          .map((b) => ({
+            start: b.startTime!,
+            end: b.endTime!,
+            label: b.jobId ? `Job ${b.jobId}` : 'a block the office booked',
+          })));
+      } catch {
+        // A calendar that will not read is not a reason to refuse to plan;
+        // the banner below says the day was laid out without it.
+        if (!cancelled) setBusy([]);
+      }
+    };
+    void read();
+    return () => { cancelled = true; };
+  }, [date, employeeId, ownName]);
 
   // The undo minute is drawn as a countdown, so a stale button never lies.
   useEffect(() => {
@@ -169,7 +242,7 @@ function DayBuilder() {
     }
   }, [stops, facts, today, ownName]);
 
-  const layout = useMemo(() => layOutDay(stops), [stops]);
+  const layout = useMemo(() => layOutDay(stops, { busy }), [stops, busy]);
   const days = useMemo(() => {
     const out: string[] = [];
     let d = today;
@@ -269,7 +342,18 @@ function DayBuilder() {
         ))}
       </Rowed>
 
-      <H2>{stops.length ? `Your day — ${dayHeadline(layout)}` : 'Your day'}</H2>
+      {busy.length ? (
+        <Banner
+          tone="info"
+          title={`${busy.length} block${busy.length === 1 ? '' : 's'} already on your calendar that day`}
+          body={`${busy.map((b) => `${b.start}–${b.end} ${b.label}`).join('\n')}\n\nThe day below is laid out around them rather than over them.`}
+        />
+      ) : null}
+
+      <Rowed style={{ justifyContent: 'space-between' }} align="center">
+        <H2>{stops.length ? `Your day — ${dayHeadline(layout)}` : 'Your day'}</H2>
+        {stops.length ? <Chip label="Start again" onPress={() => setStops([])} /> : null}
+      </Rowed>
       {stops.length === 0 ? (
         <EmptyState title="Nothing on the day yet" body="Add sites from the list below. Each one is sized from its register and laid out from seven." />
       ) : (
@@ -282,6 +366,11 @@ function DayBuilder() {
                 <Txt size="sm" tone={stop.bookable ? 'muted' : 'warn'} style={{ marginTop: 2 }}>
                   {stop.bookable ? `Books onto job ${stop.job!.externalId}${stop.job!.title ? ` — ${stop.job!.title}` : ''}` : stop.why}
                 </Txt>
+                {stop.pushedBy ? (
+                  <Txt size="xs" tone="accent" style={{ marginTop: 2 }}>
+                    Moved to after {stop.pushedBy}, which the office already has you on.
+                  </Txt>
+                ) : null}
               </View>
               <StatusPill label={stop.bookable ? 'Bookable' : 'No job'} tone={stop.bookable ? 'pass' : 'warn'} />
             </Rowed>

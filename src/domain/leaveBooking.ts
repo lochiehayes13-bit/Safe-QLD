@@ -43,6 +43,24 @@ export const LEAVE_KINDS: readonly LeaveKind[] = [
   { id: 'unpaid', label: 'Unpaid leave', match: /unpaid|lwop|without pay/i },
 ];
 
+/**
+ * The timesheet's word for a day off, in the booking module's vocabulary.
+ *
+ * The sheet has five columns — sick, RDO, annual, LWOP and public holiday —
+ * and only four of them are a day a technician books. A public holiday is
+ * the office's to set: nobody applies for Anzac Day, and putting one on the
+ * schedule as though it were leave would have it counted twice.
+ */
+export function bookableLeaveKind(sheetColumn: string): LeaveKind | undefined {
+  switch (sheetColumn) {
+    case 'annual': return leaveKind('annual');
+    case 'rdo': return leaveKind('rdo');
+    case 'sick': return leaveKind('sick');
+    case 'lwop': return leaveKind('unpaid');
+    default: return undefined;
+  }
+}
+
 export function leaveKind(id: string): LeaveKind | undefined {
   return LEAVE_KINDS.find((k) => k.id === id);
 }
