@@ -59,11 +59,34 @@ export interface Completion {
  * screen down. The caller decides what to say about the refusal; the reason
  * is here so it can.
  *
- * What is sent is exactly the two strings handed in. This function adds no
- * context of its own, so a caller that has been careful about what it puts in
- * `user` can be sure that is all that left the phone.
+ * What is sent is exactly the two strings handed in, and the photograph
+ * where one is given. This function adds no context of its own, so a caller
+ * that has been careful about what it puts in `user` can be sure that is all
+ * that left the phone.
  */
-export async function complete(input: { system: string; user: string; maxTokens?: number }): Promise<Completion> {
+/** A photograph handed to the model alongside the words, already shrunk and encoded. */
+export interface CompletionImage {
+  base64: string;
+  mediaType: 'image/jpeg' | 'image/png' | 'image/webp';
+}
+
+/**
+ * The message body, as the API takes it.
+ *
+ * Text alone stays exactly the string it always was. With a photograph the
+ * content becomes blocks — the image first, then the words — which is the
+ * one shape the API reads a picture in. Pure so the label reader's test can
+ * see what would be sent without a key.
+ */
+export function messageContent(user: string, images?: readonly CompletionImage[]): string | { type: string; source?: unknown; text?: string }[] {
+  if (!images?.length) return user;
+  return [
+    ...images.map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.mediaType, data: i.base64 } })),
+    { type: 'text', text: user },
+  ];
+}
+
+export async function complete(input: { system: string; user: string; maxTokens?: number; images?: readonly CompletionImage[] }): Promise<Completion> {
   const key = await SecureStore.getItemAsync(KEY_SLOT);
   if (!key) return { failure: 'no-key', refusal: 'No API key is set.' };
 
@@ -79,7 +102,7 @@ export async function complete(input: { system: string; user: string; maxTokens?
         model: MODEL,
         max_tokens: input.maxTokens ?? MAX_TOKENS,
         system: input.system,
-        messages: [{ role: 'user', content: input.user }],
+        messages: [{ role: 'user', content: messageContent(input.user, input.images) }],
       }),
     });
 

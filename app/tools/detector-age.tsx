@@ -1,13 +1,19 @@
 import React, { useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { Stack } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   FORMATS, LIFE_SOURCE, RECOMMENDED_LIFE_YEARS, readDateCode, serviceLife,
   type DateReading,
 } from '@/calc/deviceAge';
+import { WHY_PHOTO_READING, readLabelFromPhoto, type LabelResult } from '@/ai/labelReading';
+import { encodeLabelPhoto } from '@/services/labelPhoto';
+import { describeActionFailure } from '@/domain/loadFailure';
+import { showAlert } from '@/components/alert';
 import { useTheme } from '@/theme';
 import {
-  Banner, Card, Chip, Field, H2, Label, Rowed, Screen, Segmented, Txt,
+  Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
 
 /**
@@ -45,6 +51,8 @@ export default function DetectorAgeScreen() {
   const [inService, setInService] = useState('');
   const [earliest, setEarliest] = useState('');
   const [life, setLife] = useState(String(RECOMMENDED_LIFE_YEARS));
+  const [reading, setReading] = useState(false);
+  const [label, setLabel] = useState<LabelResult | null>(null);
 
   const year = (v: string) => {
     const n = Number(v.trim());
@@ -63,6 +71,53 @@ export default function DetectorAgeScreen() {
   const lifeYears = Number(life) > 0 ? Number(life) : RECOMMENDED_LIFE_YEARS;
   const typed = code.trim().length > 0;
 
+  /**
+   * Photographs the label and lets the model transcribe it.
+   *
+   * The model only transcribes. Whatever it read is put into the code box
+   * above as if it had been typed, the make is set where the label named one
+   * this app knows, and the readings below are the decoder's — exactly what
+   * a typed code gets. The transcription and the chain of reasoning stay on
+   * screen so the head can be held up against them.
+   */
+  const photograph = async (fromCamera: boolean) => {
+    setReading(true);
+    try {
+      const perm = fromCamera
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        showAlert('Permission needed', 'Safe QLD needs the camera to read the label.');
+        return;
+      }
+      const result = fromCamera
+        ? await ImagePicker.launchCameraAsync({ quality: 0.9 })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.9 });
+      if (result.canceled || !result.assets[0]) return;
+      const image = await encodeLabelPhoto(result.assets[0].uri);
+      const read = await readLabelFromPhoto(image, {
+        today,
+        knownInServiceYear: year(inService),
+        earliestYear: year(earliest),
+      });
+      setLabel(read);
+      const usable = read.codes.find((c) => c.readings.length);
+      if (usable) {
+        setCode(usable.code);
+        const known = read.transcription?.knownBrand;
+        setBrand(known ?? 'any');
+      } else if (read.transcription?.codes.length) {
+        // Transcribed but not decodable: still worth putting in the box so
+        // it can be corrected by hand rather than retyped from scratch.
+        setCode(read.transcription.codes[0]!.text.replace(/\s+/g, ''));
+      }
+    } catch (e) {
+      showAlert('Could not read the label', describeActionFailure(e, 'reading the photograph'));
+    } finally {
+      setReading(false);
+    }
+  };
+
   return (
     <>
       <Stack.Screen options={{ title: 'Detector age' }} />
@@ -72,6 +127,54 @@ export default function DetectorAgeScreen() {
           one on purpose — the year is a single digit, so the same code comes round every ten years.
         </Txt>
 
+        <Rowed gap={2}>
+          <View style={{ flex: 1 }}>
+            <Button
+              title="Photograph the label"
+              loading={reading}
+              onPress={() => { void photograph(true); }}
+              icon={<MaterialCommunityIcons name="camera-outline" size={20} color={t.color.onAccent} />}
+            />
+          </View>
+          <Button title="From photos" variant="secondary" disabled={reading} onPress={() => { void photograph(false); }} />
+        </Rowed>
+
+        {label?.refusal ? (
+          <Banner tone="warn" title="Nothing usable came off the photograph" body={label.refusal} />
+        ) : null}
+
+        {label && !label.refusal ? (
+          <Card>
+            <Label>Read from the photograph</Label>
+            {label.transcription ? (
+              <Txt size="sm" style={{ marginTop: t.space(1.5), lineHeight: 20 }}>
+                {label.transcription.brand || 'No make printed'}
+                {label.transcription.model ? ` · ${label.transcription.model}` : ''}
+                {label.transcription.dateText ? ` · "${label.transcription.dateText}"` : ''}
+              </Txt>
+            ) : null}
+            <Rowed gap={2} wrap style={{ marginTop: t.space(2) }}>
+              {label.codes.map((c) => (
+                <Chip
+                  key={`${c.code}-${c.where}`}
+                  label={c.readings.length ? c.code : `${c.code} · no format`}
+                  selected={code === c.code}
+                  onPress={() => setCode(c.code)}
+                />
+              ))}
+            </Rowed>
+            <Divider />
+            <Label>How it was read</Label>
+            {label.howRead.map((line, i) => (
+              <Txt key={i} size="sm" tone="muted" style={{ marginTop: t.space(1), lineHeight: 19 }}>{i + 1}. {line}</Txt>
+            ))}
+            <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
+              Hold the head up and check the digits above against the label. If the transcription is wrong, correct the
+              code in the box below — the dates come from the box, not from the photograph.
+            </Txt>
+          </Card>
+        ) : null}
+
         <Card>
           <Field
             label="Date code or serial"
@@ -79,7 +182,7 @@ export default function DetectorAgeScreen() {
             onChangeText={setCode}
             placeholder="6015"
             autoCapitalize="characters"
-            hint="From the label on the back of the head, not the address."
+            hint="From the label on the back of the head, not the address. Or photograph it above."
           />
           <View style={{ height: t.space(2.5) }} />
           <Label>Make</Label>
@@ -190,6 +293,16 @@ export default function DetectorAgeScreen() {
             A head past its recommended age is not a defect and must not be written up as one. It is
             a lifecycle finding: the device works, the manufacturer no longer stands behind its age.
           </Txt>
+        </Card>
+
+        <H2>Why photograph it</H2>
+        <Card>
+          {WHY_PHOTO_READING.map((why, i) => (
+            <Rowed key={i} gap={2} align="flex-start" style={{ marginTop: i ? t.space(2) : 0 }}>
+              <MaterialCommunityIcons name="check-circle-outline" size={16} color={t.color.accentText} style={{ marginTop: 2 }} />
+              <Txt size="sm" tone="muted" style={{ flex: 1, lineHeight: 19 }}>{why}</Txt>
+            </Rowed>
+          ))}
         </Card>
 
         <H2>The formats</H2>
