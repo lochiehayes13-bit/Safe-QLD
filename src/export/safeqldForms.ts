@@ -11,6 +11,7 @@ import {
   groupByDate,
   leaveOf,
   parseTime,
+  timesheetTotals,
   type Timesheet,
   type TimesheetEntry,
 } from '@/domain/timesheet';
@@ -366,6 +367,8 @@ export function timesheetSheet(sheet: Timesheet): Sheet {
   const lastDataRow = rows.length;
   push([]);
 
+  const columnTotals = summedColumnTotals(sheet);
+
   const totalRow = push([
     { v: '', style: 'total' },
     { v: '', style: 'total' },
@@ -373,11 +376,16 @@ export function timesheetSheet(sheet: Timesheet): Sheet {
     { v: '', style: 'totalLabel' },
     { v: '', style: 'totalLabel' },
     { v: '', style: 'totalLabel' },
-    // Live formulas rather than baked values, so the sheet still adds up if
-    // someone edits a cell after export.
+    // Live formulas, so the sheet still adds up if somebody edits a cell after
+    // export — and each carries its answer, so the file holds the week's hours
+    // as numbers for every reader that does not calculate.
     ...SUMMED_COLUMNS.map((col) =>
       lastDataRow >= firstDataRow
-        ? ({ f: `SUM(${col}${firstDataRow}:${col}${lastDataRow})`, style: 'total' } as FormulaCell)
+        ? ({
+          f: `SUM(${col}${firstDataRow}:${col}${lastDataRow})`,
+          v: columnTotals[col],
+          style: 'total',
+        } as FormulaCell)
         : ({ v: 0, style: 'total' } as Cell),
     ),
     { v: '', style: 'total' },
@@ -462,10 +470,19 @@ export function timesheetSummarySheet(sheet: Timesheet): Sheet {
     merges.push(`A${n}:C${n}`);
     rowHeights[n] = 20;
   };
-  /** A figure quoted from the timesheet's totals row, with the column it came from. */
-  const quoted = (label: string, column: string): number => push([
+  const figures = timesheetTotals(sheet);
+
+  /**
+   * A figure quoted from the timesheet's totals row, with the column it came
+   * from and the answer cached beside the formula.
+   *
+   * The cache is the point. Without it the emailed workbook contains no
+   * number anywhere — every figure on both sheets is a formula, and a reader
+   * that does not calculate finds empty cells where the hours should be.
+   */
+  const quoted = (label: string, column: string, value: number): number => push([
     field(label),
-    { f: `${TIMESHEET_SHEET}!${column}${totals}`, style: 'hours' },
+    { f: `${TIMESHEET_SHEET}!${column}${totals}`, v: value, style: 'hours' },
     { v: `Timesheet column ${column}`, style: 'muted' },
   ]);
 
@@ -487,31 +504,31 @@ export function timesheetSummarySheet(sheet: Timesheet): Sheet {
   detail('Days on the sheet', days.length, 'cell');
 
   section('WORKED');
-  const ord = quoted('Ordinary', 'G');
-  quoted('Overtime', 'H');
-  const dt = quoted('Double time', 'I');
+  const ord = quoted('Ordinary', 'G', figures.ord);
+  quoted('Overtime', 'H', figures.ot);
+  const dt = quoted('Double time', 'I', figures.dt);
   const worked = push([
     { v: 'Worked total', style: 'totalLabel' },
-    { f: `SUM(B${ord}:B${dt})`, style: 'total' },
+    { f: `SUM(B${ord}:B${dt})`, v: figures.worked, style: 'total' },
     { v: '', style: 'total' },
   ]);
 
   section('LEAVE AND PUBLIC HOLIDAYS');
-  const sick = quoted('Sick', 'J');
-  quoted('RDO', 'K');
-  quoted('Annual', 'L');
-  quoted('Unpaid (LWOP)', 'M');
-  const pubHol = quoted('Public holiday', 'N');
+  const sick = quoted('Sick', 'J', figures.sick);
+  quoted('RDO', 'K', figures.rdo);
+  quoted('Annual', 'L', figures.annual);
+  quoted('Unpaid (LWOP)', 'M', figures.lwop);
+  const pubHol = quoted('Public holiday', 'N', figures.publicHoliday);
   const leave = push([
     { v: 'Leave total', style: 'totalLabel' },
-    { f: `SUM(B${sick}:B${pubHol})`, style: 'total' },
+    { f: `SUM(B${sick}:B${pubHol})`, v: round2(figures.grand - figures.worked), style: 'total' },
     { v: '', style: 'total' },
   ]);
 
   push([]);
   const grand = push([
     { v: 'PAID TOTAL', style: 'totalLabel' },
-    { f: `B${worked}+B${leave}`, style: 'total' },
+    { f: `B${worked}+B${leave}`, v: figures.grand, style: 'total' },
     { v: '', style: 'total' },
   ]);
   rowHeights[grand] = 20;
@@ -541,13 +558,53 @@ export function timesheetSummarySheet(sheet: Timesheet): Sheet {
       at = to + 1;
       push([
         field(`${dayName(group.date)} ${formatAuDate(group.date)}`),
-        { f: `SUM(${TIMESHEET_SHEET}!G${from}:N${to})`, style: 'hours' },
+        { f: `SUM(${TIMESHEET_SHEET}!G${from}:N${to})`, v: dayPaidHours(group.entries), style: 'hours' },
         { v: dayNote(group.entries), style: 'cell' },
       ]);
     }
   }
 
   return { name: 'Summary', rows, merges, rowHeights, colWidths: [26, 12, 46] };
+}
+
+/**
+ * What each of the eight summed columns adds up to.
+ *
+ * The same eight sums the totals row writes as formulas, worked out here so
+ * each cell can carry its answer as well. Keyed by the column letter, because
+ * that is what the formula is keyed by and a second ordering is a second thing
+ * to get out of step.
+ */
+function summedColumnTotals(sheet: Timesheet): Record<(typeof SUMMED_COLUMNS)[number], number> {
+  const t = timesheetTotals(sheet);
+  return {
+    G: round2(t.ord), H: round2(t.ot), I: round2(t.dt),
+    J: round2(t.sick), K: round2(t.rdo), L: round2(t.annual),
+    M: round2(t.lwop), N: round2(t.publicHoliday),
+  };
+}
+
+/** Two decimals, which is what an hours figure is. Keeps 7.6 from printing as 7.600000000000001. */
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/**
+ * Everything a day is paid for: the hours worked on it and any leave taken.
+ *
+ * The same span the formula beside it sums — columns G to N of that day's rows
+ * on the timesheet — worked out here so the cell carries the answer as well as
+ * the sum. If these two ever disagree the formula wins the moment Excel opens
+ * the file, which is the right way round for a disagreement to fall.
+ */
+function dayPaidHours(entries: TimesheetEntry[]): number {
+  let total = 0;
+  for (const e of entries) {
+    total += entryHours(e);
+    const l = leaveOf(e);
+    if (l) total += l.hours;
+  }
+  return round2(total);
 }
 
 /** Where the day was spent: the sites worked, or the kind of day off it was. */

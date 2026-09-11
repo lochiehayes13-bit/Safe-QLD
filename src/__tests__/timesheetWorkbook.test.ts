@@ -383,3 +383,44 @@ describe('the file Excel opens', () => {
     expect(names).toContain('xl/worksheets/sheet2.xml');
   });
 });
+
+describe('a workbook that contains numbers', () => {
+  /*
+   * The fault this pins: every figure on both sheets became a cross-sheet
+   * formula, and a FormulaCell writes no value of its own. Excel works them
+   * out on load and shows them, so the sheet looked right to anybody who
+   * opened it in Excel — and the file itself held no number anywhere. Payroll
+   * does not only open these in Excel. A preview pane, a script, a reader
+   * pulling the hours into another system: all of them find empty cells.
+   */
+  const sheet = timesheet([
+    entry({ date: '2026-08-12', hourKind: 'ord', startTime: '06:30', finishTime: '14:30' }),
+    entry({ date: '2026-08-13', hourKind: 'ot', startTime: '17:30', finishTime: '20:45' }),
+    entry({ date: '2026-08-14', sick: '7.6' }),
+  ]);
+
+  it('caches the answer beside every formula on the summary', () => {
+    for (const row of timesheetSummarySheet(sheet).rows) {
+      for (const cell of row) {
+        if (cell !== null && typeof cell === 'object' && 'f' in cell) {
+          expect(typeof (cell as FormulaCell).v).toBe('number');
+        }
+      }
+    }
+  });
+
+  it('writes that answer into the file, beside the formula and not instead of it', () => {
+    const xml = part([timesheetSheet(sheet), timesheetSummarySheet(sheet)], 'xl/worksheets/sheet2.xml');
+    // <f>…</f><v>8</v>, in that order: the formula stays live and the value is
+    // what a reader without a calculation engine gets.
+    const formulas = [...xml.matchAll(/<f>([^<]*)<\/f>(<v>[^<]*<\/v>)?/g)];
+    expect(formulas.length).toBeGreaterThan(5);
+    for (const [, f, cached] of formulas) expect({ f, cached: Boolean(cached) }).toEqual({ f, cached: true });
+  });
+
+  it('does not write an empty value element for a formula with no answer to cache', () => {
+    const xml = part([{ name: 'X', rows: [[{ f: 'NOW()' } as FormulaCell]] }], 'xl/worksheets/sheet1.xml');
+    expect(xml).toContain('<f>NOW()</f></c>');
+    expect(xml).not.toContain('<v></v>');
+  });
+});

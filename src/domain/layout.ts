@@ -28,6 +28,15 @@ export type WidthBand = 'phone' | 'tablet' | 'desktop';
  * 700 rather than a tablet's 768, so a phone turned landscape — 800 points on
  * a common handset — is on the wide side of the line. It has the room for two
  * columns and it looks daft without them.
+ *
+ * It cannot be raised to keep a landscape handset out. An iPad upright is 768
+ * points and a handset turned sideways is 800, so the tablet is the narrower
+ * of the two and no threshold separates them. Raising it past 800 would make
+ * an iPad a phone, which is the worse mistake of the two, and it would not
+ * even do what it was raised for: whether a screen is centred is decided by
+ * READING_MAX and `centred`, not by the band, so an 800 point window gets its
+ * 680 point column either way. That is the cap doing its job — 680 is the
+ * width text reads well at whatever is holding it.
  */
 export const TABLET_MIN = 700;
 

@@ -139,9 +139,11 @@ describe('the hours on a timesheet', () => {
     })!;
     const first = dataRows[0];
     const last = dataRows[dataRows.length - 1];
-    // Written as formula cells rather than strings, so the sheet adds up.
-    expect(totals[HOURS[0]]).toEqual({ f: `SUM(G${first}:G${last})`, style: 'total' });
-    expect(totals[13]).toEqual({ f: `SUM(N${first}:N${last})`, style: 'total' });
+    // Formula cells rather than strings, so the sheet adds up — each carrying
+    // its answer as well, so the emailed file holds the week's hours as
+    // numbers for a reader that does not calculate.
+    expect(totals[HOURS[0]]).toEqual({ f: `SUM(G${first}:G${last})`, v: 8, style: 'total' });
+    expect(totals[13]).toEqual({ f: `SUM(N${first}:N${last})`, v: 0, style: 'total' });
     expect(sheet.colWidths).toHaveLength(totals.length);
   });
 

@@ -65,6 +65,15 @@ export default function TimesheetScreen() {
   const [history, setHistory] = useState<Timesheet[]>([]);
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState<{ date: string } | null>(null);
+  /**
+   * The width the week of cards is actually handed, once it has been laid out.
+   *
+   * Zero until the first layout, which is one frame of the window-derived
+   * guess and then the truth. Set from onLayout — an event, not a render — so
+   * it is a setState the linter is happy with and a measurement that includes
+   * whatever the scroller took for itself.
+   */
+  const [measured, setMeasured] = useState(0);
   const [heldJobs, setHeldJobs] = useState<number | null>(null);
   // The days off already on this person's Simpro schedule, and the office's
   // own activity names to book against. Without both, a day marked off on the
@@ -243,12 +252,14 @@ export default function TimesheetScreen() {
    * four across, and the sheet stops being two metres of column with the
    * payroll figures somewhere in the middle of it.
    *
-   * The room to lay them out in is the screen's own column less its padding,
-   * so the arithmetic matches what the cards actually get.
+   * The room to lay them out in is measured, not worked out from the window.
+   * Deriving it lost the scroller's own scrollbar — about fifteen points on a
+   * desktop browser — and fifteen points is the difference between four cards
+   * across and three with a hand's width of empty ground down the side.
    */
   const gap = t.space(3);
   const page = pageLayout(width, BOARD_MAX);
-  const room = page.content - t.space(4) * 2;
+  const room = measured > 0 ? measured : page.content - t.space(4) * 2;
   const columns = page.band === 'phone' ? 1 : gridColumns(room, { min: DAY_CARD_MIN, gap });
   const dayWidth = columns === 1 ? ('100%' as const) : gridItemWidth(room, columns, gap);
   // Wide enough to stand the summary and the paperwork side by side, which is
@@ -446,7 +457,9 @@ export default function TimesheetScreen() {
 
         {notBooked}
 
-        {week}
+        <View onLayout={(e) => setMeasured(e.nativeEvent.layout.width)} style={{ width: '100%' }}>
+          {week}
+        </View>
 
         {spread ? null : (
           <>

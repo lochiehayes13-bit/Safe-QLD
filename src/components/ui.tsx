@@ -37,10 +37,13 @@ import { Bounce } from './motion';
  * paragraph runs the width of the room — so past the reading width the column
  * is capped and centred and the ground keeps the rest.
  *
- * The cap is for the scrolling page, which is the shape of a document. A
- * screen that turns scrolling off has taken the window over and has to keep
- * it: the map tab is a canvas at flex 1 inside one of these, and a 680 point
- * map in the middle of a monitor is not a layout, it is a stamp.
+ * The cap is not about scrolling. Thirty-five screens turn scrolling off and
+ * all but one of them is a list that scrolls itself — jobs, defects, the
+ * catalogue, the staff list — and a list is a document like any other. Only
+ * the map is a canvas, where a 680 point square in the middle of a monitor
+ * would be a stamp rather than a layout, so that one says `full` and keeps the
+ * window. Reading the cap off `scroll` instead left those thirty-four screens
+ * full-bleed at 2560, which is the complaint this was meant to answer.
  *
  * `wide` is for the screens whose content is a grid of peers rather than a
  * page to read down: they get the board width instead, and lay their own
@@ -58,12 +61,15 @@ export function Screen({
   padded = true,
   edges = ['top'],
   wide = false,
+  full = false,
 }: {
   children: React.ReactNode;
   scroll?: boolean;
   padded?: boolean;
   edges?: ('top' | 'bottom' | 'left' | 'right')[];
   wide?: boolean;
+  /** A canvas that has to keep the whole window whatever its width. The map. */
+  full?: boolean;
 }) {
   const t = useTheme();
   const { width } = useWindowDimensions();
@@ -72,7 +78,7 @@ export function Screen({
   // Nothing at all on a phone, where the window never reaches the cap: the
   // column keeps the padding and gaps it has always had, and the extra style
   // is simply absent rather than set to the same values a different way.
-  const column: ViewStyle | null = page.centred
+  const column: ViewStyle | null = page.centred && !full
     ? { width: '100%', maxWidth: page.content, alignSelf: 'center' }
     : null;
 
@@ -87,7 +93,7 @@ export function Screen({
           {children}
         </ScrollView>
       ) : (
-        <View style={[{ flex: 1 }, inner]}>{children}</View>
+        <View style={[{ flex: 1 }, inner, column]}>{children}</View>
       )}
     </SafeAreaView>
   );

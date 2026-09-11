@@ -51,10 +51,21 @@ describe('the container 114 screens sit in', () => {
     expect(screen).toMatch(/wide = false/);
   });
 
-  it('leaves a screen that fills the window itself exactly as it was', () => {
-    // The map tab is a canvas at flex 1 inside one of these. A 680 point map
-    // in the middle of a monitor is not a layout.
-    expect(screen).toContain('<View style={[{ flex: 1 }, inner]}>{children}</View>');
+  it('caps a screen that scrolls itself, because a list is a document too', () => {
+    /*
+     * Thirty-five screens turn scrolling off and all but one of them is a
+     * list that does its own scrolling — jobs, defects, the catalogue, the
+     * staff list. Reading the cap off `scroll` left every one of them
+     * full-bleed at 2560, which is the complaint this was built to answer.
+     */
+    expect(screen).toContain('<View style={[{ flex: 1 }, inner, column]}>{children}</View>');
+  });
+
+  it('lets a canvas keep the whole window, and only the canvas does', () => {
+    // A 680 point map in the middle of a monitor is not a layout.
+    expect(screen).toContain('page.centred && !full');
+    const map = readFileSync(join(REPO, 'app/(tabs)/map.tsx'), 'utf8');
+    expect(map).toContain('<Screen scroll={false} padded={false} full>');
   });
 });
 

@@ -480,7 +480,7 @@ export default function MapScreen() {
   } as const;
 
   return (
-    <Screen scroll={false} padded={false}>
+    <Screen scroll={false} padded={false} full>
       <View style={{ flex: 1, backgroundColor: t.color.bg }}>
         {data && html ? (
           <MapCanvas

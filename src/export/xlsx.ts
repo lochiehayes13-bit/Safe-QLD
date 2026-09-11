@@ -49,12 +49,28 @@ export interface Cell {
  *
  * A formula handed over as the string "=SUM(G7:G12)" is text whatever it
  * says: the totals row on the timesheet showed the formula's letters and added
- * nothing up. No cached value is written, and the workbook is marked for a
- * full calculation on load so a reader works the figure out itself.
+ * nothing up. The workbook is marked for a full calculation on load, so a
+ * reader works the figure out itself — and `v` caches the answer beside the
+ * formula for every reader that will not.
  */
 export interface FormulaCell {
   f: string;
   style?: CellStyle;
+  /**
+   * The answer, cached beside the formula.
+   *
+   * Optional, and worth giving. A formula alone is a cell with no value in the
+   * file: Excel works it out on load and shows it, but anything that reads the
+   * workbook without a calculation engine — a script, a viewer, a mail client's
+   * preview — finds nothing there. An emailed timesheet whose every figure is
+   * a formula is a workbook that contains no numbers, which is not what payroll
+   * was sent.
+   *
+   * It stays live. The cached value is what a reader sees until it recalculates,
+   * and `fullCalcOnLoad` means Excel recalculates immediately, so an edited cell
+   * still moves the total.
+   */
+  v?: number;
 }
 
 export type Row = (CellValue | Cell | FormulaCell)[];
@@ -212,7 +228,8 @@ function buildSheetXml(sheet: Sheet): string {
       const sAttr = s ? ` s="${s}"` : '';
       if ('f' in cell) {
         if (!cell.f.trim()) return;
-        cells.push(`<c r="${ref}"${sAttr}><f>${esc(cell.f)}</f></c>`);
+        const cached = typeof cell.v === 'number' && Number.isFinite(cell.v) ? `<v>${cell.v}</v>` : '';
+        cells.push(`<c r="${ref}"${sAttr}><f>${esc(cell.f)}</f>${cached}</c>`);
         return;
       }
       const v = cell.v;
@@ -316,7 +333,7 @@ function buildStyles(): string {
 <font><b/><sz val="12"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
 <font><b/><sz val="16"/><color rgb="FFC00000"/><name val="Calibri"/></font>
 </fonts>
-<fills count="8">
+<fills count="9">
 <fill><patternFill patternType="none"/></fill>
 <fill><patternFill patternType="gray125"/></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FF333F50"/><bgColor indexed="64"/></patternFill></fill>
