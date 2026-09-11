@@ -365,8 +365,10 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/whoami', file: 'app/whoami.tsx', tab: 'today', section: 'You in Simpro',
     label: 'Who you are', modes: BOTH, openedFrom: ['/settings', '/signin', '/work/my-day'],
-    blurb: 'Pick yourself from the office employee list, for phones that do not sign in.',
-    terms: ['who am i', 'employee', 'technician', 'name', 'identity', 'pick'],
+    blurb:
+      'Pick yourself from the office staff list. It is how a phone says whose it is without a '
+      + 'login, and on a build whose Simpro application cannot sign a person in it is the way in.',
+    terms: ['who am i', 'employee', 'technician', 'name', 'identity', 'pick', 'staff list'],
   },
   {
     route: '/work/my-day', file: 'app/work/my-day.tsx', tab: 'today', section: 'You in Simpro',

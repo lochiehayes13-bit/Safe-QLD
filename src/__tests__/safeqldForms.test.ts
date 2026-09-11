@@ -119,7 +119,10 @@ describe('the hours on a timesheet', () => {
     expect(top).toHaveLength(data.length);
     expect(under).toHaveLength(data.length);
     expect(value(under[13])).toBe('PUB HOL');
-    expect(value(data[13])).toBe('7.6');
+    // 7.6 the number, not "7.6" the text. Leave is typed on a phone and was
+    // carried through as the string it arrived as, and SUM over text cells is
+    // zero — the totals under all five leave columns read nothing at all.
+    expect(value(data[13])).toBe(7.6);
     expect(value(top[14])).toBe('COMMENTS');
     expect(value(data[14])).toBe('Show day');
   });
@@ -137,8 +140,8 @@ describe('the hours on a timesheet', () => {
     const first = dataRows[0];
     const last = dataRows[dataRows.length - 1];
     // Written as formula cells rather than strings, so the sheet adds up.
-    expect(totals[HOURS[0]]).toEqual({ f: `SUM(G${first}:G${last})`, style: 'header' });
-    expect(totals[13]).toEqual({ f: `SUM(N${first}:N${last})`, style: 'header' });
+    expect(totals[HOURS[0]]).toEqual({ f: `SUM(G${first}:G${last})`, style: 'total' });
+    expect(totals[13]).toEqual({ f: `SUM(N${first}:N${last})`, style: 'total' });
     expect(sheet.colWidths).toHaveLength(totals.length);
   });
 

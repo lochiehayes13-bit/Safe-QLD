@@ -7,6 +7,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
   type StyleProp,
   type TextStyle,
   type ViewStyle,
@@ -16,6 +17,7 @@ import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme, type FontWeight, type Theme } from '@/theme';
+import { BOARD_MAX, READING_MAX, pageLayout } from '@/domain/layout';
 import { Bounce } from './motion';
 
 /**
@@ -26,26 +28,60 @@ import { Bounce } from './motion';
  * routine ones.
  */
 
+/**
+ * The container every screen sits in.
+ *
+ * On a handset it is what it always was: one column, edge to edge, with the
+ * page ground behind it. The web build is the same code on a desktop browser,
+ * where that column becomes a card the width of a 2560 point monitor and a
+ * paragraph runs the width of the room — so past the reading width the column
+ * is capped and centred and the ground keeps the rest.
+ *
+ * The cap is for the scrolling page, which is the shape of a document. A
+ * screen that turns scrolling off has taken the window over and has to keep
+ * it: the map tab is a canvas at flex 1 inside one of these, and a 680 point
+ * map in the middle of a monitor is not a layout, it is a stamp.
+ *
+ * `wide` is for the screens whose content is a grid of peers rather than a
+ * page to read down: they get the board width instead, and lay their own
+ * children out across it. Everything else stays a single readable column, and
+ * a screen that says nothing gets the narrow one, which is the right default
+ * for 113 of the 114.
+ *
+ * The width comes from useWindowDimensions rather than a measurement taken
+ * once, because a desktop browser window gets dragged wider and narrower and
+ * the layout has to follow it.
+ */
 export function Screen({
   children,
   scroll = true,
   padded = true,
   edges = ['top'],
+  wide = false,
 }: {
   children: React.ReactNode;
   scroll?: boolean;
   padded?: boolean;
   edges?: ('top' | 'bottom' | 'left' | 'right')[];
+  wide?: boolean;
 }) {
   const t = useTheme();
+  const { width } = useWindowDimensions();
+  const page = pageLayout(width, wide ? BOARD_MAX : READING_MAX);
   const inner = padded ? { padding: t.space(4), gap: t.space(3) } : undefined;
+  // Nothing at all on a phone, where the window never reaches the cap: the
+  // column keeps the padding and gaps it has always had, and the extra style
+  // is simply absent rather than set to the same values a different way.
+  const column: ViewStyle | null = page.centred
+    ? { width: '100%', maxWidth: page.content, alignSelf: 'center' }
+    : null;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.color.bg }} edges={edges}>
       {scroll ? (
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={[inner, { paddingBottom: t.space(28) }]}
+          contentContainerStyle={[inner, { paddingBottom: t.space(28) }, column]}
           keyboardShouldPersistTaps="handled"
         >
           {children}

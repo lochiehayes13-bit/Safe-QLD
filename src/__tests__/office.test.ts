@@ -48,27 +48,15 @@ describe('the shipped office application', () => {
 });
 
 describe('the first thing a new phone asks', () => {
-  const nobody = { connected: true, signedIn: false, employeeId: '', skippedSignIn: false };
-
-  it('offers the sign-in on a connected phone that is nobody\'s', () => {
-    expect(firstRunStep(nobody)).toBe('signin');
-  });
-
-  it('leaves alone a phone that has said whose it is, either way', () => {
-    expect(firstRunStep({ ...nobody, signedIn: true })).toBeNull();
-    expect(firstRunStep({ ...nobody, employeeId: '45' })).toBeNull();
-  });
-
-  it('does not ask again after "Not now"', () => {
-    expect(firstRunStep({ ...nobody, skippedSignIn: true })).toBeNull();
-  });
-
-  it('has nothing to offer a phone that cannot reach the office', () => {
-    expect(firstRunStep({ ...nobody, connected: false })).toBeNull();
-  });
-
-  it('treats a blank-but-spaced employee id as nobody', () => {
-    expect(firstRunStep({ ...nobody, employeeId: '   ' })).toBe('signin');
+  /*
+   * The whole decision table lives in firstRun.test.ts and is not repeated
+   * here — it was, and the copy went stale the day the answer changed, which
+   * is the only thing a second copy of an assertion reliably does. What this
+   * file is for is the office's own application, so what it keeps is the one
+   * line where the two meet.
+   */
+  it('sends a connected phone that is nobody\'s to the staff list, not to a login this application refuses', () => {
+    expect(firstRunStep({ connected: true, signedIn: false, employeeId: '', skippedSignIn: false })).toBe('whoami');
   });
 });
 

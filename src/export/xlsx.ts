@@ -4,9 +4,10 @@ import { createZip, toBase64, utf8Bytes, type ZipEntry } from './zip';
  * Minimal XLSX (SpreadsheetML) writer.
  *
  * Supports what a fire service report actually needs: multiple sheets, a bold
- * frozen header row, column widths, text/number/date cells, live formulas and
- * coloured pass/fail cells. Strings are written inline, which skips the
- * shared-string table at a small size cost and a large simplicity win.
+ * frozen header row, column widths, text/number/date cells, live formulas,
+ * coloured pass/fail cells and page setup for the forms that get printed.
+ * Strings are written inline, which skips the shared-string table at a small
+ * size cost and a large simplicity win.
  */
 
 export type CellValue = string | number | boolean | null | undefined;
@@ -20,7 +21,23 @@ export type CellStyle =
   /** Field label in the left column. */
   | 'field'
   /** Company name banner. */
-  | 'banner';
+  | 'banner'
+  /** Bordered data cell, wrapping whatever text is in it. */
+  | 'cell'
+  /** Hours, to two decimals. */
+  | 'hours'
+  /** Hours in a leave column, tinted so it reads as not-worked at a glance. */
+  | 'leave'
+  /** A time of day, as hh:mm. */
+  | 'time'
+  /** A date, as dd/mm/yyyy. */
+  | 'date'
+  /** A figure on a totals row. */
+  | 'total'
+  /** The label on a totals row. */
+  | 'totalLabel'
+  /** A line to sign or write on. */
+  | 'rule';
 
 export interface Cell {
   v: CellValue;
@@ -42,6 +59,35 @@ export interface FormulaCell {
 
 export type Row = (CellValue | Cell | FormulaCell)[];
 
+/**
+ * How a sheet prints.
+ *
+ * A form that goes to the office on paper is not laid out until this is set.
+ * Fifteen columns of timesheet are wider than A4 whichever way the page is
+ * turned, and Excel's default is to print what fits and push the rest onto a
+ * second sheet of paper with no headings on it — the comments column stranded
+ * on page two is the usual result, and it is the one column a payroll query is
+ * always about. Paper is A4 throughout, because that is what the office has.
+ */
+export interface PageSetup {
+  orientation?: 'portrait' | 'landscape';
+  /** Scale the columns down to this many pages across. Height runs as long as it needs. */
+  fitToWidth?: number;
+  /** 1-based inclusive rows repeated at the top of every printed page. */
+  repeatRows?: { from: number; to: number };
+  /** Margins in inches. */
+  margins?: { left: number; right: number; top: number; bottom: number };
+  /** Centre the block left to right, so a narrow form is not pinned to the margin. */
+  centreHorizontally?: boolean;
+  /**
+   * Left-hand footer text. The page count goes on the right.
+   *
+   * An ampersand starts a field code in a footer, so one cannot survive in the
+   * text and is dropped.
+   */
+  footer?: string;
+}
+
 export interface Sheet {
   name: string;
   rows: Row[];
@@ -55,6 +101,8 @@ export interface Sheet {
   merges?: string[];
   /** Row heights in points, keyed by 1-based row number. */
   rowHeights?: Record<number, number>;
+  /** How the sheet prints, for the ones that get printed. */
+  page?: PageSetup;
 }
 
 // Style indices must match the order written in buildStyles().
@@ -71,7 +119,35 @@ const STYLE_INDEX: Record<CellStyle, number> = {
   section: 9,
   field: 10,
   banner: 11,
+  cell: 12,
+  hours: 13,
+  leave: 14,
+  time: 15,
+  date: 16,
+  total: 17,
+  totalLabel: 18,
+  rule: 19,
 };
+
+/**
+ * Excel's serial number for a calendar day.
+ *
+ * A date written as text cannot be sorted, filtered or subtracted from another
+ * one, and "12/08/2026" in a column that payroll sorts puts August after
+ * December. Day zero is 30 December 1899, which absorbs Excel's belief that
+ * 1900 was a leap year.
+ */
+export function excelDate(isoDay: string | undefined): number | undefined {
+  if (!isoDay || !/^\d{4}-\d{2}-\d{2}$/.test(isoDay)) return undefined;
+  const ms = Date.parse(`${isoDay}T00:00:00Z`);
+  if (!Number.isFinite(ms)) return undefined;
+  return Math.round(ms / 86400000) + 25569;
+}
+
+/** A time of day as Excel holds one: the fraction of a day it falls at. */
+export function excelTime(minutesSinceMidnight: number): number {
+  return minutesSinceMidnight / 1440;
+}
 
 function esc(s: string): string {
   return s
@@ -116,6 +192,11 @@ export function safeSheetName(name: string, taken: Set<string>): string {
   return candidate;
 }
 
+/** A sheet name as a formula refers to it: quoted unless it is a bare word. */
+function sheetRef(name: string): string {
+  return /^[A-Za-z_][A-Za-z0-9_.]*$/.test(name) ? name : `'${name.replace(/'/g, "''")}'`;
+}
+
 function buildSheetXml(sheet: Sheet): string {
   const rows: string[] = [];
   let maxCols = 0;
@@ -135,7 +216,19 @@ function buildSheetXml(sheet: Sheet): string {
         return;
       }
       const v = cell.v;
-      if (v === null || v === undefined || v === '') return;
+      if (v === null || v === undefined || v === '') {
+        /*
+         * A blank cell that was given a style is still written, as a cell with
+         * a style and no value. Dropping it drops the style with it: the
+         * yellow box on a field nobody filled in came out white, the border
+         * round the timesheet grid stopped at the last cell anybody had typed
+         * in, and a merged box was only coloured as far as its first cell.
+         * A blank with no style is left out as before — an empty cell and a
+         * cell holding an empty string read differently to anything counting.
+         */
+        if (s) cells.push(`<c r="${ref}"${sAttr}/>`);
+        return;
+      }
       if (typeof v === 'number' && Number.isFinite(v)) {
         cells.push(`<c r="${ref}"${sAttr}><v>${v}</v></c>`);
       } else if (typeof v === 'boolean') {
@@ -164,22 +257,56 @@ function buildSheetXml(sheet: Sheet): string {
   const lastCol = colName(Math.max(0, maxCols - 1));
   const filter = sheet.autoFilter && sheet.rows.length > 1 ? `<autoFilter ref="A1:${lastCol}${lastRow}"/>` : '';
 
-  // mergeCells must follow sheetData and, per the schema, precede autoFilter.
   const merges = sheet.merges?.length
     ? `<mergeCells count="${sheet.merges.length}">${sheet.merges
         .map((ref) => `<mergeCell ref="${esc(ref)}"/>`)
         .join('')}</mergeCells>`
     : '';
 
+  const page = sheet.page;
+  // fitToWidth is ignored unless the sheet says it is fitting to a page, and
+  // sheetPr is the first thing in a worksheet.
+  const sheetPr = page?.fitToWidth ? '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>' : '';
+  const printOptions = page?.centreHorizontally ? '<printOptions horizontalCentered="1"/>' : '';
+  const m = page?.margins;
+  const margins = page
+    ? `<pageMargins left="${m?.left ?? 0.7}" right="${m?.right ?? 0.7}" top="${m?.top ?? 0.75}" bottom="${
+        m?.bottom ?? 0.75
+      }" header="0.3" footer="0.3"/>`
+    : '';
+  // paperSize 9 is A4.
+  const pageSetup = page
+    ? `<pageSetup paperSize="9" orientation="${page.orientation ?? 'portrait'}"${
+        page.fitToWidth ? ` fitToWidth="${page.fitToWidth}" fitToHeight="0"` : ''
+      }/>`
+    : '';
+  const footer = page?.footer
+    ? `<headerFooter><oddFooter>${esc(`&L${page.footer.replace(/&/g, '')}&RPage &P of &N`)}</oddFooter></headerFooter>`
+    : '';
+
+  /*
+   * Element order is the schema's, not a preference: autoFilter before
+   * mergeCells, then the print block. A worksheet whose children are out of
+   * order opens as a repair prompt, which on this app's output means a
+   * technician's report or somebody's pay.
+   */
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${freeze}${cols}<sheetData>${rows.join('')}</sheetData>${merges}${filter}</worksheet>`;
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${sheetPr}${freeze}${cols}<sheetData>${rows.join(
+    '',
+  )}</sheetData>${filter}${merges}${printOptions}${margins}${pageSetup}${footer}</worksheet>`;
 }
 
 function buildStyles(): string {
   // fonts: 0 default, 1 bold, 2 title, 3 muted, 4 mono
   // fills: 0 none, 1 gray125 (required), 2 header, 3 pass, 4 fail, 5 warn
+  // Number formats 164 up are this file's own; everything below is built in,
+  // and 2 is the "0.00" that keeps an hour reading as an hour.
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<numFmts count="2">
+<numFmt numFmtId="164" formatCode="hh:mm"/>
+<numFmt numFmtId="165" formatCode="dd/mm/yyyy"/>
+</numFmts>
 <fonts count="7">
 <font><sz val="11"/><name val="Calibri"/></font>
 <font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
@@ -198,13 +325,16 @@ function buildStyles(): string {
 <fill><patternFill patternType="solid"><fgColor rgb="FFFFF3CD"/><bgColor indexed="64"/></patternFill></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/><bgColor indexed="64"/></patternFill></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FFC00000"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFEAF0F7"/><bgColor indexed="64"/></patternFill></fill>
 </fills>
-<borders count="2">
+<borders count="4">
 <border><left/><right/><top/><bottom/><diagonal/></border>
 <border><left style="thin"><color rgb="FFD0D0D0"/></left><right style="thin"><color rgb="FFD0D0D0"/></right><top style="thin"><color rgb="FFD0D0D0"/></top><bottom style="thin"><color rgb="FFD0D0D0"/></bottom><diagonal/></border>
+<border><left style="thin"><color rgb="FFD0D0D0"/></left><right style="thin"><color rgb="FFD0D0D0"/></right><top style="medium"><color rgb="FF333F50"/></top><bottom style="thin"><color rgb="FFD0D0D0"/></bottom><diagonal/></border>
+<border><left/><right/><top/><bottom style="medium"><color rgb="FF808080"/></bottom><diagonal/></border>
 </borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="12">
+<cellXfs count="20">
 <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
 <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
 <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
@@ -217,6 +347,14 @@ function buildStyles(): string {
 <xf numFmtId="0" fontId="5" fillId="7" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
 <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
 <xf numFmtId="0" fontId="6" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+<xf numFmtId="2" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="2" fontId="0" fillId="8" borderId="1" xfId="0" applyNumberFormat="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="165" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="2" fontId="1" fillId="2" borderId="2" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="1" fillId="2" borderId="2" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="3" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="bottom"/></xf>
 </cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;
@@ -254,11 +392,29 @@ ${sheetEntries
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
 </Relationships>`;
 
+  /*
+   * Repeating the headings on page two is a workbook-level defined name, not a
+   * sheet setting, which is why it is built here rather than beside the rest of
+   * the page setup. Without it page two of a long week is fifteen unlabelled
+   * columns of numbers.
+   */
+  const printTitles = named
+    .map((s, i) => {
+      const repeat = s.page?.repeatRows;
+      if (!repeat) return '';
+      return `<definedName name="_xlnm.Print_Titles" localSheetId="${i}">${esc(sheetRef(s.name))}!$${repeat.from}:$${
+        repeat.to
+      }</definedName>`;
+    })
+    .filter(Boolean);
+  const definedNames = printTitles.length ? `<definedNames>${printTitles.join('')}</definedNames>` : '';
+
   const workbook = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <sheets>${sheetEntries
     .map((s) => `<sheet name="${esc(s.name)}" sheetId="${s.id}" r:id="${s.rid}"/>`)
     .join('')}</sheets>
+${definedNames}
 <calcPr fullCalcOnLoad="1"/>
 </workbook>`;
 

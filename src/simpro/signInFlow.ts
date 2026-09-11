@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loadPrefs, savePrefs } from '@/app-prefs';
-import { listEmployees, replaceEmployees } from '@/db/employeeRepo';
+import { listEmployees, replaceEmployees, type EmployeeRecord } from '@/db/employeeRepo';
 import { SimproClient, type SimproConfig } from './client';
 import { SimproResources } from './resources';
 import { prefsFromIdentity, resolveIdentity, type CurrentUser, type ResolvedIdentity } from './identity';
@@ -69,17 +69,43 @@ export async function noteWayRefused(
   }
 }
 
+export interface StaffList {
+  /** Everyone the office has, archived included, so a phone set to an archived employee still names them. */
+  people: EmployeeRecord[];
+  /** The rows were read from Simpro just now rather than found on the phone. */
+  fromOffice: boolean;
+}
+
+/**
+ * The staff list, read from the office where the phone has not got it yet.
+ *
+ * Throws when that read fails, and that is the whole reason it is not
+ * `ensureEmployees`. The screen that offers the list as the way in has
+ * nothing to show when the read fails, and what it used to show was "No staff
+ * list on this phone yet — it comes down with the next sync", said to
+ * somebody holding a phone that had just been installed and had no next sync
+ * to wait for. A screen that can say what Simpro said can offer to try again;
+ * one handed a zero cannot.
+ *
+ * An office that really has nobody on it comes back empty and does not throw.
+ * That is a different sentence and the screen says it differently.
+ */
+export async function loadStaffList(config: SimproConfig): Promise<StaffList> {
+  const held = await listEmployees({ includeArchived: true });
+  if (held.length) return { people: held, fromOffice: false };
+  const people = await new SimproResources(new SimproClient(config)).employees();
+  await replaceEmployees(people);
+  return { people: await listEmployees({ includeArchived: true }), fromOffice: true };
+}
+
 /**
  * Makes sure the staff list is on the phone, reading it from the office when
  * it is not. Returns how many people are held afterwards. A read that fails
  * is not thrown: the caller still has whatever was there, which may be enough.
  */
 export async function ensureEmployees(config: SimproConfig): Promise<number> {
-  const held = await listEmployees({ includeArchived: true });
-  if (held.length) return held.length;
   try {
-    const people = await new SimproResources(new SimproClient(config)).employees();
-    return await replaceEmployees(people);
+    return (await loadStaffList(config)).people.length;
   } catch {
     return 0;
   }

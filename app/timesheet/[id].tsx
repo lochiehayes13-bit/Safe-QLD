@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, TextInput, View } from 'react-native';
+import { Modal, Pressable, ScrollView, TextInput, View, useWindowDimensions, type ViewStyle } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as MailComposer from 'expo-mail-composer';
@@ -29,6 +29,7 @@ import { shareFile, writeXlsx } from '@/export/files';
 import { notSharedNotice } from '@/export/shareOutcome';
 import { newId, nowIso } from '@/db';
 import { qldIsoDay } from '@/domain/qldTime';
+import { BOARD_MAX, gridColumns, gridItemWidth, pageLayout } from '@/domain/layout';
 import { useTheme, type Theme } from '@/theme';
 import { Button, Card, Chip, Rowed, Screen, Txt } from '@/components/ui';
 import { ProgressRing, Reveal } from '@/components/motion';
@@ -54,6 +55,7 @@ import { showAlert } from '@/components/alert';
  */
 export default function TimesheetScreen() {
   const t = useTheme();
+  const { width } = useWindowDimensions();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [sheet, setSheet] = useState<Timesheet | null>(null);
   const [missing, setMissing] = useState(false);
@@ -206,10 +208,6 @@ export default function TimesheetScreen() {
   }, [persist]);
 
   const totals = useMemo(() => (sheet ? timesheetTotals(sheet) : null), [sheet]);
-  // Saturday and Sunday stay folded until tapped, unless something is already
-  // on them. Kept per date rather than as one flag, so opening Saturday does
-  // not unfold Sunday as well.
-  const [openWeekend, setOpenWeekend] = useState<Record<string, boolean>>({});
   const days = useMemo(() => (sheet ? weekDates(sheet.weekStarting) : []), [sheet]);
   const options = useMemo(
     () => jobOptions(history.filter((h) => h.id !== id), jobs.map((j) => ({
@@ -237,6 +235,25 @@ export default function TimesheetScreen() {
   // arrives changes the hook count between renders, which React answers by
   // throwing — a blank screen where the week should be.
   if (!sheet || !totals) return <RecordGate missing={missing} what="timesheet" failed={failed} onRetry={() => { void load(); }} />;
+
+  /*
+   * The week is seven days of the same shape, which is a grid rather than a
+   * scroll. On a phone the grid is one column and the screen is what it always
+   * was; on a tablet or a browser window the same seven cards sit two, three or
+   * four across, and the sheet stops being two metres of column with the
+   * payroll figures somewhere in the middle of it.
+   *
+   * The room to lay them out in is the screen's own column less its padding,
+   * so the arithmetic matches what the cards actually get.
+   */
+  const gap = t.space(3);
+  const page = pageLayout(width, BOARD_MAX);
+  const room = page.content - t.space(4) * 2;
+  const columns = page.band === 'phone' ? 1 : gridColumns(room, { min: DAY_CARD_MIN, gap });
+  const dayWidth = columns === 1 ? ('100%' as const) : gridItemWidth(room, columns, gap);
+  // Wide enough to stand the summary and the paperwork side by side, which is
+  // where a desktop expects them: at the top, not under a week of cards.
+  const spread = page.band !== 'phone';
 
   const addJob = (date: string, opt: JobOption | null) => {
     const entry = blankEntry(newId(), date);
@@ -303,106 +320,140 @@ export default function TimesheetScreen() {
   };
 
 
+  const summary = (
+    <Card variant="raised" style={{ gap: t.space(1) }}>
+      <Rowed gap={3}>
+        <ProgressRing fraction={totals.grand / 38} size={72} stroke={8}>
+          <Txt size="xs" weight="800" mono>{Math.round((totals.grand / 38) * 100)}%</Txt>
+        </ProgressRing>
+        <View style={{ flex: 1 }}>
+          <Txt size="display" weight="800" style={{ letterSpacing: -1.4 }}>{totals.grand}<Txt size="lg" tone="muted" weight="700"> h</Txt></Txt>
+          <Txt size="xs" tone="faint">of a 38 hour week</Txt>
+        </View>
+        <Chip label={sheet.status === 'submitted' ? 'Submitted' : 'Draft'} tone={sheet.status === 'submitted' ? 'pass' : 'warn'} />
+      </Rowed>
+      <Rowed gap={2} wrap>
+        <Txt size="sm" tone="muted">{totals.worked} worked</Txt>
+        {totals.ot ? <Txt size="sm" tone="warn">· {totals.ot} O/T</Txt> : null}
+        {totals.dt ? <Txt size="sm" tone="warn">· {totals.dt} D/T</Txt> : null}
+        {totals.grand - totals.worked ? <Txt size="sm" tone="muted">· {Math.round((totals.grand - totals.worked) * 100) / 100} leave</Txt> : null}
+        {!sheet.employeeName.trim() ? <Txt size="sm" tone="fail">· no name set</Txt> : null}
+      </Rowed>
+    </Card>
+  );
+
+  const notBooked = unbookedLeave.length ? (
+    <Card>
+      <Txt weight="700">
+        {unbookedLeave.length} day{unbookedLeave.length === 1 ? '' : 's'} off on this sheet the office cannot see
+      </Txt>
+      <Txt size="sm" tone="muted" style={{ marginTop: t.space(1), lineHeight: 19 }}>
+        {unbookedLeave.map((l) => `${dayName(l.date)} ${formatAuDate(l.date)} — ${l.activity.name}`).join('\n')}
+      </Txt>
+      <Txt size="sm" tone="muted" style={{ marginTop: t.space(2), lineHeight: 19 }}>
+        Marking a day off here puts the hours on your pay. It does not put the day on your Simpro schedule, so
+        the person building next week’s run still has you available.
+      </Txt>
+      <Button
+        title="Put them on my Simpro schedule"
+        variant="secondary"
+        loading={bookingLeave}
+        onPress={() => { void bookLeaveDays(); }}
+        style={{ marginTop: t.space(3) }}
+      />
+    </Card>
+  ) : null;
+
+  const week = (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap }}>
+      {days.map((date, i) => {
+        const onDay = sheet.entries.filter((e) => e.date === date);
+        return (
+          <Reveal key={date} index={1 + i} style={{ width: dayWidth }}>
+            <DayCard
+              date={date}
+              entries={onDay}
+              theme={t}
+              extraChoices={extraChoices}
+              quiet={isWeekendDay(date) && onDay.length === 0}
+              grid={columns > 1}
+              onAdd={() => setPicking({ date })}
+              onQuickAdd={() => addJob(date, null)}
+              onDuplicate={() => dupPrevious(date)}
+              onLeave={(kind, hours) => {
+                const existing = sheet.entries.find((e) => e.date === date && leaveOf(e));
+                if (existing) {
+                  setEntries(sheet.entries.map((e) => e.id === existing.id ? setLeave(e, kind, hours) : e));
+                } else {
+                  setEntries([...sheet.entries, setLeave(blankEntry(newId(), date), kind, hours)]);
+                }
+              }}
+              onChange={(entry) => setEntries(sheet.entries.map((e) => e.id === entry.id ? entry : e))}
+              onRemove={(entryId) => setEntries(sheet.entries.filter((e) => e.id !== entryId))}
+              canDuplicate={previousDayWithEntries(sheet.entries, date) !== null}
+            />
+          </Reveal>
+        );
+      })}
+    </View>
+  );
+
+  const yourDetails = (
+    <Card>
+      <Txt size="xs" tone="faint" weight="700" style={{ textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: t.space(2) }}>Your details</Txt>
+      <LabeledInput label="Name" value={sheet.employeeName} onChange={(v) => void persist({ employeeName: v })} autoCapitalize="words" theme={t} />
+      <Rowed gap={2} align="flex-start" style={{ marginTop: t.space(2) }}>
+        <View style={{ flex: 1 }}><LabeledInput label="Vehicle" value={sheet.vehicleRego} onChange={(v) => void persist({ vehicleRego: v })} autoCapitalize="characters" theme={t} /></View>
+        <View style={{ flex: 1 }}><LabeledInput label="Odometer" value={sheet.kilometerReading} onChange={(v) => void persist({ kilometerReading: v })} keyboardType="numeric" theme={t} /></View>
+      </Rowed>
+    </Card>
+  );
+
+  const sendIt = (
+    <View style={{ gap: t.space(3) }}>
+      <Button title="Email to accounts" onPress={() => { void emailSheet(); }} loading={busy} icon={<MaterialCommunityIcons name="send-outline" size={20} color={t.color.onAccent} />} />
+      <Rowed gap={2}>
+        <Button title="Export" variant="secondary" onPress={() => { void exportSheet(); }} loading={busy} style={{ flex: 1 }} />
+        <Button
+          title={sheet.status === 'submitted' ? 'Back to draft' : 'Mark submitted'}
+          variant="ghost"
+          onPress={() => void persist({ status: sheet.status === 'submitted' ? 'draft' : 'submitted' })}
+          style={{ flex: 1 }}
+        />
+      </Rowed>
+      <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
+        Goes to {TIMESHEET_INBOX} from your own mail app, so payroll can reply to you. Nothing is
+        marked submitted until the mail app says it sent.
+      </Txt>
+    </View>
+  );
+
   return (
     <>
       <Stack.Screen options={{ title: `Week of ${formatAuDate(sheet.weekStarting)}` }} />
-      <Screen>
-        <Reveal index={0}>
-        <Card variant="raised" style={{ gap: t.space(1) }}>
-          <Rowed gap={3}>
-            <ProgressRing fraction={totals.grand / 38} size={72} stroke={8}>
-              <Txt size="xs" weight="800" mono>{Math.round((totals.grand / 38) * 100)}%</Txt>
-            </ProgressRing>
-            <View style={{ flex: 1 }}>
-              <Txt size="display" weight="800" style={{ letterSpacing: -1.4 }}>{totals.grand}<Txt size="lg" tone="muted" weight="700"> h</Txt></Txt>
-              <Txt size="xs" tone="faint">of a 38 hour week</Txt>
+      <Screen wide>
+        {spread ? (
+          <Rowed gap={3} align="flex-start">
+            <Reveal index={0} style={{ flex: 1 }}>{summary}</Reveal>
+            <View style={{ flex: 1, gap: t.space(3) }}>
+              {yourDetails}
+              {sendIt}
             </View>
-            <Chip label={sheet.status === 'submitted' ? 'Submitted' : 'Draft'} tone={sheet.status === 'submitted' ? 'pass' : 'warn'} />
           </Rowed>
-          <Rowed gap={2} wrap>
-            <Txt size="sm" tone="muted">{totals.worked} worked</Txt>
-            {totals.ot ? <Txt size="sm" tone="warn">· {totals.ot} O/T</Txt> : null}
-            {totals.dt ? <Txt size="sm" tone="warn">· {totals.dt} D/T</Txt> : null}
-            {totals.grand - totals.worked ? <Txt size="sm" tone="muted">· {Math.round((totals.grand - totals.worked) * 100) / 100} leave</Txt> : null}
-            {!sheet.employeeName.trim() ? <Txt size="sm" tone="fail">· no name set</Txt> : null}
-          </Rowed>
-        </Card>
-        </Reveal>
+        ) : (
+          <Reveal index={0}>{summary}</Reveal>
+        )}
 
-        {unbookedLeave.length ? (
-          <Card>
-            <Txt weight="700">
-              {unbookedLeave.length} day{unbookedLeave.length === 1 ? '' : 's'} off on this sheet the office cannot see
-            </Txt>
-            <Txt size="sm" tone="muted" style={{ marginTop: t.space(1), lineHeight: 19 }}>
-              {unbookedLeave.map((l) => `${dayName(l.date)} ${formatAuDate(l.date)} — ${l.activity.name}`).join('\n')}
-            </Txt>
-            <Txt size="sm" tone="muted" style={{ marginTop: t.space(2), lineHeight: 19 }}>
-              Marking a day off here puts the hours on your pay. It does not put the day on your Simpro schedule, so
-              the person building next week’s run still has you available.
-            </Txt>
-            <Button
-              title="Put them on my Simpro schedule"
-              variant="secondary"
-              loading={bookingLeave}
-              onPress={() => { void bookLeaveDays(); }}
-              style={{ marginTop: t.space(3) }}
-            />
-          </Card>
-        ) : null}
+        {notBooked}
 
-        {days.map((date, i) => (
-          <Reveal key={date} index={1 + i}>
-          {isWeekendDay(date) && !openWeekend[date] && !sheet.entries.some((e) => e.date === date) ? (
-            <WeekendRow date={date} theme={t} onOpen={() => setOpenWeekend((o) => ({ ...o, [date]: true }))} />
-          ) : (
-          <DayCard
-            date={date}
-            entries={sheet.entries.filter((e) => e.date === date)}
-            theme={t}
-            extraChoices={extraChoices}
-            onAdd={() => setPicking({ date })}
-            onQuickAdd={() => addJob(date, null)}
-            onDuplicate={() => dupPrevious(date)}
-            onLeave={(kind, hours) => {
-              const existing = sheet.entries.find((e) => e.date === date && leaveOf(e));
-              if (existing) {
-                setEntries(sheet.entries.map((e) => e.id === existing.id ? setLeave(e, kind, hours) : e));
-              } else {
-                setEntries([...sheet.entries, setLeave(blankEntry(newId(), date), kind, hours)]);
-              }
-            }}
-            onChange={(entry) => setEntries(sheet.entries.map((e) => e.id === entry.id ? entry : e))}
-            onRemove={(entryId) => setEntries(sheet.entries.filter((e) => e.id !== entryId))}
-            canDuplicate={previousDayWithEntries(sheet.entries, date) !== null}
-          />
-          )}
-          </Reveal>
-        ))}
+        {week}
 
-        <Card>
-          <Txt size="xs" tone="faint" weight="700" style={{ textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: t.space(2) }}>Your details</Txt>
-          <LabeledInput label="Name" value={sheet.employeeName} onChange={(v) => void persist({ employeeName: v })} autoCapitalize="words" theme={t} />
-          <Rowed gap={2} align="flex-start" style={{ marginTop: t.space(2) }}>
-            <View style={{ flex: 1 }}><LabeledInput label="Vehicle" value={sheet.vehicleRego} onChange={(v) => void persist({ vehicleRego: v })} autoCapitalize="characters" theme={t} /></View>
-            <View style={{ flex: 1 }}><LabeledInput label="Odometer" value={sheet.kilometerReading} onChange={(v) => void persist({ kilometerReading: v })} keyboardType="numeric" theme={t} /></View>
-          </Rowed>
-        </Card>
-
-        <Button title="Email to accounts" onPress={() => { void emailSheet(); }} loading={busy} icon={<MaterialCommunityIcons name="send-outline" size={20} color={t.color.onAccent} />} />
-        <Rowed gap={2}>
-          <Button title="Export" variant="secondary" onPress={() => { void exportSheet(); }} loading={busy} style={{ flex: 1 }} />
-          <Button
-            title={sheet.status === 'submitted' ? 'Back to draft' : 'Mark submitted'}
-            variant="ghost"
-            onPress={() => void persist({ status: sheet.status === 'submitted' ? 'draft' : 'submitted' })}
-            style={{ flex: 1 }}
-          />
-        </Rowed>
-        <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-          Goes to {TIMESHEET_INBOX} from your own mail app, so payroll can reply to you. Nothing is
-          marked submitted until the mail app says it sent.
-        </Txt>
+        {spread ? null : (
+          <>
+            {yourDetails}
+            {sendIt}
+          </>
+        )}
       </Screen>
 
       <JobPicker
@@ -421,36 +472,22 @@ export default function TimesheetScreen() {
 // ---------------------------------------------------------------------------
 
 /**
- * A weekend day with nothing on it.
+ * The narrowest a day card gets before the week drops a column.
  *
- * One line, not a card: most weeks nobody works Saturday, and a full card
- * for each of two empty days is what made the sheet a long scroll. Tapping
- * it opens the ordinary day, and a day that gets an entry stays open on its
- * own.
+ * A job row is a site name, a start, a finish and the hours. Under about this
+ * the times wrap onto a line of their own and a Tuesday stops looking like the
+ * Wednesday beside it.
  */
-function WeekendRow({ date, theme: t, onOpen }: { date: string; theme: Theme; onOpen: () => void }) {
-  return (
-    <Pressable
-      onPress={onOpen}
-      accessibilityRole="button"
-      accessibilityLabel={`Add hours for ${dayName(date)} ${formatAuDate(date)}`}
-      style={{
-        flexDirection: 'row', alignItems: 'center', gap: t.space(2),
-        paddingVertical: t.space(2.5), paddingHorizontal: t.space(3),
-        borderRadius: t.radius.md, borderWidth: 1, borderStyle: 'dashed', borderColor: t.color.border,
-      }}
-    >
-      <Txt weight="700" tone="muted">{dayName(date)}</Txt>
-      <Txt size="sm" tone="faint" style={{ flex: 1 }}>{formatAuDate(date)}</Txt>
-      <Txt size="sm" tone="accent" weight="700">Worked? Tap to add</Txt>
-    </Pressable>
-  );
-}
+const DAY_CARD_MIN = 300;
 
 function DayCard({
-  date, entries, theme: t, extraChoices, onAdd, onQuickAdd, onDuplicate, onLeave, onChange, onRemove, canDuplicate,
+  date, entries, theme: t, extraChoices, quiet, grid, onAdd, onQuickAdd, onDuplicate, onLeave, onChange, onRemove, canDuplicate,
 }: {
   date: string; entries: TimesheetEntry[]; theme: Theme; extraChoices: string[];
+  /** A weekend with nothing on it: the same day, drawn as one row instead of a page. */
+  quiet?: boolean;
+  /** Laid out beside other days rather than under them. */
+  grid?: boolean;
   onAdd: () => void; onQuickAdd: () => void; onDuplicate: () => void;
   onLeave: (kind: LeaveKind, hours: number) => void;
   onChange: (entry: TimesheetEntry) => void; onRemove: (id: string) => void; canDuplicate: boolean;
@@ -459,9 +496,39 @@ function DayCard({
   const jobs = entries.filter((e) => !leaveOf(e));
   const worked = dayWorkedHours(entries, date);
   const isToday = date === (qldIsoDay(nowIso()) ?? '');
+  const shell: ViewStyle = {
+    borderColor: isToday ? t.color.accent : t.color.border,
+    borderWidth: isToday ? 2 : 1,
+    // Side by side, a row of cards is as tall as the tallest one in it. Filling
+    // that height keeps the row a row rather than a set of steps.
+    ...(grid ? { flex: 1 } : null),
+  };
+
+  /*
+   * Saturday and Sunday used to be a dashed line that became a day when it was
+   * tapped, which put a day of the week behind a gesture nobody is told about.
+   * The objection that produced it is real — a full card for each of two empty
+   * days is what made the sheet a long scroll — so this is a card one row high
+   * instead: the day, and the two things anyone ever does to a weekend. Nothing
+   * to discover, and hours go on it in one tap.
+   */
+  if (quiet) {
+    return (
+      <Card style={{ ...shell, padding: t.space(3) }}>
+        <Rowed gap={2} wrap>
+          <View style={{ flex: 1, minWidth: 92 }}>
+            <Txt weight="800" tone="muted" style={{ letterSpacing: -0.2 }}>{dayName(date)}</Txt>
+            <Txt size="xs" tone="faint">{formatAuDate(date)}</Txt>
+          </View>
+          <Chip label="Add a job" onPress={onAdd} />
+          <LeaveButton onLeave={onLeave} theme={t} compact />
+        </Rowed>
+      </Card>
+    );
+  }
 
   return (
-    <Card style={{ borderColor: isToday ? t.color.accent : t.color.border, borderWidth: isToday ? 2 : 1 }}>
+    <Card style={shell}>
       <Rowed gap={2}>
         <Txt weight="800" style={{ letterSpacing: -0.2 }}>{dayName(date)}</Txt>
         <Txt size="sm" tone="muted" style={{ flex: 1 }}>{formatAuDate(date)}</Txt>
@@ -482,7 +549,7 @@ function DayCard({
           ))}
 
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.space(2), marginTop: t.space(2.5) }}>
-            <TileButton icon="plus" label={jobs.length ? 'Add a job' : 'Add a job'} onPress={onAdd} theme={t} primary />
+            <TileButton icon="plus" label="Add a job" onPress={onAdd} theme={t} primary />
             {canDuplicate ? <TileButton icon="content-copy" label="Copy previous day" onPress={onDuplicate} theme={t} /> : null}
             {!jobs.length ? <LeaveButton onLeave={onLeave} theme={t} /> : null}
           </View>
@@ -613,9 +680,13 @@ function JobEntry({
   );
 }
 
-function LeaveButton({ onLeave, theme: t }: { onLeave: (kind: LeaveKind, hours: number) => void; theme: Theme }) {
+function LeaveButton({ onLeave, theme: t, compact }: { onLeave: (kind: LeaveKind, hours: number) => void; theme: Theme; compact?: boolean }) {
   const [open, setOpen] = useState(false);
-  if (!open) return <TileButton icon="palm-tree" label="Day off" onPress={() => setOpen(true)} theme={t} />;
+  if (!open) {
+    return compact
+      ? <Chip label="Day off" onPress={() => setOpen(true)} />
+      : <TileButton icon="palm-tree" label="Day off" onPress={() => setOpen(true)} theme={t} />;
+  }
   return (
     <View style={{ width: '100%', gap: t.space(2) }}>
       <LeavePicker date="" selected={null} hours={STANDARD_DAY_HOURS} onLeave={(k, h) => { onLeave(k, h); setOpen(false); }} theme={t} />

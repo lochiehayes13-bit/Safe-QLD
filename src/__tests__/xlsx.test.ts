@@ -165,6 +165,20 @@ describe('workbook generation', () => {
     expect(xml).not.toContain('r="C1"');
   });
 
+  it('keeps an empty cell that was given a style, because the style is the content', () => {
+    /*
+     * A blank cell was dropped whatever it was styled as, and a fill and a
+     * border are the two things that are worth something on a cell with no
+     * value in it. So the yellow box against a field nobody filled in came out
+     * white, the border round the timesheet grid stopped wherever somebody had
+     * last typed, and a merged box was coloured for its first column only —
+     * every one of which is a form that looks like a draft.
+     */
+    const xml = sheetXml([{ name: 'S', rows: [[{ v: '', style: 'input' }, '', { v: 'x' }]] }]);
+    expect(xml).toContain('<c r="A1" s="8"/>');
+    expect(xml).not.toContain('r="B1"');
+  });
+
   it('writes sample files a person can open by hand', () => {
     mkdirSync(OUT, { recursive: true });
     writeFileSync(`${OUT}/basic.xlsx`, buildXlsx(sheets));
