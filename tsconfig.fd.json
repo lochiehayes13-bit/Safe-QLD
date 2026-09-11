@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/domain/fireDoor.ts", "app/tools/fire-door.tsx", "src/__tests__/fireDoor.test.ts", "expo-env.d.ts"]
+}

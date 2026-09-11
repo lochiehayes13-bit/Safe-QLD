@@ -1,0 +1,110 @@
+{
+  "name": "safe-qld",
+  "version": "0.1.0",
+  "main": "index.js",
+  "private": true,
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "expo lint",
+    "bundle:android": "expo export --platform android --output-dir dist",
+    "build:apk": "eas build --profile preview --platform android",
+    "build:play": "eas build --profile production --platform android",
+    "build:ios": "eas build --profile preview --platform ios",
+    "check": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@expo-google-fonts/manrope": "^0.4.2",
+    "@expo/metro-runtime": "^57.0.15",
+    "@expo/vector-icons": "^15.0.2",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~57.0.18",
+    "expo-background-task": "~57.0.15",
+    "expo-camera": "~57.0.4",
+    "expo-clipboard": "~57.0.1",
+    "expo-constants": "~57.0.16",
+    "expo-document-picker": "~57.0.1",
+    "expo-file-system": "~57.0.6",
+    "expo-font": "~57.0.3",
+    "expo-haptics": "~57.0.2",
+    "expo-image-manipulator": "~57.0.14",
+    "expo-image-picker": "~57.0.14",
+    "expo-linear-gradient": "~57.0.1",
+    "expo-linking": "~57.0.8",
+    "expo-location": "~57.0.14",
+    "expo-mail-composer": "~57.0.1",
+    "expo-network": "~57.0.1",
+    "expo-print": "~57.0.1",
+    "expo-router": "~57.0.17",
+    "expo-secure-store": "~57.0.2",
+    "expo-sharing": "~57.0.16",
+    "expo-splash-screen": "~57.0.8",
+    "expo-sqlite": "~57.0.2",
+    "expo-status-bar": "~57.0.1",
+    "expo-system-ui": "~57.0.3",
+    "expo-task-manager": "~57.0.15",
+    "expo-web-browser": "~57.0.2",
+    "pako": "^3.0.1",
+    "react": "19.2.3",
+    "react-dom": "^19.2.3",
+    "react-native": "0.86.3",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-reanimated": "4.5.1",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "~4.26.0",
+    "react-native-svg": "15.15.4",
+    "react-native-web": "^0.21.2",
+    "react-native-webview": "13.16.1",
+    "react-native-worklets": "0.10.1"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/pako": "^2.0.4",
+    "@types/react": "~19.2.2",
+    "@types/semver": "^7.8.0",
+    "eslint": "^9.0.0",
+    "eslint-config-expo": "~57.0.2",
+    "jest": "^30.5.0",
+    "semver": "^7.8.5",
+    "ts-jest": "^29.4.12",
+    "typescript": "~6.0.3"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/__tests__/**/*.test.ts"
+    ],
+    "moduleNameMapper": {
+      "^expo-secure-store$": "<rootDir>/src/__mocks__/expo-secure-store.ts",
+      "^react-native$": "<rootDir>/src/__mocks__/react-native.ts",
+      "^@/(.*)$": "<rootDir>/src/$1"
+    },
+    "collectCoverageFrom": [
+      "src/calc/**/*.ts",
+      "src/share/**/*.ts",
+      "src/export/**/*.ts",
+      "src/domain/**/*.ts",
+      "src/parsers/**/*.ts"
+    ],
+    "transform": {
+      "^.+\\.tsx?$": [
+        "ts-jest",
+        {
+          "tsconfig": {
+            "module": "commonjs",
+            "esModuleInterop": true,
+            "resolveJsonModule": true,
+            "strict": true,
+            "skipLibCheck": true
+          }
+        }
+      ]
+    }
+  }
+}
