@@ -1,5 +1,5 @@
 import {
-  assessIncremental, describeStaleness, newestChange, nextWatermark, planIncremental,
+  assessIncremental, describeStaleness, newestChange, nextWatermark, planIncremental, readsEverything,
   type SyncState,
 } from '@/simpro/incremental';
 
@@ -202,5 +202,47 @@ describe('a read the ceiling cut short', () => {
     const records = [{ DateModified: '2026-08-21T09:45:00Z' }];
     expect(nextWatermark(records, 'incremental', '2026-08-22T00:00:00.000Z', previous, true)).toEqual(previous);
     expect(nextWatermark(records, 'full', '2026-08-22T00:00:00.000Z', previous, true)).toEqual(previous);
+  });
+});
+
+/**
+ * What a plain press of Sync now asks for.
+ *
+ * This reversed in this build and the reversal is the whole fix for "syncing
+ * takes ages": an absent option used to mean "read everything", so the button
+ * re-read 3,112 sites and 12,546 assets every time somebody wanted one job.
+ * The default is asserted rather than assumed, because it is invisible at the
+ * call site — Settings passes no options at all — and flipping back would look
+ * like a tidy-up and cost six minutes a press.
+ */
+describe('deciding between changes and everything', () => {
+  it('asks only for changes when nothing says otherwise', () => {
+    expect(readsEverything()).toBe(false);
+    expect(readsEverything({})).toBe(false);
+  });
+
+  it('asks only for changes when asked for changes', () => {
+    expect(readsEverything({ incremental: true })).toBe(false);
+  });
+
+  it('reads everything only when that is asked for by name', () => {
+    expect(readsEverything({ incremental: false })).toBe(true);
+  });
+});
+
+/**
+ * The window Simpro will actually accept.
+ *
+ * Asked of the live build on 13 September 2026: `DateModified=gt(2026-09-12)`
+ * is honoured and returns 2 of 3,112 sites, while `gt(2026-09-12T00:00:00)`
+ * comes back 422 "Invalid search value". So the anchor is a whole day and
+ * cannot be narrowed to an hour — which reads like a rounding bug and is not
+ * one. Pinned here so the next person to notice the truncation finds the
+ * answer instead of the API's.
+ */
+describe('the anchor Simpro accepts', () => {
+  it('is a date, not an instant', () => {
+    const plan = planIncremental('sites', '2026-09-12T14:30:00.000Z');
+    expect(plan.query.DateModified).toMatch(/^gt\(\d{4}-\d{2}-\d{2}\)$/);
   });
 });

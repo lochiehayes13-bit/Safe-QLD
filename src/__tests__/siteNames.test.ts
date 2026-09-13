@@ -1,5 +1,6 @@
 import {
-  ambiguousNames, disambiguator, indistinguishable, matchSiteByRefOrName, readableRef,
+  addToIndex, ambiguousNames, disambiguator, indexSites, indistinguishable, matchSiteByRefOrName,
+  matchSiteInIndex, readableRef,
   type NamedSite,
 } from '@/domain/siteNames';
 
@@ -233,5 +234,88 @@ describe('matching an incoming site to one already held', () => {
 
   it('finds nothing for a site it has never seen', () => {
     expect(matchSiteByRefOrName(held, 'SIMPRO:1', 'Somewhere New')).toEqual({});
+  });
+});
+
+/**
+ * The same match, against a list indexed once instead of walked every time.
+ *
+ * The sync asks this question once per incoming site, so walking the list each
+ * time made a full pull of 3,112 sites walk it 3,112 times. Measured, that is
+ * 57 ms against the index's 3.4 ms — worth removing, and far too small to be
+ * why syncing took minutes. The default flip in `readsEverything` is that fix.
+ *
+ * Speed is not what these check. They check that nothing was traded for it,
+ * because the rule being optimised is the one that decides whether three
+ * separate buildings called "Luggage Direct" stay three buildings. Every case
+ * the list-walking version was given is asked of the index too, and the two
+ * answers are compared directly rather than restated — a restatement can drift
+ * and agree with itself.
+ */
+describe('matching against an index', () => {
+  const held: NamedSite[] = [
+    { id: 'a', name: 'Luggage Direct', siteRef: 'asset-register:3370' },
+    { id: 'b', name: 'Luggage Direct', siteRef: 'asset-register:3371' },
+    { id: 'c', name: 'Luggage Direct', siteRef: 'SIMPRO:3372' },
+    { id: 'd', name: 'Sandgate Hall', siteRef: 'asset-register:9000' },
+    { id: 'e', name: 'Carina Bus Depot' },
+    { id: 'f', name: '   ', siteRef: 'SIMPRO:5000' },
+  ];
+
+  const queries: [string | undefined, string][] = [
+    ['asset-register:3371', 'Luggage Direct'],
+    ['SIMPRO:3372', 'Luggage Direct'],
+    ['SIMPRO:9999', 'Luggage Direct'],
+    ['asset-register:9999', 'Luggage Direct'],
+    ['SIMPRO:412', 'Carina Bus Depot'],
+    ['SIMPRO:9000', 'Sandgate Hall'],
+    [undefined, '  sandgate hall '],
+    [undefined, 'Luggage Direct'],
+    ['SIMPRO:1', 'Somewhere New'],
+    [undefined, ''],
+    [undefined, '   '],
+    ['SIMPRO:5000', ''],
+  ];
+
+  it.each(queries)('answers as the walk did for %s / %s', (ref, name) => {
+    const index = indexSites(held);
+    expect(matchSiteInIndex(index, ref, name)).toEqual(matchSiteByRefOrName(held, ref, name));
+  });
+
+  it('takes the first site carrying a duplicated reference, as find did', () => {
+    const twice: NamedSite[] = [
+      { id: 'first', name: 'One', siteRef: 'SIMPRO:7' },
+      { id: 'second', name: 'Two', siteRef: 'SIMPRO:7' },
+    ];
+    expect(matchSiteInIndex(indexSites(twice), 'SIMPRO:7', 'Two').match?.id).toBe('first');
+  });
+
+  it('hands back a copy of the ambiguous list, not the index itself', () => {
+    const index = indexSites(held);
+    const out = matchSiteInIndex(index, undefined, 'Luggage Direct');
+    out.ambiguous?.push({ id: 'intruder', name: 'Luggage Direct' });
+    expect(matchSiteInIndex(index, undefined, 'Luggage Direct').ambiguous).toHaveLength(3);
+  });
+
+  /*
+   * The sync creates sites as it walks the incoming list, and the records still
+   * to come have to be able to match the ones it just made. An index built once
+   * and never added to would miss them and make a second copy of every site
+   * created in the same run — the exact duplication the matching exists to stop.
+   */
+  it('matches a site created part-way through the same run', () => {
+    const index = indexSites<NamedSite>([]);
+    expect(matchSiteInIndex(index, 'SIMPRO:81', 'New Depot').match).toBeUndefined();
+
+    addToIndex(index, { id: 'new', name: 'New Depot', siteRef: 'SIMPRO:81' });
+    expect(matchSiteInIndex(index, 'SIMPRO:81', 'New Depot').match?.id).toBe('new');
+    expect(matchSiteInIndex(index, undefined, 'New Depot').match?.id).toBe('new');
+  });
+
+  it('does not index a site with no name, which is not an identity', () => {
+    const index = indexSites<NamedSite>([]);
+    addToIndex(index, { id: 'blank', name: '  ', siteRef: 'SIMPRO:82' });
+    expect(matchSiteInIndex(index, undefined, '  ').match).toBeUndefined();
+    expect(matchSiteInIndex(index, 'SIMPRO:82', '').match?.id).toBe('blank');
   });
 });

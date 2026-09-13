@@ -3,7 +3,7 @@ import { SimproResources, rejectedTheDateRange, scheduleDateFilter, type SimproS
 import {
   SimproMirror, dateSinceFilter, invoiceWindowStart, type PagedRead, type SimproCustomer, type SimproInvoice,
 } from './mirrorResources';
-import { assessIncremental, nextWatermark, planIncremental, type SyncResource } from './incremental';
+import { assessIncremental, nextWatermark, planIncremental, readsEverything, type SyncResource } from './incremental';
 import { readSyncState, writeSyncState } from './watermark';
 import { MORE_STAGES, pullMore, type MoreResource } from './syncMore';
 import { sendMore } from './outboundMore';
@@ -27,7 +27,7 @@ import {
   withMirrorTransaction, type JobChildren, type QuoteChildren,
 } from '@/db/mirrorRepo';
 import { markerFor, withMarker } from '@/domain/queueKey';
-import { matchSiteByRefOrName } from '@/domain/siteNames';
+import { addToIndex, indexSites, matchSiteInIndex, type SiteIndex } from '@/domain/siteNames';
 import {
   attachmentContentKey, keysInNoteText, type OutboundAssetTest, type OutboundAttachment,
 } from '@/domain/outboundWork';
@@ -131,6 +131,13 @@ export interface SyncResult {
 }
 
 export interface PullOptions {
+  /**
+   * True or absent to ask only for what changed; false to re-read everything.
+   *
+   * Absent means changes-only, which is the opposite of what it meant until
+   * now — see the note at the top of `pullFromSimpro` for why it was the other
+   * way round and what changed. Callers that want the whole lot must say so.
+   */
   incremental?: boolean;
   /**
    * Whose phone this is, so their booked jobs are the first to get their
@@ -151,8 +158,8 @@ export interface PullOptions {
  * Direct", and folding a Simpro site onto whichever of them came first merges
  * three buildings' jobs and assets into one.
  */
-function matchSite(existing: Site[], externalId: string, name: string) {
-  return matchSiteByRefOrName(existing, `SIMPRO:${externalId}`, name);
+function matchSite(existing: SiteIndex<Site>, externalId: string, name: string) {
+  return matchSiteInIndex(existing, `SIMPRO:${externalId}`, name);
 }
 
 /**
@@ -255,22 +262,40 @@ export async function pullFromSimpro(
   options?: PullOptions,
 ): Promise<SyncResult> {
   /*
-   * A pull reads everything, every time.
+   * A pull asks for what changed. It used to read everything, every time.
    *
-   * The incremental machinery below is kept and still works — it asks only for
-   * what changed since the last successful sync — but it is no longer what a
-   * press of the button does. Incremental sync is only ever as good as its
-   * watermark, and a watermark can be wrong in ways nobody sees: a record
-   * edited without its modified date moving, a filter the server quietly
-   * ignored, a sync that half-failed and left the mark further forward than the
-   * data it actually stored. Each of those leaves the phone confidently stale,
-   * and stale in this app means a technician standing in front of equipment the
-   * office has since changed.
+   * The reasoning for reading everything was sound and is still true: an
+   * incremental sync is only ever as good as its watermark, and a watermark can
+   * be wrong in ways nobody sees — a record edited without its modified date
+   * moving, a filter the server quietly ignored, a sync that half-failed and
+   * left the mark further forward than the data it actually stored. Each of
+   * those leaves the phone confidently stale, and stale in this app means a
+   * technician standing in front of equipment the office has since changed.
    *
-   * A full read of 3,059 sites and 12,546 assets is about six minutes on a
-   * decent signal. That is the price of never wondering.
+   * What was wrong was the price. A full read of 3,112 sites and 12,546 assets
+   * is about six minutes, and it ran on every press of Sync now — so the button
+   * a technician reaches for when they want one job on their phone re-read the
+   * company. Chris Scoffell put it plainly from the field: "Syncing takes ages
+   * … seems to try and sync everything each time." He was reading the code
+   * correctly from the outside.
+   *
+   * Both things are had at once, because the two jobs were never the same job:
+   *
+   *  - **Every press asks for changes.** Against the live build a day's filter
+   *    on sites returns 2 records out of 3,112. That is the difference between
+   *    six minutes and a few seconds, and it is the same data.
+   *  - **Everything is still re-read daily**, by the automatic sync, which asks
+   *    for `incremental: false` once every twenty-four hours (see
+   *    ./autoSyncPolicy). The ceiling on how long a bad watermark can hide is
+   *    unchanged; it is just no longer paid for by hand, several times a day.
+   *  - **A full read is still one tap away** in Settings, for the moment
+   *    somebody has reason to doubt what is on the phone.
+   *
+   * So `incremental` defaults to on, and a caller that wants the whole lot says
+   * `incremental: false`. That is a reversal of what an absent option used to
+   * mean, which is why it is spelled out on PullOptions as well as here.
    */
-  const force = !options?.incremental;
+  const force = readsEverything(options);
   const client = new SimproClient(config);
   const api = new SimproResources(client);
   const mirror = new SimproMirror(client);
@@ -331,13 +356,16 @@ export async function pullFromSimpro(
   }
 
   const existing = await listSites();
+  // Indexed once. The match itself used to walk this whole list for every
+  // incoming site; see indexSites for what that cost at 3,112 of them.
+  const existingIndex = indexSites(existing);
   // Keyed by external id so jobs can find the site they belong to.
   const siteIdByExternal = new Map<string, string>();
 
   await inPages(remoteSites, async (remote, i) => {
     if (i % 25 === 0) progress('Sites', i, remoteSites.length);
     try {
-      const { match, ambiguous } = matchSite(existing, remote.id, remote.name);
+      const { match, ambiguous } = matchSite(existingIndex, remote.id, remote.name);
       if (ambiguous) {
         // Said out loud rather than resolved. A second site is visible and can
         // be merged by hand; two buildings folded together cannot be taken
@@ -393,6 +421,8 @@ export async function pullFromSimpro(
         localId = created.id;
         siteIdByExternal.set(remote.id, created.id);
         existing.push(created);
+        // So a later site in this same run can match the one just made.
+        addToIndex(existingIndex, created);
         result.sitesAdded++;
       }
       // The office's own words about the site, and whose it is. These are

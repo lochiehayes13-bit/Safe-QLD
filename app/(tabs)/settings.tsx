@@ -292,7 +292,16 @@ export default function SettingsScreen() {
 
   const configFor = () => simproConfigFromPrefs(prefs);
 
-  const runPull = async () => {
+  /**
+   * Fetches from the office: what changed, or the whole lot.
+   *
+   * Two buttons rather than one, because they answer different questions and
+   * one of them is expensive. "Sync now" is the everyday press and asks only
+   * for what changed, which is seconds. "Fetch everything" is for the moment
+   * somebody has reason to doubt what is on the phone, and says in its own
+   * confirmation what it will cost before it starts.
+   */
+  const runPull = async (everything = false) => {
     // Held so an automatic run cannot start alongside this one. Two pulls at
     // once each read the site list before the other has written to it, and a
     // site new to both is created twice.
@@ -300,7 +309,7 @@ export default function SettingsScreen() {
     setSyncing(true);
     setProgress(null);
     try {
-      const r = await pullFromSimpro(configFor(), setProgress);
+      const r = await pullFromSimpro(configFor(), setProgress, { incremental: !everything });
       setSyncState(await readAllSyncState());
       setCard(await loadRateCard());
       const incremental = Object.entries(r.modes)
@@ -321,7 +330,7 @@ export default function SettingsScreen() {
       // that is quietly not doing what it claims.
       if (r.notes.length) lines.push('', ...r.notes);
       if (r.errors.length) lines.push('', ...r.errors.slice(0, 5));
-      showAlert('Sync complete', lines.join('\n'));
+      showAlert(everything ? 'Everything fetched' : 'Sync complete', lines.join('\n'));
     } catch (e) {
       showAlert('Sync failed', e instanceof Error ? e.message : String(e));
     } finally {
@@ -329,6 +338,27 @@ export default function SettingsScreen() {
       setSyncing(false);
       setProgress(null);
     }
+  };
+
+  /**
+   * Asks before a full re-read, because the cost is the whole point of asking.
+   *
+   * Not a warning about damage — a full pull is safe, it just takes minutes,
+   * and a technician who pressed it expecting the quick one is a technician
+   * standing in a car park watching a progress bar. So the confirmation says
+   * how long and what the quick button does instead.
+   */
+  const confirmFetchEverything = () => {
+    showAlert(
+      'Fetch everything?',
+      'This re-reads every site, job and asset the office holds — a few minutes on a good signal. '
+      + 'Sync now fetches only what changed and is usually seconds. Everything is re-read on its own '
+      + 'once a day anyway; do this when you have reason to doubt what is on the phone.',
+      [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Fetch everything', onPress: () => { void runPull(true); } },
+      ],
+    );
   };
 
   const runFlush = async () => {
@@ -1023,7 +1053,7 @@ export default function SettingsScreen() {
           <Button
             title="Sync now"
             style={{ flex: 1 }}
-            onPress={runPull}
+            onPress={() => runPull()}
             loading={syncing}
             disabled={auto.inFlight && !syncing}
           />
@@ -1036,15 +1066,25 @@ export default function SettingsScreen() {
             disabled={!pending || (auto.inFlight && !syncing)}
           />
         </Rowed>
+        <View style={{ height: t.space(2) }} />
+        <Button
+          title="Fetch everything"
+          variant="secondary"
+          onPress={confirmFetchEverything}
+          loading={syncing}
+          disabled={auto.inFlight && !syncing}
+        />
         {progress ? (
           <Txt size="xs" tone="muted" style={{ marginTop: t.space(2) }}>
             {progress.stage} {progress.total ? `${progress.done} of ${progress.total}` : ''}
           </Txt>
         ) : null}
         <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
-          Sync now re-reads everything, which takes a few minutes; the automatic sync fetches only what
-          changed. Either way a pull fills in blanks and adds records. It never overwrites something you
-          typed on site — the person standing in the building knows better than the office record.
+          Sync now fetches only what the office has changed since the last sync, which is usually
+          seconds. Everything is re-read in full once a day on its own; Fetch everything does it on
+          demand and takes a few minutes. Either way a pull fills in blanks and adds records. It never
+          overwrites something you typed on site — the person standing in the building knows better
+          than the office record.
         </Txt>
       </Card>
 

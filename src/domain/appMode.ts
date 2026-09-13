@@ -954,6 +954,16 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['stock', 'van', 'restock', 'inventory', 'spares'],
   },
   {
+    route: '/work/stock-list', file: 'app/work/stock-list.tsx', tab: 'work', section: 'Parts and stock',
+    label: 'Stock to load', modes: BOTH, openedFrom: ['/work', '/shortcuts'],
+    blurb: 'What the next few days of booked work calls for, less what the van already carries.',
+    terms: ['stock list', 'load', 'pick list', 'parts', 'week ahead', 'days', 'defects', 'van'],
+    keptBecause:
+      'Loading the van is the technician\'s job and nobody else can do it: the answer depends on '
+      + 'what is already in the back. The office cannot see that, and a list built without it is a '
+      + 'list of things half of which are already on board.',
+  },
+  {
     route: '/work/needs', file: 'app/work/needs.tsx', tab: 'work', section: 'Parts and stock',
     label: 'Things I need', modes: BOTH, openedFrom: ['/work', '/shortcuts', '/work/purchases'],
     blurb: 'The running list of parts to get, split into what is wanted now and what is for work still coming.',
@@ -965,7 +975,7 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/work/purchases', file: 'app/work/purchases.tsx', tab: 'work', section: 'Parts and stock',
-    label: 'Purchase requests', modes: OFFICE, openedFrom: ['/work', '/work/stock', '/work/needs'],
+    label: 'Purchase requests', modes: OFFICE, openedFrom: ['/work', '/work/stock', '/work/stock-list', '/work/needs'],
     // Raising a restock lands on this screen, and it does that in Technician
     // mode too — hiding the row must not break the middle of that action.
     stillOpenedFrom: '/work/stock',

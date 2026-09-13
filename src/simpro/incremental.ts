@@ -48,6 +48,24 @@ export function planIncremental(
   return { query: { [column]: `gt(${since})` }, mode: 'incremental', since };
 }
 
+/**
+ * Whether a pull should re-read everything rather than ask for changes.
+ *
+ * One line, and it lives here rather than inline in the pull because it is the
+ * line that decided a technician's Tuesday. Until this build an absent option
+ * meant "read everything", so Settings' Sync now — which passes no options —
+ * re-read 3,112 sites and 12,546 assets on every press, about six minutes,
+ * when what the person wanted was the job they had just been given. Chris
+ * Scoffell reported it from the field as "syncing takes ages … seems to try
+ * and sync everything each time", which is exactly what it did.
+ *
+ * So the default is changes-only and a full read has to be asked for by name.
+ * The daily full re-read still happens; ./autoSyncPolicy asks for it.
+ */
+export function readsEverything(options?: { incremental?: boolean }): boolean {
+  return options?.incremental === false;
+}
+
 export interface IncrementalOutcome<T> {
   records: T[];
   /** What actually happened, which is not always what was asked for. */

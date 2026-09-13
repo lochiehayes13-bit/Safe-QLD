@@ -63,6 +63,7 @@ export default function WorkScreen() {
       rows: [
         { label: 'Asset labels', sub: 'Issue numbers to untagged assets and print the sheet', icon: 'tag-multiple-outline', href: '/work/labels' },
         { label: 'Van stock', sub: 'What you carry and what needs restocking', icon: 'van-utility', href: '/work/stock', badge: counts.restock, tone: counts.restock ? 'warn' : undefined },
+        { label: 'Stock to load', sub: 'What the days ahead need, less what is in the van', icon: 'clipboard-list-outline', href: '/work/stock-list' },
         { label: 'Things I need', sub: 'Parts to grab, for now and for work still coming', icon: 'format-list-checks', href: '/work/needs' },
         { label: 'Purchase requests', sub: 'Parts to order', icon: 'cart-outline', href: '/work/purchases', badge: counts.purchasesDraft },
         { label: 'Company knowledge', sub: 'Tricks of the trade, approved and unverified', icon: 'lightbulb-on-outline', href: '/work/knowledge' },
