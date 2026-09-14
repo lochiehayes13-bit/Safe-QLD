@@ -292,6 +292,28 @@ export default function ImportScreen() {
               }
             />
 
+            {/*
+              * Offered here because this is the screen somebody reaches for
+              * when they are holding a config, and importing is usually not
+              * what they want: the file goes into the site permanently and
+              * cannot be taken out again. Reading it first costs nothing.
+              */}
+            <Card>
+              <Txt weight="700">Just want to look inside it?</Txt>
+              <Txt size="sm" tone="muted" style={{ marginTop: t.space(1), lineHeight: 19 }}>
+                Config Explorer opens the same files and writes nothing into a site. Browse the devices, read the
+                cause and effect, check the configuration against itself, or compare it with what the register
+                already holds — and import it from there if you decide to.
+              </Txt>
+              <View style={{ height: t.space(2) }} />
+              <Button
+                title="Open Config Explorer"
+                variant="secondary"
+                compact
+                onPress={() => router.push('/config')}
+              />
+            </Card>
+
             <H2>Getting a list out of your panel software</H2>
             {PANEL_CATALOGUE.map((p) => (
               <Card key={p.id}>

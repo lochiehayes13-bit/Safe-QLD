@@ -334,6 +334,57 @@ them. Those are the vendor's files rather than ours so they are not committed
 either, but they are what the parser was built and checked against — all 86
 template files across both installers parse without error.
 
+## Config Explorer
+
+Opening a panel configuration used to mean importing it: its devices, zones and
+logic went into a site, permanently, and there was no way back. So the only way
+to look inside a file was to commit to it — which is the wrong shape for nearly
+every reason anybody opens one.
+
+The Config Explorer is the other way. A file opened there is kept whole and
+read, and **nothing is written into a site** until somebody presses the button
+that does that. Six screens work on what is in it:
+
+- **Devices** — every point, searched by text, zone, what it is, or the address
+  written either way round (`L1P012` or `1/12`). Device classes carry the words
+  a technician actually says, so "call point" finds a head the panel calls
+  `BREAK GLASS`.
+- **Check it** — what the configuration says that contradicts itself: two
+  devices on one address, a zone with devices and no name, a device reporting to
+  a zone the panel has no record of, a rule driving a device that is not on the
+  loop.
+- **Cause and effect** — the logic as the panel holds it, with the equation each
+  rule was read from printed underneath, because the equation is the part that
+  is definitely true.
+- **Compare with a site** — the file against the register: what is new, what has
+  gone, what was relabelled, and which zones were re-texted. A device whose text
+  was edited is one change, not a removal and an arrival.
+- **Inside the file** — the vendor tool's own tables, row by row, including the
+  ones this app does not read. A Kentec `.nle` shows its SQLite tables; a
+  Notifier `.pci` shows each element kind and its attributes; a Pertronic
+  `.util` separates the live configuration from the copy the tool last read back
+  off the panel.
+- **The library** — what this phone is holding, grouped by building, so two
+  versions of the same site sit together.
+
+### What the check does not check
+
+A check run on ground that is not there produces findings that are confidently
+wrong, and a technician shown a hundred of those stops opening the screen. So
+each check declares what it needs and the file declares what it can support, and
+a check whose ground is missing does not run — and says so, on the screen,
+underneath the findings, with the reason.
+
+Some of those reasons are derived from the file: if every device came back with
+an unknown type, nothing about device classes can mean anything. Others are
+written down because the data cannot show them — that Ampac writes its node into
+every point reference, or that Notifier numbers detectors and modules separately
+so a detector and a module legitimately share address 7.
+
+Nothing in it is a compliance check. These read a configuration against itself.
+Whether the system meets the Standard is a question about the building, and no
+file can answer it.
+
 ## Reading panel configurations
 
 Seven vendor formats are read directly, without an export step.

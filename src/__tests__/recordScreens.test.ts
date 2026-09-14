@@ -110,10 +110,39 @@ describe('record screens', () => {
   });
 
   it('makes every screen that shows the gate able to tell the two states apart', () => {
+    /*
+     * The flag either comes from the screen's own loader, or from a hook that
+     * sets it on the screen's behalf. Both satisfy the rule — the point is that
+     * something has decided which of the two states the gate is showing — and
+     * the hook is the better of the two arrangements, because six Config
+     * Explorer screens read the same record and six copies of the same three
+     * states is six chances to get one of them wrong.
+     *
+     * So a hook counts only when it actually sets the flag itself, which is
+     * checked here rather than assumed. A hook that returns `missing` and never
+     * computes it would pass a textual test and reintroduce the exact bug.
+     */
+    const hooksThatSetMissing = new Set(
+      readdirSync(join(REPO, 'src', 'hooks'))
+        .filter((f) => f.endsWith('.ts') || f.endsWith('.tsx'))
+        .filter((f) => code(readFileSync(join(REPO, 'src', 'hooks', f), 'utf8')).includes('setMissing('))
+        .map((f) => f.replace(/\.tsx?$/, '')),
+    );
+
     const broken = files
-      .filter((f) => f.code.includes('<RecordGate') && !f.code.includes('setMissing('))
+      .filter((f) => f.code.includes('<RecordGate'))
+      .filter((f) => !f.code.includes('setMissing('))
+      .filter((f) => ![...hooksThatSetMissing].some((hook) => f.code.includes(`@/hooks/${hook}`)))
       .map((f) => f.path);
     expect(broken).toEqual([]);
+  });
+
+  it('found a hook that sets the flag, so the rule above is not vacuous', () => {
+    // If the hooks directory stopped setting it, the exemption above would
+    // silently let every screen through.
+    const setters = readdirSync(join(REPO, 'src', 'hooks'))
+      .filter((f) => code(readFileSync(join(REPO, 'src', 'hooks', f), 'utf8')).includes('setMissing('));
+    expect(setters.length).toBeGreaterThan(0);
   });
 
   it('can say that the read itself failed, not only that the record is absent', () => {

@@ -76,7 +76,19 @@ export function zoneSheet(panel: Panel, zones: Zone[]): Sheet {
   };
 }
 
-export function pointSheet(panel: Panel, points: Point[]): Sheet {
+/**
+ * The point list as a spreadsheet.
+ *
+ * Takes the name rather than the whole panel, and points without their row
+ * ids, so the Config Explorer can hand it a configuration that has not been
+ * imported. A parsed point has no id and no panelId because it is not a row;
+ * requiring them here would mean inventing two, and an invented id is a handle
+ * to something that does not exist.
+ */
+export function pointSheet(
+  panel: Pick<Panel, 'name'>,
+  points: readonly Omit<Point, 'id' | 'panelId'>[],
+): Sheet {
   const rows: Row[] = [[
     H('Address'), H('Loop'), H('Point'), H('Sub'), H('Device text'),
     H('Second line'), H('Type'), H('Panel type'), H('Zone'), H('Zone text'), H('Status'),

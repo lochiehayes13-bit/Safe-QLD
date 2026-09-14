@@ -399,9 +399,60 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/site/[id]', file: 'app/site/[id].tsx', tab: 'sites', section: 'Your sites',
     label: 'Site', needsContext: true, modes: BOTH,
-    openedFrom: ['/sites', '/work/job/[id]', '/customer/[id]', '/quotes/simpro/[id]', '/search', '/contacts/[id]', '/leads'],
+    openedFrom: [
+      '/sites', '/work/job/[id]', '/customer/[id]', '/quotes/simpro/[id]', '/search', '/contacts/[id]', '/leads',
+      '/config/[id]', '/config/compare',
+    ],
     blurb: 'One site: its systems, its history, its paperwork, and the pack that hands it to another technician.',
     terms: ['site', 'building', 'pack'],
+  },
+  // -- Config Explorer -------------------------------------------------------
+  // A panel configuration opened and read rather than imported. Every other
+  // path in this app that touches a vendor file writes it into a site on the
+  // way past; these six screens write nothing until somebody says so.
+  {
+    route: '/config', file: 'app/config/index.tsx', tab: 'sites', section: 'Config Explorer',
+    label: 'Config Explorer', modes: BOTH, openedFrom: ['/sites', '/import', '/shortcuts'],
+    blurb: 'Open a panel configuration and read it on the phone. Nothing is written into a site.',
+    terms: ['config', 'configuration', 'panel file', 'nle', 'pci', 'ffp', 'util', 'loop explorer',
+      'verifire', 'smartconfig', 'config manager', 'open a config'],
+  },
+  {
+    route: '/config/[id]', file: 'app/config/[id].tsx', tab: 'sites', section: 'Config Explorer',
+    label: 'A configuration', needsContext: true, modes: BOTH, openedFrom: ['/config'],
+    blurb: 'What one file holds: its panels, loops, zones and logic, and where it can be written in.',
+    terms: ['config', 'panel', 'loops', 'zones'],
+  },
+  {
+    route: '/config/points', file: 'app/config/points.tsx', tab: 'sites', section: 'Config Explorer',
+    label: 'Devices in a configuration', needsContext: true, modes: BOTH,
+    openedFrom: ['/config/[id]', '/config/verify'],
+    blurb: 'Every point in the file, searchable by text, address, zone or what it is.',
+    terms: ['devices', 'points', 'addresses', 'device list'],
+  },
+  {
+    route: '/config/verify', file: 'app/config/verify.tsx', tab: 'sites', section: 'Config Explorer',
+    label: 'Check a configuration', needsContext: true, modes: BOTH, openedFrom: ['/config/[id]'],
+    blurb: 'What is wrong with the file, and — just as plainly — what could not be checked and why.',
+    terms: ['check', 'verify', 'duplicate address', 'zone text', 'findings', 'errors'],
+  },
+  {
+    route: '/config/logic', file: 'app/config/logic.tsx', tab: 'sites', section: 'Config Explorer',
+    label: 'Cause and effect in a configuration', needsContext: true, modes: BOTH, openedFrom: ['/config/[id]'],
+    blurb: 'The logic as the panel holds it, with the equation each rule was read from.',
+    terms: ['cause and effect', 'matrix', 'logic', 'equations', 'c&e'],
+  },
+  {
+    route: '/config/compare', file: 'app/config/compare.tsx', tab: 'sites', section: 'Config Explorer',
+    label: 'Compare a configuration', needsContext: true, modes: BOTH, openedFrom: ['/config/[id]'],
+    blurb: 'The file against what the register holds: what is new, what has gone, what was relabelled.',
+    terms: ['compare', 'difference', 'changed', 'what changed', 'diff'],
+  },
+  {
+    route: '/config/raw', file: 'app/config/raw.tsx', tab: 'sites', section: 'Config Explorer',
+    label: 'Inside a configuration file', needsContext: true, modes: BOTH, openedFrom: ['/config/[id]'],
+    blurb: 'The vendor tool\u2019s own tables, row by row, including the ones this app does not read.',
+    terms: ['raw', 'tables', 'inside', 'sqlite', 'structure', 'what is in the file'],
   },
   {
     route: '/scan', file: 'app/scan.tsx', tab: 'sites', section: 'In front of you',

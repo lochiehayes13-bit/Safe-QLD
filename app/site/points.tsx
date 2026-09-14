@@ -130,9 +130,9 @@ export default function PointsScreen() {
     try {
       const panel = panels.find((p) => p.id === activePanel) ?? panels[0];
       const name = `${site?.name ?? 'Site'} points`;
-      const file = writeXlsx(name, [
-        pointSheet(panel ?? ({ id: '', siteId: '', name: 'Points', brand: 'other', source: 'manual', createdAt: '', updatedAt: '' } as Panel), points),
-      ]);
+      // The sheet needs the panel's name and nothing else, so a site with no
+      // panel gets a name rather than a whole invented panel record.
+      const file = writeXlsx(name, [pointSheet({ name: panel?.name ?? 'Points' }, points)]);
       const shared = await shareFile(file, 'Export point list');
       if (!shared) {
         const notice = notSharedNotice(file.name, 'spreadsheet');

@@ -25,7 +25,7 @@
  */
 
 /** The kinds of record a screen in this app can be opened *about*. */
-export type ContextKind = 'site' | 'asset';
+export type ContextKind = 'site' | 'asset' | 'configuration';
 
 export interface MissingContext {
   /** The heading, phrased as the question the screen cannot answer. */
@@ -38,10 +38,30 @@ export interface MissingContext {
   actionRoute: string;
 }
 
-/** Where each kind of record is chosen. Both are tab-level screens, so neither is a dead end. */
+/**
+ * Where each kind of record is chosen.
+ *
+ * Every one of them is a screen that lists the records itself, so none of
+ * these is a dead end: whatever sent a technician here, the way out puts them
+ * in front of the thing they were trying to open.
+ */
 const PICKER: Record<ContextKind, { route: string; label: string }> = {
   site: { route: '/sites', label: 'Choose a site' },
   asset: { route: '/assets/find', label: 'Find an asset' },
+  configuration: { route: '/config', label: 'Open a configuration' },
+};
+
+/**
+ * The heading for each kind.
+ *
+ * A table rather than a ternary because a third kind arrived and the ternary
+ * would have quietly given it the asset's wording — which is the failure this
+ * whole module exists to stop, one level up.
+ */
+const TITLE: Record<ContextKind, string> = {
+  site: 'Which site?',
+  asset: 'Which asset?',
+  configuration: 'Which configuration?',
 };
 
 /**
@@ -56,7 +76,7 @@ const PICKER: Record<ContextKind, { route: string; label: string }> = {
 export function missingContext(kind: ContextKind, what: string): MissingContext {
   const picker = PICKER[kind];
   return {
-    title: kind === 'site' ? 'Which site?' : 'Which asset?',
+    title: TITLE[kind],
     body:
       `This screen shows ${what} for one ${kind}, and it was opened without one — which happens `
       + `when it is reached from search or from a link rather than from the ${kind} itself. `

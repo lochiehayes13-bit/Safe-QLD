@@ -113,6 +113,17 @@ export default function SitesScreen() {
               <Button title="New site" onPress={() => router.push('/site/new')} style={{ flex: 1 }} />
               <Button title="Import" variant="secondary" onPress={() => router.push('/import')} style={{ flex: 1 }} />
             </Rowed>
+            {/*
+              * On its own row rather than beside Import, because they are
+              * opposite things and the word is nearly the same. Import writes a
+              * file into a site; this one opens a file and writes nothing.
+              */}
+            <Button
+              title="Config Explorer"
+              variant="secondary"
+              onPress={() => router.push('/config')}
+              icon={<MaterialCommunityIcons name="file-cog-outline" size={20} color={t.color.text} />}
+            />
           </View>
         }
         renderItem={({ item, index }) => (

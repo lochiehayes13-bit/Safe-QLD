@@ -22,8 +22,15 @@ import { ZipError, isZip, readZip } from './zipRead';
 
 const PARSER_ID = 'pertronic-util@1';
 
-/** Everything after this banner is the panel's last-read-back state, not the config. */
-const REFERENCE_BANNER = /Start of Reference Panel Config/i;
+/**
+ * Everything after this banner is the panel's last-read-back state, not the config.
+ *
+ * Exported because the Config Explorer shows the file as it is rather than as
+ * this parser reads it, and a raw view that presents both copies as one table
+ * reports 636 loop devices on a panel that has 318 of them.
+ */
+export const PERTRONIC_REFERENCE_BANNER = /Start of Reference Panel Config/i;
+const REFERENCE_BANNER = PERTRONIC_REFERENCE_BANNER;
 
 /**
  * The panel's device type vocabulary.
