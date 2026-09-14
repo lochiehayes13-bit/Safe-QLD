@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { Linking, Platform, View } from 'react-native';
+import { View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import * as MailComposer from 'expo-mail-composer';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   MAX_PHOTOS_PER_EMAIL, PHOTO_DROP_SUBTITLE, PHOTO_DROP_TITLE, WEBSITE_PHOTOS_INBOX,
   describePick, photoDropBody, photoDropSubject,
 } from '@/domain/photoDrop';
+import { sendMail } from '@/export/mail';
 import { useTheme } from '@/theme';
 import { Txt } from '@/components/ui';
 import { Bounce } from '@/components/motion';
@@ -18,10 +18,10 @@ import { describeActionFailure } from '@/domain/loadFailure';
  *
  * Pick from the library, and the mail app opens addressed to Lachlan with
  * the photos attached. The phone's own mail app does the sending, so the
- * technician sees exactly what goes and can add a line. On the web build
- * there is no mail composer that can carry an attachment, so the button
- * says so and opens an addressed email instead — the photos have to be
- * dragged in by hand there, which is still better than a dead button.
+ * technician sees exactly what goes and can add a line. A browser cannot put
+ * a photo on an email, so there the photos are handed to the person first and
+ * the addressed draft opens second, with the pictures a drag away in their
+ * downloads.
  */
 export function PhotoDrop({ technicianName }: { technicianName: string }) {
   const t = useTheme();
@@ -44,29 +44,32 @@ export function PhotoDrop({ technicianName }: { technicianName: string }) {
       if (result.canceled || !result.assets.length) return;
 
       const pickNote = describePick(result.assets.length);
-      const uris = result.assets.slice(0, pickNote.send).map((a) => a.uri);
+      // Named and sized the way an export is, so the mail layer can attach
+      // them on a phone and hand them over in a browser without knowing they
+      // came from a camera roll rather than a spreadsheet writer.
+      const photos = result.assets.slice(0, pickNote.send).map((a, i) => ({
+        uri: a.uri,
+        name: a.fileName?.trim() || `photo-${i + 1}.jpg`,
+        size: a.fileSize ?? 0,
+      }));
+      const many = photos.length === 1 ? '' : 's';
+      const tail = pickNote.note ? `\n\n${pickNote.note}` : '';
 
-      if (!(await MailComposer.isAvailableAsync())) {
-        const subject = encodeURIComponent(photoDropSubject(technicianName, uris.length));
-        const body = encodeURIComponent(photoDropBody(technicianName, uris.length));
+      const outcome = await sendMail({
+        to: WEBSITE_PHOTOS_INBOX,
+        subject: photoDropSubject(technicianName, photos.length),
+        body: photoDropBody(technicianName, photos.length, pickNote.note),
+      }, photos);
+
+      if (outcome === 'no-mail-app') {
+        showAlert('No mail app set up', `This phone has no email account configured, so the photos cannot be sent from here. They go to ${WEBSITE_PHOTOS_INBOX}.`);
+      } else if (outcome === 'sent') {
+        showAlert('Sent', `${photos.length} photo${many} on the way to ${WEBSITE_PHOTOS_INBOX}. Thanks.${tail}`);
+      } else if (outcome === 'handed-over') {
         showAlert(
-          Platform.OS === 'web' ? 'Attach them in your email' : 'No mail app set up',
-          Platform.OS === 'web'
-            ? `The browser cannot attach photos for you. An email to ${WEBSITE_PHOTOS_INBOX} will open; drag the photos into it.`
-            : `This phone has no email account configured, so the photos cannot be sent from here. They go to ${WEBSITE_PHOTOS_INBOX}.`,
-          [{ text: 'OK', onPress: () => { void Linking.openURL(`mailto:${WEBSITE_PHOTOS_INBOX}?subject=${subject}&body=${body}`).catch(() => undefined); } }],
+          'Draft opened — drag the photos in',
+          `An email to ${WEBSITE_PHOTOS_INBOX} is open and ${photos.length} photo${many} ${photos.length === 1 ? 'has' : 'have'} downloaded. Drag them onto the email and send it.${tail}`,
         );
-        return;
-      }
-
-      const { status } = await MailComposer.composeAsync({
-        recipients: [WEBSITE_PHOTOS_INBOX],
-        subject: photoDropSubject(technicianName, uris.length),
-        body: photoDropBody(technicianName, uris.length, pickNote.note),
-        attachments: uris,
-      });
-      if (status === MailComposer.MailComposerStatus.SENT) {
-        showAlert('Sent', `${uris.length} photo${uris.length === 1 ? '' : 's'} on the way to ${WEBSITE_PHOTOS_INBOX}. Thanks.${pickNote.note ? `\n\n${pickNote.note}` : ''}`);
       } else {
         showAlert('Not sent', 'The email was not sent, so the photos have not gone anywhere.');
       }

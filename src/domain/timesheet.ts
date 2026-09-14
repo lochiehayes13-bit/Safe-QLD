@@ -422,6 +422,70 @@ export function dayWorkedHours(entries: TimesheetEntry[], date: string): number 
   return Math.round(total * 100) / 100;
 }
 
+/** One day of a week, as the summary panel reads it. */
+export interface DaySummary {
+  date: string;
+  /** The three-letter weekday, e.g. `Wed`. */
+  day: string;
+  /** Hours on jobs. Leave is not work and is counted separately. */
+  worked: number;
+  /**
+   * The day's leave, and what kind. Where a day somehow carries two kinds the
+   * hours add up and the first one names it — a case worth showing rather than
+   * hiding, because it is a mistake somebody has to fix.
+   */
+  leave: { kind: LeaveKind; hours: number } | null;
+  /** Everything on the day that reaches payroll. */
+  total: number;
+  /** How many jobs were on it, so an eight hour day across four sites reads as one. */
+  jobs: number;
+  weekend: boolean;
+}
+
+/**
+ * The week as seven rows, one per day, whether or not anything is on them.
+ *
+ * Seven rows always. A week drawn from only the days that have entries on them
+ * hides the one that matters — the Thursday nobody filled in — and it is the
+ * missing day rather than the recorded ones that costs somebody a day's pay.
+ */
+export function weekSummary(sheet: Timesheet): DaySummary[] {
+  return weekDates(sheet.weekStarting).map((date) => {
+    const onDay = sheet.entries.filter((e) => e.date === date);
+    const worked = dayWorkedHours(onDay, date);
+
+    let leaveHours = 0;
+    let leaveKind: LeaveKind | null = null;
+    for (const e of onDay) {
+      const l = leaveOf(e);
+      if (!l) continue;
+      leaveHours += l.hours;
+      leaveKind ??= l.kind;
+    }
+
+    return {
+      date,
+      day: dayName(date),
+      worked,
+      leave: leaveKind ? { kind: leaveKind, hours: Math.round(leaveHours * 100) / 100 } : null,
+      total: Math.round((worked + leaveHours) * 100) / 100,
+      jobs: onDay.filter((e) => !leaveOf(e)).length,
+      weekend: isWeekendDay(date),
+    };
+  });
+}
+
+/**
+ * The longest day of the week, or a standard one — whichever is longer.
+ *
+ * What the bars in the summary are drawn against. Scaling to the longest day
+ * alone makes a week of two hour days look full, so a standard day is the
+ * floor and a twelve hour Tuesday stretches the scale rather than clipping.
+ */
+export function weekPeak(days: readonly DaySummary[]): number {
+  return Math.max(STANDARD_DAY_HOURS, ...days.map((d) => d.total));
+}
+
 /**
  * Yesterday, on today.
  *

@@ -1,7 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import * as MailComposer from 'expo-mail-composer';
 import { getQuote, listQuoteLines, setQuoteStatus, updateQuote } from '@/db/quoteRepo';
 import {
   QUOTE_STATUS_LABEL, canTransition, editRefusal, lapseStatus, lineAmountCents, qldDate, quoteTotals,
@@ -10,6 +9,7 @@ import {
 import { formatCents } from '@/domain/rates';
 import { quoteDocumentHtml } from '@/export/quoteDocument';
 import { shareFile, writePdf } from '@/export/files';
+import { sendMail } from '@/export/mail';
 import { notSharedNotice } from '@/export/shareOutcome';
 import { safeFileName } from '@/export/fileNames';
 import { formatAuDate } from '@/export/sheets';
@@ -105,12 +105,11 @@ export default function QuoteScreen() {
     if (!quote) return;
     setBusy(true);
     try {
-      if (!(await MailComposer.isAvailableAsync())) {
-        showAlert('No mail app set up', 'This phone has no email account configured. Use the PDF button and attach it yourself.');
-        return;
-      }
       const file = await pdf();
-      await MailComposer.composeAsync({
+      // No recipient: the client's address is in the technician's own contacts
+      // rather than on the quote, and a blank To line is one tap to fill.
+      const outcome = await sendMail({
+        to: '',
         subject: `Quotation ${quote.reference} — ${quote.siteName}`.trim(),
         body: [
           `${quote.clientName || 'Hello'},`,
@@ -120,8 +119,18 @@ export default function QuoteScreen() {
           '',
           companyName || 'Safe QLD Fire Protection',
         ].filter(Boolean).join('\n'),
-        attachments: file.printed ? undefined : [file.uri],
-      });
+      }, [file]);
+
+      if (outcome === 'no-mail-app') {
+        showAlert('No mail app set up', 'This phone has no email account configured. Use the PDF button and attach it yourself.');
+      } else if (outcome === 'handed-over') {
+        showAlert(
+          'Draft opened — attach the quote',
+          file.printed
+            ? 'An email is open. Use the PDF button, save it from the print dialogue, and attach it before sending.'
+            : `An email is open and ${file.name} has downloaded. Attach it and fill in the client's address before sending.`,
+        );
+      }
     } catch (e) {
       showAlert('Could not email it', describeActionFailure(e, 'emailing the quote'));
     } finally {

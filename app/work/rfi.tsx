@@ -1,16 +1,17 @@
 import React, { useCallback, useState } from 'react';
 import { View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import * as MailComposer from 'expo-mail-composer';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { loadPrefs, type Prefs } from '@/app-prefs';
 import {
   informationBody, informationNotReady, informationSubject, type InformationRequest,
 } from '@/domain/requests';
 import { queueJobNote } from '@/simpro/sync';
+import { sendMail } from '@/export/mail';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Field, Screen, Segmented, Txt } from '@/components/ui';
 import { showAlert } from '@/components/alert';
+import { describeActionFailure } from '@/domain/loadFailure';
 
 /**
  * Ask the office.
@@ -59,21 +60,32 @@ export default function RequestInformationScreen() {
     }
     setBusy(true);
     try {
-      if (!(await MailComposer.isAvailableAsync())) {
-        showAlert('No mail app set up', 'This phone has no email account configured, so the question cannot be sent from here.');
-        return;
-      }
-      const { status } = await MailComposer.composeAsync({
-        recipients: [prefs.supervisorEmail.trim()],
+      const outcome = await sendMail({
+        to: prefs.supervisorEmail.trim(),
         subject: informationSubject(r),
         body: informationBody(r),
       });
-      if (status !== MailComposer.MailComposerStatus.SENT) {
+
+      if (outcome === 'no-mail-app') {
+        showAlert('No mail app set up', 'This phone has no email account configured, so the question cannot be sent from here.');
+        return;
+      }
+      if (outcome === 'not-sent') {
         showAlert('Not sent', 'The email was not sent. Nothing has reached the office.');
         return;
       }
-      // Onto the job as well, so the question and its answer are on the record
-      // the office works from, not only in one person's inbox.
+
+      /*
+       * Onto the job as well, so the question and its answer are on the record
+       * the office works from, not only in one person's inbox.
+       *
+       * The note is queued on `handed-over` too, which is every question asked
+       * from a browser. A browser cannot say whether the draft was sent, and
+       * treating "cannot say" as "not sent" is what this screen used to do —
+       * the mail app had the question open and the job got nothing. A note on
+       * the job is the durable half, and a duplicate note is a smaller fault
+       * than a question the office never sees.
+       */
       const job = jobNumber.trim();
       if (job) {
         await queueJobNote({
@@ -82,15 +94,17 @@ export default function RequestInformationScreen() {
           note: informationBody(r),
         });
       }
+
+      const noted = job ? ` It is also noted on job ${job} in Simpro.` : '';
       showAlert(
-        'Sent',
-        job
-          ? `Your question has gone to ${prefs.supervisorEmail} and will be noted on job ${job} in Simpro.`
-          : `Your question has gone to ${prefs.supervisorEmail}.`,
+        outcome === 'sent' ? 'Sent' : 'Draft opened',
+        outcome === 'sent'
+          ? `Your question has gone to ${prefs.supervisorEmail}.${noted}`
+          : `An email to ${prefs.supervisorEmail} is open in your mail app — send it.${noted}`,
         [{ text: 'OK', onPress: () => router.back() }],
       );
     } catch (e) {
-      showAlert('Could not send', e instanceof Error ? e.message : String(e));
+      showAlert('Could not send', describeActionFailure(e, 'sending the question'));
     } finally {
       setBusy(false);
     }

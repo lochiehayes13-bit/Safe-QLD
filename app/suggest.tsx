@@ -1,7 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import * as MailComposer from 'expo-mail-composer';
 import Constants from 'expo-constants';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { loadPrefs, type Prefs } from '@/app-prefs';
@@ -9,9 +8,11 @@ import {
   SUGGESTION_KINDS, suggestionBody, suggestionNotReady, suggestionSubject,
   type Suggestion, type SuggestionKind,
 } from '@/domain/suggestions';
+import { sendMail } from '@/export/mail';
 import { useTheme } from '@/theme';
 import { Button, Card, Field, Screen, Segmented, Txt } from '@/components/ui';
 import { showAlert } from '@/components/alert';
+import { describeActionFailure } from '@/domain/loadFailure';
 
 /**
  * Suggest a change.
@@ -56,22 +57,26 @@ export default function SuggestScreen() {
     }
     setBusy(true);
     try {
-      if (!(await MailComposer.isAvailableAsync())) {
-        showAlert('No mail app set up', 'This phone has no email account configured, so the suggestion cannot be sent from here.');
-        return;
-      }
-      const { status } = await MailComposer.composeAsync({
-        recipients: [prefs.suggestionsEmail.trim()],
+      const outcome = await sendMail({
+        to: prefs.suggestionsEmail.trim(),
         subject: suggestionSubject(s),
         body: suggestionBody(s),
       });
-      if (status === MailComposer.MailComposerStatus.SENT) {
+
+      if (outcome === 'no-mail-app') {
+        showAlert('No mail app set up', 'This phone has no email account configured, so the suggestion cannot be sent from here.');
+      } else if (outcome === 'sent') {
         showAlert('Sent', 'Thanks. When it turns into a change, the new build lands at the same download link.', [{ text: 'OK', onPress: () => router.back() }]);
+      } else if (outcome === 'handed-over') {
+        // A browser hands the draft to a mail client and never hears back, so
+        // this says what actually happened rather than thanking somebody for
+        // an email still sitting unsent in another window.
+        showAlert('Draft opened', `An email to ${prefs.suggestionsEmail} is open in your mail app — send it and it lands with the person who builds this.`, [{ text: 'OK', onPress: () => router.back() }]);
       } else {
         showAlert('Not sent', 'The email was not sent, so nobody has seen it yet.');
       }
     } catch (e) {
-      showAlert('Could not send', e instanceof Error ? e.message : String(e));
+      showAlert('Could not send', describeActionFailure(e, 'sending the suggestion'));
     } finally {
       setBusy(false);
     }

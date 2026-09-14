@@ -100,11 +100,46 @@ describe('the timesheet at whatever width it is given', () => {
     expect(wide.indexOf('{yourDetails}')).toBeLessThan(wide.indexOf('{week}'));
   });
 
-  it('sends the office exactly what it sent before', () => {
-    // Layout only. The two sheets in the workbook, the address it goes to and
-    // the moment the week is marked submitted are untouched.
-    expect(timesheet).toContain('writeXlsx(name, [timesheetSheet(sheet), timesheetSummarySheet(sheet)])');
-    expect(timesheet).toContain('recipients: [TIMESHEET_INBOX]');
+  it('sends the office the same workbook, whichever button is pressed', () => {
+    // Email and Export were each building the file. Two copies of a file name
+    // and a sheet list is how they come to disagree, so there is one now.
+    expect(timesheet).toContain('writeXlsx(');
+    expect(timesheet.match(/writeXlsx\(/g)).toHaveLength(1);
+    expect(timesheet).toContain('[timesheetSheet(sheet), timesheetSummarySheet(sheet)]');
+    expect(timesheet.match(/workbook\(\)/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('still goes to accounts, and still only marks a week submitted when it went', () => {
+    expect(timesheet).toContain('to: TIMESHEET_INBOX');
     expect(timesheet).toContain("persist({ status: 'submitted' })");
+    // On the one outcome that means the mail app said so, and no other. A
+    // browser answers `handed-over`, and a week marked submitted on that is a
+    // week nobody sent.
+    const marked = timesheet.slice(0, timesheet.indexOf("persist({ status: 'submitted' })"));
+    expect(marked.lastIndexOf("outcome === 'sent'")).toBeGreaterThan(marked.lastIndexOf('const emailSheet'));
+  });
+
+  it('puts the workbook on the email itself, not only on Export', () => {
+    // The whole point of the button: accounts should not have to ask for the
+    // spreadsheet after reading the summary.
+    expect(timesheet).toMatch(/sendMail\([\s\S]{0,400}\[file\]/);
+  });
+
+  it('gives the summary card the week, so it stands beside the paperwork', () => {
+    // A four line card next to an eight line column left a hole the height of
+    // a hand on every desktop.
+    expect(timesheet).toContain('weekSummary(sheet)');
+    expect(timesheet).toContain('<DayBar');
+    expect(timesheet).toContain('byDay.map(');
+  });
+
+  it('runs the two top columns to the same height, so neither ends in background', () => {
+    // `flex-start` is what left the hole: the short column kept its natural
+    // height and the row was as tall as the other one.
+    const wide = timesheet.slice(timesheet.indexOf('{spread ? ('), timesheet.indexOf('</Screen>'));
+    expect(wide).toContain('align="stretch"');
+    expect(wide).not.toContain('align="flex-start"');
+    // And the card fills what it is given rather than floating at the top of it.
+    expect(timesheet).toMatch(/spread \? \{ flex: 1 \}/);
   });
 });

@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, TextInput, View, useWindowDimensions, type ViewStyle } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import * as MailComposer from 'expo-mail-composer';
 import { getTimesheet, listTimesheets, saveTimesheet } from '@/db/timesheetRepo';
 import { jobCount, openJobPicks, searchJobPicks, type JobPick } from '@/db/opsRepo';
 import { deleteEntry, insertClosedEntry, listEntriesBetween } from '@/db/clockRepo';
@@ -17,8 +16,8 @@ import {
   DEFAULT_EXTRAS, LEAVE_KINDS, LEAVE_LABEL, STANDARD_DAY_HOURS,
   blankEntry, copyDay, dayName, dayWorkedHours, entryHours, filterJobOptions, jobOptions, mergeJobOptions,
   isWeekendDay, leaveOf, nextTimesFor, previousDayWithEntries, setLeave, timesheetTotals, toggleExtra, usualTimes,
-  weekDates,
-  type HourKind, type JobOption, type LeaveKind, type Timesheet, type TimesheetEntry,
+  weekDates, weekPeak, weekSummary,
+  type DaySummary, type HourKind, type JobOption, type LeaveKind, type Timesheet, type TimesheetEntry,
 } from '@/domain/timesheet';
 import {
   TIMESHEET_INBOX, timesheetBody, timesheetNotReady, timesheetSubject,
@@ -26,6 +25,7 @@ import {
 import { timesheetSheet, timesheetSummarySheet } from '@/export/safeqldForms';
 import { formatAuDate } from '@/export/sheets';
 import { shareFile, writeXlsx } from '@/export/files';
+import { sendMail } from '@/export/mail';
 import { notSharedNotice } from '@/export/shareOutcome';
 import { newId, nowIso } from '@/db';
 import { qldIsoDay } from '@/domain/qldTime';
@@ -218,6 +218,7 @@ export default function TimesheetScreen() {
 
   const totals = useMemo(() => (sheet ? timesheetTotals(sheet) : null), [sheet]);
   const days = useMemo(() => (sheet ? weekDates(sheet.weekStarting) : []), [sheet]);
+  const byDay = useMemo(() => (sheet ? weekSummary(sheet) : []), [sheet]);
   const options = useMemo(
     () => jobOptions(history.filter((h) => h.id !== id), jobs.map((j) => ({
       externalId: j.externalId, siteName: j.siteName, status: j.status,
@@ -286,28 +287,57 @@ export default function TimesheetScreen() {
     setEntries([...sheet.entries, ...copied]);
   };
 
+  /**
+   * The workbook the office reads.
+   *
+   * Built in one place because both buttons send the same file: the sheet that
+   * gets emailed and the sheet that gets exported were being constructed
+   * separately, and two copies of a file name and a sheet list is how they
+   * drift apart.
+   */
+  const workbook = () => writeXlsx(
+    `Timesheet ${sheet.employeeName || ''} ${formatAuDate(sheet.weekStarting)}`.trim(),
+    [timesheetSheet(sheet), timesheetSummarySheet(sheet)],
+  );
+
   const emailSheet = async () => {
     const blocked = timesheetNotReady(sheet);
     if (blocked) { showAlert('Not ready to send', blocked); return; }
     setBusy(true);
     try {
-      if (!(await MailComposer.isAvailableAsync())) {
+      // The workbook is built and handed over whichever way the email goes:
+      // payroll works from the attachment, and the body is only the glance.
+      const file = workbook();
+      const outcome = await sendMail(
+        { to: TIMESHEET_INBOX, subject: timesheetSubject(sheet), body: timesheetBody(sheet) },
+        [file],
+      );
+
+      if (outcome === 'no-mail-app') {
         showAlert('No mail app set up', 'This phone has no email account configured. Use Export and attach the file yourself.');
         return;
       }
-      const name = `Timesheet ${sheet.employeeName || ''} ${formatAuDate(sheet.weekStarting)}`.trim();
-      const file = writeXlsx(name, [timesheetSheet(sheet), timesheetSummarySheet(sheet)]);
-      const { status } = await MailComposer.composeAsync({
-        recipients: [TIMESHEET_INBOX], subject: timesheetSubject(sheet), body: timesheetBody(sheet), attachments: [file.uri],
-      });
-      if (status === MailComposer.MailComposerStatus.SENT) {
+      if (outcome === 'sent') {
         void persist({ status: 'submitted' });
         showAlert('Sent', `Your week has gone to ${TIMESHEET_INBOX} and is marked submitted.`);
-      } else {
-        showAlert('Not sent', 'The email was not sent, so this sheet is still a draft. Nothing has gone to the office.');
+        return;
       }
+      if (outcome === 'handed-over') {
+        /*
+         * A browser cannot attach a file to an email and cannot see whether one
+         * was sent. So the workbook has just downloaded, the draft is open, and
+         * the sheet stays a draft — saying "Sent" here would mark a week
+         * submitted that nobody sent.
+         */
+        showAlert(
+          'Draft opened — attach the file',
+          `An email to ${TIMESHEET_INBOX} is open and ${file.name} has downloaded. Drag it onto the email, send it, then tap Mark submitted.`,
+        );
+        return;
+      }
+      showAlert('Not sent', 'The email was not sent, so this sheet is still a draft. Nothing has gone to the office.');
     } catch (e) {
-      showAlert('Could not send', e instanceof Error ? e.message : String(e));
+      showAlert('Could not send', describeActionFailure(e, 'email this timesheet'));
     } finally {
       setBusy(false);
     }
@@ -316,8 +346,7 @@ export default function TimesheetScreen() {
   const exportSheet = async () => {
     setBusy(true);
     try {
-      const name = `Timesheet ${sheet.employeeName || ''} ${formatAuDate(sheet.weekStarting)}`.trim();
-      const file = writeXlsx(name, [timesheetSheet(sheet), timesheetSummarySheet(sheet)]);
+      const file = workbook();
       const shared = await shareFile(file, 'Timesheet');
       if (!shared) {
         const notice = notSharedNotice(file.name, 'timesheet');
@@ -331,8 +360,23 @@ export default function TimesheetScreen() {
   };
 
 
+  /*
+   * The summary card, which used to be a ring and a number.
+   *
+   * On a wide screen it stands beside the name, the vehicle and the three
+   * buttons, and a card with four lines in it next to a column with eight
+   * leaves a hole the height of a hand — which is what the owner was looking
+   * at. The fix is not padding: it is that the week is the thing worth
+   * showing, and a bar per day says at a glance which day is short and which
+   * one is leave, which no total can. On a phone the same seven rows read as
+   * a contents page for the week below them.
+   */
+  const peak = weekPeak(byDay);
   const summary = (
-    <Card variant="raised" style={{ gap: t.space(1) }}>
+    // On a wide screen the card fills its column and the day rows share out
+    // whatever height is left over, so the two columns end level instead of
+    // leaving a band of background under the shorter one.
+    <Card variant="raised" style={[{ gap: t.space(1) }, spread ? { flex: 1 } : null]}>
       <Rowed gap={3}>
         <ProgressRing fraction={totals.grand / 38} size={72} stroke={8}>
           <Txt size="xs" weight="800" mono>{Math.round((totals.grand / 38) * 100)}%</Txt>
@@ -350,6 +394,14 @@ export default function TimesheetScreen() {
         {totals.grand - totals.worked ? <Txt size="sm" tone="muted">· {Math.round((totals.grand - totals.worked) * 100) / 100} leave</Txt> : null}
         {!sheet.employeeName.trim() ? <Txt size="sm" tone="fail">· no name set</Txt> : null}
       </Rowed>
+
+      <View style={{ height: 1, backgroundColor: t.color.border, marginVertical: t.space(2) }} />
+
+      <View style={[{ gap: t.space(1.5) }, spread ? { flex: 1, justifyContent: 'space-between' } : null]}>
+        {byDay.map((d) => (
+          <DayBar key={d.date} day={d} peak={peak} theme={t} />
+        ))}
+      </View>
     </Card>
   );
 
@@ -444,7 +496,7 @@ export default function TimesheetScreen() {
       <Stack.Screen options={{ title: `Week of ${formatAuDate(sheet.weekStarting)}` }} />
       <Screen wide>
         {spread ? (
-          <Rowed gap={3} align="flex-start">
+          <Rowed gap={3} align="stretch">
             <Reveal index={0} style={{ flex: 1 }}>{summary}</Reveal>
             <View style={{ flex: 1, gap: t.space(3) }}>
               {yourDetails}
@@ -479,6 +531,57 @@ export default function TimesheetScreen() {
         onClose={() => setPicking(null)}
       />
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+/**
+ * One day of the week, as a bar.
+ *
+ * Seven of these are the summary card. A row is drawn whether or not the day
+ * has anything on it, because the day with nothing on it is the one worth
+ * finding — a Thursday left blank is a day's pay, and a week drawn only from
+ * the days that were filled in has no gap in it to notice.
+ *
+ * Leave is drawn in the warning colour and named, so a 7.6 hour Monday that is
+ * annual leave never reads as a 7.6 hour Monday that was worked.
+ */
+function DayBar({ day, peak, theme: t }: { day: DaySummary; peak: number; theme: Theme }) {
+  const share = peak > 0 ? Math.min(1, day.total / peak) : 0;
+  const empty = day.total <= 0;
+  const tail = empty
+    ? (day.weekend ? '—' : 'not filled in')
+    : day.leave
+      ? `${day.total}h ${LEAVE_LABEL[day.leave.kind].toLowerCase()}`
+      : `${day.total}h`;
+
+  return (
+    <Rowed gap={2}>
+      <Txt size="xs" weight="800" mono tone={empty ? 'faint' : 'default'} style={{ width: 32 }}>{day.day}</Txt>
+      <View style={{ flex: 1, height: 10, borderRadius: 5, backgroundColor: t.color.surfaceAlt, overflow: 'hidden' }}>
+        {share > 0 ? (
+          <View
+            style={{
+              width: `${share * 100}%`,
+              height: '100%',
+              borderRadius: 5,
+              backgroundColor: day.leave ? t.color.warn : t.color.accent,
+            }}
+          />
+        ) : null}
+      </View>
+      <Txt
+        size="xs"
+        weight={empty ? '600' : '700'}
+        mono={!day.leave && !empty}
+        tone={empty ? 'faint' : day.leave ? 'warn' : 'muted'}
+        numberOfLines={1}
+        style={{ width: 96, textAlign: 'right' }}
+      >
+        {tail}
+      </Txt>
+    </Rowed>
   );
 }
 

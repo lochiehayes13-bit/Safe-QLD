@@ -14,7 +14,6 @@ import {
 import { qldIsoDay, qldMoment } from '@/domain/qldTime';
 import { attachmentContentKey } from '@/domain/outboundWork';
 import { describeActionFailure } from '@/domain/loadFailure';
-import * as MailComposer from 'expo-mail-composer';
 import { router } from 'expo-router';
 import {
   CALIBRATION_MONTHS, PART_RESULT_LABEL, deviceCalibration, elevationHeadKpa, frictionalLossKpa,
@@ -30,6 +29,7 @@ import {
   occupierCopyDueBy, testPointOutcome, testerCopyKeepUntil,
 } from '@/export/form72';
 import { shareFile, writePdf } from '@/export/files';
+import { sendMail } from '@/export/mail';
 import { notSharedNotice } from '@/export/shareOutcome';
 import { formatAuDate } from '@/export/sheets';
 import { queryAssets } from '@/db/assetRepo';
@@ -214,18 +214,33 @@ export default function Form72Screen() {
     try {
       const html = form72Html({ form, systemLabel: form.systemLabel, companyName, generatedAt: nowIso(), overload: form.overload });
       const file = await writePdf(form72AttachmentName(form).replace(/\.pdf$/i, ''), html);
-      if (!(await MailComposer.isAvailableAsync())) {
-        showAlert('No mail app set up', `This phone has no email account configured. The form goes to ${FORM72_INBOX}; use Produce PDF and send it from wherever you can.`);
-        return;
-      }
-      const { status } = await MailComposer.composeAsync({
-        recipients: [FORM72_INBOX],
+
+      const outcome = await sendMail({
+        to: FORM72_INBOX,
         subject: form72AttachmentSubject(form),
         body: form72EmailBody(form, form.jobExternalId),
-        attachments: file.printed ? [] : [file.uri],
-      });
-      showAlert(status === MailComposer.MailComposerStatus.SENT ? 'Sent' : 'Not sent',
-        status === MailComposer.MailComposerStatus.SENT ? `On its way to ${FORM72_INBOX}.` : 'The email was not sent.');
+      }, [file]);
+
+      if (outcome === 'no-mail-app') {
+        showAlert('No mail app set up', `This phone has no email account configured. The form goes to ${FORM72_INBOX}; use Produce PDF and send it from wherever you can.`);
+      } else if (outcome === 'sent') {
+        showAlert('Sent', `On its way to ${FORM72_INBOX}.`);
+      } else if (outcome === 'handed-over') {
+        /*
+         * A browser prints a PDF rather than writing one, so there is no file
+         * to hand over — the person saves it from the print dialogue. Said
+         * plainly, because a Form 72 that reaches the Commissioner without the
+         * form attached is a notification that did not happen.
+         */
+        showAlert(
+          'Draft opened — attach the form',
+          file.printed
+            ? `An email to ${FORM72_INBOX} is open. Use Produce PDF, save it from the print dialogue, and attach it before sending.`
+            : `An email to ${FORM72_INBOX} is open and ${file.name} has downloaded. Attach it before sending.`,
+        );
+      } else {
+        showAlert('Not sent', 'The email was not sent.');
+      }
     } catch (e) {
       showAlert('Could not email it', describeActionFailure(e, 'emailing the form'));
     } finally {

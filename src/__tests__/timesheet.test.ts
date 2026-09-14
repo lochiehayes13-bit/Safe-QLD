@@ -17,6 +17,8 @@ import {
   usualTimes,
   validateTimesheet,
   weekDates,
+  weekPeak,
+  weekSummary,
   type Timesheet,
   type TimesheetEntry,
 } from '@/domain/timesheet';
@@ -428,5 +430,81 @@ describe('week dates on a Brisbane phone', () => {
   it('names the weekday the same in Brisbane and in UTC', () => {
     withTz('Australia/Brisbane', () => { expect(dayName('2026-08-31')).toBe('Mon'); });
     withTz('UTC', () => { expect(dayName('2026-08-31')).toBe('Mon'); });
+  });
+});
+
+describe('the week, a row per day', () => {
+  /**
+   * The summary panel on the timesheet. It reads as decoration and it is not:
+   * it is the only place a week is shown as seven days at once, which is the
+   * shape the missing day shows up in.
+   */
+  it('gives seven days whatever is on the sheet', () => {
+    expect(weekSummary(sheet([])).map((d) => d.day)).toEqual(['Wed', 'Thu', 'Fri', 'Sat', 'Sun', 'Mon', 'Tue']);
+  });
+
+  it('draws the day nobody filled in, rather than leaving it out', () => {
+    // A week built only from the days that have entries has no gap in it to
+    // notice, and the gap is a day's pay.
+    const week = weekSummary(sheet([entry({ date: '2026-08-12' })]));
+    expect(week.filter((d) => d.total === 0)).toHaveLength(6);
+    expect(week[0]?.total).toBe(8);
+  });
+
+  it('adds up several jobs on one day and says how many there were', () => {
+    const week = weekSummary(sheet([
+      entry({ id: 'a', date: '2026-08-13', startTime: '07:00', finishTime: '11:00' }),
+      entry({ id: 'b', date: '2026-08-13', startTime: '11:30', finishTime: '15:30' }),
+    ]));
+    expect(week[1]?.worked).toBe(8);
+    expect(week[1]?.jobs).toBe(2);
+  });
+
+  it('keeps leave apart from work, and names it', () => {
+    const week = weekSummary(sheet([setLeave(entry({ date: '2026-08-14' }), 'annual', 7.6)]));
+    expect(week[2]?.worked).toBe(0);
+    expect(week[2]?.leave).toEqual({ kind: 'annual', hours: 7.6 });
+    expect(week[2]?.total).toBe(7.6);
+  });
+
+  it('counts a day that is half worked and half leave as both', () => {
+    const week = weekSummary(sheet([
+      entry({ id: 'a', date: '2026-08-17', startTime: '06:30', finishTime: '10:30' }),
+      setLeave(entry({ id: 'b', date: '2026-08-17' }), 'sick', 4),
+    ]));
+    expect(week[5]?.worked).toBe(4);
+    expect(week[5]?.leave).toEqual({ kind: 'sick', hours: 4 });
+    expect(week[5]?.total).toBe(8);
+  });
+
+  it('marks the weekend, so an empty Saturday reads differently from an empty Thursday', () => {
+    expect(weekSummary(sheet([])).map((d) => d.weekend)).toEqual([false, false, false, true, true, false, false]);
+  });
+
+  it('agrees with the total the screen prints beside it', () => {
+    const entries = [
+      entry({ id: 'a', date: '2026-08-12' }),
+      entry({ id: 'b', date: '2026-08-13', hourKind: 'ot' }),
+      setLeave(entry({ id: 'c', date: '2026-08-14' }), 'rdo', 7.6),
+    ];
+    const week = weekSummary(sheet(entries));
+    const summed = Math.round(week.reduce((n, d) => n + d.total, 0) * 100) / 100;
+    expect(summed).toBe(timesheetTotals(sheet(entries)).grand);
+  });
+});
+
+describe('what the day bars are drawn against', () => {
+  it('is a standard day, so a week of short days does not look full', () => {
+    const week = weekSummary(sheet([entry({ date: '2026-08-12', startTime: '08:00', finishTime: '10:00' })]));
+    expect(weekPeak(week)).toBe(7.6);
+  });
+
+  it('stretches to the longest day rather than clipping it', () => {
+    const week = weekSummary(sheet([entry({ date: '2026-08-12', startTime: '06:00', finishTime: '18:00' })]));
+    expect(weekPeak(week)).toBe(12);
+  });
+
+  it('is never zero, so an empty week cannot divide by it', () => {
+    expect(weekPeak(weekSummary(sheet([])))).toBeGreaterThan(0);
   });
 });
