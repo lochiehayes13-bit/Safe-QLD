@@ -22,7 +22,9 @@ import { dismissSync, failedSync, forgetSync, retrySync, unknownSync, type SyncE
 import { getEntry, markEntrySent } from '@/db/clockRepo';
 import { CLOCK_QUEUE_KIND, describeEntry, type ClockEntry } from '@/domain/clockOn';
 import { flushSoon } from '@/simpro/flushSoon';
-import { markerFor } from '@/domain/queueKey';
+import {
+  unknownOutcomeLine, whereToCheck, type LookupPayload, type OutboundLookup,
+} from '@/domain/outboundLookup';
 import { describeJobChange } from '@/domain/jobActions';
 import { describeAssetChange, isAssetChangeKind } from '@/domain/assetChanges';
 import { describeScheduleChange, isScheduleKind } from '@/domain/scheduling';
@@ -318,35 +320,47 @@ export default function OutboundScreen() {
           <H2>Sent, but no reply came</H2>
           <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
             The request went out and the connection dropped before Simpro answered. It may have
-            landed. Sending again could post it twice, so the app will not; search Simpro for the
-            reference below and decide.
+            landed. Sending again could post it twice, so the app will not — each one below says
+            where to look in Simpro. Have a look, then tell it which.
           </Txt>
-          {unknown.map((u) => (
-            <Card key={u.id}>
-              <Txt weight="700">{describeUnknown(u, clockEntries)}</Txt>
-              <Txt size="xs" tone="muted">{formatAuDate(u.createdAt)}{u.lastError ? ` · ${u.lastError}` : ''}</Txt>
-              {u.contentKey ? (
-                <Txt size="xs" tone="faint" style={{ marginTop: 4 }} mono>Reference {markerFor(u.contentKey)}</Txt>
-              ) : null}
-              <Rowed gap={2} style={{ marginTop: t.space(2.5) }}>
-                <Button
-                  title="It is in Simpro"
-                  variant="secondary"
-                  compact
-                  style={{ flex: 1 }}
-                  onPress={() => { void dismiss(u).then(loadQueues); }}
-                />
-                <Button
-                  title="Send again"
-                  compact
-                  style={{ flex: 1 }}
-                  onPress={() => {
-                    void retrySync(u.id).then(() => { flushSoon(); return loadQueues(); });
-                  }}
-                />
-              </Rowed>
-            </Card>
-          ))}
+          {unknown.map((u) => {
+            const described = describeUnknown(u, clockEntries);
+            const lookup = lookupFor(u, described);
+            return (
+              <Card key={u.id}>
+                <Txt weight="700">{described}</Txt>
+                <Txt size="xs" tone="muted">{unknownOutcomeLine(formatAuDate(u.createdAt), u.attempts)}</Txt>
+
+                <Txt size="sm" style={{ marginTop: t.space(2), lineHeight: 19 }}>{lookup.look}</Txt>
+                {/*
+                  Only the two kinds that actually write their marker into the
+                  Simpro record get a reference. A local queue key shown here
+                  reads as something to search for and is not in Simpro at all.
+                */}
+                {lookup.reference ? (
+                  <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5) }} mono>{lookup.reference}</Txt>
+                ) : null}
+
+                <Rowed gap={2} style={{ marginTop: t.space(2.5) }}>
+                  <Button
+                    title="It is there"
+                    variant="secondary"
+                    compact
+                    style={{ flex: 1 }}
+                    onPress={() => { void dismiss(u).then(loadQueues); }}
+                  />
+                  <Button
+                    title="It is not — send it"
+                    compact
+                    style={{ flex: 1 }}
+                    onPress={() => {
+                      void retrySync(u.id).then(() => { flushSoon(); return loadQueues(); });
+                    }}
+                  />
+                </Rowed>
+              </Card>
+            );
+          })}
         </>
       ) : null}
 
@@ -369,9 +383,7 @@ export default function OutboundScreen() {
               {f.lastError ? (
                 <Txt size="sm" tone="fail" style={{ marginTop: 4, lineHeight: 19 }}>{f.lastError}</Txt>
               ) : null}
-              {f.contentKey ? (
-                <Txt size="xs" tone="faint" style={{ marginTop: 4 }} mono>Reference {markerFor(f.contentKey)}</Txt>
-              ) : null}
+
               <Rowed gap={2} style={{ marginTop: t.space(2.5) }}>
                 {/*
                   * Forget, not dismiss: dismissing marks the row sent, which
@@ -458,6 +470,23 @@ function clockEntryIdOf(u: SyncEntry): string | undefined {
  * looks for on the job's schedule. A payload that will not parse still shows
  * its kind rather than nothing.
  */
+/**
+ * Where to look in Simpro for a row whose outcome nobody knows.
+ *
+ * The decision is in @/domain/outboundLookup; this only reads the payload off
+ * the row, which is JSON and may be anything.
+ */
+function lookupFor(u: SyncEntry, described: string): OutboundLookup {
+  let payload: LookupPayload = {};
+  try {
+    payload = JSON.parse(u.payload) as LookupPayload;
+  } catch {
+    // A payload that will not read still has a kind, and the kind is enough to
+    // name the place.
+  }
+  return whereToCheck(u.kind, payload, described);
+}
+
 function describeUnknown(u: SyncEntry, clockEntries: ReadonlyMap<string, ClockEntry>): string {
   try {
     const p = JSON.parse(u.payload) as { jobId?: string; subject?: string; filename?: string; mimeType?: string; lines?: unknown[]; entryId?: string };
