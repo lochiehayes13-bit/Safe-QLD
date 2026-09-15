@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { Linking, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { formatBuildMoment, offeredRelease } from '@/domain/updateCheck';
+import { buildInfo } from '@/update/buildInfo';
 import { checkForUpdate, snoozeUpdate, useUpdateCheck } from '@/update/check';
 import { formatBytes } from '@/share/pack';
 import { useTheme } from '@/theme';
@@ -29,7 +30,11 @@ export function UpdateBanner(): React.ReactElement | null {
     void checkForUpdate();
   }, []);
 
-  const release = offeredRelease(record, new Date());
+  // The running build is handed in rather than assumed, which is what makes
+  // this disappear the moment the update is installed: the answer the phone
+  // came up holding is about the build it has just replaced, and one comparison
+  // here settles that without waiting on GitHub.
+  const release = offeredRelease(record, new Date(), buildInfo());
   if (!release?.apkUrl) return null;
   const url = release.apkUrl;
   const when = formatBuildMoment(release.publishedAt);

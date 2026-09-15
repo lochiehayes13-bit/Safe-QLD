@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { loadPrefs, savePrefs } from '@/app-prefs';
+import { loadPrefs, patchPrefs } from '@/app-prefs';
 import { listEmployees, replaceEmployees, type EmployeeRecord } from '@/db/employeeRepo';
 import { SimproClient, type SimproConfig } from './client';
 import { SimproResources } from './resources';
@@ -117,7 +117,7 @@ export async function completeSignIn(config: SimproConfig, who: CurrentUser | nu
   const identity = resolveIdentity({ currentUser: who, employees });
   if (identity) {
     const prefs = await loadPrefs();
-    await savePrefs({ ...prefs, ...prefsFromIdentity(prefs, identity) });
+    await patchPrefs(prefsFromIdentity(prefs, identity));
   }
   // A sign-in answers the question "not now" was asked, so the next reinstall
   // or sign-out starts clean.

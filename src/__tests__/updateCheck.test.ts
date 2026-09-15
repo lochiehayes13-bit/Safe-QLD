@@ -1,6 +1,7 @@
 import {
   APK_ASSET, CHECK_EVERY_MS, EMPTY_UPDATE_CHECK, NEWER_BY_AT_LEAST_MS, SNOOZE_MS,
-  compareBuild, describeBuild, describeUpdateCheck, formatBuildMoment, offeredRelease, parseRelease, shouldCheck,
+  answersFor, compareBuild, describeBuild, describeUpdateCheck, formatBuildMoment, offeredRelease, parseRelease,
+  shouldCheck,
   type ReleaseInfo, type RunningBuild, type UpdateCheckRecord,
 } from '@/domain/updateCheck';
 
@@ -80,8 +81,12 @@ function release(over: Partial<ReleaseInfo> = {}): ReleaseInfo {
   };
 }
 
+/** The build these tests are running on, unless one of them says otherwise. */
+const RUNNING: RunningBuild = { sha: SHA, builtAt: BUILT };
+
+/** An answer worked out by the build that is running, unless `forBuildSha` says otherwise. */
 function record(over: Partial<UpdateCheckRecord> = {}): UpdateCheckRecord {
-  return { ...EMPTY_UPDATE_CHECK, ...over };
+  return { ...EMPTY_UPDATE_CHECK, forBuildSha: SHA, ...over };
 }
 
 describe('parseRelease', () => {
@@ -248,26 +253,26 @@ describe('shouldCheck', () => {
   const ago = (ms: number): string => new Date(NOW.getTime() - ms).toISOString();
 
   it('checks a phone that has never had an answer', () => {
-    expect(shouldCheck(record(), NOW, false)).toBe(true);
+    expect(shouldCheck(record(), NOW, false, RUNNING)).toBe(true);
   });
 
   it('trusts an answer for six hours and no longer', () => {
-    expect(shouldCheck(record({ checkedAt: ago(5 * 3_600_000) }), NOW, false)).toBe(false);
-    expect(shouldCheck(record({ checkedAt: ago(CHECK_EVERY_MS) }), NOW, false)).toBe(true);
+    expect(shouldCheck(record({ checkedAt: ago(5 * 3_600_000) }), NOW, false, RUNNING)).toBe(false);
+    expect(shouldCheck(record({ checkedAt: ago(CHECK_EVERY_MS) }), NOW, false, RUNNING)).toBe(true);
   });
 
   it('always goes when forced', () => {
-    expect(shouldCheck(record({ checkedAt: ago(60_000) }), NOW, true)).toBe(true);
+    expect(shouldCheck(record({ checkedAt: ago(60_000) }), NOW, true, RUNNING)).toBe(true);
   });
 
   it('checks again after a failed attempt, since a failure leaves no answer', () => {
     // An offline phone should try again as soon as it is opened with signal,
     // not six hours after the attempt that got nothing.
-    expect(shouldCheck(record({ lastError: 'No answer from GitHub — most likely no signal.' }), NOW, false)).toBe(true);
+    expect(shouldCheck(record({ lastError: 'No answer from GitHub — most likely no signal.' }), NOW, false, RUNNING)).toBe(true);
   });
 
   it('checks when the last answer is in the future', () => {
-    expect(shouldCheck(record({ checkedAt: ago(-3_600_000) }), NOW, false)).toBe(true);
+    expect(shouldCheck(record({ checkedAt: ago(-3_600_000) }), NOW, false, RUNNING)).toBe(true);
   });
 });
 
@@ -278,33 +283,33 @@ describe('offeredRelease', () => {
   });
 
   it('offers a newer build', () => {
-    expect(offeredRelease(newer, NOW)).toEqual(release());
+    expect(offeredRelease(newer, NOW, RUNNING)).toEqual(release());
   });
 
   it('offers nothing when current or unknown', () => {
-    expect(offeredRelease(record({ result: { verdict: 'current', reason: 'Current.', release: release() } }), NOW)).toBeNull();
-    expect(offeredRelease(record({ result: { verdict: 'unknown', reason: 'Cannot say.', release: null } }), NOW)).toBeNull();
-    expect(offeredRelease(record(), NOW)).toBeNull();
+    expect(offeredRelease(record({ result: { verdict: 'current', reason: 'Current.', release: release() } }), NOW, RUNNING)).toBeNull();
+    expect(offeredRelease(record({ result: { verdict: 'unknown', reason: 'Cannot say.', release: null } }), NOW, RUNNING)).toBeNull();
+    expect(offeredRelease(record(), NOW, RUNNING)).toBeNull();
   });
 
   it('offers nothing while "Not now" is in force for that build', () => {
     const until = new Date(NOW.getTime() + SNOOZE_MS - 60_000).toISOString();
-    expect(offeredRelease({ ...newer, snoozedUntil: until, snoozedSha: OTHER }, NOW)).toBeNull();
+    expect(offeredRelease({ ...newer, snoozedUntil: until, snoozedSha: OTHER }, NOW, RUNNING)).toBeNull();
   });
 
   it('offers a build that landed after "Not now" was pressed on the last one', () => {
     const until = new Date(NOW.getTime() + SNOOZE_MS - 60_000).toISOString();
-    expect(offeredRelease({ ...newer, snoozedUntil: until, snoozedSha: SHA }, NOW)).toEqual(release());
+    expect(offeredRelease({ ...newer, snoozedUntil: until, snoozedSha: SHA }, NOW, RUNNING)).toEqual(release());
   });
 
   it('offers the build again once the day is up', () => {
     const until = new Date(NOW.getTime() - 1).toISOString();
-    expect(offeredRelease({ ...newer, snoozedUntil: until, snoozedSha: OTHER }, NOW)).toEqual(release());
+    expect(offeredRelease({ ...newer, snoozedUntil: until, snoozedSha: OTHER }, NOW, RUNNING)).toEqual(release());
   });
 
   it('offers nothing it cannot download, whatever the verdict says', () => {
     const r = { ...newer, result: { ...newer.result!, release: release({ apkUrl: null }) } };
-    expect(offeredRelease(r, NOW)).toBeNull();
+    expect(offeredRelease(r, NOW, RUNNING)).toBeNull();
   });
 });
 
@@ -313,22 +318,22 @@ describe('describeUpdateCheck', () => {
   const answer = { verdict: 'current' as const, reason: 'This phone is running the build the office last published.', release: release() };
 
   it('says so before anything has been asked', () => {
-    expect(describeUpdateCheck(record(), NOW)).toBe('Not checked yet.');
+    expect(describeUpdateCheck(record(), NOW, RUNNING)).toBe('Not checked yet.');
   });
 
   it('gives the age of the answer and the answer', () => {
-    expect(describeUpdateCheck(record({ checkedAt: ago(3 * 3_600_000), result: answer }), NOW))
+    expect(describeUpdateCheck(record({ checkedAt: ago(3 * 3_600_000), result: answer }), NOW, RUNNING))
       .toBe('Checked 3 hours ago — This phone is running the build the office last published.');
-    expect(describeUpdateCheck(record({ checkedAt: ago(20_000), result: answer }), NOW))
+    expect(describeUpdateCheck(record({ checkedAt: ago(20_000), result: answer }), NOW, RUNNING))
       .toMatch(/^Checked just now — /);
-    expect(describeUpdateCheck(record({ checkedAt: ago(60_000), result: answer }), NOW))
+    expect(describeUpdateCheck(record({ checkedAt: ago(60_000), result: answer }), NOW, RUNNING))
       .toMatch(/^Checked 1 minute ago — /);
-    expect(describeUpdateCheck(record({ checkedAt: ago(2 * 24 * 3_600_000), result: answer }), NOW))
+    expect(describeUpdateCheck(record({ checkedAt: ago(2 * 24 * 3_600_000), result: answer }), NOW, RUNNING))
       .toMatch(/^Checked 2 days ago — /);
   });
 
   it('reports a failure that got no answer', () => {
-    expect(describeUpdateCheck(record({ lastError: 'No answer from GitHub — most likely no signal.' }), NOW))
+    expect(describeUpdateCheck(record({ lastError: 'No answer from GitHub — most likely no signal.' }), NOW, RUNNING))
       .toBe('Could not check: No answer from GitHub — most likely no signal.');
   });
 
@@ -336,7 +341,75 @@ describe('describeUpdateCheck', () => {
     // A newer build seen this morning is still waiting this afternoon, and
     // the line should keep saying so.
     const r = record({ checkedAt: ago(3_600_000), result: answer, lastError: 'No answer from GitHub — most likely no signal.' });
-    expect(describeUpdateCheck(r, NOW))
+    expect(describeUpdateCheck(r, NOW, RUNNING))
       .toBe('Could not check again: No answer from GitHub — most likely no signal. Checked 1 hour ago — This phone is running the build the office last published.');
+  });
+});
+
+describe('an answer about the build before this one', () => {
+  /**
+   * The banner that would not go away.
+   *
+   * Installing the APK over the old one keeps the app's storage, which is the
+   * whole point of installing over rather than reinstalling. So the phone came
+   * back up holding the answer it had worked out before the update — "a newer
+   * build is available", true an hour ago, about the build now running — and
+   * that answer had five of its six hours left. The banner sat on the home
+   * screen for all five, pointing at a build already installed, which is the
+   * exact thing the "never guess" rule at the top of the module exists to stop.
+   *
+   * The fix is that an answer is about a pair: this build and that release.
+   * Change either half and it is a leftover, not an answer.
+   */
+  const newer = record({
+    checkedAt: NOW.toISOString(),
+    result: { verdict: 'newer', reason: 'A build is available.', release: release() },
+  });
+
+  /** After the update: the phone is now running what the record calls newer. */
+  const installed: RunningBuild = { sha: OTHER, builtAt: minutesAfter(BUILT, 30) };
+
+  it('is not an answer about this one', () => {
+    expect(answersFor(newer, RUNNING)).toBe(true);
+    expect(answersFor(newer, installed)).toBe(false);
+  });
+
+  it('never leaves the banner up on the build it was pointing at', () => {
+    expect(offeredRelease(newer, NOW, RUNNING)).toEqual(release());
+    expect(offeredRelease(newer, NOW, installed)).toBeNull();
+  });
+
+  it('goes back to GitHub at once rather than waiting out the six hours', () => {
+    // Five hours of a six hour answer left, and it still checks: the age is
+    // about how stale an answer gets, not about whether it is the right one.
+    expect(shouldCheck(newer, NOW, false, RUNNING)).toBe(false);
+    expect(shouldCheck(newer, NOW, false, installed)).toBe(true);
+  });
+
+  it('holds for a record written before the build was stamped on it', () => {
+    // Every phone in the fleet has one of these on it right now.
+    const old = { ...newer, forBuildSha: null };
+    expect(answersFor(old, RUNNING)).toBe(false);
+    expect(offeredRelease(old, NOW, RUNNING)).toBeNull();
+    expect(shouldCheck(old, NOW, false, RUNNING)).toBe(true);
+  });
+
+  it('offers nothing to a development build, which has no commit to compare', () => {
+    const dev: RunningBuild = { sha: null, builtAt: null };
+    expect(offeredRelease(newer, NOW, dev)).toBeNull();
+    expect(shouldCheck(newer, NOW, false, dev)).toBe(true);
+  });
+
+  it('says in Settings that this build has not been checked, rather than repeating the old answer', () => {
+    expect(describeUpdateCheck(newer, NOW, installed))
+      .toBe('This build has not been checked yet — the last answer was about the one before it.');
+  });
+
+  it('never offers the release the phone is already running, whatever the record says', () => {
+    // Belt and braces: the same conclusion reached from the release side, so
+    // a record stamped with the right build but carrying a stale release
+    // cannot put the banner back either.
+    const confused = { ...newer, forBuildSha: OTHER };
+    expect(offeredRelease(confused, NOW, installed)).toBeNull();
   });
 });

@@ -2,14 +2,15 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, TextInput, View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { loadPrefs, savePrefs, type Prefs } from '@/app-prefs';
+import { loadPrefs, patchPrefs, type Prefs } from '@/app-prefs';
 import type { EmployeeRecord } from '@/db/employeeRepo';
-import { describeLoadFailure } from '@/domain/loadFailure';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { hasSignInApplication, simproConfigFromPrefs } from '@/simpro/config';
-import { prefsForEmployee, prefsForNobody, searchEmployees } from '@/simpro/identity';
+import { prefsForEmployee, prefsForNobody, repairPick, searchEmployees } from '@/simpro/identity';
 import { loadStaffList, markSignInSkipped } from '@/simpro/signInFlow';
 import { useTheme } from '@/theme';
 import { Button, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
+import { showAlert } from '@/components/alert';
 
 /**
  * Who you are.
@@ -44,6 +45,11 @@ export default function WhoAmIScreen() {
       setPrefs(held);
       const list = await loadStaffList(simproConfigFromPrefs(held));
       setPeople(list.people);
+      // A phone that lost its pick to an older build's blob write gets it
+      // back here rather than being asked again, where the name already on it
+      // names exactly one person who works here. Never a guess: see repairPick.
+      const repair = repairPick(held, list.people);
+      if (repair) setPrefs(await patchPrefs(repair));
     } catch (e) {
       setFailed(describeLoadFailure(e, 'the staff list'));
     } finally {
@@ -58,9 +64,26 @@ export default function WhoAmIScreen() {
   const canSignIn = prefs ? hasSignInApplication(prefs) : true;
 
   const choose = async (e: EmployeeRecord | null) => {
-    const p = await loadPrefs();
-    const next = { ...p, ...(e ? prefsForEmployee(p, e) : prefsForNobody()) };
-    await savePrefs(next);
+    let next: Prefs;
+    try {
+      const p = await loadPrefs();
+      // A patch, not the whole blob. Writing every field back is how the pick
+      // was being lost: this screen and the module arranger each held a copy
+      // of the settings read when they opened, and whichever saved last put
+      // the other's fields back to what they were.
+      next = await patchPrefs(e ? prefsForEmployee(p, e) : prefsForNobody());
+    } catch (err) {
+      /*
+       * A write that failed and said nothing is the same fault as the blob
+       * clobber, arrived at the other way: the screen shows the tick, the
+       * person walks off believing the phone is theirs, and the first sign
+       * otherwise is My day showing an empty week. So it is said here, and
+       * the screen stays open on the list rather than closing over it.
+       */
+      showAlert('Not saved', describeActionFailure(err, e ? 'setting this phone to you' : 'clearing who this phone is'));
+      return;
+    }
+
     setPrefs(next);
     // Clearing is done in order to pick again, so it stays on the list.
     // Picking is the end of the job: back to whatever opened this, or to the

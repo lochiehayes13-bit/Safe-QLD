@@ -1,4 +1,4 @@
-import { loadPrefs, savePrefs } from '@/app-prefs';
+import { loadPrefs, patchPrefs } from '@/app-prefs';
 import { SimproClient } from './client';
 import type { PastedConnection } from './oauthDetails';
 
@@ -22,8 +22,7 @@ export async function applyConnection(connection: PastedConnection): Promise<voi
   if (connection.clientSecret) await SimproClient.storeSecret(connection.clientSecret);
   if (!connection.domain && !connection.clientId) return;
   const prefs = await loadPrefs();
-  await savePrefs({
-    ...prefs,
+  await patchPrefs({
     simproDomain: connection.domain ?? prefs.simproDomain,
     simproClientId: connection.clientId ?? prefs.simproClientId,
   });

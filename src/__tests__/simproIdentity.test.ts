@@ -1,5 +1,6 @@
 import {
-  prefsForEmployee, prefsForNobody, resolveIdentity, searchEmployees, type IdentityCandidate,
+  isPicked, prefsForEmployee, prefsForNobody, repairPick, resolveIdentity, searchEmployees,
+  type IdentityCandidate, type IdentityPrefs,
 } from '@/simpro/identity';
 import {
   APP_REDIRECT_URI, authorizeUrl, describeOAuthFailure, expiresAtFrom, parseAuthRedirect, parseTokenResponse,
@@ -182,5 +183,86 @@ describe('what a refusal says', () => {
 
   it('copes with a body that is not JSON', () => {
     expect(describeOAuthFailure(502, '<html>Bad gateway</html>')).toContain('Bad gateway');
+  });
+});
+
+describe('staying picked', () => {
+  /**
+   * "Once somebody picks themselves from the list, they are always picked."
+   *
+   * It reads like a rule that needs no code, and it needed some. The pick is
+   * one field in the same settings blob as the rate card, the licence number
+   * and the Simpro credentials, and two screens wrote that whole blob back
+   * from a copy read when they opened — so a screen loaded before the pick and
+   * saved after it put the blank back, and the phone was nobody's again with
+   * nothing said. Those writes are patches now, and a guard test holds them
+   * there; this is the other half, which puts a lost pick back.
+   *
+   * Narrow on purpose. Adopting the wrong person is worse than asking: their
+   * notes, their timesheet blocks and their day would all go to somebody else,
+   * quietly, which is the same failure the identity resolver above exists to
+   * prevent.
+   */
+  const prefs = (over: Partial<IdentityPrefs> = {}): IdentityPrefs => ({
+    technicianName: '',
+    simproEmployeeId: '',
+    simproEmployeeEmail: '',
+    ...over,
+  });
+
+  it('leaves a pick that is already held alone', () => {
+    expect(repairPick(prefs({ simproEmployeeId: '14', technicianName: 'Kerry Lee' }), staff)).toBeNull();
+  });
+
+  it('keeps a pick whose employee is not on the list rather than clearing it', () => {
+    // The staff list is replaced whole on every sync. A read that half-failed,
+    // or an office that archived somebody for an afternoon, must not be able
+    // to un-pick a technician standing in a plant room.
+    expect(repairPick(prefs({ simproEmployeeId: '99', technicianName: 'Kerry Lee' }), staff)).toBeNull();
+    expect(repairPick(prefs({ simproEmployeeId: '14' }), [])).toBeNull();
+  });
+
+  it('adopts the name already on the phone when it names exactly one person here', () => {
+    expect(repairPick(prefs({ technicianName: 'Kerry Lee' }), staff))
+      .toEqual({ simproEmployeeId: '14', simproEmployeeEmail: 'kerry@safeqld.com.au', technicianName: 'Kerry Lee' });
+  });
+
+  it('ignores case and surrounding space, because the name was typed by hand', () => {
+    expect(repairPick(prefs({ technicianName: '  kerry lee ' }), staff))
+      .toMatchObject({ simproEmployeeId: '14' });
+  });
+
+  it('refuses a name two people share', () => {
+    // Two Dave Smiths on this office's list, one a technician and one an
+    // apprentice. Guessing here sends one man's week to the other man's pay.
+    expect(repairPick(prefs({ technicianName: 'Dave Smith' }), staff)).toBeNull();
+  });
+
+  it('never adopts somebody who has left', () => {
+    expect(repairPick(prefs({ technicianName: 'Old Hand' }), staff)).toBeNull();
+  });
+
+  it('adopts nobody off a blank name', () => {
+    expect(repairPick(prefs(), staff)).toBeNull();
+    expect(repairPick(prefs({ technicianName: '   ' }), staff)).toBeNull();
+  });
+
+  it('adopts nobody when there is no list to look in', () => {
+    expect(repairPick(prefs({ technicianName: 'Kerry Lee' }), [])).toBeNull();
+  });
+
+  it('keeps the typed name when it adopts, because that is the name on the reports', () => {
+    const repair = repairPick(prefs({ technicianName: 'Kerry' }), [
+      { id: '14', name: 'Kerry', email: 'kerry@safeqld.com.au' },
+    ]);
+    expect(repair?.technicianName).toBe('Kerry');
+  });
+
+  it('reads picked off the id rather than the name', () => {
+    // A name is typed on a report by anybody; the id is what a schedule
+    // filter and a timesheet block are keyed on.
+    expect(isPicked({ simproEmployeeId: '14' })).toBe(true);
+    expect(isPicked({ simproEmployeeId: '  ' })).toBe(false);
+    expect(isPicked({ simproEmployeeId: '' })).toBe(false);
   });
 });

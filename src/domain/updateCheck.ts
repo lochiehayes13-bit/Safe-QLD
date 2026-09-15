@@ -79,6 +79,23 @@ export interface UpdateCheckRecord {
   snoozedUntil: string | null;
   /** The build the snooze was for, so a newer one is not hidden by yesterday's "Not now". */
   snoozedSha: string | null;
+  /**
+   * The build that was running when this answer was worked out.
+   *
+   * This is the field the banner would not go away without. Installing the
+   * new APK over the old one keeps the app's storage — that is the point of
+   * installing over rather than reinstalling — so the phone came up holding
+   * "a newer build is available", worked out an hour ago about the build it
+   * had just replaced. The verdict was six hours from expiring and the banner
+   * sat there for all six, on a phone already running the build it was
+   * pointing at.
+   *
+   * A verdict is about a pair: this build and that release. Change either half
+   * and it is no longer an answer, it is a leftover. Null on a record written
+   * by a build before this field existed, which is treated the same way — as
+   * something to check again rather than something to show.
+   */
+  forBuildSha: string | null;
 }
 
 export const EMPTY_UPDATE_CHECK: UpdateCheckRecord = {
@@ -87,6 +104,7 @@ export const EMPTY_UPDATE_CHECK: UpdateCheckRecord = {
   lastError: null,
   snoozedUntil: null,
   snoozedSha: null,
+  forBuildSha: null,
 };
 
 const HOUR_MS = 3_600_000;
@@ -251,14 +269,34 @@ export function describeBuild(running: RunningBuild): string {
  * failure sets no checkedAt and an offline phone should try again as soon as
  * it is opened with signal.
  */
-export function shouldCheck(record: UpdateCheckRecord, now: Date, force: boolean): boolean {
+export function shouldCheck(
+  record: UpdateCheckRecord,
+  now: Date,
+  force: boolean,
+  running: RunningBuild,
+): boolean {
   if (force) return true;
+  // An answer about a build this phone is no longer running answers nothing.
+  // Checked before the age, because the whole point is that it is fresh: the
+  // record written an hour before the update is five hours from expiring.
+  if (!answersFor(record, running)) return true;
   const checked = readInstant(record.checkedAt);
   if (checked === undefined) return true;
   const age = now.getTime() - checked;
   // A check in the future is a clock that has been put back; waiting for it
   // to catch up could be days.
   return age < 0 || age >= CHECK_EVERY_MS;
+}
+
+/**
+ * Whether the held answer is about the build that is actually running.
+ *
+ * A development build has no commit of its own, so nothing can be said to be
+ * about it and the answer is always no.
+ */
+export function answersFor(record: UpdateCheckRecord, running: RunningBuild): boolean {
+  if (!record.forBuildSha || !running.sha) return false;
+  return sameSha(record.forBuildSha, running.sha);
 }
 
 /**
@@ -269,9 +307,30 @@ export function shouldCheck(record: UpdateCheckRecord, now: Date, force: boolean
  * pressed on: a newer one landing the next morning is news, not the thing
  * that was dismissed last night.
  */
-export function offeredRelease(record: UpdateCheckRecord, now: Date): ReleaseInfo | null {
+export function offeredRelease(
+  record: UpdateCheckRecord,
+  now: Date,
+  running: RunningBuild,
+): ReleaseInfo | null {
   const result = record.result;
   if (!result || result.verdict !== 'newer' || !result.release?.apkUrl) return null;
+
+  /*
+   * Two ways a held "newer" can be about the past, and the banner showed
+   * through both of them.
+   *
+   * The first is the answer being about another build: worked out before the
+   * update, restored after it, still hours from expiring. The second is the
+   * offer being this very build — the same commit, arrived at from the other
+   * direction — which is what a stale answer naming the release you just
+   * installed amounts to. Either one and there is nothing to offer, and this
+   * is decided here rather than waiting on a request, so the banner is gone
+   * the first time the new build draws the home screen rather than six hours
+   * later.
+   */
+  if (!answersFor(record, running)) return null;
+  if (running.sha && result.release.sha && sameSha(running.sha, result.release.sha)) return null;
+
   const until = readInstant(record.snoozedUntil);
   const snoozed = until !== undefined && now.getTime() < until
     && record.snoozedSha !== null && result.release.sha !== null
@@ -298,7 +357,13 @@ export function describeAge(ms: number): string {
  * signal this afternoon still has a newer build waiting, and the line should
  * keep saying so.
  */
-export function describeUpdateCheck(record: UpdateCheckRecord, now: Date): string {
+export function describeUpdateCheck(record: UpdateCheckRecord, now: Date, running: RunningBuild): string {
+  // An answer about the build before this one is not reported as this build's,
+  // because the line under the build number is where somebody goes to find
+  // out whether the update they just installed took.
+  if (record.result && !answersFor(record, running)) {
+    return 'This build has not been checked yet — the last answer was about the one before it.';
+  }
   const checked = readInstant(record.checkedAt);
   const answered = record.result && checked !== undefined
     ? `Checked ${describeAge(now.getTime() - checked)} — ${record.result.reason}`

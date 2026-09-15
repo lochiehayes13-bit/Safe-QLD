@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+
 /*
  * An in-memory store, kept local to this file.
  *
@@ -82,5 +85,56 @@ describe('changing one setting', () => {
     await patchPrefs({ technicianName: 'Sam' });
     await patchPrefs({ technicianName: 'Alex' });
     expect((await loadPrefs()).technicianName).toBe('Alex');
+  });
+});
+
+describe('nothing outside the storage module writes the whole blob', () => {
+  /**
+   * The rule the clobber above keeps coming back through.
+   *
+   * `patchPrefs` exists and the theme was fixed with it, and three writers
+   * were left on `savePrefs` — the staff picker, the module arranger and the
+   * connection applier — each holding a copy of the settings and writing every
+   * field of it back. The module arranger was the live one: it read the
+   * settings when it opened and wrote all of them on each tile moved, so a
+   * technician could pick themselves off the staff list, arrange their home
+   * screen, and be nobody again. Nothing on the screen says that has happened;
+   * the first sign is My day showing an empty week.
+   *
+   * So it is a rule about where the whole blob may be written, rather than a
+   * test of any one screen, because the next screen to edit a setting will be
+   * written by somebody who has not read this. `savePrefs` stays exported —
+   * `patchPrefs` is built on it — and belongs to the storage module alone.
+   */
+  const REPO = join(__dirname, '..', '..');
+  const SKIP = new Set(['node_modules', '.git', 'dist', '.expo', 'coverage', '__tests__', '__mocks__']);
+
+  const walk = (dir: string, out: string[] = []): string[] => {
+    for (const entry of readdirSync(dir)) {
+      if (SKIP.has(entry)) continue;
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) walk(full, out);
+      else if (/\.tsx?$/.test(entry) && !entry.endsWith('.d.ts')) out.push(full);
+    }
+    return out;
+  };
+
+  it('is only called from app-prefs itself', () => {
+    const callers: string[] = [];
+    for (const file of [...walk(join(REPO, 'src')), ...walk(join(REPO, 'app'))]) {
+      if (file.endsWith(join('src', 'app-prefs.ts'))) continue;
+      const source = readFileSync(file, 'utf8');
+      // The call, not the word: the comments above explain the hazard by name.
+      if (/\bsavePrefs\s*\(/.test(source)) callers.push(file.slice(REPO.length + 1));
+    }
+    // Named rather than counted, so the fix is a file somebody opens.
+    expect(callers.sort()).toEqual([]);
+  });
+
+  it('found the files it means to be reading', () => {
+    // A walk that silently returns nothing would pass the rule above forever.
+    const files = [...walk(join(REPO, 'src')), ...walk(join(REPO, 'app'))];
+    expect(files.length).toBeGreaterThan(200);
+    expect(files.filter((f) => /patchPrefs\s*\(/.test(readFileSync(f, 'utf8'))).length).toBeGreaterThan(4);
   });
 });

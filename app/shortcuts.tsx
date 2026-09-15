@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, TextInput, View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { loadPrefs, savePrefs, type Prefs } from '@/app-prefs';
+import { loadPrefs, patchPrefs, type Prefs } from '@/app-prefs';
 import {
   MODULE_GROUPS,
   demoteShortcut,
@@ -37,11 +37,20 @@ export default function ShortcutsScreen() {
 
   useFocusEffect(useCallback(() => { void loadPrefs().then(setPrefs); }, []));
 
+  /**
+   * One field changes, and nothing else is touched.
+   *
+   * This screen used to write the whole settings blob back from the copy it
+   * read when it opened — the rate card, the licence, the Simpro credentials
+   * and whoever this phone belongs to, all of it, every time somebody moved a
+   * tile. Anything saved elsewhere since then went back to what it was, which
+   * is how a technician could pick themselves off the staff list, arrange
+   * their home screen, and be nobody again.
+   */
   const update = (shortcuts: string[]) => {
     if (!prefs) return;
-    const next = { ...prefs, shortcuts };
-    setPrefs(next);
-    void savePrefs(next);
+    setPrefs({ ...prefs, shortcuts });
+    void patchPrefs({ shortcuts });
   };
 
   const chosen = useMemo(() => resolveShortcuts(prefs?.shortcuts ?? []), [prefs?.shortcuts]);

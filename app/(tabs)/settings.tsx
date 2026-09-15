@@ -1267,7 +1267,7 @@ export default function SettingsScreen() {
           tone={updateCheck.record.result?.verdict === 'newer' ? 'accent' : updateCheck.record.lastError ? 'warn' : 'faint'}
           style={{ marginTop: t.space(1.5), lineHeight: 17 }}
         >
-          {updateCheck.inFlight ? 'Checking for a newer build…' : describeUpdateCheck(updateCheck.record, new Date())}
+          {updateCheck.inFlight ? 'Checking for a newer build…' : describeUpdateCheck(updateCheck.record, new Date(), build)}
         </Txt>
         <View style={{ height: t.space(2) }} />
         <Button

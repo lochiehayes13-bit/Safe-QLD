@@ -123,6 +123,54 @@ export function prefsFromIdentity(prefs: IdentityPrefs, identity: ResolvedIdenti
   return prefsForEmployee(prefs, { id: identity.employeeId, name: identity.name, email: identity.email });
 }
 
+/**
+ * The pick this phone should be holding, or null to leave it exactly as it is.
+ *
+ * "Once somebody picks themselves, they stay picked" sounds like it needs no
+ * code, and it did: the pick is one field in the same blob as the rate card,
+ * the licence number and the Simpro credentials, and two screens wrote that
+ * whole blob back from a copy they had read earlier. A screen that loaded
+ * before the pick and saved after it put the blank back, and the phone was
+ * nobody's again — silently, because nothing in the app ever says "you have
+ * stopped being you". Those writes are patches now, which is the actual fix.
+ *
+ * This is the other half: the pick repairs itself where it can, so a phone
+ * that already lost one gets it back rather than asking again. Deliberately
+ * narrow, because adopting the wrong person is worse than asking:
+ *
+ *  - A pick already held is kept, whatever the staff list says. An employee
+ *    who is not on the list is not a reason to un-pick somebody — the list is
+ *    replaced whole on every sync, so a read that half-failed or an office
+ *    that briefly archived them would otherwise clear the phone.
+ *  - A phone with no pick adopts the name already on it only when that name
+ *    matches exactly one person who works here. Two Daves and it asks.
+ *  - A blank name adopts nobody. Everything else here is a guess about a
+ *    person, and there is a list one tap away.
+ */
+export function repairPick(
+  prefs: IdentityPrefs,
+  employees: readonly IdentityCandidate[],
+): Partial<IdentityPrefs> | null {
+  if (prefs.simproEmployeeId.trim()) return null;
+
+  const name = norm(prefs.technicianName);
+  if (!name) return null;
+
+  const matches = employees.filter((e) => !e.archived && norm(e.name) === name);
+  const only = matches.length === 1 ? matches[0] : undefined;
+  return only ? prefsForEmployee(prefs, only) : null;
+}
+
+/**
+ * Whether this phone has been told whose it is.
+ *
+ * The id rather than the name: a name is typed on a report by anybody, and
+ * the id is the thing a schedule filter and a timesheet block are keyed on.
+ */
+export function isPicked(prefs: Pick<IdentityPrefs, 'simproEmployeeId'>): boolean {
+  return prefs.simproEmployeeId.trim() !== '';
+}
+
 /** Clearing the choice. The display name stays: it is still the name on the reports. */
 export function prefsForNobody(): Partial<IdentityPrefs> {
   return { simproEmployeeId: '', simproEmployeeEmail: '' };

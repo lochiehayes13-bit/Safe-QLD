@@ -163,8 +163,9 @@ function resultFor(status: number, json: unknown, repo: string, hadToken: boolea
 async function run(force: boolean): Promise<UpdateCheckRecord> {
   try {
     await restore();
-    if (!shouldCheck(record, new Date(), force)) return record;
-    const { repo } = buildInfo();
+    const running = buildInfo();
+    if (!shouldCheck(record, new Date(), force, running)) return record;
+    const { repo } = running;
     const token = await readToken();
     let exchange: { status: number; json: unknown };
     try {
@@ -182,6 +183,10 @@ async function run(force: boolean): Promise<UpdateCheckRecord> {
       checkedAt: new Date().toISOString(),
       result: resultFor(exchange.status, exchange.json, repo, token !== null),
       lastError: null,
+      // Stamped with the build that asked. Without it the answer outlives the
+      // build it is about: the phone keeps its storage across an install, so
+      // "a newer build is available" came back up on the build it named.
+      forBuildSha: running.sha,
     });
     return record;
   } catch (e) {

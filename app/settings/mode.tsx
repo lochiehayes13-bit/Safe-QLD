@@ -8,7 +8,7 @@ import {
   validateManifest,
   type AppMode, type Destination, type TabKey,
 } from '@/domain/appMode';
-import { DEFAULT_PREFS, loadPrefs, savePrefs, type Prefs } from '@/app-prefs';
+import { DEFAULT_PREFS, loadPrefs, patchPrefs, type Prefs } from '@/app-prefs';
 import { useTheme } from '@/theme';
 import {
   Banner, Card, Chip, Field, H2, Rowed, Screen, Segmented, StatTile, Txt,
@@ -59,9 +59,7 @@ export default function ModeScreen() {
     // tapped before the read comes back — writing the defaults it starts with
     // would take all of that with it. One field changes; nothing else is
     // touched, whatever else has been saved since this screen opened.
-    writes.current = writes.current
-      .then(() => loadPrefs())
-      .then((stored) => savePrefs({ ...stored, appMode: next }));
+    writes.current = writes.current.then(() => patchPrefs({ appMode: next }));
   }, []);
 
   const stats = summarise(mode);

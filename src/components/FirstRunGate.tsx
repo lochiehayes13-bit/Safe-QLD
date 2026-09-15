@@ -1,9 +1,11 @@
 import { useEffect } from 'react';
 import { router, useRootNavigationState } from 'expo-router';
-import { loadPrefs } from '@/app-prefs';
+import { loadPrefs, patchPrefs } from '@/app-prefs';
+import { listEmployees } from '@/db/employeeRepo';
 import { firstRunStep } from '@/domain/firstRun';
 import { SimproClient } from '@/simpro/client';
 import { simproConfigFromPrefs } from '@/simpro/config';
+import { repairPick } from '@/simpro/identity';
 import { wasSignInSkipped } from '@/simpro/signInFlow';
 import { isSignedIn } from '@/simpro/userSession';
 
@@ -42,10 +44,26 @@ export function FirstRunGate(): null {
           isSignedIn(),
           wasSignInSkipped(),
         ]);
+
+        /*
+         * Put a lost pick back before deciding whether to ask for one.
+         *
+         * Two screens used to write the whole settings blob back from a copy
+         * read earlier, so a pick made in one could be undone by a save in the
+         * other. Those are patches now and it cannot happen again — but every
+         * phone that already lost one would be met by this gate asking the
+         * question a second time, and the answer is sitting on the phone: the
+         * name on the reports. Adopted only where it names exactly one person
+         * who works here. The staff list is whatever the last sync left; no
+         * request is made, because a gate must not wait on the network.
+         */
+        const repair = repairPick(prefs, await listEmployees({ includeArchived: true }));
+        if (repair) await patchPrefs(repair);
+
         const step = firstRunStep({
           connected: problem === null,
           signedIn,
-          employeeId: prefs.simproEmployeeId,
+          employeeId: repair?.simproEmployeeId ?? prefs.simproEmployeeId,
           skippedSignIn: skipped,
         });
         if (step === 'whoami') router.push('/whoami');
