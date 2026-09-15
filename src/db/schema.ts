@@ -30,6 +30,7 @@ import { MIGRATION_V28 } from './schemaV28';
 import { MIGRATION_V29 } from './schemaV29';
 import { MIGRATION_V30 } from './schemaV30';
 import { MIGRATION_V31 } from './schemaV31';
+import { MIGRATION_V32 } from './schemaV32';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -371,6 +372,7 @@ export const MIGRATIONS: string[] = [
   MIGRATION_V29,
   MIGRATION_V30,
   MIGRATION_V31,
+  MIGRATION_V32,
 ];
 
 /**

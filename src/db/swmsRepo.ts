@@ -1,7 +1,8 @@
 import { getDb, newId, nowIso } from '@/db';
 import {
   canSign, mergeSwms, whyNotSigned,
-  type AddedHazard, type PermitHeld, type SwmsRecord, type SwmsStatus, type SwmsTemplate, type SwmsWorker,
+  type AddedHazard, type PermitHeld, type RiskLevel, type SwmsRecord, type SwmsStatus,
+  type SwmsTemplate, type SwmsWorker,
 } from '@/domain/swms';
 import { SWMS_TEMPLATES, templateById } from '@/seed/swms';
 
@@ -46,6 +47,10 @@ interface SwmsRow {
   signedAt: string | null;
   attachedAt: string | null;
   notes: string | null;
+  notApplicable: string | null;
+  crewRisk: string | null;
+  emailedAt: string | null;
+  emailedTo: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -82,12 +87,18 @@ function toRecord(r: SwmsRow): SwmsRecord {
     answers: readJson<Record<string, string>>(r.answers, {}),
     addedHazards: readJson<AddedHazard[]>(r.addedHazards, []),
     ticked: readJson<string[]>(r.ticked, []),
+    // Added in v32. A statement written before it reads back as a crew who
+    // took nothing off and disagreed with nothing, which is what they did.
+    notApplicable: readJson<string[]>(r.notApplicable, []),
+    crewRisk: readJson<Record<string, RiskLevel>>(r.crewRisk, {}),
     ppeChecked: readJson<string[]>(r.ppeChecked, []),
     permits: readJson<PermitHeld[]>(r.permits, []),
     workers: readJson<SwmsWorker[]>(r.workers, []),
     status: readStatus(r.status),
     signedAt: r.signedAt ?? undefined,
     attachedAt: r.attachedAt ?? undefined,
+    emailedAt: r.emailedAt ?? undefined,
+    emailedTo: r.emailedTo ?? undefined,
     notes: r.notes ?? undefined,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
@@ -140,6 +151,8 @@ export async function createSwms(input: {
     answers: input.answers ?? {},
     addedHazards: input.addedHazards ?? [],
     ticked: [],
+    notApplicable: [],
+    crewRisk: {},
     ppeChecked: input.ppeChecked ?? [],
     // Every permit the chosen statements require starts on the record, unticked,
     // so the crew sees what they are missing before they start rather than at
@@ -156,15 +169,16 @@ export async function createSwms(input: {
   await db.runAsync(
     `INSERT INTO swms
        (id, templateIds, title, siteId, siteName, jobExternalId, jobTitle, date, supervisor, supervisorPhone,
-        answers, addedHazards, ticked, ppeChecked, permits, workers, status, signedAt, attachedAt, notes,
-        createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        answers, addedHazards, ticked, notApplicable, crewRisk, ppeChecked, permits, workers, status,
+        signedAt, attachedAt, emailedAt, emailedTo, notes, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       record.id, JSON.stringify(record.templateIds), record.title, record.siteId ?? null, record.siteName ?? null,
       record.jobExternalId ?? null, record.jobTitle ?? null, record.date, record.supervisor ?? null,
       record.supervisorPhone ?? null, JSON.stringify(record.answers), JSON.stringify(record.addedHazards),
-      JSON.stringify(record.ticked), JSON.stringify(record.ppeChecked), JSON.stringify(record.permits),
-      JSON.stringify(record.workers), record.status, null, null, record.notes ?? null,
+      JSON.stringify(record.ticked), JSON.stringify(record.notApplicable), JSON.stringify(record.crewRisk),
+      JSON.stringify(record.ppeChecked), JSON.stringify(record.permits),
+      JSON.stringify(record.workers), record.status, null, null, null, null, record.notes ?? null,
       record.createdAt, record.updatedAt,
     ],
   );
@@ -215,13 +229,14 @@ export async function updateSwms(id: string, patch: SwmsPatch): Promise<void> {
   await db.runAsync(
     `UPDATE swms SET templateIds = ?, title = ?, siteId = ?, siteName = ?, jobExternalId = ?, jobTitle = ?,
        date = ?, supervisor = ?, supervisorPhone = ?, answers = ?, addedHazards = ?, ticked = ?,
-       ppeChecked = ?, permits = ?, workers = ?, notes = ?, updatedAt = ?
+       notApplicable = ?, crewRisk = ?, ppeChecked = ?, permits = ?, workers = ?, notes = ?, updatedAt = ?
      WHERE id = ?`,
     [
       JSON.stringify(next.templateIds), next.title, next.siteId ?? null, next.siteName ?? null,
       next.jobExternalId ?? null, next.jobTitle ?? null, next.date, next.supervisor ?? null,
       next.supervisorPhone ?? null, JSON.stringify(next.answers), JSON.stringify(next.addedHazards),
-      JSON.stringify(next.ticked), JSON.stringify(next.ppeChecked), JSON.stringify(next.permits),
+      JSON.stringify(next.ticked), JSON.stringify(next.notApplicable), JSON.stringify(next.crewRisk),
+      JSON.stringify(next.ppeChecked), JSON.stringify(next.permits),
       JSON.stringify(next.workers), next.notes ?? null, next.updatedAt, id,
     ],
   );
@@ -263,6 +278,19 @@ export async function linkSwmsJob(id: string, job: { externalId: string; title?:
     'UPDATE swms SET jobExternalId = ?, jobTitle = ?, updatedAt = ? WHERE id = ?',
     [job?.externalId ?? null, job?.title ?? null, nowIso(), id],
   );
+}
+
+/**
+ * Notes that the statement went to the office, and to which inbox.
+ *
+ * Allowed on a signed record for the same reason attaching is: sending a copy
+ * is filing, not editing. Nothing here re-reads or re-validates — the send
+ * already happened, and a row that refused to record it would leave the phone
+ * saying it was never sent.
+ */
+export async function recordSwmsEmailed(id: string, to: string, at: string = nowIso()): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('UPDATE swms SET emailedAt = ?, emailedTo = ?, updatedAt = ? WHERE id = ?', [at, to, at, id]);
 }
 
 export async function recordSwmsAttached(id: string, at: string = nowIso()): Promise<void> {

@@ -115,6 +115,35 @@ const SYNONYMS: Synonyms[] = [
   { terms: ['qdc', 'queensland development code', 'mp 6.1', 'mp6.1'] },
   { terms: ['bfsr', 'building fire safety regulation', 'regulation 2008'] },
   { terms: ['not tested', 'no access', 'inaccessible', 'could not test', 'unable to test'] },
+
+  // --- Doing the work ------------------------------------------------------
+  //
+  // Everything above is about the equipment. None of it is about the physical
+  // act of installing or servicing it, which is what a technician describes
+  // when the app asks what today's work is — and which is what decides the
+  // safe work method statement they need. "Core drilling the slab to run pipe
+  // in an old shopping centre" expanded to nothing at all before this block,
+  // and it names four separate hazards.
+  { terms: ['core', 'coring', 'cored', 'core drill', 'core hole', 'diamond drill'],
+    note: 'Coring a slab is the single act that most often brings asbestos, silica and a height together.' },
+  { terms: ['drill', 'drilling', 'drilled', 'chase', 'chasing', 'penetration', 'penetrations'] },
+  { terms: ['asbestos', 'acm', 'fibro', 'ac sheet', 'asbestos register'] },
+  { terms: ['silica', 'dust', 'respirable dust', 'concrete dust'] },
+  { terms: ['weld', 'welding', 'braze', 'brazing', 'solder', 'soldering', 'hot work', 'oxy'] },
+  { terms: ['grind', 'grinding', 'angle grinder', 'cut off saw', 'saw cutting'] },
+  { terms: ['ewp', 'scissor lift', 'boom lift', 'knuckle boom', 'elevated work platform', 'cherry picker'] },
+  { terms: ['ladder', 'step ladder', 'extension ladder', 'platform ladder'] },
+  { terms: ['height', 'heights', 'elevated', 'high level', 'overhead', 'above ceiling', 'roof'] },
+  { terms: ['harness', 'fall arrest', 'anchor point', 'lanyard', 'fall restraint'] },
+  { terms: ['confined space', 'confined', 'entry permit', 'wet well', 'sump', 'manhole'] },
+  { terms: ['lock out', 'tag out', 'loto', 'prove dead', 'isolated and locked'] },
+  { terms: ['megger', 'insulation resistance', 'ir test'] },
+  { terms: ['traffic', 'traffic control', 'cones', 'witches hat', 'roadway', 'kerb', 'footpath'] },
+  { terms: ['alone', 'lone worker', 'on my own', 'by myself', 'solo'] },
+  { terms: ['after hours', 'out of hours', 'night', 'nightshift', 'night shift', 'overnight'] },
+  { terms: ['occupied', 'occupied building', 'public area', 'shopping centre', 'tenanted'] },
+  { terms: ['slab', 'concrete', 'masonry', 'brick', 'brickwork', 'blockwork', 'render'] },
+  { terms: ['install', 'installation', 'installing', 'fit off', 'mount', 'mounting', 'relocate'] },
 ];
 
 /**

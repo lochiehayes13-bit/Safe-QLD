@@ -2,14 +2,10 @@ import React, { useCallback, useState } from 'react';
 import { View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { createSwms, listSwms, swmsForDay, templatesFor } from '@/db/swmsRepo';
+import { createSwms, listSwms, templatesFor } from '@/db/swmsRepo';
 import { SWMS_TEMPLATES } from '@/seed/swms';
-import { listSites } from '@/db/repo';
-import { assetCountsBySystem } from '@/db/assetRepo';
-import { dueAtSite } from '@/db/routineRunRepo';
-import { listJobPage, type JobSummary } from '@/db/opsRepo';
 import {
-  carryForwardSwms, mergeSwms, suggestTemplates, swmsProgressLine, swmsTitleFor,
+  carryForwardSwms, mergeSwms, swmsProgressLine,
   type SwmsRecord, type SwmsTemplate,
 } from '@/domain/swms';
 import { qldIsoDay } from '@/domain/qldTime';
@@ -50,73 +46,17 @@ export default function SwmsLibraryScreen() {
   const [failed, setFailed] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [starting, setStarting] = useState(false);
-  const [sites, setSites] = useState<{ id: string; name: string }[]>([]);
-  const [picking, setPicking] = useState(false);
 
   const load = useCallback(async () => {
     setFailed(null);
     try {
-      const [rows, siteRows] = await Promise.all([listSwms({ limit: 30 }), listSites()]);
-      setRecent(rows);
-      setSites(siteRows.map((s) => ({ id: s.id, name: s.name })));
+      setRecent(await listSwms({ limit: 30 }));
     } catch (e) {
       setRecent([]);
       setFailed(describeLoadFailure(e, 'your statements'));
     }
   }, []);
   useFocusEffect(useCallback(() => { void load(); }, [load]));
-
-  /**
-   * Starts today's analysis for a site, with the statements the work implies.
-   *
-   * The suggestion is deliberately generous: an extra statement costs a
-   * technician twenty seconds to take off, and a missing one costs whatever
-   * the hazard was.
-   */
-  const startForSite = async (site: { id: string; name: string }) => {
-    setPicking(false);
-    setStarting(true);
-    try {
-      const existing = await swmsForDay(today, site.id);
-      if (existing) {
-        router.push({ pathname: '/swms/[id]', params: { id: existing.id } });
-        return;
-      }
-
-      const [counts, due, prefs, jobs] = await Promise.all([
-        assetCountsBySystem(site.id),
-        dueAtSite(site.id, today),
-        loadPrefs(),
-        listJobPage({ filter: 'all', today, siteId: site.id, limit: 10 })
-          .then((page) => page.rows)
-          .catch(() => [] as JobSummary[]),
-      ]);
-      const openJob = jobs.find((j) => j.status !== 'complete' && j.externalId);
-      const dueNow = due.filter((d) => d.state === 'overdue' || d.state === 'due').map((d) => d.routineId);
-      const ids = suggestTemplates(SWMS_TEMPLATES, {
-        systems: counts.map((c) => c.system),
-        routineIds: dueNow,
-        text: openJob?.title,
-      });
-      const chosen = ids.length ? ids : ['live-testing'];
-
-      const record = await createSwms({
-        templateIds: chosen,
-        date: today,
-        title: swmsTitleFor(chosen.map((id) => SWMS_TEMPLATES.find((x) => x.id === id)).filter((x): x is SwmsTemplate => Boolean(x))),
-        siteId: site.id,
-        siteName: site.name,
-        jobExternalId: openJob?.externalId,
-        jobTitle: openJob?.title,
-        workers: prefs.technicianName ? [{ name: prefs.technicianName, licence: prefs.technicianLicence || undefined }] : [],
-      });
-      router.push({ pathname: '/swms/[id]', params: { id: record.id } });
-    } catch (e) {
-      showAlert('Could not start it', describeActionFailure(e, 'starting the statement'));
-    } finally {
-      setStarting(false);
-    }
-  };
 
   /** One statement on its own, for work that is not at a site on the register. */
   const startTemplate = async (template: SwmsTemplate) => {
@@ -155,7 +95,6 @@ export default function SwmsLibraryScreen() {
   const templates = term
     ? SWMS_TEMPLATES.filter((x) => `${x.title} ${x.activity} ${x.steps.map((s) => s.step).join(' ')}`.toLowerCase().includes(term))
     : SWMS_TEMPLATES;
-  const siteMatches = term ? sites.filter((s) => s.name.toLowerCase().includes(term)).slice(0, 8) : sites.slice(0, 8);
 
   return (
     <>
@@ -169,35 +108,17 @@ export default function SwmsLibraryScreen() {
             <View style={{ flex: 1, marginLeft: t.space(3) }}>
               <Txt weight="700">Start today’s statement</Txt>
               <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-                Pick the site and the app chooses the statements the work needs — what is due there, what is on the
-                register, and the ones that come with them. Take off anything that does not apply.
+                Pick the job, say what the work is, and the statements it needs come up ticked — from the words,
+                from the register at that site and from what is due there. Take off anything that does not apply.
               </Txt>
             </View>
           </Rowed>
           <Button
-            title={picking ? 'Pick a site below' : 'Start today’s statement'}
-            onPress={() => setPicking((p) => !p)}
-            loading={starting}
+            title="Start today’s statement"
+            onPress={() => router.push('/swms/new')}
             style={{ marginTop: t.space(3) }}
           />
         </Card>
-
-        {picking ? (
-          <Card>
-            <Label>Which site</Label>
-            <SearchBox value={query} onChange={setQuery} placeholder="Search sites" />
-            {siteMatches.length === 0 ? (
-              <Txt size="sm" tone="muted" style={{ marginTop: t.space(2) }}>
-                No site by that name on this phone. Sync, or start from a statement below.
-              </Txt>
-            ) : null}
-            {siteMatches.map((s) => (
-              <Card key={s.id} onPress={() => void startForSite(s)}>
-                <Txt weight="600">{s.name}</Txt>
-              </Card>
-            ))}
-          </Card>
-        ) : null}
 
         {recent.length ? (
           <>
@@ -247,7 +168,7 @@ export default function SwmsLibraryScreen() {
           icon="magnify-close" title="Nothing by that name" body="Try the work rather than the hazard: hot work, heights, confined space." />
         ) : null}
         {templates.map((x) => (
-          <Card key={x.id} onPress={() => void startTemplate(x)}>
+          <Card key={x.id} onPress={starting ? undefined : () => void startTemplate(x)}>
             <Rowed align="flex-start">
               <View style={{ flex: 1 }}>
                 <Txt weight="700">{x.title}</Txt>

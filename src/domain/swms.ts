@@ -99,8 +99,20 @@ export interface SwmsSuggestion {
   systems?: string[];
   /** Service routine ids, as in @/seed/serviceRoutines. */
   routineIds?: string[];
-  /** Words in the job title or the technician's own description of the day. */
+  /**
+   * Words that settle it. One of these in what the technician typed is enough
+   * to put the statement in front of them with the box already ticked.
+   */
   words?: string[];
+  /**
+   * Words that corroborate but do not decide.
+   *
+   * Every one of these statements mentions a panel, a test and a pressure, so
+   * matching on any of those alone returns all ten. A word here can put a
+   * statement on the page for the crew to consider; it takes two of them, or
+   * one alongside a system on the register, to tick the box.
+   */
+  weakWords?: string[];
 }
 
 export interface SwmsTemplate {
@@ -166,6 +178,15 @@ export interface SwmsWorker {
 export interface AddedHazard {
   hazard: string;
   control: string;
+  /**
+   * How risky the crew judged it, after the control they wrote beside it.
+   *
+   * The template's own steps are rated by whoever wrote and reviewed the
+   * statement. This is the one hazard nobody has rated, because nobody knew
+   * about it until the crew arrived — which makes it the one most worth
+   * hearing their judgement on.
+   */
+  risk?: RiskLevel;
 }
 
 export interface PermitHeld {
@@ -195,8 +216,36 @@ export interface SwmsRecord {
   answers: Record<string, string>;
   /** What the crew found on arrival that the office could not have known. */
   addedHazards: AddedHazard[];
-  /** Step keys the crew has ticked as read. See stepKey. */
+  /**
+   * Step keys the crew has ticked as READ. See stepKey.
+   *
+   * Read, not "applies". The PDF stamps a ticked step "read on site" and the
+   * signature says the crew read it, so this field cannot be reused to mean
+   * anything else — `notApplicable` below is the separate question.
+   */
   ticked: string[];
+  /**
+   * Step keys the crew has taken off as not applicable to today's work.
+   *
+   * A statement covers the activity in general and a day is one instance of
+   * it: the confined-space statement has a step about a tripod and retrieval
+   * line, and a booster pit you stand beside and reach into does not need one.
+   * Before this, a crew faced with a step that did not apply had two bad
+   * choices — tick it, which makes the document say they read and followed
+   * something they did not, or leave it, which blocks the signature. Taking it
+   * off is the honest third, and it is printed as such rather than hidden.
+   */
+  notApplicable: string[];
+  /**
+   * What the crew judged the risk to be, per step, keyed by stepKey.
+   *
+   * Only where it differs from the statement's own rating, so an empty map
+   * means the crew agreed with it. Kept beside the template's rating on the
+   * page rather than replacing it: the reviewed rating is what the method was
+   * written against, and the crew's is what they found on the day. Both are
+   * worth having and they are not the same claim.
+   */
+  crewRisk: Record<string, RiskLevel>;
   ppeChecked: string[];
   permits: PermitHeld[];
   workers: SwmsWorker[];
@@ -204,6 +253,9 @@ export interface SwmsRecord {
   signedAt?: string;
   /** When the PDF was queued onto the Simpro job. */
   attachedAt?: string;
+  /** When it was emailed to the office, and to which of the two inboxes. */
+  emailedAt?: string;
+  emailedTo?: string;
   notes?: string;
   createdAt: string;
   updatedAt: string;
@@ -390,13 +442,70 @@ export function validateSwms(record: SwmsRecord, merged: MergedSwms): SwmsIssue[
     });
   }
 
-  const unticked = merged.steps.filter((s) => !record.ticked.includes(s.key));
+  /*
+   * A step taken off as not applicable does not have to be read, and a step
+   * cannot be both. Taking one off is the honest answer to a step that does
+   * not apply to today's instance of the work — the alternative was ticking
+   * it, which makes the document say the crew read and followed something
+   * they did not, on a page an inspector reads.
+   */
+  const unticked = merged.steps.filter(
+    (s) => !record.ticked.includes(s.key) && !record.notApplicable.includes(s.key),
+  );
   if (unticked.length) {
     issues.push({
       blocking: true,
       what: `${unticked.length} step${unticked.length === 1 ? '' : 's'} not read`,
-      fix: 'Every step has to be read before it is signed. Tick them as you go through them with the crew.',
+      fix: 'Every step has to be read before it is signed. Tick them as you go through them with the crew, '
+        + 'or take one off if it genuinely does not apply to this job.',
     });
+  }
+
+  /*
+   * Everything cannot be not applicable.
+   *
+   * A crew that takes every step off has not written a safe work method
+   * statement, they have written a blank page with a signature on it — and it
+   * would otherwise validate cleanly, because there would be nothing left to
+   * fail.
+   */
+  const applicable = merged.steps.filter((s) => !record.notApplicable.includes(s.key));
+  if (merged.steps.length && !applicable.length) {
+    issues.push({
+      blocking: true,
+      what: 'Every step has been taken off as not applicable',
+      fix: 'Then this is not the statement for this work. Pick the statements that do cover it.',
+    });
+  }
+
+  /*
+   * A hazard the crew found, with nothing written against it.
+   *
+   * This is precisely what a reviewer refused all ten shipped statements over
+   * — named hazards with no control against them — so the same standard
+   * applies to the ones a crew adds on the day. A hazard on a signed statement
+   * with an empty control column is worse than one nobody wrote down: it is
+   * evidence that it was seen and nothing was done.
+   */
+  for (const h of record.addedHazards) {
+    const named = h.hazard.trim();
+    if (!named) continue;
+    if (!h.control.trim()) {
+      issues.push({
+        blocking: true,
+        what: `Nothing written against "${named}"`,
+        fix: 'Say what is being done about it. A hazard on the page with an empty control column is the '
+          + 'one thing this document must never show.',
+      });
+    }
+    if (!h.risk) {
+      issues.push({
+        blocking: false,
+        what: `No risk set on "${named}"`,
+        fix: 'Every step in the statement carries a rating from whoever reviewed it. This one is yours: '
+          + 'say how risky it is with the control in place.',
+      });
+    }
   }
 
   const missingPermits = merged.permits.filter((p) => !record.permits.some((h) => h.permit === p && h.held));
@@ -539,6 +648,14 @@ export function carryForwardSwms(previous: SwmsRecord, date: string): CarryForwa
       answers: { ...previous.answers },
       addedHazards: previous.addedHazards.map((h) => ({ ...h })),
       ticked: [],
+      // A step the crew took off yesterday carries, because it is a fact about
+      // this site and this job rather than about yesterday: the booster pit
+      // that needs no tripod today needed none yesterday. It is still on the
+      // screen and still one tap to put back, and the statement prints what
+      // was taken off either way.
+      notApplicable: [...previous.notApplicable],
+      // Their own reading of the risk carries with it, for the same reason.
+      crewRisk: { ...previous.crewRisk },
       ppeChecked: [...previous.ppeChecked],
       permits: previous.permits.map((p) => ({ permit: p.permit, held: false, reference: p.reference })),
       workers: previous.workers.map((w) => ({ name: w.name, licence: w.licence })),

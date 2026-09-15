@@ -37,44 +37,105 @@ const SUGGESTIONS: Record<string, SwmsSuggestion> = {
   'live-testing': {
     systems: ['detection', 'ews', 'aspirating'],
     routineIds: ['det-monthly', 'det-annual', 'ews-annual', 'asd-six-monthly'],
-    words: ['detection', 'alarm', 'fip', 'panel', 'annual', 'routine', 'test', 'monthly', 'brigade', 'ase'],
+    words: [
+      'detection', 'detector', 'detectors', 'smoke alarm', 'fip', 'fire indicator panel',
+      'brigade', 'ase', 'asdu', 'monitoring', 'evacuation', 'eward', 'wip', 'occupant warning',
+      'aspirating', 'vesda', 'block plan', 'zone', 'zones', 'sounder', 'strobe', 'mcp',
+      'call point', 'functional test', 'as 1851',
+    ],
+    // Every statement here mentions a panel and a test. On their own they say
+    // nothing about which one the day needs.
+    weakWords: ['panel', 'test', 'testing', 'alarm', 'annual', 'routine', 'monthly', 'service'],
   },
   'hot-work': {
-    words: ['weld', 'grind', 'cut', 'solder', 'braze', 'hot work', 'install', 'pipe'],
+    words: [
+      'weld', 'welding', 'grind', 'grinding', 'cut', 'cutting', 'saw cutting', 'solder',
+      'soldering', 'braze', 'brazing', 'hot work', 'oxy', 'angle grinder', 'spark', 'sparks',
+      'torch', 'thread', 'threading', 'pipework', 'bracketry', 'hot permit',
+    ],
+    weakWords: ['install', 'installation', 'pipe', 'steel', 'fabricate'],
   },
   heights: {
     systems: ['detection', 'sprinkler', 'ews', 'emergency-lighting'],
     routineIds: ['det-annual', 'spr-annual', 'eel-six-monthly', 'asd-six-monthly'],
-    words: ['ceiling', 'roof', 'ladder', 'ewp', 'scissor', 'boom', 'height', 'detector', 'sprinkler', 'valve'],
+    words: [
+      'ceiling', 'ceilings', 'roof', 'ladder', 'ladders', 'ewp', 'scissor', 'scissor lift',
+      'boom', 'boom lift', 'knuckle', 'height', 'heights', 'elevated', 'platform', 'scaffold',
+      'harness', 'fall', 'fall arrest', 'anchor', 'edge', 'void', 'mezzanine', 'atrium',
+      'high level', 'overhead', 'tank top', 'step ladder', 'above ceiling',
+    ],
+    weakWords: ['detector', 'detectors', 'sprinkler', 'valve', 'light', 'lights', 'exit sign'],
   },
   'confined-space': {
-    words: ['tank', 'pit', 'well', 'riser', 'confined', 'internal inspection'],
+    words: [
+      'confined', 'confined space', 'tank', 'tanks', 'water tank', 'wet well', 'pump well',
+      'sump', 'chamber', 'vault', 'manhole', 'entry permit', 'gas test', 'atmosphere',
+      'standby person', 'retrieval', 'tripod', 'internal inspection', 'inside the tank',
+      'booster pit', 'valve pit', 'riser shaft',
+    ],
+    weakWords: ['pit', 'well', 'riser', 'entry', 'internal', 'ventilation'],
   },
   electrical: {
     systems: ['detection'],
-    words: ['battery', 'batteries', 'wiring', 'cable', 'mains', 'submain', 'electrical', 'panel', 'power', 'fault'],
+    words: [
+      'battery', 'batteries', 'battery bank', 'wiring', 'cable', 'cabling', 'mains', 'submain',
+      'electrical', 'switchboard', 'circuit', 'circuits', 'megger', 'insulation resistance',
+      'isolate the supply', 'lock out', 'tag out', 'loto', 'prove dead', 'energised', 'live work',
+      'terminate', 'terminating', 'rcd', 'earth', 'earthing', '240', 'wiring rules', 'as 3000',
+    ],
+    weakWords: ['panel', 'power', 'supply', 'fault', 'charger', 'voltage'],
   },
   'hydrant-flow': {
     systems: ['hydrant', 'pump'],
     routineIds: ['hyd-annual', 'hydrant-five-yearly', 'pmp-monthly', 'pump-five-yearly'],
-    words: ['hydrant', 'booster', 'flow', 'pump', 'form 72', 'pressure'],
+    words: [
+      'hydrant', 'hydrants', 'booster', 'flow test', 'flowing', 'form 72', 'pitot', 'standpipe',
+      'fire pump', 'pumpset', 'diesel pump', 'jockey', 'duty point', 'landing valve',
+      'suction', 'hose off', 'run the pump', 'block plan test',
+    ],
+    weakWords: ['flow', 'pump', 'pressure', 'water', 'test'],
   },
   'extinguisher-cylinders': {
-    systems: ['extinguisher', 'gas'],
-    routineIds: ['ext-six-monthly', 'ext-five-yearly'],
-    words: ['extinguisher', 'cylinder', 'gas', 'co2', 'suppression', 'refill', 'pressure test'],
+    words: [
+      'extinguisher', 'extinguishers', 'cylinder', 'cylinders', 'co2', 'carbon dioxide',
+      'suppression', 'refill', 'recharge', 'pressure test', 'hydrostatic', 'five yearly',
+      'discharge', 'agent', 'fm200', 'novec', 'inergen', 'clean agent', 'off site',
+      'manual handling', 'trolley',
+    ],
+    weakWords: ['gas', 'gaseous', 'weight', 'tag', 'sign'],
   },
   'traffic-lone': {
     systems: ['hydrant'],
-    words: ['booster', 'carpark', 'basement', 'street', 'alone', 'after hours', 'night'],
+    words: [
+      'traffic', 'roadway', 'road', 'street', 'kerb', 'footpath', 'driveway', 'carpark',
+      'car park', 'cones', 'witches hat', 'traffic control', 'alone', 'on my own', 'lone',
+      'lone worker', 'after hours', 'night', 'nightshift', 'out of hours', 'no one else',
+      'public area', 'shopping centre', 'occupied building',
+    ],
+    weakWords: ['booster', 'basement', 'loading dock', 'public'],
   },
   'asbestos-silica': {
-    words: ['drill', 'core', 'mount', 'install', 'new device', 'relocate', 'ceiling'],
+    words: [
+      'drill', 'drilling', 'core', 'coring', 'core drill', 'core hole', 'diamond drill',
+      'chase', 'chasing', 'penetration', 'penetrations', 'slab', 'concrete', 'masonry',
+      'brick', 'brickwork', 'blockwork', 'render', 'asbestos', 'acm', 'silica', 'dust',
+      'lead paint', 'fibro', 'ac sheet', 'pre 1990', 'asbestos register', 'demolition',
+      'cut in', 'new device', 'relocate', 'mount',
+    ],
+    weakWords: ['install', 'ceiling', 'wall', 'walls', 'riser', 'old building'],
   },
   'sprinkler-wet': {
     systems: ['sprinkler'],
     routineIds: ['spr-annual', 'sprinkler-five-yearly'],
-    words: ['sprinkler', 'valve', 'drain', 'isolate', 'wet', 'alarm valve'],
+    words: [
+      'sprinkler', 'sprinklers', 'sprinkler head', 'alarm valve', 'stop valve',
+      'drain', 'draining', 'drain down', 'charged', 'wet system', 'combined system',
+      'flow switch', 'tamper', 'impairment', 'shut down the system', 'refill the system',
+      'water damage', 'escutcheon',
+    ],
+    // "heads" is detector heads as often as sprinkler heads, and "replace three
+    // heads" is a detection job far more often than a sprinkler one.
+    weakWords: ['valve', 'wet', 'isolate', 'water', 'pipe', 'heads'],
   },
 };
 

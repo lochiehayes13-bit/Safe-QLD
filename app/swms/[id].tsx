@@ -3,7 +3,8 @@ import { View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
-  SIGNED_REFUSAL, getSwms, linkSwmsJob, recordSwmsAttached, signSwms, templatesFor, updateSwms,
+  SIGNED_REFUSAL, getSwms, linkSwmsJob, recordSwmsAttached, recordSwmsEmailed, signSwms, templatesFor,
+  updateSwms,
 } from '@/db/swmsRepo';
 import { SWMS_TEMPLATES } from '@/seed/swms';
 import { listJobPage, type JobSummary } from '@/db/opsRepo';
@@ -15,11 +16,16 @@ import {
 import { attachmentContentKey } from '@/domain/outboundWork';
 import { qldIsoDay } from '@/domain/qldTime';
 import { swmsHtml } from '@/export/swms';
+import { sendMail } from '@/export/mail';
+import {
+  DEFAULT_SWMS_INBOX, SWMS_INBOX_ADDRESS, SWMS_INBOX_OPTIONS, swmsBody, swmsInboxFrom, swmsNotReady,
+  swmsSubject, type SwmsInbox,
+} from '@/domain/swmsEmail';
 import { shareFile, writePdf } from '@/export/files';
 import { notSharedNotice } from '@/export/shareOutcome';
 import { formatAuDate } from '@/export/sheets';
 import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
-import { loadPrefs } from '@/app-prefs';
+import { loadPrefs, patchPrefs } from '@/app-prefs';
 import { nowIso } from '@/db';
 import { showAlert } from '@/components/alert';
 import { RecordGate } from '@/components/RecordGate';
@@ -81,6 +87,7 @@ export default function SwmsRecordScreen() {
   const [newWorker, setNewWorker] = useState('');
   const [signingFor, setSigningFor] = useState<number | null>(null);
   const [companyName, setCompanyName] = useState('');
+  const [inbox, setInbox] = useState<SwmsInbox>(DEFAULT_SWMS_INBOX);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -90,6 +97,7 @@ export default function SwmsRecordScreen() {
       setRecord(r);
       setMissing(!r);
       setCompanyName(prefs.companyName);
+      setInbox(swmsInboxFrom(prefs.swmsInbox));
     } catch (e) {
       setFailed(describeLoadFailure(e, 'this statement'));
     }
@@ -234,6 +242,60 @@ export default function SwmsRecordScreen() {
       showAlert('On its way to the job', `It goes onto Simpro job ${record.jobExternalId} with the next sync.`);
     } catch (e) {
       showAlert('Not attached', describeActionFailure(e, 'attaching it to the job'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Sends the statement to the office, to the inbox the crew chose.
+   *
+   * The PDF goes on the email on a phone. In a browser it cannot: `writePdf`
+   * there holds the document for the print dialogue rather than writing a
+   * file, and both halves of the mail layer drop a `printed` file rather than
+   * attaching HTML under a .pdf name. So the body says so in as many words and
+   * points at the Share button, instead of arriving looking complete with
+   * nothing on it.
+   */
+  const emailIt = async () => {
+    if (!record) return;
+    const stop = swmsNotReady(record, merged);
+    if (stop) { showAlert('Not yet', stop); return; }
+
+    setBusy(true);
+    try {
+      const file = await pdfFor(record).catch(() => null);
+      const attached = !!file && !file.printed;
+      const to = SWMS_INBOX_ADDRESS[inbox];
+      const outcome = await sendMail({
+        to,
+        subject: swmsSubject(record),
+        body: swmsBody(record, merged, { attached, companyName: companyName || undefined }),
+      }, file ? [file] : []);
+
+      // Remembered on the outcomes where something actually left, and not on
+      // the ones where it did not. A phone that says "sent" over a composer
+      // somebody closed is worse than one that says nothing.
+      if (outcome === 'sent' || outcome === 'handed-over') {
+        await recordSwmsEmailed(record.id, to).catch(() => undefined);
+        setRecord({ ...record, emailedAt: nowIso(), emailedTo: to });
+      }
+
+      if (outcome === 'no-mail-app') {
+        showAlert('No mail app set up', `This device has no email account configured. The statement goes to ${to}.`);
+      } else if (outcome === 'sent') {
+        showAlert('Sent', `It is on its way to ${to}.${attached ? '' : ' The PDF could not be attached — use Share to send it.'}`);
+      } else if (outcome === 'handed-over') {
+        showAlert(
+          'Draft opened',
+          `An email to ${to} is open in your mail app. Press send there.`
+          + (attached ? '' : ' A browser cannot attach the PDF, so the email says so — use Share to send the document itself.'),
+        );
+      } else {
+        showAlert('Not sent', 'The email was not sent, so nothing has reached the office.');
+      }
+    } catch (e) {
+      showAlert('Could not send it', describeActionFailure(e, 'emailing the statement'));
     } finally {
       setBusy(false);
     }
@@ -657,6 +719,43 @@ export default function SwmsRecordScreen() {
             ) : null}
 
             <H2>Afterwards</H2>
+
+            <Card>
+              <Label>Send it to the office</Label>
+              <Segmented
+                value={inbox}
+                onChange={(next) => {
+                  setInbox(next);
+                  // Remembered for next time, but asked every time: it is the
+                  // person doing the work who knows which half of the company
+                  // it is, and a statement in the wrong inbox is not filed, it
+                  // is lost.
+                  void patchPrefs({ swmsInbox: next });
+                }}
+                options={SWMS_INBOX_OPTIONS}
+              />
+              <Txt size="sm" tone="muted" style={{ marginTop: t.space(2) }}>
+                {SWMS_INBOX_ADDRESS[inbox]}
+              </Txt>
+              {record.emailedAt ? (
+                <Txt size="xs" tone="faint" style={{ marginTop: t.space(1), lineHeight: 16 }}>
+                  Already sent to {record.emailedTo ?? 'the office'} on {formatAuDate(record.emailedAt)}.
+                </Txt>
+              ) : null}
+              <Button
+                title={record.emailedAt ? 'Send it again' : 'Send it'}
+                onPress={() => void emailIt()}
+                loading={busy}
+                style={{ marginTop: t.space(3) }}
+              />
+              {!locked ? (
+                <Txt size="xs" tone="warn" style={{ marginTop: t.space(2), lineHeight: 16 }}>
+                  This is not signed yet. It will go marked DRAFT, which is honest and sometimes what you want —
+                  but the office files a signed one.
+                </Txt>
+              ) : null}
+            </Card>
+
             <Button title="Share the PDF" variant="secondary" onPress={() => void share()} loading={busy} />
             {record.jobExternalId ? (
               <Button

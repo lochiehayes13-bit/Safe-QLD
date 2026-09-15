@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DEFAULT_SHORTCUTS, migrateShortcuts } from '@/domain/modules';
+import { DEFAULT_SWMS_INBOX } from '@/domain/swmsEmail';
 import { company } from '@/theme/brand';
 
 /**
@@ -109,6 +110,16 @@ export interface Prefs {
   /** Where a suggestion about the app itself goes. Same reasoning. */
   suggestionsEmail: string;
   /**
+   * Which of the two inboxes a finished safe work method statement goes to.
+   *
+   * 'service' or 'projects'. Held as a plain string rather than the union for
+   * the same reason `appMode` is: an older build must not fail to parse the
+   * whole settings blob over one field it has never heard of. It is the last
+   * choice this device made, not a rule — the send step asks every time, and
+   * shows the address in full beside the choice.
+   */
+  swmsInbox: string;
+  /**
    * Charge-out rates, in whole cents excluding GST.
    *
    * Held here rather than shipped in the repository: these are commercial terms
@@ -169,6 +180,7 @@ export const DEFAULT_PREFS: Prefs = {
   autoSync: true,
   shortcuts: DEFAULT_SHORTCUTS,
   supervisorEmail: company.email,
+  swmsInbox: DEFAULT_SWMS_INBOX,
   suggestionsEmail: company.email,
   normalHoursSellCents: 0,
   afterHoursSellCents: 0,

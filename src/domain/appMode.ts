@@ -281,6 +281,14 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['swms', 'jsea', 'jsa', 'safe work', 'method statement', 'safety', 'hazard', 'risk', 'permit', 'high risk'],
   },
   {
+    route: '/swms/new', file: 'app/swms/new.tsx', tab: 'today', section: 'Before you start',
+    label: 'New statement', modes: BOTH, openedFrom: ['/swms'],
+    blurb:
+      'Pick the job, say what the work is, and the statements it needs come up ticked. Take off '
+      + 'anything that does not apply.',
+    terms: ['swms', 'jsea', 'new', 'start', 'builder', 'safe work', 'method statement', 'today'],
+  },
+  {
     route: '/swms/[id]', file: 'app/swms/[id].tsx', tab: 'today', section: 'Before you start',
     label: 'The statement', needsContext: true, modes: BOTH, openedFrom: ['/swms'],
     blurb: 'One day’s statement: the steps, this site’s own answers, and everybody’s signature.',

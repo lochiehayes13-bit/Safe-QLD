@@ -92,6 +92,8 @@ function record(over: Partial<SwmsRecord> = {}): SwmsRecord {
     title: 'Hot work and 1 other',
     siteName: 'Fictional Tower',
     date: '2026-09-10',
+    notApplicable: [],
+    crewRisk: {},
     answers: {},
     addedHazards: [],
     ticked: [],
@@ -311,7 +313,7 @@ describe('a statement no reviewer has cleared', () => {
   const complete = (templateIds: string[]): SwmsRecord => ({
     id: 'r1', templateIds, title: 'Today', siteId: 's1', siteName: 'Tower',
     date: '2026-09-10', answers: { 'Where is the isolation point': 'Panel 1' },
-    addedHazards: [], ticked: [], ppeChecked: [], permits: [],
+    addedHazards: [], ticked: [], notApplicable: [], crewRisk: {}, ppeChecked: [], permits: [],
     workers: [{ name: 'Sam', signature: 'data:sig' }],
     status: 'draft', createdAt: '', updatedAt: '',
   } as unknown as SwmsRecord);
