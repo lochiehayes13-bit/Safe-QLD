@@ -141,6 +141,15 @@ const STOP_WORDS = new Set([
   'need', 'want', 'get', 'any', 'all', 'some', 'there', 'here', 'about',
 ]);
 
+/**
+ * How much a clause title matching the question is worth.
+ *
+ * Deliberately smaller than the gap between matching one more word of the
+ * question and not, so it decides between equals rather than overruling a
+ * better match.
+ */
+const TITLE_MATCH_BONUS = 0.15;
+
 function tokens(s: string): string[] {
   // Two characters is the floor for a term to be worth matching, and a stop
   // word never is.
@@ -157,6 +166,27 @@ function tokens(s: string): string[] {
  * match is noise. Below that it is term coverage: an answer matching four of
  * the five words asked beats one matching one.
  */
+/**
+ * What a clause's own sub-clauses start with.
+ *
+ * "5.1" owns "5.1.4" and the prefix is just the ref and a dot. A section
+ * heading is written "SECTION 5" and owns "5.1.4" as well, which the plain
+ * prefix cannot see — so a section heading with a description on it sat above
+ * the clause that actually answered the question, which is the exact failure
+ * the demotion below exists to prevent. Appendices are the same shape:
+ * "Appendix H" owns "H.3".
+ *
+ * A ref that names no children returns something nothing can start with,
+ * rather than an empty string that would make every clause its child.
+ */
+function childPrefix(ref: string): string {
+  const section = /^SECTION\s+(\d+)$/i.exec(ref.trim());
+  if (section) return `${section[1]}.`;
+  const appendix = /^Appendix\s+([A-Z]+)$/i.exec(ref.trim());
+  if (appendix) return `${appendix[1]!.toUpperCase()}.`;
+  return `${ref}.`;
+}
+
 function score(
   query: string,
   identifier: string,
@@ -364,6 +394,25 @@ export function ask(query: string, limit = 12): Answer[] {
     const scored: { clause: typeof doc.clauses[number]; s: number; named: boolean }[] = [];
     const bodies = new Map<string, string>();
 
+    /*
+     * How many of this document's clause titles each word appears in.
+     *
+     * "how far off the wall can a detector go" leaves two words after the
+     * trade vocabulary has taken its share: "wall" and "detector". In a
+     * detection standard "detector" is in a third of the titles and tells you
+     * almost nothing about which clause is wanted; "wall" is in a handful and
+     * tells you almost everything. Counting them equally put the sloping-
+     * ceiling clause level with the one about walls. Rarity across this
+     * document's own titles is the cheapest honest way to tell them apart, and
+     * it stays inspectable — no weights, just a count anyone can check.
+     */
+    const titlesWith = new Map<string, number>();
+    for (const clause of doc.clauses) {
+      for (const w of new Set(tokens(clause.title))) {
+        titlesWith.set(w, (titlesWith.get(w) ?? 0) + 1);
+      }
+    }
+
     for (const clause of doc.clauses) {
       /*
        * A clause named outright is navigation, not search. "AS 2419.1 clause
@@ -382,10 +431,38 @@ export function ask(query: string, limit = 12): Answer[] {
         ?? `${doc.designation} clause ${clause.ref}. Nobody has written up what this clause covers, `
           + 'so the app is not going to guess — open your own copy of the standard.';
 
+      /*
+       * A clause whose TITLE is about the thing asked beats one that only
+       * mentions it in passing.
+       *
+       * The haystack above is one flat string, so a word in the clause title
+       * and the same word buried in a description are worth exactly the same.
+       * That held while the descriptions were few. With the catalogue carrying
+       * several thousand of them, "how far off the wall" started returning the
+       * sloping-ceiling clause and the fan-control clause — both of which
+       * mention a wall once, in passing — above "Spacing from walls,
+       * partitions or air supply openings", which is the clause that answers
+       * it. The bonus is small and proportional: it breaks ties between
+       * clauses that matched the same words, and it never outweighs actually
+       * matching more of the question.
+       */
+      // Matched as a substring rather than word-for-word, which is how the
+      // scorer itself reads the haystack. Nothing here stems, so an exact
+      // token match would miss "wall" inside "walls" and the bonus would be
+      // zero on the very clause it exists to lift.
+      const clauseTitle = normalise(clause.title);
+      const asked = tokens(q).filter((w) => !consumed.has(w));
+      const inTitle = asked
+        .filter((w) => clauseTitle.includes(w))
+        // A word in most of the titles distinguishes nothing, so it earns
+        // almost none of the bonus; a word in few of them earns nearly all.
+        .reduce((n, w) => n + (1 - Math.min(1, (titlesWith.get(w) ?? 0) / Math.max(1, doc.clauses.length))), 0);
+      const titleBonus = asked.length ? (inTitle / asked.length) * TITLE_MATCH_BONUS : 0;
+
       scored.push({
         clause,
         named: !!named,
-        s: named ? 900 : score(q, `${doc.designation} ${clause.ref}`, hay, implied, consumed),
+        s: named ? 900 : score(q, `${doc.designation} ${clause.ref}`, hay, implied, consumed) + titleBonus,
       });
       // Keep the composed body with the clause so the second pass need not
       // rebuild it.
@@ -404,13 +481,29 @@ export function ask(query: string, limit = 12): Answer[] {
      * So a clause whose own sub-clause also cleared the threshold is demoted
      * below it. Only ever below its own children, never below an unrelated
      * clause, and never at all where the technician named it outright.
+     *
+     * It has to settle the whole chain, not one link of it. A section heading
+     * sits above the sub-clause that sits above the clause with the answer,
+     * and reading a child's ORIGINAL score rather than its demoted one sank
+     * the heading below where its child started instead of where its child
+     * ended up — leaving the heading on top anyway. So the deepest refs are
+     * settled first and each parent is then pushed below what its children
+     * finally scored.
      */
+    const depth = (ref: string): number => ref.split('.').length;
+    const settled = new Map<string, number>();
+    for (const entry of [...scored].sort((a, b) => depth(b.clause.ref) - depth(a.clause.ref))) {
+      const prefix = childPrefix(entry.clause.ref);
+      let floor = entry.s;
+      for (const o of scored) {
+        if (o === entry || !o.clause.ref.startsWith(prefix) || o.s < ANSWER_THRESHOLD) continue;
+        floor = Math.min(floor, (settled.get(o.clause.ref) ?? o.s) - 0.001);
+      }
+      settled.set(entry.clause.ref, entry.named ? entry.s : floor);
+    }
+
     for (const entry of scored) {
-      const child = scored.find((o) =>
-        o !== entry
-        && o.clause.ref.startsWith(`${entry.clause.ref}.`)
-        && o.s >= ANSWER_THRESHOLD);
-      const demoted = !entry.named && child ? Math.min(entry.s, child.s - 0.001) : entry.s;
+      const demoted = settled.get(entry.clause.ref) ?? entry.s;
       const { clause } = entry;
 
       add({

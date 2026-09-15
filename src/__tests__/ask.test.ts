@@ -137,6 +137,44 @@ describe('the standards catalogue', () => {
     expect(best.title).toContain('5.1.4');
   });
 
+  it('puts the clause a question is about above one that mentions it in passing', () => {
+    /*
+     * The catalogue grew from five hundred clauses to three thousand, and the
+     * ranking had been resting on there not being much text to match against.
+     *
+     * The haystack is one flat string, so a word in a clause TITLE and the same
+     * word buried in a description counted the same. Once every clause carried
+     * a description, "how far off the wall" started returning the sloping-
+     * ceiling clause and the fan-control clause — each of which mentions a wall
+     * once, incidentally — above the clause actually titled for it.
+     */
+    const best = ask('how far off the wall can a detector go')[0]!;
+    expect(best.title).toContain('Spacing from walls');
+  });
+
+  it('does not let a word that is in every title decide anything', () => {
+    // "detector" is in a third of the titles of a detection standard and tells
+    // you nothing about which clause is wanted; "wall" is in a handful and
+    // tells you almost everything. Counting them equally left the two level.
+    const titles = ask('how far off the wall can a detector go').slice(0, 2).map((a) => a.title);
+    expect(titles.every((t) => /Spacing from walls/.test(t))).toBe(true);
+  });
+
+  it('never answers with the section heading over the clause inside it', () => {
+    /*
+     * The demotion that handles this matched a child by its ref starting with
+     * the parent's ref and a dot, which works for "5.1" owning "5.1.4" and not
+     * at all for "SECTION 5" — so the newly described section headings sat on
+     * top of the clauses that answered the question. It also has to settle the
+     * whole chain: reading a child's original score rather than its demoted one
+     * sank a heading below where its child STARTED, which left it on top anyway.
+     */
+    for (const q of ['how far off the wall can a detector go', 'detector spacing', 'sound pressure level']) {
+      const top = ask(q)[0];
+      if (top?.kind === 'clause') expect(top.title).not.toMatch(/ SECTION \d+ —/);
+    }
+  });
+
   it('jumps straight to a clause the technician named outright', () => {
     // Someone typing a reference is navigating, not searching.
     const best = ask('AS 2419.1 clause 10.4')[0]!;

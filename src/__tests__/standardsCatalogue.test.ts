@@ -405,11 +405,22 @@ describe('the documents a technician uses most are actually covered', () => {
     expect(countFor(docId as string)).toBeGreaterThanOrEqual(minimum as number);
   });
 
-  it('leaves the superseded AS 1670.4 editions alone rather than guessing at them', () => {
-    // Their clause bodies were never read. Inventing summaries from the titles
-    // is precisely the failure this module refuses.
-    expect(countFor('as-1670-4-2015')).toBe(0);
+  it('leaves the AS 1670.4 edition nobody has read alone rather than guessing at it', () => {
+    /*
+     * This used to cover the 2015 edition as well, on the stated grounds that
+     * neither edition's clause bodies had ever been read and that inventing
+     * summaries from titles is the failure this module refuses.
+     *
+     * The owner has since supplied AS 1670.4:2015, so that reason no longer
+     * holds for it and it is written up from the document like any other. The
+     * 2004 edition has still never been read, so the rule keeps its teeth
+     * where the reason still applies — and it is narrowed rather than dropped,
+     * because a guard deleted the moment it fails is not a guard.
+     */
     expect(countFor('as-1670-4-2004')).toBe(0);
+    // And the edition that was read is genuinely described, so this test
+     // cannot quietly pass by the document having been dropped instead.
+    expect(countFor('as-1670-4-2015')).toBeGreaterThan(20);
   });
 });
 
