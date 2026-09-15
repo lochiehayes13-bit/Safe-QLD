@@ -3,8 +3,8 @@ import { SERVICE_ROUTINES, SOURCE_LABEL } from '@/seed/serviceRoutines';
 import { EOL_VALUES } from '@/calc/eol';
 import { PROTOCOLS } from '@/calc/dipswitch';
 import { ASSET_TYPES, SYSTEM_LABELS } from '@/seed/assetTypes';
-import { LIBRARY } from '@/domain/standardsLibrary';
-import { clauseQuery, expand, normalise as normaliseRef } from '@/domain/tradeVocabulary';
+import { LIBRARY, sectionLine } from '@/domain/standardsLibrary';
+import { clauseQuery, expand, normalise as normaliseRef, type ClauseQuery } from '@/domain/tradeVocabulary';
 
 /**
  * Answering a technician's question from what the app already holds.
@@ -41,6 +41,15 @@ export interface Answer {
    * specific than 5.1.
    */
   specificity?: number;
+  /**
+   * What part of the document this came out of, for a clause.
+   *
+   * Eight cards from six standards all read alike — a number, a heading and a
+   * paragraph — and deciding which is worth opening means knowing whether it
+   * came from the smoke detector section or the commissioning appendix. The
+   * words are the catalogue's own; see sectionLine in standardsLibrary.
+   */
+  context?: string;
 }
 
 export const KIND_LABEL: Record<AnswerKind, string> = {
@@ -149,6 +158,76 @@ const STOP_WORDS = new Set([
  * better match.
  */
 const TITLE_MATCH_BONUS = 0.15;
+
+/**
+ * What a clause scores when the technician named its document outright.
+ *
+ * Two of them, because "named it" turned out to cover two very different
+ * things. Asked for "as 1670 2018", the old rule gave a flat 900 to every
+ * clause of every AS 1670 there is — the 1986 edition, all three parts, every
+ * edition of each — because it tested `designation.startsWith('as 1670')` and
+ * that is true of all of them. Eleven hundred clauses tied on one score, the
+ * tie fell through to a title comparison, and the answer was twenty-three
+ * clauses of a standard withdrawn in 2004.
+ *
+ * So an edition the person actually named beats one they did not. Both still
+ * sit far above anything the word scorer can produce, because naming a
+ * standard is navigation and it should not have to fight the ranking.
+ */
+const NAMED_EXACT = 900;
+const NAMED_FAMILY = 700;
+
+/**
+ * Whether a document is the one the query named, and how squarely.
+ *
+ * Three things the plain prefix test could not tell apart, in the order they
+ * matter.
+ *
+ * **A longer number is a different standard.** "as 167" must not match
+ * "AS 1670": a digit straight after the match means the query stopped short of
+ * the real number, and that is not a match at all.
+ *
+ * **A part is not the parent.** Designations normalise to "as 1670-1986" and
+ * "as 1670.4 2018", so a query of "as 1670" is a prefix of both. It names the
+ * first outright and names the second's family, which is not the same claim
+ * and should not score the same.
+ *
+ * **A year that was typed is a year that counts.** It is the strongest thing a
+ * technician can say about which edition they mean, and it was being parsed
+ * and discarded — so "as 1670 2018" put a standard withdrawn in 2004 above the
+ * 2018 editions it actually asked for. With the year read, a part of the
+ * family published in that year outranks the parent published in another.
+ */
+function namedMatch(designation: string, direct: ClauseQuery | undefined): 'exact' | 'family' | false {
+  if (!direct) return false;
+  if (!direct.standard) return 'exact';
+  if (!designation.startsWith(direct.standard)) return false;
+
+  const after = designation.charAt(direct.standard.length);
+  if (after >= '0' && after <= '9') return false;
+
+  if (direct.year) return designation.includes(direct.year) ? 'exact' : 'family';
+  return after === '.' ? 'family' : 'exact';
+}
+
+/**
+ * How much of the answer one document may fill.
+ *
+ * Twenty-five slots and no rule about spreading them: asked "1670 2018", a
+ * thousand clauses across eight AS 1670 documents scored identically, and AS
+ * 1670.1:2018 — the largest of them — took all twenty-five. AS 1670.4:2018,
+ * the part about emergency warning systems, had a hundred and forty-seven
+ * clauses on exactly the same score and not one of them was shown.
+ *
+ * So a run of answers from one document decays, slightly, the further down
+ * that document's own list it goes. Applied as a score adjustment rather than
+ * an interleave, so the single sort at the end still returns descending
+ * scores and the guard that says so still holds. The decay is small enough
+ * that a genuinely better answer never loses to a worse one from elsewhere —
+ * it only breaks the ties, which is the whole of the problem.
+ */
+const PER_DOC_RUN = 6;
+const PER_DOC_DECAY = 0.02;
 
 function tokens(s: string): string[] {
   // Two characters is the floor for a term to be worth matching, and a stop
@@ -419,9 +498,8 @@ export function ask(query: string, limit = 12): Answer[] {
        * 10.4" wins over everything so the technician who already knows the
        * reference is not made to fight the ranking for it.
        */
-      const named = direct
-        && (!direct.standard || designation.startsWith(direct.standard))
-        && (!direct.clause || clause.ref.toLowerCase() === direct.clause);
+      const match = namedMatch(designation, direct);
+      const named = !!match && (!direct?.clause || clause.ref.toLowerCase() === direct.clause);
 
       const hay = [
         doc.designation, doc.title, clause.ref, clause.title, clause.covers,
@@ -461,8 +539,10 @@ export function ask(query: string, limit = 12): Answer[] {
 
       scored.push({
         clause,
-        named: !!named,
-        s: named ? 900 : score(q, `${doc.designation} ${clause.ref}`, hay, implied, consumed) + titleBonus,
+        named,
+        s: named
+          ? (match === 'exact' ? NAMED_EXACT : NAMED_FAMILY)
+          : score(q, `${doc.designation} ${clause.ref}`, hay, implied, consumed) + titleBonus,
       });
       // Keep the composed body with the clause so the second pass need not
       // rebuild it.
@@ -522,6 +602,7 @@ export function ask(query: string, limit = 12): Answer[] {
         route: `/library/${doc.id}`,
         // A clause reference's depth. See the tie-break in the sort below.
         specificity: clause.ref.split('.').length,
+        context: sectionLine(doc, clause),
       }, demoted);
     }
   }
@@ -536,6 +617,35 @@ export function ask(query: string, limit = 12): Answer[] {
    * instead of "5.1.4 Spacing from walls, partitions or air supply openings".
    * Both are true; only one answers the question. The deeper reference wins.
    */
+  /*
+   * No one document may take the whole answer.
+   *
+   * See PER_DOC_RUN. Grouped by route, which for a clause is `/library/<id>`
+   * and so is the document itself — nothing new has to be carried on an
+   * Answer to do it. Ranked within the group on the score it already has, then
+   * decayed by how far down that group it sits, and never below the threshold
+   * that decides whether something is an answer at all: this reorders, it does
+   * not disqualify.
+   */
+  const byDoc = new Map<string, Answer[]>();
+  for (const a of out) {
+    if (a.kind !== 'clause' || !a.route) continue;
+    const group = byDoc.get(a.route);
+    if (group) group.push(a);
+    else byDoc.set(a.route, [a]);
+  }
+  for (const group of byDoc.values()) {
+    if (group.length <= PER_DOC_RUN) continue;
+    group.sort((a, b) =>
+      b.score - a.score
+      || (b.specificity ?? 0) - (a.specificity ?? 0)
+      || a.title.localeCompare(b.title));
+    group.forEach((a, rank) => {
+      const decayed = a.score * (1 - PER_DOC_DECAY * Math.floor(rank / PER_DOC_RUN));
+      a.score = Math.max(ANSWER_THRESHOLD, decayed);
+    });
+  }
+
   return out
     .sort((a, b) =>
       b.score - a.score

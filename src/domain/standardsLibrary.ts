@@ -93,3 +93,71 @@ export function bestExplained(limit = 5): { doc: StandardDoc; explained: number 
     .sort((a, b) => b.explained - a.explained)
     .slice(0, limit);
 }
+
+/**
+ * Which part of a document a clause sits in, in one line.
+ *
+ * A search returns eight cards from six standards and they all read alike: a
+ * clause number, a heading and a paragraph. Deciding which one is worth
+ * opening means knowing what part of the document it came out of — "5.1.7" in
+ * the smoke detector section is a different kind of answer from "5.1.7" in the
+ * commissioning appendix, and nothing on the card said which.
+ *
+ * So each answer carries the section above it. The words are the catalogue's
+ * own: the section heading is read out of the document like every other
+ * heading, and where somebody has written up what that section is for, its
+ * first sentence goes on the end. Nothing here is composed or summarised — a
+ * line invented to describe a standard is the one thing this library will not
+ * do.
+ *
+ * Returns nothing for a clause that IS a section, which needs no line saying
+ * it is itself, and for a document with no sections listed.
+ */
+
+/** Longer than this and it is a paragraph, not a line under a card. */
+const SECTION_LINE_LIMIT = 120;
+
+/**
+ * The heading a reference belongs under, as the catalogue spells it.
+ *
+ * Three shapes, because the documents use three. "5.1.7" and "Table 13.2.1"
+ * belong to a numbered section; "A.4" and "Table K.1" to a lettered appendix.
+ * A reference that is already a heading belongs to nothing.
+ */
+export function sectionRefFor(ref: string): string | null {
+  const trimmed = ref.trim();
+  if (/^(SECTION|Appendix|Part|Schedule)\b/i.test(trimmed)) return null;
+
+  const numbered = /^(?:Table|Figure|Form)?\s*(\d+)\./i.exec(trimmed);
+  if (numbered) return `SECTION ${numbered[1]}`;
+
+  const lettered = /^(?:Table|Figure|Form)?\s*([A-Z])\./.exec(trimmed);
+  if (lettered) return `Appendix ${lettered[1]}`;
+
+  return null;
+}
+
+/** The first sentence of a description, or the whole of it where it is one. */
+function firstSentence(text: string): string {
+  const stop = /[.!?](?:\s|$)/.exec(text);
+  return stop ? text.slice(0, stop.index + 1).trim() : text.trim();
+}
+
+export function sectionLine(doc: StandardDoc, clause: StandardClause): string | undefined {
+  const sectionRef = sectionRefFor(clause.ref);
+  if (!sectionRef) return undefined;
+
+  const section = doc.clauses.find((c) => c.ref.toLowerCase() === sectionRef.toLowerCase());
+  if (!section) return undefined;
+
+  // "SECTION 5" shouts on a card under a heading that does not. The number is
+  // the useful half; the document prints the word in capitals and we do not
+  // have to.
+  const head = sectionRef.replace(/^SECTION\s+/i, 'Section ');
+  const named = `${head} · ${section.title}`;
+
+  if (!section.covers) return named;
+  const gist = firstSentence(section.covers);
+  const full = `${named} — ${gist}`;
+  return full.length <= SECTION_LINE_LIMIT ? full : named;
+}

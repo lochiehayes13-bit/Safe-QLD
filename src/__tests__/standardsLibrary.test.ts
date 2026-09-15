@@ -2,6 +2,7 @@ import { STANDARDS } from '@/domain/standardsCatalogue';
 import { CLAUSE_NOTES, clauseNoteKey } from '@/domain/standardsExtra';
 import {
   EXPLAINED_CLAUSES, LIBRARY, TOTAL_CLAUSES, bestExplained, clauseProvenance, libraryDoc,
+  sectionLine, sectionRefFor,
 } from '@/domain/standardsLibrary';
 
 /**
@@ -131,5 +132,94 @@ describe('bestExplained', () => {
 
   it('honours the limit it was given', () => {
     expect(bestExplained(3)).toHaveLength(3);
+  });
+});
+
+/**
+ * The line under each search result saying which part of the document it came
+ * out of.
+ *
+ * Every card in a result list reads alike — a clause number, a heading and a
+ * paragraph — and what tells a technician which is worth opening is usually
+ * the part of the standard it came from. The words are the catalogue's own:
+ * the section heading, and where somebody has written up what that section is
+ * for, its first sentence. Nothing is composed.
+ */
+describe('which part of a document a clause sits in', () => {
+  it('sends a numbered clause to its numbered section', () => {
+    expect(sectionRefFor('5.1.7')).toBe('SECTION 5');
+    expect(sectionRefFor('3.15.8.1')).toBe('SECTION 3');
+    expect(sectionRefFor('13.2')).toBe('SECTION 13');
+  });
+
+  it('sends a table or a figure to the section it is printed in', () => {
+    expect(sectionRefFor('Table 13.2.1')).toBe('SECTION 13');
+    expect(sectionRefFor('Table K.1')).toBe('Appendix K');
+  });
+
+  it('sends a lettered clause to its appendix', () => {
+    expect(sectionRefFor('A.1')).toBe('Appendix A');
+    expect(sectionRefFor('J.4')).toBe('Appendix J');
+  });
+
+  it('says nothing for a reference that is already a heading', () => {
+    // A line under "SECTION 5" saying it is in section 5 is noise.
+    expect(sectionRefFor('SECTION 5')).toBeNull();
+    expect(sectionRefFor('Appendix A')).toBeNull();
+    expect(sectionRefFor('Part 3')).toBeNull();
+  });
+
+  it('says nothing for a reference with no part to it', () => {
+    expect(sectionRefFor('Scope')).toBeNull();
+    expect(sectionRefFor('7')).toBeNull();
+  });
+
+  it('names the section a clause belongs to, in the document\u2019s own words', () => {
+    const doc = libraryDoc('as-1670-1-2018')!;
+    const clause = doc.clauses.find((c) => c.ref === '5.1.7')!;
+    const line = sectionLine(doc, clause)!;
+    expect(line).toContain('Section 5');
+    // The section heading as the document prints it, not a summary of it.
+    const section = doc.clauses.find((c) => c.ref === 'SECTION 5')!;
+    expect(line).toContain(section.title);
+  });
+
+  it('stops short of a paragraph', () => {
+    // It sits under a card as one line. Anything longer is the card again.
+    for (const doc of LIBRARY) {
+      for (const clause of doc.clauses) {
+        const line = sectionLine(doc, clause);
+        if (line) expect(line.length).toBeLessThanOrEqual(120);
+      }
+    }
+  });
+
+  it('never quotes a figure, the same as every other line this app prints', () => {
+    // The whole library ships clause numbers and its own prose, never the
+    // standard's text or its thresholds. A derived line is no exception.
+    const withUnit = /\d+(?:\.\d+)?\s*(?:mm|cm|km|kPa|MPa|kg|lx|lux|dBA|dB|\u00b0C|Ah|kW|V|W|L\/s|L|m|h|s|min|%)\b/;
+    const offenders: string[] = [];
+    for (const doc of LIBRARY) {
+      for (const clause of doc.clauses) {
+        const line = sectionLine(doc, clause);
+        // The leading "Section 13 · ..." is a reference, not a measurement.
+        const prose = line?.replace(/^(?:Section|Appendix)\s+\S+\s+\u00b7\s*/, '') ?? '';
+        if (prose && withUnit.test(prose)) offenders.push(`${doc.id} ${clause.ref}: ${line}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('covers a real share of the catalogue rather than almost none of it', () => {
+    let withLine = 0;
+    let total = 0;
+    for (const doc of LIBRARY) {
+      for (const clause of doc.clauses) {
+        total += 1;
+        if (sectionLine(doc, clause)) withLine += 1;
+      }
+    }
+    // Not every document lists its sections, so this is a floor and not a rule.
+    expect(withLine / total).toBeGreaterThan(0.5);
   });
 });

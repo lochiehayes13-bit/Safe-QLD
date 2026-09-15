@@ -279,6 +279,17 @@ export function expand(query: string): Expansion {
 export interface ClauseQuery {
   /** The standard as typed, normalised: "as 2419.1". Absent when only a clause was given. */
   standard?: string;
+  /**
+   * The edition year as typed: "2018". Absent where none was given.
+   *
+   * It was captured and thrown away, which is how "as 1670 2018" — a query
+   * naming both the standard and the edition — came back with twenty-three
+   * clauses of AS 1670-1986, a standard withdrawn before the person asking was
+   * qualified. Naming the year is the strongest thing a technician can do to
+   * say which edition they mean, and it was the one part of the query nothing
+   * read.
+   */
+  year?: string;
   /** "10.4" */
   clause?: string;
 }
@@ -304,6 +315,7 @@ export function clauseQuery(query: string): ClauseQuery | undefined {
   if (!std && !clause) return undefined;
   return {
     standard: std ? `as ${std[1]}` : undefined,
+    year: std?.[2],
     clause,
   };
 }

@@ -1,7 +1,7 @@
 import { existsSync } from 'fs';
 import { join } from 'path';
 import {
-  DEFAULT_SHORTCUTS, LEGACY_DEFAULT_SHORTCUTS, MODULES, MODULE_GROUPS,
+  DEFAULT_SHORTCUTS, LEGACY_DEFAULT_SHORTCUTS, MODULES, MODULE_GROUPS, SHORT_GRID_DEFAULT_SHORTCUTS,
   demoteShortcut, migrateShortcuts, moduleFor, moveShortcut, promoteShortcut, resolveShortcuts,
   searchModules, toggleShortcut,
 } from '@/domain/modules';
@@ -46,23 +46,25 @@ describe('the catalogue', () => {
     }
   });
 
-  it('starts a new phone with a short grid, not a full one', () => {
-    // A full grid looks finished, and nobody edits a finished thing. A short
-    // one that is obviously missing your favourite is what sends you to the
-    // edit button.
-    expect(DEFAULT_SHORTCUTS.length).toBeLessThanOrEqual(8);
+  it('starts a new phone with everything on it', () => {
+    // This shipped eight tiles, on the reasoning that a full grid looks
+    // finished and nobody edits a finished thing. The owner reversed it, and
+    // the reason is better: a technician cannot go looking for a module they
+    // have never seen. Taking one off is one tap from the screen that adds it.
+    expect(DEFAULT_SHORTCUTS).toEqual(MODULES.map((m) => m.href));
+  });
+
+  it('leaves nothing out, including a module added after this was written', () => {
+    const missing = MODULES.filter((m) => !DEFAULT_SHORTCUTS.includes(m.href)).map((m) => m.label);
+    expect(missing).toEqual([]);
+  });
+
+  it('lists no tile twice, which would render two of the same thing', () => {
+    expect(new Set(DEFAULT_SHORTCUTS).size).toBe(DEFAULT_SHORTCUTS.length);
   });
 
   it('ships defaults that all resolve', () => {
     expect(resolveShortcuts(DEFAULT_SHORTCUTS)).toHaveLength(DEFAULT_SHORTCUTS.length);
-  });
-
-  it('starts nobody on a job list', () => {
-    // The front page is for the projects crew and the apprentices as much as
-    // the service technician, and the app does not know which one is holding
-    // the phone. Jobs are one tap away for whoever wants them pinned.
-    const groups = resolveShortcuts(DEFAULT_SHORTCUTS).map((m) => m.group);
-    expect(groups).not.toContain('Jobs and planning');
   });
 
   it('says on every tile what the thing is for, briefly enough to fit on two lines', () => {
@@ -76,6 +78,18 @@ describe('the catalogue', () => {
 describe('a saved home screen from the previous build', () => {
   it('is replaced when it is exactly the old default, which nobody chose', () => {
     expect(migrateShortcuts([...LEGACY_DEFAULT_SHORTCUTS])).toEqual(DEFAULT_SHORTCUTS);
+  });
+
+  it('is replaced when it is the eight-tile default that shipped in between', () => {
+    // Every phone updated during that window holds this list and holds it
+    // because nobody chose it. Leaving them on eight tiles would mean the
+    // people already using the app are the only ones who never see the rest.
+    expect(migrateShortcuts([...SHORT_GRID_DEFAULT_SHORTCUTS])).toEqual(DEFAULT_SHORTCUTS);
+  });
+
+  it('is kept when somebody edited the eight-tile grid, same as any other', () => {
+    const edited = [...SHORT_GRID_DEFAULT_SHORTCUTS.slice(1)];
+    expect(migrateShortcuts(edited)).toEqual(edited);
   });
 
   it('is kept when anybody has touched it, even slightly', () => {

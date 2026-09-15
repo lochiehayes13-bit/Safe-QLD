@@ -290,24 +290,22 @@ export const MODULE_GROUPS: ModuleGroup[] = [
 ];
 
 /**
- * What a new install starts with.
+ * What a new install starts with: all of it.
  *
- * Eight, and none of them a job list. The first thing a technician sees has
- * to be true for the projects crew and the service crew alike: the week's
- * hours, a way to ask the office something, leave, the map, the reference and
- * two calculators. Anyone who wants their jobs on the front page adds them,
- * which takes one tap, and the grid is obviously theirs from then on.
+ * This used to ship eight tiles, on the reasoning that a full grid looks
+ * finished and nobody edits a finished thing, so a short one that is obviously
+ * missing your favourite is what sends somebody to the edit button.
+ *
+ * The owner's call is the other way, and it is the better one for this app: a
+ * technician cannot go looking for a module they have never seen. Everything a
+ * new phone can do is on the front page, and taking a tile off is one tap from
+ * the same screen that adds one. Nobody has to be told the app can do a thing
+ * before they can find it.
+ *
+ * Built from MODULES rather than written out, so a module added next month is
+ * on a new phone without anybody remembering to put it here.
  */
-export const DEFAULT_SHORTCUTS: string[] = [
-  '/work/timesheets',
-  '/swms',
-  '/work/rfi',
-  '/work/leave',
-  '/library',
-  '/tools/routines',
-  '/tools/resistor',
-  '/suggest',
-];
+export const DEFAULT_SHORTCUTS: string[] = MODULES.map((m) => m.href);
 
 /**
  * The defaults the previous build shipped with.
@@ -326,11 +324,37 @@ export const LEGACY_DEFAULT_SHORTCUTS: readonly string[] = [
   '/tools/resistor',
 ];
 
+/**
+ * The eight-tile grid that shipped between the two.
+ *
+ * A phone updated during that window holds this and holds it because nobody
+ * chose it, exactly as LEGACY_DEFAULT_SHORTCUTS describes. Kept as its own
+ * list rather than folded into that one, so each is the honest record of what
+ * some build actually shipped.
+ */
+export const SHORT_GRID_DEFAULT_SHORTCUTS: readonly string[] = [
+  '/work/timesheets',
+  '/swms',
+  '/work/rfi',
+  '/work/leave',
+  '/library',
+  '/tools/routines',
+  '/tools/resistor',
+  '/suggest',
+];
+
+/** Every arrangement this app has ever shipped as its own idea of a default. */
+const SUPERSEDED_DEFAULTS: readonly (readonly string[])[] = [
+  LEGACY_DEFAULT_SHORTCUTS,
+  SHORT_GRID_DEFAULT_SHORTCUTS,
+];
+
 export function migrateShortcuts(saved: readonly string[] | undefined): string[] {
   if (!saved) return [...DEFAULT_SHORTCUTS];
-  const untouchedLegacy = saved.length === LEGACY_DEFAULT_SHORTCUTS.length
-    && saved.every((h, i) => h === LEGACY_DEFAULT_SHORTCUTS[i]);
-  return untouchedLegacy ? [...DEFAULT_SHORTCUTS] : [...saved];
+  const untouched = SUPERSEDED_DEFAULTS.some(
+    (was) => saved.length === was.length && saved.every((h, i) => h === was[i]),
+  );
+  return untouched ? [...DEFAULT_SHORTCUTS] : [...saved];
 }
 
 const BY_HREF = new Map(MODULES.map((m) => [m.href, m]));

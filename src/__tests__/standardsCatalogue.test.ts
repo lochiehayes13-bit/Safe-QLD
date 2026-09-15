@@ -189,6 +189,48 @@ function record(over: Partial<MaintenanceRecord> = {}): MaintenanceRecord {
 // Clause notes — do they attach to anything real?
 // ---------------------------------------------------------------------------
 
+/**
+ * Twenty documents were added at once, and one of them went in twice.
+ *
+ * Both copies were AS 1670.4:2015, one carrying the supersession and one the
+ * provenance note, and nothing said a word. The id is the only handle the app
+ * has on a document — `libraryDoc(id)` and `/library/[id]` both take the first
+ * match — so the second copy could never be opened: tapping its card in the
+ * catalogue opened the first one. The front page counted it anyway, printing
+ * a document and thirty-three clauses that were not there twice over.
+ *
+ * Nothing about that is visible reading a nineteen-thousand-line data file, so
+ * it is a rule instead.
+ */
+describe('the catalogue is a register, so each document appears in it once', () => {
+  it('gives every document an id of its own', () => {
+    const counts = new Map<string, number>();
+    for (const doc of STANDARDS) counts.set(doc.id, (counts.get(doc.id) ?? 0) + 1);
+    expect([...counts].filter(([, n]) => n > 1).map(([id]) => id)).toEqual([]);
+  });
+
+  it('never prints the same designation twice, whatever the ids say', () => {
+    // The id is what the app routes on; the designation is what a person
+    // reads. Two cards reading "AS 1670.4:2015" are the same fault to them
+    // whether or not the ids differ.
+    const counts = new Map<string, number>();
+    for (const doc of STANDARDS) counts.set(doc.designation, (counts.get(doc.designation) ?? 0) + 1);
+    expect([...counts].filter(([, n]) => n > 1).map(([d]) => d)).toEqual([]);
+  });
+
+  it('numbers a clause once within a document', () => {
+    const repeated: string[] = [];
+    for (const doc of STANDARDS) {
+      const seen = new Set<string>();
+      for (const clause of doc.clauses) {
+        if (seen.has(clause.ref)) repeated.push(`${doc.id} ${clause.ref}`);
+        seen.add(clause.ref);
+      }
+    }
+    expect(repeated).toEqual([]);
+  });
+});
+
 describe('every curated description attaches to a clause that exists', () => {
   it('is never keyed to a document or clause that does not exist', () => {
     // The failure that matters: a note keyed to something the catalogue does not

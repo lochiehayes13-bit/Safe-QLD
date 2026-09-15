@@ -71,9 +71,25 @@ jobs:
         if: steps.pages.outcome == 'success'
         run: npm ci --legacy-peer-deps
 
+      # The commit's own moment, not this run's.
+      #
+      # `date` here would stamp a different second into the bundle on every
+      # run, and the hourly schedule above means there is a run every hour
+      # whether or not anything changed. A different stamp is a different
+      # bundle body, a different content hash in its filename, a different file
+      # list, and so a different service worker cache name — which asks every
+      # browser in the fleet to throw away 11 MB and fetch it again, hourly,
+      # for a build with nothing new in it. On a phone on mobile data that is
+      # the whole point of the offline copy, undone.
+      #
+      # Taken from the commit, the same commit always produces the same bundle:
+      # a scheduled run republishes byte-identical files, the cache name does
+      # not move, and nobody downloads anything.
       - name: Stamp the build
         if: steps.pages.outcome == 'success'
-        run: echo "BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+        run: |
+          STAMP=$(TZ=UTC git show -s --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd HEAD)
+          echo "BUILD_TIME=${STAMP:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" >> "$GITHUB_ENV"
 
       # A project page is served from /<repo>/, not from the root of the domain,
       # and the export writes its asset paths from the root — so without this

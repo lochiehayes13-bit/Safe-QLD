@@ -226,6 +226,59 @@ describe('the standards catalogue', () => {
  *
  * Route strings are not checked by the typechecker, so this is what checks them.
  */
+/**
+ * Naming a standard is navigation, not search, and it was answering the wrong
+ * document. The owner asked where AS 1670.4:2018 had gone and the search's own
+ * answer to "1670 2018" was a hundred and forty-seven clauses of it, all cut,
+ * behind three hundred and fifty-eight of a different part.
+ */
+describe('naming a standard, and an edition', () => {
+  const sources = (q: string): string[] => [...new Set(ask(q, 12).map((a) => a.source))];
+
+  it('reads the edition year instead of parsing it and throwing it away', () => {
+    // "as 1670 2018" used to return twenty-three clauses of AS 1670-1986, a
+    // standard withdrawn in 2004, because the year was captured by the regular
+    // expression and never put on the query.
+    for (const q of ['as 1670 2018', '1670 2018']) {
+      expect(sources(q).every((s) => /2018/.test(s))).toBe(true);
+    }
+  });
+
+  it('answers with every part of a family published in the year asked for', () => {
+    // The whole complaint: AS 1670.4:2018 exists, it is described, and the
+    // owner's own phrasing could not reach it.
+    const found = sources('1670 2018');
+    expect(found).toContain('AS 1670.1:2018');
+    expect(found).toContain('AS 1670.4:2018');
+  });
+
+  it('lets no single document take the whole answer', () => {
+    // A thousand clauses across eight AS 1670 documents scored identically,
+    // and the largest of them filled all twenty-five slots outright.
+    expect(sources('1670 2018').length).toBeGreaterThan(1);
+  });
+
+  it('keeps a part number a part number', () => {
+    // "as 1670.4" must not drag in AS 1670.1 or the 1986 edition.
+    expect(sources('as 1670.4').every((s) => /1670\.4/.test(s))).toBe(true);
+  });
+
+  it('does not let a number that stopped short match a longer one', () => {
+    // "as 167" is not "AS 1670". A digit straight after the match means the
+    // query never named this standard at all, so it falls through to the word
+    // scorer rather than jumping.
+    const top = ask('as 167', 5)[0];
+    expect(top?.score ?? 0).toBeLessThan(700);
+  });
+
+  it('still returns answers in descending score after the spreading', () => {
+    // The decay is applied before the single final sort, so this holds.
+    const scores = ask('1670 2018', 20).map((a) => a.score);
+    expect([...scores].sort((a, b) => b - a)).toEqual(scores);
+    expect(scores.every((s) => s >= ANSWER_THRESHOLD)).toBe(true);
+  });
+});
+
 describe('every answer the ask bar gives has a screen behind it', () => {
   const APP = join(__dirname, '..', '..', 'app');
 

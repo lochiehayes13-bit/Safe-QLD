@@ -531,6 +531,26 @@ function Result({ answer }: { answer: Answer }) {
           <Txt size="sm" tone="muted" style={{ marginTop: t.space(1), lineHeight: 19 }}>
             {answer.body}
           </Txt>
+          {/*
+            Which part of the document this came out of.
+            Eight cards from six standards all read alike — a number, a heading
+            and a paragraph — and what decides which is worth opening is
+            usually whether it came from the smoke detector section or the
+            commissioning appendix. In the brand colour because it is the line
+            the eye should land on while scanning, and above the source rather
+            than below it: the section is about the answer, the source is about
+            where to check it.
+          */}
+          {answer.context ? (
+            <Txt
+              size="xs"
+              weight="600"
+              numberOfLines={2}
+              style={{ color: t.color.accentText, marginTop: t.space(1.5), lineHeight: 16 }}
+            >
+              {answer.context}
+            </Txt>
+          ) : null}
           <Rowed gap={2} align="center" style={{ marginTop: t.space(1.5) }}>
             <Txt size="xs" tone={tone} style={{ flex: 1 }}>{answer.source}</Txt>
             {answer.confidence !== 'high' ? (

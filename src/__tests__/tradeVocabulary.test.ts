@@ -138,8 +138,24 @@ describe('clauseQuery', () => {
     expect(clauseQuery('AS/NZS 2293.2 clause 3.4')).toEqual({ standard: 'as 2293.2', clause: '3.4' });
   });
 
-  it('ignores the edition year, which is not part of the reference being sought', () => {
-    expect(clauseQuery('AS 2419.1:2005 clause 8.4')).toEqual({ standard: 'as 2419.1', clause: '8.4' });
+  it('keeps the edition year, because naming one is the point of typing it', () => {
+    /*
+     * This used to assert the opposite — that the year was "not part of the
+     * reference being sought" — and the year was captured by the expression
+     * and then dropped on the floor.
+     *
+     * Which is how "as 1670 2018" came back with twenty-three clauses of
+     * AS 1670-1986, a standard withdrawn in 2004, while AS 1670.4:2018 sat at
+     * rank ninety-seven. Naming the year is the strongest thing a technician
+     * can do to say which edition they mean; it is the one part of the query
+     * nothing read.
+     */
+    expect(clauseQuery('AS 2419.1:2005 clause 8.4')).toEqual({ standard: 'as 2419.1', year: '2005', clause: '8.4' });
+  });
+
+  it('says nothing about a year where none was typed', () => {
+    expect(clauseQuery('AS 2444')?.year).toBeUndefined();
+    expect(clauseQuery('AS/NZS 2293.2 clause 3.4')?.year).toBeUndefined();
   });
 
   it('says nothing for an ordinary question', () => {

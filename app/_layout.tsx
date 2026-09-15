@@ -12,6 +12,7 @@ import {
 import { getDb } from '@/db';
 import { seedReferenceData } from '@/db/assetRepo';
 import { startCatalogueSeed } from '@/seed/catalogueSeed';
+import { NewVersionStrip } from '@/components/NewVersionStrip';
 import { setFontsReady, useTheme } from '@/theme';
 import { ThemeChoiceProvider } from '@/theme/choice';
 import { STARTUP_PATIENCE_MS, startupStalled } from '@/domain/startup';
@@ -143,6 +144,11 @@ function RootShell() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <StatusBar style={t.mode === 'dark' ? 'light' : 'dark'} />
+        {/* A browser updates by loading the page again, so it is offered here
+            rather than on the home screen: the home screen is one tab of six,
+            and somebody who opens straight into Work would never see it.
+            Nothing on a phone, which updates by installing over itself. */}
+        <NewVersionStrip />
         {/* Only once the database is open: the first thing it does is read sync state. */}
         <AutoSyncDriver />
         {/* A new phone is asked whose it is, once, over the home screen. */}
