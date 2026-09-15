@@ -369,3 +369,109 @@ describe('a statement no reviewer has cleared', () => {
     expect(mergeSwms([HOT, HEIGHTS]).notCleared).toEqual([]);
   });
 });
+
+/**
+ * Two things a crew on a site could not say, until now.
+ *
+ * A step that does not apply to today's instance of the work, and how risky
+ * they judged something to be. Both matter because the alternative to saying
+ * them was a document that said something untrue: a step ticked as read and
+ * followed when it was neither, or a hazard on the page with an empty column
+ * beside it.
+ */
+describe('a step that does not apply to this job', () => {
+  const merged = mergeSwms(TEMPLATES);
+  const base = (over: Partial<SwmsRecord> = {}): SwmsRecord => record({
+    permits: merged.permits.map((permit) => ({ permit, held: true })),
+    answers: Object.fromEntries(merged.prompts.map((q) => [q, 'answered'])),
+    ppeChecked: [...merged.ppe],
+    workers: [{ name: 'Sam', signature: 'data:sig' }],
+    ...over,
+  });
+
+  const blockers = (r: SwmsRecord): string[] =>
+    validateSwms(r, merged).filter((i) => i.blocking).map((i) => i.what);
+
+  it('does not have to be read before the statement is signed', () => {
+    const first = merged.steps[0]!.key;
+    const r = base({
+      ticked: merged.steps.slice(1).map((s) => s.key),
+      notApplicable: [first],
+    });
+    expect(blockers(r).some((w) => /not read/.test(w))).toBe(false);
+    expect(canSign(r, merged)).toBe(true);
+  });
+
+  it('still blocks the ones that were neither read nor taken off', () => {
+    const r = base({ ticked: [], notApplicable: [merged.steps[0]!.key] });
+    expect(blockers(r).some((w) => /not read/.test(w))).toBe(true);
+  });
+
+  it('refuses a statement where every step has been taken off', () => {
+    // Otherwise it validates perfectly, because there is nothing left to fail:
+    // a blank page with a signature on it.
+    const r = base({ ticked: [], notApplicable: merged.steps.map((s) => s.key) });
+    expect(blockers(r).some((w) => /not applicable/.test(w))).toBe(true);
+    expect(canSign(r, merged)).toBe(false);
+  });
+});
+
+describe('a hazard the crew found on arrival', () => {
+  const merged = mergeSwms(TEMPLATES);
+  const base = (hazards: SwmsRecord['addedHazards']): SwmsRecord => record({
+    ticked: merged.steps.map((s) => s.key),
+    permits: merged.permits.map((permit) => ({ permit, held: true })),
+    answers: Object.fromEntries(merged.prompts.map((q) => [q, 'answered'])),
+    ppeChecked: [...merged.ppe],
+    workers: [{ name: 'Sam', signature: 'data:sig' }],
+    addedHazards: hazards,
+  });
+
+  it('cannot be signed with nothing written against it', () => {
+    /*
+     * This is exactly what a reviewer refused all ten shipped statements over
+     * — named hazards with no control against them — so the same standard
+     * applies to the ones a crew adds on the day. A hazard on a signed page
+     * with an empty control column is worse than one nobody wrote down: it is
+     * evidence it was seen and nothing was done.
+     */
+    const r = base([{ hazard: 'Live busway above the ceiling', control: '' }]);
+    expect(canSign(r, merged)).toBe(false);
+    expect(whyNotSigned(r, merged)).toContain('Live busway above the ceiling');
+  });
+
+  it('is signable once they say what they did about it', () => {
+    const r = base([{ hazard: 'Live busway above the ceiling', control: 'Isolated at the board' }]);
+    expect(canSign(r, merged)).toBe(true);
+  });
+
+  it('asks for a rating without blocking on it', () => {
+    // Advisory: the crew's judgement is worth having and a statement held up
+    // over a missing chip helps nobody.
+    const r = base([{ hazard: 'Live busway', control: 'Isolated at the board' }]);
+    const issues = validateSwms(r, merged).filter((i) => /No risk set/.test(i.what));
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.blocking).toBe(false);
+  });
+
+  it('says nothing about a blank row somebody added and never filled in', () => {
+    const r = base([{ hazard: '   ', control: '' }]);
+    expect(canSign(r, merged)).toBe(true);
+  });
+});
+
+describe('yesterday’s statement, again', () => {
+  it('carries the steps that did not apply, because that is a fact about the site', () => {
+    const previous = record({ notApplicable: ['hot-work#0'], crewRisk: { 'hot-work#1': 'high' } });
+    const { record: next } = carryForwardSwms(previous, '2026-09-11');
+    expect(next.notApplicable).toEqual(['hot-work#0']);
+    expect(next.crewRisk).toEqual({ 'hot-work#1': 'high' });
+  });
+
+  it('still carries no ticks and no signatures', () => {
+    const previous = record({ ticked: ['hot-work#0'], workers: [{ name: 'Sam', signature: 'data:sig' }] });
+    const { record: next } = carryForwardSwms(previous, '2026-09-11');
+    expect(next.ticked).toEqual([]);
+    expect(next.workers).toEqual([{ name: 'Sam', licence: undefined }]);
+  });
+});

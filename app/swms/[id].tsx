@@ -71,6 +71,30 @@ const RISK_TONE: Record<RiskLevel, 'fail' | 'warn' | 'pass'> = {
   extreme: 'fail', high: 'fail', medium: 'warn', low: 'pass',
 };
 
+/**
+ * The crew's own rating of a step, or nothing.
+ *
+ * "As written" first and selected by default, because agreeing with the
+ * reviewer is the ordinary answer and it must not need a tap. The four levels
+ * are the same four the statements are written in, so the two ratings on the
+ * page are comparable rather than two different scales side by side.
+ */
+const HAZARD_RISK_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: 'Not set' },
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'extreme', label: 'Extreme' },
+];
+
+const CREW_RISK_OPTIONS: { value: string; label: string }[] = [
+  { value: 'same', label: 'As written' },
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'extreme', label: 'Extreme' },
+];
+
 export default function SwmsRecordScreen() {
   const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -137,7 +161,35 @@ export default function SwmsRecordScreen() {
     const ticked = record.ticked.includes(key)
       ? record.ticked.filter((k) => k !== key)
       : [...record.ticked, key];
-    void save({ ticked });
+    // A step cannot be both read and not applicable. Reading one puts it back.
+    void save({ ticked, notApplicable: record.notApplicable.filter((k) => k !== key) });
+  };
+
+  /**
+   * Takes a step off, or puts it back.
+   *
+   * The honest answer to a step that does not apply to today's instance of the
+   * work. The two choices before this were to tick it — which makes the
+   * document say the crew read and followed something they did not — or to
+   * leave it and never sign. Taking it off clears the tick, because those are
+   * different claims and a step cannot make both.
+   */
+  const toggleNotApplicable = (key: string) => {
+    if (!record) return;
+    const off = record.notApplicable.includes(key);
+    void save({
+      notApplicable: off ? record.notApplicable.filter((k) => k !== key) : [...record.notApplicable, key],
+      ticked: off ? record.ticked : record.ticked.filter((k) => k !== key),
+    });
+  };
+
+  /** The crew's own reading of a step's risk, kept beside the reviewed one. */
+  const setCrewRisk = (key: string, level: RiskLevel | null) => {
+    if (!record) return;
+    const next = { ...record.crewRisk };
+    if (level) next[key] = level;
+    else delete next[key];
+    void save({ crewRisk: next });
   };
 
   const togglePpe = (item: string) => {
@@ -511,19 +563,27 @@ export default function SwmsRecordScreen() {
             {merged.steps.map((s, i) => {
               const on = openStep === s.key;
               const done = record.ticked.includes(s.key);
+              const off = record.notApplicable.includes(s.key);
+              const crew = record.crewRisk[s.key];
               return (
-                <Card key={s.key} onPress={() => setOpenStep(on ? null : s.key)}>
+                <Card key={s.key} onPress={() => setOpenStep(on ? null : s.key)} style={off ? { opacity: 0.55 } : undefined}>
                   <Rowed align="flex-start">
                     <View style={{ flex: 1 }}>
                       <Txt weight="700">{i + 1}. {s.step}</Txt>
-                      <Txt size="xs" tone="faint">{s.templateTitle} · {s.responsible}</Txt>
+                      <Txt size="xs" tone="faint">
+                        {s.templateTitle} · {s.responsible}{off ? ' · not applicable today' : ''}
+                      </Txt>
                     </View>
                     <View style={{ alignItems: 'flex-end', gap: t.space(1) }}>
-                      <Chip label={RISK_LABEL[s.residualRisk]} tone={RISK_TONE[s.residualRisk]} />
+                      {crew ? (
+                        <Chip label={`Crew: ${RISK_LABEL[crew]}`} tone={RISK_TONE[crew]} />
+                      ) : (
+                        <Chip label={RISK_LABEL[s.residualRisk]} tone={RISK_TONE[s.residualRisk]} />
+                      )}
                       <MaterialCommunityIcons
-                        name={done ? 'check-circle' : 'circle-outline'}
+                        name={off ? 'minus-circle-outline' : done ? 'check-circle' : 'circle-outline'}
                         size={22}
-                        color={done ? t.color.pass : t.color.textFaint}
+                        color={off ? t.color.textFaint : done ? t.color.pass : t.color.textFaint}
                       />
                     </View>
                   </Rowed>
@@ -551,13 +611,36 @@ export default function SwmsRecordScreen() {
                         After controls: {RISK_LABEL[s.residualRisk]}
                       </Txt>
 
+                      <Divider />
+                      <Label>How risky is it here, with those in place</Label>
+                      <Txt size="xs" tone="faint" style={{ marginTop: 2, marginBottom: t.space(2), lineHeight: 16 }}>
+                        The rating above is the reviewer&rsquo;s, arrived at in an office. Set yours if this site
+                        is different — both print, and a disagreement between them is worth more than either.
+                      </Txt>
+                      <Segmented
+                        value={crew ?? 'same'}
+                        onChange={(next) => setCrewRisk(s.key, next === 'same' ? null : (next as RiskLevel))}
+                        options={CREW_RISK_OPTIONS}
+                      />
+
                       <Button
                         title={done ? 'Read — tap to untick' : 'We have read this step'}
                         variant={done ? 'ghost' : 'primary'}
                         onPress={() => toggleStep(s.key)}
-                        disabled={locked}
+                        disabled={locked || off}
                         style={{ marginTop: t.space(3) }}
                       />
+                      <Button
+                        title={off ? 'Put this step back' : 'Does not apply to this job'}
+                        variant="ghost"
+                        onPress={() => toggleNotApplicable(s.key)}
+                        disabled={locked}
+                      />
+                      {off ? (
+                        <Txt size="xs" tone="faint" style={{ marginTop: t.space(1), lineHeight: 16 }}>
+                          It prints as not applicable rather than disappearing, so the page says what was decided.
+                        </Txt>
+                      ) : null}
                     </>
                   ) : null}
                 </Card>
@@ -647,6 +730,24 @@ export default function SwmsRecordScreen() {
               <Card key={`hazard-${i}`}>
                 <Field label="What you found" value={h.hazard} onChangeText={(v) => setHazard(i, { hazard: v })} editable={!locked} />
                 <Field label="What you did about it" value={h.control} onChangeText={(v) => setHazard(i, { control: v })} editable={!locked} multiline />
+                {/*
+                  The one hazard nobody has rated. Every step in the statement
+                  carries a rating from whoever reviewed it; this one was not
+                  known about until the crew arrived, which makes their reading
+                  of it the only one there is.
+                */}
+                <Label>How risky, with what you did about it</Label>
+                <Segmented
+                  value={h.risk ?? ''}
+                  onChange={(next) => setHazard(i, { risk: (next || undefined) as RiskLevel | undefined })}
+                  options={HAZARD_RISK_OPTIONS}
+                />
+                {h.hazard.trim() && !h.control.trim() ? (
+                  <Txt size="xs" tone="warn" style={{ marginTop: t.space(2), lineHeight: 16 }}>
+                    A hazard on the page with nothing written against it is the one thing this document must never
+                    show. It cannot be signed until you say what you did.
+                  </Txt>
+                ) : null}
               </Card>
             ))}
             <Button title="Add something you found" variant="secondary" onPress={addHazard} disabled={locked} />

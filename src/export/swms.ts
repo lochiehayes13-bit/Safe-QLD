@@ -68,6 +68,13 @@ const CSS = `
   .r-medium { background: #E0A800; color: #1A1A1A; }
   .r-low { background: #2E7D32; color: #FFF; }
   .risk { text-align: center; font-weight: 700; font-size: 9px; }
+  /*
+    A step the crew took off. Struck through and greyed rather than removed:
+    "we considered this and it did not apply" and "this was never in the
+    document" are different claims, and only one of them is true.
+  */
+  tr.na td { opacity: 0.55; text-decoration: line-through; }
+  tr.na td:nth-child(2) { text-decoration: none; }
   .hrcw { border: 1.5px solid #7B1E1E; padding: 2mm; margin-bottom: 3mm; }
   .hrcw .t { color: #7B1E1E; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; font-size: 9px; }
   .draft { border: 2px solid #C0392B; padding: 2.5mm; margin-bottom: 3mm; }
@@ -102,19 +109,46 @@ function hrcwBlock(merged: MergedSwms): string {
     + `<ul>${merged.hrcw.map((h) => `<li><strong>${esc(h.clause)}</strong> — ${esc(h.text)}</li>`).join('')}</ul></div>`;
 }
 
+/**
+ * The steps, with what the crew decided about each.
+ *
+ * Three things the crew can say and all three print, because a document that
+ * only shows what the office wrote is a document that cannot be checked
+ * against what happened.
+ *
+ * A step read on site is marked as read. A step taken off is printed struck
+ * through and labelled — not removed, because "we considered this and it did
+ * not apply" and "this was never in the document" are completely different
+ * claims and only one of them is true. And where the crew rated a step
+ * differently from the reviewer, both ratings appear: theirs beside the
+ * reviewed one, so a disagreement is visible rather than overwritten.
+ */
 function stepsTable(input: SwmsDocumentInput, merged: MergedSwms): string {
   const ticked = new Set(input.record.ticked);
+  const off = new Set(input.record.notApplicable);
+  const crewRisk = input.record.crewRisk;
   const rows = merged.steps.map((s, i) => {
     const controls = orderedControls(s.controls)
       .map((c) => `<li><span class="lvl">${esc(CONTROL_LEVEL_LABEL[c.level])}</span> ${esc(c.control)}</li>`)
       .join('');
-    return `<tr class="avoid">`
+    const skipped = off.has(s.key);
+    const note = skipped
+      ? 'not applicable to this job'
+      : ticked.has(s.key) ? 'read on site' : '';
+    const crew = crewRisk[s.key];
+    const after = skipped
+      ? '<em>n/a</em>'
+      : crew
+        ? `<span class="risk ${RISK_CLASS[crew]}">${esc(RISK_LABEL[crew])}</span>`
+          + `<br /><span class="note">crew · as written ${esc(RISK_LABEL[s.residualRisk])}</span>`
+        : `<span class="risk ${RISK_CLASS[s.residualRisk]}">${esc(RISK_LABEL[s.residualRisk])}</span>`;
+    return `<tr class="avoid${skipped ? ' na' : ''}">`
       + `<td>${i + 1}</td>`
-      + `<td>${esc(s.step)}<br /><span class="note">${esc(s.templateTitle)}${ticked.has(s.key) ? ' · read on site' : ''}</span></td>`
+      + `<td>${esc(s.step)}<br /><span class="note">${esc(s.templateTitle)}${note ? ` · ${note}` : ''}</span></td>`
       + `<td><ul>${s.hazards.map((h) => `<li>${esc(h)}</li>`).join('')}</ul></td>`
       + `<td class="risk ${RISK_CLASS[s.initialRisk]}">${esc(RISK_LABEL[s.initialRisk])}</td>`
       + `<td><ul>${controls}</ul></td>`
-      + `<td class="risk ${RISK_CLASS[s.residualRisk]}">${esc(RISK_LABEL[s.residualRisk])}</td>`
+      + `<td>${after}</td>`
       + `<td>${esc(s.responsible)}</td>`
       + `</tr>`;
   }).join('');
@@ -140,8 +174,14 @@ function answersBlock(input: SwmsDocumentInput, merged: MergedSwms): string {
 function addedBlock(input: SwmsDocumentInput): string {
   const added = input.record.addedHazards.filter((h) => h.hazard.trim());
   if (!added.length) return '';
-  return `<h2>Found on arrival</h2><table><thead><tr><th>Hazard</th><th>What was done about it</th></tr></thead>`
-    + `<tbody>${added.map((h) => `<tr><td>${esc(h.hazard)}</td><td>${esc(h.control) || '<em>Not stated</em>'}</td></tr>`).join('')}</tbody></table>`;
+  return `<h2>Found on arrival</h2>`
+    + `<table><thead><tr><th>Hazard</th><th>What was done about it</th><th>Risk</th></tr></thead>`
+    + `<tbody>${added.map((h) => `<tr><td>${esc(h.hazard)}</td>`
+      + `<td>${esc(h.control) || '<em>Not stated</em>'}</td>`
+      // The crew's own rating, and said plainly where they did not give one:
+      // a blank cell reads as low risk to anybody scanning the page.
+      + `<td class="risk${h.risk ? ` ${RISK_CLASS[h.risk]}` : ''}">${h.risk ? esc(RISK_LABEL[h.risk]) : '<em>Not rated</em>'}</td>`
+      + `</tr>`).join('')}</tbody></table>`;
 }
 
 function permitsBlock(input: SwmsDocumentInput, merged: MergedSwms): string {
