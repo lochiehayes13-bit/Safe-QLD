@@ -5,8 +5,19 @@ drafted, read by a reviewer whose job was to refuse to sign it, and corrected.
 This directory holds the reads that came after that, one file per statement,
 each replaced when a newer read of that statement lands.
 
-**No statement here has been cleared.** Every one has been read by somebody who
-would not sign it. As it stands: **87 blocking findings, 17 of them fatal.**
+**Every finding filed here has now been answered.** All 87 of them, across all
+ten statements, 17 fatal — not just the fatal ones. The hazards that were named
+and left uncontrolled carry controls; the controls that instructed what other
+controls prohibited have been reconciled; the ratings that could not be
+reproduced from the document's own key have been corrected or the key has.
+
+**No statement here is cleared, and none should be signed.** A correction is
+not a clearance. The person who makes a correction is the worst possible judge
+of whether it worked, because they know what they meant and so they read what
+they meant. What each statement is waiting on is a cold read: somebody who did
+not make the correction reading it the way a crew would, and saying they would
+sign it. Until that has happened `review.cleared` stays false and the signature
+gate stays shut.
 
 The fault that keeps coming back, in every document and every round, is the same
 one, and it is the worst a method statement can have: **a hazard the document
@@ -14,12 +25,13 @@ names and then never controls.** A crew that reads it believes that hazard is
 handled. Second is a hazard of the work that the document never names at all —
 harder to see, because nothing on the page is wrong.
 
-## Where each one stands
+## What the last read found, and what the correction answered
 
-Five statements have been through a correction round. They are measurably
-better — `heights` and `electrical` no longer carry a fatal finding at all — and
-not one of them is signable, because the deeper read found what the first read
-had not reached.
+The table below is the last filed read, kept as it was: it is the record the
+correction was worked from, and the "one that matters" column is the finding
+that would have hurt somebody. Each of those, and every other finding in the
+file beside it, has been answered in the shipped statement. The column is
+therefore a history of what was wrong, not a description of what is.
 
 | Statement | Blocking | Fatal | The one that matters most |
 | --- | --- | --- | --- |
@@ -48,6 +60,21 @@ the record screen shows them. **A statement nobody has cleared cannot be
 signed.** A missing `review` block counts as not cleared — silence is not a
 clearance.
 
+There are three states, not two, because they are three different things to be
+holding at a hatch:
+
+| State | `cleared` | `findings` | `correctedAgainst` |
+| --- | --- | --- | --- |
+| Nobody has read it | false | empty | absent |
+| A reviewer refused it | false | what is unanswered | absent |
+| Corrected, waiting on a cold read | false | empty | the count and a note |
+
+All ten are currently in the third state. The banner says so in those terms
+rather than listing findings the document no longer has — a crew that learns
+the banner is stale stops reading it, and that costs the next one that is true.
+`swmsReview.test.ts` holds the three states apart and refuses to let a
+correction round clear its own work.
+
 The statements are still worth reading and briefing a crew from; they are
 substantially right and far better than the nothing that came before. They are
 not worth signing, because a signature says the document describes how the work
@@ -55,17 +82,20 @@ will actually be done.
 
 ## Outstanding
 
-1. Correct each statement against the `fix` field of every finding filed against
-   it — fatal, serious and minor.
-2. Have each corrected statement read cold by a reviewer who has not seen the
-   correction, and file that read here in place of this one.
-3. Set `review.cleared` to `true` only where a reviewer would sign the corrected
-   statement, and the signature gate opens on its own.
+1. ~~Correct each statement against the `fix` field of every finding filed
+   against it — fatal, serious and minor.~~ Done: all 87 findings across all
+   ten statements.
+2. **Have each corrected statement read cold by a reviewer who has not seen the
+   correction, and file that read here in place of this one.** This is the only
+   thing standing between these statements and a signature, and it cannot be
+   done by whoever made the correction.
+3. Set `review.cleared` to `true` only where that reviewer would sign the
+   corrected statement, and the signature gate opens on its own.
 
 `src/__tests__/swmsReview.test.ts` holds the seed and these files together, so a
 statement cannot be marked cleared while a filed review here refuses it.
 
-Rounds are not converging quickly, and that is worth knowing before promising a
-date. Each read is deeper than the last rather than a re-run of it: the
-correction round on the first five cut the fatal findings from six to three and
-still produced forty-one blocking findings between them, most of them new.
+Rounds have not converged quickly and that is worth knowing before promising a
+date. Each read has been deeper than the last rather than a re-run of it, so the
+next one should be expected to find things this correction did not reach — that
+is what the read is for, and it is why the gate is where it is.

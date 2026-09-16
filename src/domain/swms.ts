@@ -158,8 +158,35 @@ export interface TemplateReview {
   cleared: boolean;
   /** Why it is not cleared, in a sentence. */
   reason: string;
-  /** What the reviewer would not sign it over. Empty where nobody has read it. */
+  /**
+   * What the reviewer would not sign it over, and that is still unanswered.
+   *
+   * Empty where nobody has read it, and empty again once a correction round
+   * has answered every one of them — a banner that lists faults the document
+   * in the crew's hands no longer has is how they learn to stop reading the
+   * banner, which costs the next one that is true.
+   */
   findings: string[];
+  /**
+   * Set where every finding a reviewer filed has been answered in this version
+   * and the statement is waiting on a cold read.
+   *
+   * This is deliberately not a clearance, and the field exists so it cannot be
+   * mistaken for one. The person who makes a correction is the worst possible
+   * judge of whether it worked: they know what they meant, so they read what
+   * they meant. A clearance is a second person who has not seen the correction
+   * reading the document as a crew would and saying they would sign it, and
+   * until that has happened `cleared` stays false and the signature gate stays
+   * shut. Three states rather than two, because "refused, with these faults",
+   * "corrected, not yet re-read" and "nobody has read it" are three different
+   * things to be standing at a hatch holding.
+   */
+  correctedAgainst?: {
+    /** How many findings the last filed review raised against it. */
+    findings: number;
+    /** What the correction did, in a sentence for the crew. */
+    note: string;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -302,7 +329,11 @@ export interface MergedSwms {
    * to a signature passes it — the record's own validation, the button, and
    * the PDF all read the same list.
    */
-  notCleared: { id: string; title: string; reason: string; findings: string[] }[];
+  notCleared: {
+    id: string; title: string; reason: string; findings: string[];
+    /** Set where the findings were answered and only the cold read is outstanding. */
+    correctedAgainst?: { findings: number; note: string };
+  }[];
 }
 
 /**
@@ -342,6 +373,7 @@ export function mergeSwms(templates: readonly SwmsTemplate[]): MergedSwms {
         title: t.title,
         reason: t.review?.reason ?? 'No reviewer has read this statement.',
         findings: t.review?.findings ?? [],
+        ...(t.review?.correctedAgainst ? { correctedAgainst: t.review.correctedAgainst } : {}),
       })),
   };
   return merged;
@@ -421,8 +453,12 @@ export function validateSwms(record: SwmsRecord, merged: MergedSwms): SwmsIssue[
       fix: t.findings.length
         ? `${t.reason} What is unresolved: ${t.findings.join(' · ')}. Read it and work to it if it helps, `
           + 'but it cannot be signed as the statement for this work until those are answered.'
-        : `${t.reason} Read it and work to it if it helps, but it cannot be signed as the statement for `
-          + 'this work until somebody has.',
+        : t.correctedAgainst
+          ? `${t.reason} Read it and work to it — it is the current version and it answers everything `
+            + 'the last read raised. It cannot be signed as the statement for this work until somebody '
+            + 'who did not write the correction has read it cold and would sign it.'
+          : `${t.reason} Read it and work to it if it helps, but it cannot be signed as the statement for `
+            + 'this work until somebody has.',
     });
   }
 

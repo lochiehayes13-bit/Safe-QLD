@@ -161,6 +161,12 @@ export function swmsBody(
     lines.push('');
     lines.push('Statements no reviewer has cleared for signature:');
     for (const n of merged.notCleared) lines.push(`    ${n.title} — ${n.reason}`);
+    // Said once, for the office reading this rather than the crew: the two
+    // reasons a statement is uncleared need different things done about them.
+    if (merged.notCleared.every((n) => n.correctedAgainst)) {
+      lines.push('    All of these have been corrected against every finding the last read raised.');
+      lines.push('    What they are waiting on is a cold read by somebody who did not write the correction.');
+    }
   }
 
   lines.push('');

@@ -77,12 +77,39 @@ describe('the seed against the filed reviews', () => {
     expect(wrong).toEqual([]);
   });
 
-  it('records findings for every statement a reviewer refused', () => {
+  it('either lists what is still unanswered, or records that it was all answered', () => {
+    /*
+     * The banner mirrors the filed review only while the filed review is still
+     * outstanding. Once a correction round has answered every finding, listing
+     * them would tell a technician the document in their hand has faults it no
+     * longer has — and a crew that learns the banner is stale stops reading it,
+     * which costs the next one that is true.
+     *
+     * So: findings must match the filed review's fatal and serious count, OR
+     * the statement records a correction against every finding filed and lists
+     * none. Never both, and never neither.
+     */
     for (const [id, r] of filed) {
       const t = templates.find((x) => x.id === id);
       expect(t).toBeDefined();
-      const fatalOrSerious = r.blocking.filter((b) => b.severity !== 'minor');
-      expect(t!.review?.findings.length).toBe(fatalOrSerious.length);
+      const corrected = t!.review?.correctedAgainst;
+      if (corrected) {
+        expect(t!.review!.findings).toEqual([]);
+        // Counted against every finding filed, not only the fatal ones: a
+        // round that answered the fatals and left the minors is not this.
+        expect(corrected.findings).toBe(r.blocking.length);
+      } else {
+        const fatalOrSerious = r.blocking.filter((b) => b.severity !== 'minor');
+        expect(t!.review?.findings.length).toBe(fatalOrSerious.length);
+      }
+    }
+  });
+
+  it('never lets a correction round clear its own work', () => {
+    // The correction and the clearance are never the same person's. Recording
+    // a correction must not open the signature gate — only a cold read does.
+    for (const t of templates) {
+      if (t.review?.correctedAgainst) expect(t.review.cleared).toBe(false);
     }
   });
 

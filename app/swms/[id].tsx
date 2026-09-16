@@ -452,12 +452,18 @@ export default function SwmsRecordScreen() {
             body={[
               merged.notCleared.map((n) => {
                 const head = `${n.title} — ${n.reason}`;
-                return n.findings.length ? `${head}\n${n.findings.map((f) => `  • ${f}`).join('\n')}` : head;
+                // Three states, three things to print. Listing findings that a
+                // correction round has already answered is how a crew learns
+                // the banner is stale and stops reading it.
+                if (n.findings.length) {
+                  return `${head}\n${n.findings.map((f) => `  • ${f}`).join('\n')}`;
+                }
+                return n.correctedAgainst ? `${head}\n  ${n.correctedAgainst.note}` : head;
               }).join('\n\n'),
               '',
-              'Read it and use it to brief the crew if it helps. It cannot be signed as the statement for this '
-              + 'work: a signature says the document describes how the work will actually be done, and a hazard '
-              + 'named in it with nothing written against it is the opposite of that.',
+              'Read it and use it to brief the crew — it is the current version. It cannot be signed as the '
+              + 'statement for this work: a signature says the document describes how the work will actually '
+              + 'be done, and that takes somebody who did not write it reading it and saying they would sign it.',
             ].join('\n')}
           />
         ) : null}

@@ -5,6 +5,7 @@ import {
 import { SWMS_TEMPLATES } from '@/seed/swms';
 import { mergeSwms } from '@/domain/swms';
 import { openMigrated, type NodeSqliteDb } from './support/nodeSqlite';
+import type { SwmsTemplate } from '@/domain/swms';
 
 jest.mock('@/db/index', () => jest.requireActual('./support/nodeSqlite'));
 
@@ -195,7 +196,10 @@ describe('signing', () => {
  * take somebody to the findings.
  */
 describe('the statements as they actually ship', () => {
-  const actual = jest.requireActual('@/seed/swms') as { SWMS_TEMPLATES: { id: string; review?: { cleared: boolean; reason: string; findings: string[] } }[] };
+  // Cast to the real type rather than a hand-written shape: a review field
+  // added to the domain and not to this literal used to typecheck clean here
+  // while the test that reads it could not see it at all.
+  const actual = jest.requireActual('@/seed/swms') as { SWMS_TEMPLATES: SwmsTemplate[] };
 
   it('ships ten of them', () => {
     expect(actual.SWMS_TEMPLATES).toHaveLength(10);
@@ -215,13 +219,30 @@ describe('the statements as they actually ship', () => {
     expect(actual.SWMS_TEMPLATES.filter((t) => t.review?.cleared).map((t) => t.id)).toEqual([]);
   });
 
-  it('says what the reviewer would not sign, where a reviewer got to it', () => {
-    // Five were re-read and refused with reasons; five were never reached
-    // because the run stopped. Both are uncleared, and the record says which.
-    const withFindings = actual.SWMS_TEMPLATES.filter((t) => (t.review?.findings.length ?? 0) > 0);
-    expect(withFindings.length).toBeGreaterThanOrEqual(5);
-    for (const t of withFindings) {
-      expect(t.review!.findings.join(' ')).toMatch(/\[(fatal|serious)\]/);
+  it('tells a crew which of the three states the statement in their hand is in', () => {
+    /*
+     * "A reviewer refused this, over these faults", "corrected against every
+     * finding and waiting on a cold read" and "nobody has read it" are three
+     * different things to be holding at a hatch, and all three are uncleared.
+     * Every statement has to be exactly one of them.
+     */
+    for (const t of actual.SWMS_TEMPLATES) {
+      const r = t.review!;
+      const refused = r.findings.length > 0;
+      const corrected = !!r.correctedAgainst;
+      expect(refused && corrected).toBe(false);
+      if (refused) expect(r.findings.join(' ')).toMatch(/\[(fatal|serious)\]/);
+      if (corrected) {
+        expect(r.correctedAgainst!.findings).toBeGreaterThan(0);
+        expect(r.correctedAgainst!.note.length).toBeGreaterThan(40);
+        // The one that matters: a correction is not a clearance, and the
+        // person who made it is the worst judge of whether it worked.
+        expect(r.cleared).toBe(false);
+      }
     }
+    // The whole set has been through a correction round, so nothing should
+    // still be sitting on a list of unanswered findings.
+    const corrected = actual.SWMS_TEMPLATES.filter((t) => t.review?.correctedAgainst);
+    expect(corrected.length).toBeGreaterThanOrEqual(10);
   });
 });
