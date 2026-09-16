@@ -140,6 +140,15 @@ export interface PullOptions {
    */
   incremental?: boolean;
   /**
+   * Resources to re-read in full even though the pull is incremental.
+   *
+   * This is how the daily full re-read is paid for now: two resources at a
+   * time on a trigger nobody is waiting on, rather than all eighteen on the
+   * next launch. ./autoSyncPolicy picks which two and says why. Absent means
+   * `incremental` alone decides, which is what every other caller wants.
+   */
+  fullResources?: readonly SyncResource[];
+  /**
    * Whose phone this is, so their booked jobs are the first to get their
    * children read. Without it the whole schedule window is used, soonest
    * first, and the cap decides how far that reaches.
@@ -295,7 +304,13 @@ export async function pullFromSimpro(
    * `incremental: false`. That is a reversal of what an absent option used to
    * mean, which is why it is spelled out on PullOptions as well as here.
    */
-  const force = readsEverything(options);
+  const readsAll = readsEverything(options);
+  /*
+   * Whether this stage re-reads its resource in full: because the whole pull
+   * was asked to, or because this is the resource a sweep slice picked.
+   */
+  const force = (resource: SyncResource): boolean =>
+    readsAll || (options?.fullResources?.includes(resource) ?? false);
   const client = new SimproClient(config);
   const api = new SimproResources(client);
   const mirror = new SimproMirror(client);
@@ -325,7 +340,7 @@ export async function pullFromSimpro(
   // Read against the watermark even on a full pull: the mark is still recorded,
   // so switching back to incremental later has somewhere to start from.
   const siteState = await readSyncState('sites');
-  const sitePlan = planIncremental('sites', siteState.lastChangeSeenAt, { force });
+  const sitePlan = planIncremental('sites', siteState.lastChangeSeenAt, { force: force('sites') });
 
   let remoteSites: SimproSite[] = [];
   let siteMode: 'incremental' | 'full' = 'full';
@@ -472,7 +487,7 @@ export async function pullFromSimpro(
    * further down.
    */
   const jobState = await readSyncState('jobs');
-  const jobPlan = planIncremental('jobs', jobState.lastChangeSeenAt, { force });
+  const jobPlan = planIncremental('jobs', jobState.lastChangeSeenAt, { force: force('jobs') });
   const errorsBeforeJobs = result.errors.length;
 
   try {
@@ -531,7 +546,7 @@ export async function pullFromSimpro(
    */
 
   const assetState = await readSyncState('assets');
-  const assetPlan = planIncremental('assets', assetState.lastChangeSeenAt, { force });
+  const assetPlan = planIncremental('assets', assetState.lastChangeSeenAt, { force: force('assets') });
   const errorsBeforeAssets = result.errors.length;
   const unmappedTypes = new Set<string>();
 
@@ -762,7 +777,7 @@ export async function pullFromSimpro(
    * companies.
    */
   const customerState = await readSyncState('customers');
-  const customerPlan = planIncremental('customers', customerState.lastChangeSeenAt, { force });
+  const customerPlan = planIncremental('customers', customerState.lastChangeSeenAt, { force: force('customers') });
   const errorsBeforeCustomers = result.errors.length;
   try {
     const companies = await mirror.companiesPaged(customerPlan.query, CUSTOMER_CEILING);
@@ -830,7 +845,7 @@ export async function pullFromSimpro(
   progress('Reading quotes', 7);
 
   const quoteState = await readSyncState('quotes');
-  const quotePlan = planIncremental('quotes', quoteState.lastChangeSeenAt, { force });
+  const quotePlan = planIncremental('quotes', quoteState.lastChangeSeenAt, { force: force('quotes') });
   const errorsBeforeQuotes = result.errors.length;
   try {
     const read = await mirror.quotesPaged(quotePlan.query, QUOTE_CEILING);
@@ -872,7 +887,7 @@ export async function pullFromSimpro(
    * office where the money is chased.
    */
   const invoiceState = await readSyncState('invoices');
-  const invoicePlan = planIncremental('invoices', invoiceState.lastChangeSeenAt, { force });
+  const invoicePlan = planIncremental('invoices', invoiceState.lastChangeSeenAt, { force: force('invoices') });
   const errorsBeforeInvoices = result.errors.length;
   try {
     const query = invoicePlan.mode === 'full'
@@ -937,7 +952,8 @@ export async function pullFromSimpro(
    */
   const more = await pullMore({
     client,
-    force,
+    force: readsAll,
+    fullResources: options?.fullResources,
     startedAt,
     progress: (stage, done, total) => (
       total === undefined ? progress(stage, LIST_STAGES + done) : progress(stage, done, total)

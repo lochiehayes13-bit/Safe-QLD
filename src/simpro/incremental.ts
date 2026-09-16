@@ -161,6 +161,28 @@ export const SYNC_RESOURCES: readonly SyncResource[] = [
   'vendorOrders', 'vendors', 'catalogs', 'contacts', 'leads', 'timesheets', 'activities', 'payments', 'creditNotes',
 ];
 
+/**
+ * The resources that are read against a watermark, and so the only ones for
+ * which "read this one in full" means anything.
+ *
+ * The four left out — employees, schedules, tasks and timesheets — are read
+ * whole on every pull already, because none of them has a usable change filter
+ * on this build: the schedule and task reads are windowed by date rather than
+ * by modification, and the timesheet list carries no DateModified at all and
+ * ignores paging (see ./syncMore). They are small, so reading them whole every
+ * time costs nothing.
+ *
+ * It matters that this list is exactly right rather than simply everything:
+ * ./autoSyncPolicy rotates a full re-read through it a couple at a time, and a
+ * slice spent on a resource that was going to be read in full anyway is a slice
+ * that re-reads nothing. `src/__tests__/autoSync.test.ts` holds it to being a
+ * subset of SYNC_RESOURCES.
+ */
+export const INCREMENTAL_RESOURCES: readonly SyncResource[] = [
+  'sites', 'jobs', 'assets', 'customers', 'quotes', 'invoices',
+  'vendorOrders', 'vendors', 'catalogs', 'contacts', 'leads', 'activities', 'payments', 'creditNotes',
+];
+
 export interface SyncState {
   resource: SyncResource;
   /** When a sync of this resource last completed without error. */

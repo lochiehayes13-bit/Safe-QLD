@@ -1,5 +1,4 @@
-import { QLD_UTC_OFFSET_HOURS } from '@/domain/qldTime';
-import type { SyncState } from './incremental';
+import { INCREMENTAL_RESOURCES, type SyncResource, type SyncState } from './incremental';
 
 /**
  * When the app syncs on its own, and what it says about it.
@@ -21,14 +20,66 @@ import type { SyncState } from './incremental';
 export const INCREMENTAL_EVERY_MS = 30 * 60_000;
 
 /**
- * How often to re-read everything regardless.
+ * How stale any one resource is allowed to get before it is re-read in full.
  *
  * An incremental pull is only as good as its watermark, and a watermark can be
  * wrong in ways nobody sees — a record edited without its modified date moving,
  * a filter the server quietly ignored. A daily full read puts a ceiling on how
  * long any of that can leave a phone confidently stale.
+ *
+ * What changed is *when* that read is paid for. It used to be one six-minute
+ * pull of all eighteen resources, and the trigger that collected the bill was
+ * almost always `launch`: the phone sleeps overnight, the day rolls over, and
+ * the next thing to ask the policy anything is somebody opening the app. So
+ * the ceiling that exists to keep the phone honest was being charged to the
+ * one moment a technician is waiting on it — which is the whole of "it does a
+ * full sync when I open it". The ceiling is unchanged and the six minutes are
+ * still spent; they are just spent two resources at a time while nobody is
+ * waiting. See `resourcesDueSweep`.
  */
 export const FULL_EVERY_MS = 24 * 3_600_000;
+
+/**
+ * How many resources one sweep slice re-reads in full.
+ *
+ * Two. Small enough that the heaviest pair on this build — sites at about
+ * three thousand rows and assets at twelve and a half — is a slice and not an
+ * afternoon, and large enough that all eighteen come round inside a couple of
+ * hours of an app being open.
+ */
+export const SWEEP_CHUNK = 2;
+
+/**
+ * The shortest gap between slices.
+ *
+ * The open app's tick is every five minutes, which would be six slices in half
+ * an hour and a warm phone. A quarter hour still turns the whole list over in
+ * about four and a half hours of being open, against a ceiling of twenty-four.
+ */
+export const SWEEP_EVERY_MS = 15 * 60_000;
+
+/**
+ * The triggers a sweep slice is allowed to run on, and the reason this module
+ * exists in the shape it does.
+ *
+ * `background` is the operating system waking the app with nobody looking at
+ * it, and `timer` is the app sitting open in a ute with nobody touching it.
+ * Both are time this phone was going to spend anyway.
+ *
+ * Every other trigger is somebody waiting. `launch` and `foreground` are a
+ * person who has just opened the app to do something; `signin` is a person
+ * watching for their own jobs to appear; `queued` and `online` are a note
+ * trying to get to the office. Spending a full re-read on any of those is
+ * spending it out of somebody's day, and that is exactly what was reported.
+ */
+export const SWEEP_TRIGGERS: readonly AutoSyncTrigger[] = ['background', 'timer'];
+
+/**
+ * Every resource the sweep rotates through: the ones read against a watermark,
+ * and so the only ones a full re-read changes anything for. See
+ * INCREMENTAL_RESOURCES for what is left out and why.
+ */
+export const SWEEP_RESOURCES: readonly SyncResource[] = INCREMENTAL_RESOURCES;
 
 /**
  * How often the open app asks itself whether anything is due.
@@ -40,15 +91,13 @@ export const FULL_EVERY_MS = 24 * 3_600_000;
  */
 export const TIMER_EVERY_MS = 5 * 60_000;
 
-const HOUR_MS = 3_600_000;
-const DAY_MS = 24 * HOUR_MS;
 
 /**
  * What asked for the run. `signin` is somebody who has just signed in and
  * wants their own jobs on the phone; `timer` is the open app's own tick.
  */
 export type AutoSyncTrigger = 'launch' | 'foreground' | 'online' | 'background' | 'queued' | 'signin' | 'timer';
-export type AutoSyncAction = 'full' | 'incremental' | 'flush-only' | 'none';
+export type AutoSyncAction = 'full' | 'sweep' | 'incremental' | 'flush-only' | 'none';
 
 export interface AutoSyncInput {
   now: Date;
@@ -68,12 +117,65 @@ export interface AutoSyncInput {
    * in which case the sync state is all there is to go on.
    */
   lastFullAt?: string | null;
+  /**
+   * When each resource was last read in full, by the sweep or by a full pull.
+   *
+   * Kept by the runner rather than in `syncState`, for the same reason
+   * `lastFullAt` is: a resource's mode flips to 'incremental' on its next
+   * partial read and the time of the full read before it is gone.
+   */
+  sweptAt?: Readonly<Record<string, string>>;
+  /** When the last sweep slice ran, so slices are spaced by SWEEP_EVERY_MS. */
+  lastSweepAt?: string | null;
 }
 
 export interface AutoSyncDecision {
   action: AutoSyncAction;
   /** A sentence for Settings, never a code. */
   reason: string;
+  /** On 'sweep', the resources this slice re-reads in full. Absent otherwise. */
+  sweep?: readonly SyncResource[];
+}
+
+/**
+ * The resources due a full re-read, oldest first, capped at one slice.
+ *
+ * Oldest first is what makes the rotation fair without storing a cursor: the
+ * resource that has gone longest without a full read is always the next one,
+ * so a slice that is interrupted — the operating system taking its thirty
+ * seconds back, a van driving out of signal — simply comes up again rather
+ * than being skipped to the end of a queue.
+ *
+ * A stamp in the future counts as due. A phone whose clock has been put back
+ * would otherwise have every resource look freshly read and the sweep would
+ * stall silently for as long as the clock was wrong.
+ */
+export function resourcesDueSweep(
+  sweptAt: Readonly<Record<string, string>> | undefined,
+  now: Date,
+  chunk: number = SWEEP_CHUNK,
+): readonly SyncResource[] {
+  const at = now.getTime();
+  const due: { resource: SyncResource; when: number }[] = [];
+  for (const resource of SWEEP_RESOURCES) {
+    const raw = sweptAt?.[resource];
+    const when = raw ? Date.parse(raw) : NaN;
+    // Never swept sorts first: it is the least known and the most overdue.
+    if (!Number.isFinite(when)) { due.push({ resource, when: -Infinity }); continue; }
+    if (when > at || at - when >= FULL_EVERY_MS) due.push({ resource, when });
+  }
+  due.sort((a, b) => a.when - b.when);
+  return due.slice(0, Math.max(0, chunk)).map((d) => d.resource);
+}
+
+/** How many resources are waiting on a full re-read, for the line in Settings. */
+export function sweepBehind(sweptAt: Readonly<Record<string, string>> | undefined, now: Date): number {
+  return resourcesDueSweep(sweptAt, now, SWEEP_RESOURCES.length).length;
+}
+
+/** Whether this trigger is one the sweep may spend time on. See SWEEP_TRIGGERS. */
+export function triggerMaySweep(trigger: AutoSyncTrigger): boolean {
+  return SWEEP_TRIGGERS.includes(trigger);
 }
 
 /**
@@ -116,21 +218,6 @@ export function decideAutoSync(input: AutoSyncInput): AutoSyncDecision {
     };
   }
 
-  const lastFull = latestFullPull(input.syncState, input.lastFullAt);
-  if (lastFull === undefined) {
-    return {
-      action: 'full',
-      reason: 'It is not known when everything was last fetched, so it is being fetched again.',
-    };
-  }
-  const fullAge = now - lastFull;
-  if (fullAge >= FULL_EVERY_MS) {
-    return {
-      action: 'full',
-      reason: `Everything was last fetched ${describeAge(fullAge)} ago, so it is being fetched again.`,
-    };
-  }
-
   const age = now - lastAny;
   if (input.trigger === 'signin') {
     // Their day and their jobs are what a person signing in is waiting for,
@@ -149,6 +236,27 @@ export function decideAutoSync(input: AutoSyncInput): AutoSyncDecision {
     };
   }
 
+  /*
+   * Nothing shallow is due. This is the gap the rolling re-read lives in, and
+   * only on a trigger nobody is waiting on — see SWEEP_TRIGGERS for why that
+   * restriction is the point of the whole mechanism rather than a tuning knob.
+   */
+  const due = resourcesDueSweep(input.sweptAt, input.now);
+  if (due.length && triggerMaySweep(input.trigger)) {
+    const sinceSweep = input.lastSweepAt ? Date.parse(input.lastSweepAt) : NaN;
+    const spaced = !Number.isFinite(sinceSweep)
+      || sinceSweep > now
+      || now - sinceSweep >= SWEEP_EVERY_MS;
+    if (spaced) {
+      return {
+        action: 'sweep',
+        sweep: due,
+        reason: `Re-reading ${listOf(due)} in full in the background, a couple at a time, `
+          + 'so nothing has to wait for it.',
+      };
+    }
+  }
+
   // Nothing is due to come down. Whether anything should go up depends on why
   // this run was asked for: a technician who just queued a note wants it gone,
   // and signal coming back is the moment a basement's worth of notes can go.
@@ -164,7 +272,20 @@ export function decideAutoSync(input: AutoSyncInput): AutoSyncDecision {
       reason: 'Back online. The copy here is current, so only the queue is being sent.',
     };
   }
+  if (due.length) {
+    return {
+      action: 'none',
+      reason: `Synced ${describeAge(age)} ago. ${due.length === 1 ? 'One resource is' : `${sweepBehind(input.sweptAt, input.now)} resources are`} `
+        + 'waiting on a full re-read, which happens in the background rather than while you wait.',
+    };
+  }
   return { action: 'none', reason: `Synced ${describeAge(age)} ago and nothing is due yet.` };
+}
+
+/** "sites and jobs", "sites, jobs and assets" — for a sentence, not a log. */
+function listOf(resources: readonly SyncResource[]): string {
+  if (resources.length <= 1) return resources[0] ?? 'nothing';
+  return `${resources.slice(0, -1).join(', ')} and ${resources[resources.length - 1]}`;
 }
 
 /** The newest completed sync of any resource, as epoch milliseconds. */
@@ -225,6 +346,10 @@ export interface AutoSyncRecord {
   lastResultSummary: string | null;
   /** When a full pull last finished. Kept here because sync state forgets it; see latestFullPull. */
   lastFullAt: string | null;
+  /** Per resource, when it was last read in full. See resourcesDueSweep. */
+  sweptAt: Record<string, string>;
+  /** When the last sweep slice ran, so slices stay SWEEP_EVERY_MS apart. */
+  lastSweepAt: string | null;
 }
 
 export const EMPTY_AUTO_SYNC: AutoSyncRecord = {
@@ -234,7 +359,14 @@ export const EMPTY_AUTO_SYNC: AutoSyncRecord = {
   lastError: null,
   lastResultSummary: null,
   lastFullAt: null,
+  sweptAt: {},
+  lastSweepAt: null,
 };
+
+/** Every resource stamped as read in full at `at`. What a real full pull earns. */
+export function sweptEverything(at: string): Record<string, string> {
+  return Object.fromEntries(SWEEP_RESOURCES.map((r) => [r, at]));
+}
 
 /**
  * One line for Settings: what happened last, and when everything is next
@@ -255,6 +387,9 @@ export function describeAutoSync(record: AutoSyncRecord, now: Date): string {
       case 'full':
         first = `Last ran ${ago} ago (full pull).`;
         break;
+      case 'sweep':
+        first = `Last ran ${ago} ago (re-read part of the office in the background).`;
+        break;
       case 'incremental':
         first = `Last ran ${ago} ago (incremental).`;
         break;
@@ -265,38 +400,28 @@ export function describeAutoSync(record: AutoSyncRecord, now: Date): string {
         first = `Last checked ${ago} ago. ${sentence(record.lastResultSummary ?? 'Nothing was due.')}`;
     }
   }
-  return `${first} ${describeNextFull(record.lastFullAt, now)}`;
+  return `${first} ${describeSweep(record.sweptAt, now)}`;
 }
 
 /**
- * When everything is next re-read, in words a person would use.
+ * How the rolling re-read is going, in words a person would use.
  *
- * "Tonight" and "tomorrow" are Queensland's, not UTC's: the company runs on
- * Brisbane time and a phone that said "tomorrow" at nine in the evening
- * because it was still today in Greenwich would be answering a different
- * question. Queensland has no daylight saving, so this is arithmetic.
+ * This used to be a countdown to the next full pull, which was honest about
+ * the old design and would be a lie about this one: there is no longer a
+ * moment when the app stops and reads the company. There is a list that comes
+ * round, and the only thing worth saying is whether it is keeping up and that
+ * it is not being paid for out of anybody's day.
+ *
+ * That also took the last naming of a Queensland day out of this module, so
+ * the offset arithmetic that supported it went with it rather than being kept
+ * against a use that may never come.
  */
-function describeNextFull(lastFullAt: string | null, now: Date): string {
-  const last = lastFullAt ? Date.parse(lastFullAt) : NaN;
-  if (!Number.isFinite(last)) return 'A full pull is due.';
-  const due = last + FULL_EVERY_MS;
-  const wait = due - now.getTime();
-  if (wait <= 0) return 'A full pull is due now.';
-  if (wait < HOUR_MS) return 'Next full pull within the hour.';
-
-  const today = qldDayIndex(now.getTime());
-  const dueDay = qldDayIndex(due);
-  if (dueDay === today) return qldHour(due) >= 18 ? 'Next full pull tonight.' : 'Next full pull later today.';
-  if (dueDay === today + 1) return 'Next full pull tomorrow.';
-  return `Next full pull in ${describeAge(wait)}.`;
-}
-
-function qldDayIndex(ms: number): number {
-  return Math.floor((ms + QLD_UTC_OFFSET_HOURS * HOUR_MS) / DAY_MS);
-}
-
-function qldHour(ms: number): number {
-  return Math.floor(((ms + QLD_UTC_OFFSET_HOURS * HOUR_MS) % DAY_MS) / HOUR_MS);
+function describeSweep(sweptAt: Record<string, string> | undefined, now: Date): string {
+  const behind = sweepBehind(sweptAt, now);
+  const total = SWEEP_RESOURCES.length;
+  if (behind === 0) return 'Everything here was re-read from the office within the last day.';
+  if (behind >= total) return 'A full re-read is under way in the background, a couple at a time.';
+  return `${behind} of ${total} are waiting on their re-read, which happens in the background.`;
 }
 
 /** "12 min", "1 hour", "3 days" — coarse on purpose, this is a status line not a log. */
@@ -354,8 +479,11 @@ export function summariseRun(
     const sites = pull.sitesAdded + pull.sitesUpdated;
     const jobs = pull.jobsAdded + pull.jobsUpdated;
     const assets = pull.assetsAdded + pull.assetsUpdated;
+    const what = action === 'full' ? 'Fetched everything'
+      : action === 'sweep' ? 'Re-read part of the office'
+        : 'Fetched changes';
     parts.push(
-      `${action === 'full' ? 'Fetched everything' : 'Fetched changes'}: `
+      `${what}: `
       + `${sites} ${sites === 1 ? 'site' : 'sites'}, ${jobs} ${jobs === 1 ? 'job' : 'jobs'} and `
       + `${assets} ${assets === 1 ? 'asset' : 'assets'} changed here.`,
     );

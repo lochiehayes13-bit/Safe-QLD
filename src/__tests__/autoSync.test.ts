@@ -1,9 +1,11 @@
 import {
-  decideAutoSync, describeAge, describeAutoSync, latestFullPull, networkLooksOnline, summariseRun,
-  EMPTY_AUTO_SYNC, FULL_EVERY_MS, INCREMENTAL_EVERY_MS,
-  type AutoSyncInput, type AutoSyncRecord,
+  decideAutoSync, describeAge, describeAutoSync, latestFullPull, networkLooksOnline, resourcesDueSweep,
+  summariseRun, sweepBehind, sweptEverything, triggerMaySweep,
+  EMPTY_AUTO_SYNC, FULL_EVERY_MS, INCREMENTAL_EVERY_MS, SWEEP_CHUNK, SWEEP_EVERY_MS, SWEEP_RESOURCES,
+  SWEEP_TRIGGERS,
+  type AutoSyncInput, type AutoSyncRecord, type AutoSyncTrigger,
 } from '@/simpro/autoSyncPolicy';
-import type { SyncResource, SyncState } from '@/simpro/incremental';
+import { SYNC_RESOURCES, type SyncResource, type SyncState } from '@/simpro/incremental';
 
 /**
  * Syncing without anybody pressing anything.
@@ -30,6 +32,11 @@ function state(resource: SyncResource, lastSyncedAt?: string, mode: SyncState['m
   return { resource, lastSyncedAt, lastRecordCount: lastSyncedAt ? 100 : 0, mode };
 }
 
+/** Every resource re-read in full this long ago. */
+function swept(hours: number): Record<string, string> {
+  return sweptEverything(hoursAgo(hours));
+}
+
 /** A phone that synced ten minutes ago and read everything three hours ago. */
 function input(over: Partial<AutoSyncInput> = {}): AutoSyncInput {
   return {
@@ -46,6 +53,8 @@ function input(over: Partial<AutoSyncInput> = {}): AutoSyncInput {
     ],
     trigger: 'foreground',
     lastFullAt: hoursAgo(3),
+    sweptAt: swept(3),
+    lastSweepAt: hoursAgo(3),
     ...over,
   };
 }
@@ -91,54 +100,9 @@ describe('when nothing can run', () => {
 
 describe('when everything is fetched', () => {
   it('fetches everything the first time', () => {
-    const d = decideAutoSync(input({ syncState: NEVER, lastFullAt: null }));
+    const d = decideAutoSync(input({ syncState: NEVER, lastFullAt: null, sweptAt: {} }));
     expect(d.action).toBe('full');
     expect(d.reason).toMatch(/nothing has been synced/i);
-  });
-
-  it('fetches everything again once a day', () => {
-    // A watermark can be wrong in ways nobody sees; a daily re-read caps how
-    // long that can leave a phone confidently stale.
-    const d = decideAutoSync(input({ lastFullAt: hoursAgo(25) }));
-    expect(d.action).toBe('full');
-    expect(d.reason).toMatch(/1 day ago/);
-  });
-
-  it('is not due a full read a minute short of a day', () => {
-    const d = decideAutoSync(input({ lastFullAt: new Date(NOW.getTime() - FULL_EVERY_MS + 60_000).toISOString() }));
-    expect(d.action).not.toBe('full');
-  });
-
-  it('takes a manual full pull as a full pull when every resource says so', () => {
-    // Sync now in Settings writes every resource 'full' at once; the runner
-    // has no note of it, and should not count it as never having happened.
-    const two = hoursAgo(2);
-    const d = decideAutoSync(input({
-      syncState: [state('sites', two, 'full'), state('jobs', two, 'full'), state('assets', two, 'full'), state('employees')],
-      lastFullAt: null,
-    }));
-    expect(d.action).toBe('incremental');
-  });
-
-  it('does not take one resource reading full as a full pull', () => {
-    // A server that ignores the change filter marks that resource 'full' on
-    // every incremental run. Counting it would switch the daily read off.
-    const two = hoursAgo(2);
-    const d = decideAutoSync(input({
-      syncState: [state('sites', two), state('jobs', two), state('assets', two, 'full'), state('employees')],
-      lastFullAt: null,
-    }));
-    expect(d.action).toBe('full');
-    expect(d.reason).toMatch(/not known when everything was last fetched/i);
-  });
-
-  it('prefers the daily read over a due incremental', () => {
-    // Both are due; the full one makes the other unnecessary, not the reverse.
-    const d = decideAutoSync(input({
-      syncState: [state('sites', hoursAgo(26)), state('jobs', hoursAgo(26)), state('assets', hoursAgo(26))],
-      lastFullAt: hoursAgo(26),
-    }));
-    expect(d.action).toBe('full');
   });
 
   it('fetches everything when the last sync is in the future', () => {
@@ -148,6 +112,136 @@ describe('when everything is fetched', () => {
     }));
     expect(d.action).toBe('full');
     expect(d.reason).toMatch(/in the future/i);
+  });
+
+  it('never opens the app with one', () => {
+    /*
+     * The whole of the reported fault, in one assertion.
+     *
+     * Everything is a day overdue and nothing has been swept, which under the
+     * old rules made the next trigger a six-minute full pull — and the next
+     * trigger, on a phone that slept overnight, was always somebody opening
+     * the app. There is no longer any input that gets a full pull out of a
+     * launch or a foreground while the phone has data on it.
+     */
+    for (const trigger of ['launch', 'foreground', 'signin', 'queued', 'online'] as const) {
+      const d = decideAutoSync(input({
+        trigger,
+        lastFullAt: hoursAgo(72),
+        sweptAt: {},
+        syncState: [state('sites', hoursAgo(26)), state('jobs', hoursAgo(26)), state('assets', hoursAgo(26))],
+      }));
+      expect(d.action).not.toBe('full');
+      expect(d.action).not.toBe('sweep');
+    }
+  });
+});
+
+describe('the rolling re-read', () => {
+  /** Every resource but these two read recently, so the slice is predictable. */
+  function allButSites(): Record<string, string> {
+    const at = swept(3);
+    delete at.sites;
+    delete at.jobs;
+    return at;
+  }
+
+  it('re-reads the ones that have gone longest without it, oldest first', () => {
+    const at = swept(3);
+    at.assets = hoursAgo(40);
+    at.quotes = hoursAgo(30);
+    expect(resourcesDueSweep(at, NOW, 2)).toEqual(['assets', 'quotes']);
+  });
+
+  it('puts a resource that has never been re-read at the front of the queue', () => {
+    const at = swept(3);
+    at.assets = hoursAgo(40);
+    delete at.invoices;
+    expect(resourcesDueSweep(at, NOW, 2)).toEqual(['invoices', 'assets']);
+  });
+
+  it('treats a stamp in the future as due rather than letting the sweep stall', () => {
+    // A phone whose clock was put back would otherwise read every resource as
+    // freshly done and stop re-reading anything, silently, for as long as the
+    // clock was wrong.
+    const at = swept(3);
+    at.assets = new Date(NOW.getTime() + 60 * 60_000).toISOString();
+    expect(resourcesDueSweep(at, NOW, 2)).toEqual(['assets']);
+  });
+
+  it('leaves alone anything read inside the day', () => {
+    expect(resourcesDueSweep(swept(23), NOW)).toEqual([]);
+    expect(sweepBehind(swept(23), NOW)).toBe(0);
+  });
+
+  it('takes a slice at a time rather than the lot', () => {
+    expect(resourcesDueSweep({}, NOW)).toHaveLength(SWEEP_CHUNK);
+    expect(sweepBehind({}, NOW)).toBe(SWEEP_RESOURCES.length);
+  });
+
+  it('runs on the triggers nobody is waiting on, and only those', () => {
+    const waited: AutoSyncTrigger[] = ['launch', 'foreground', 'online', 'queued', 'signin'];
+    for (const trigger of waited) expect(triggerMaySweep(trigger)).toBe(false);
+    for (const trigger of SWEEP_TRIGGERS) expect(triggerMaySweep(trigger)).toBe(true);
+  });
+
+  it.each(SWEEP_TRIGGERS)('takes a slice on %s when one is due', (trigger) => {
+    const d = decideAutoSync(input({ trigger, sweptAt: allButSites(), lastSweepAt: hoursAgo(1) }));
+    expect(d.action).toBe('sweep');
+    expect(d.sweep).toEqual(['sites', 'jobs']);
+    expect(d.reason).toMatch(/in the background/i);
+  });
+
+  it('spaces the slices out rather than taking one every tick', () => {
+    // The open app ticks every five minutes; without this that is six full
+    // re-reads an hour and a warm phone.
+    const recent = new Date(NOW.getTime() - SWEEP_EVERY_MS + 60_000).toISOString();
+    const d = decideAutoSync(input({ trigger: 'timer', sweptAt: allButSites(), lastSweepAt: recent }));
+    expect(d.action).toBe('none');
+  });
+
+  it('takes a slice when the last one is further back than the spacing', () => {
+    const old = new Date(NOW.getTime() - SWEEP_EVERY_MS - 60_000).toISOString();
+    expect(decideAutoSync(input({ trigger: 'timer', sweptAt: allButSites(), lastSweepAt: old })).action)
+      .toBe('sweep');
+  });
+
+  it('does not let a slice delay the changes everything else is waiting on', () => {
+    /*
+     * Both due. The incremental is seconds and covers every resource, so it
+     * goes first and the slice takes one of the gaps between them — which is
+     * the point, since the gaps were being wasted.
+     */
+    const d = decideAutoSync(input({
+      trigger: 'timer',
+      syncState: [state('sites', minutesAgo(31)), state('jobs', minutesAgo(31))],
+      sweptAt: allButSites(),
+      lastSweepAt: hoursAgo(1),
+    }));
+    expect(d.action).toBe('incremental');
+  });
+
+  it('says a re-read is in hand rather than reading as idle', () => {
+    // On a trigger that may not sweep, the line still has to account for the
+    // eighteen resources it is not re-reading this second.
+    const d = decideAutoSync(input({ trigger: 'foreground', sweptAt: allButSites() }));
+    expect(d.action).toBe('none');
+    expect(d.reason).toMatch(/waiting on a full re-read/i);
+    expect(d.reason).toMatch(/background/i);
+  });
+
+  it('only rotates through resources a full read changes anything for', () => {
+    // employees, schedules, tasks and timesheets are read whole on every pull
+    // already, so a slice spent on one would re-read nothing.
+    for (const resource of SWEEP_RESOURCES) expect(SYNC_RESOURCES).toContain(resource);
+    expect(SWEEP_RESOURCES).not.toContain('employees');
+    expect(SWEEP_RESOURCES).not.toContain('timesheets');
+  });
+
+  it('turns the whole list over well inside the day it is holding to', () => {
+    // Slices of SWEEP_CHUNK, no closer together than SWEEP_EVERY_MS.
+    const toGetRound = Math.ceil(SWEEP_RESOURCES.length / SWEEP_CHUNK) * SWEEP_EVERY_MS;
+    expect(toGetRound).toBeLessThan(FULL_EVERY_MS / 2);
   });
 });
 
@@ -212,8 +306,8 @@ describe('the reasons', () => {
     ['offline', { online: false }],
     ['in flight', { inFlight: true }],
     ['never synced', { syncState: NEVER, lastFullAt: null }],
-    ['full due', { lastFullAt: hoursAgo(30) }],
-    ['full unknown', { lastFullAt: null }],
+    ['a slice due', { trigger: 'timer' as const, sweptAt: {}, lastSweepAt: null }],
+    ['a slice due but not this trigger', { trigger: 'foreground' as const, sweptAt: {} }],
     ['incremental due', { syncState: [state('sites', hoursAgo(1))] }],
     ['queued', { trigger: 'queued' }],
     ['online', { trigger: 'online' }],
@@ -252,33 +346,51 @@ describe('the line in Settings', () => {
   });
 
   it('reads the way the brief asked for', () => {
-    // Half past seven last night plus a day is tonight, in Brisbane.
     const line = describeAutoSync(record({
       lastRunAt: minutesAgo(12), lastAction: 'incremental', lastTrigger: 'foreground',
-      lastFullAt: '2026-09-01T09:30:00Z',
+      sweptAt: swept(3),
     }), NOW);
-    expect(line).toBe('Last ran 12 min ago (incremental). Next full pull tonight.');
+    expect(line).toBe('Last ran 12 min ago (incremental). Everything here was re-read from the office within the last day.');
   });
 
   it.each([
-    // [when now is, when everything was last read, what the line ends with]
-    ['2026-09-02T00:00:00Z', '2026-09-01T04:00:00Z', 'Next full pull later today.'],
-    ['2026-09-02T12:00:00Z', '2026-09-02T00:00:00Z', 'Next full pull tomorrow.'],
-    ['2026-09-02T02:00:00Z', hoursAgo(23.5), 'Next full pull within the hour.'],
-    ['2026-09-02T02:00:00Z', hoursAgo(25), 'A full pull is due now.'],
-    ['2026-09-02T02:00:00Z', null, 'A full pull is due.'],
-  ])('at %s with a full pull at %s says "%s"', (now, lastFullAt, ending) => {
-    // "Tonight" and "tomorrow" are Brisbane's; at ten at night it is still
-    // today in Greenwich, and a phone that said tomorrow would be wrong.
-    const line = describeAutoSync(record({ lastRunAt: minutesAgo(1, new Date(now)), lastAction: 'none', lastFullAt }), new Date(now));
+    // [what has been re-read, what the line ends with]
+    ['everything, recently', swept(3), 'Everything here was re-read from the office within the last day.'],
+    ['nothing at all', {}, 'A full re-read is under way in the background, a couple at a time.'],
+  ])('with %s says "%s"', (_name, sweptAt, ending) => {
+    /*
+     * This used to be a countdown to the next full pull — "tonight",
+     * "tomorrow", "within the hour" — which was honest about a design that
+     * stopped and read the company once a day. It would be a lie about this
+     * one: there is no such moment any more, only a list that comes round. So
+     * the line says whether it is keeping up, which is the thing a technician
+     * would actually want to know.
+     */
+    const line = describeAutoSync(record({ lastRunAt: minutesAgo(1), lastAction: 'none', sweptAt }), NOW);
     expect(line.endsWith(ending)).toBe(true);
+  });
+
+  it('counts what is still waiting rather than rounding it to all or nothing', () => {
+    const at = swept(3);
+    delete at.sites;
+    delete at.assets;
+    const line = describeAutoSync(record({ lastRunAt: minutesAgo(1), lastAction: 'none', sweptAt: at }), NOW);
+    expect(line).toContain(`2 of ${SWEEP_RESOURCES.length} are waiting on their re-read`);
+  });
+
+  it('names a slice as what it did', () => {
+    const line = describeAutoSync(record({ lastRunAt: minutesAgo(4), lastAction: 'sweep', sweptAt: swept(3) }), NOW);
+    expect(line).toMatch(/^Last ran 4 min ago \(re-read part of the office in the background\)\./);
   });
 
   it('leads with the problem when the last run hit one', () => {
     const line = describeAutoSync(record({
       lastRunAt: minutesAgo(5), lastAction: 'full', lastError: 'sites: fetch failed',
     }), NOW);
-    expect(line).toBe('Last ran 5 min ago and hit a problem: sites: fetch failed. A full pull is due.');
+    expect(line).toBe(
+      'Last ran 5 min ago and hit a problem: sites: fetch failed. '
+      + 'A full re-read is under way in the background, a couple at a time.',
+    );
   });
 
   it('names sending the queue as what it did', () => {
@@ -295,9 +407,12 @@ describe('the line in Settings', () => {
     // A check that did nothing is still a check; silence would read as broken.
     const line = describeAutoSync(record({
       lastRunAt: minutesAgo(1), lastAction: 'none', lastResultSummary: 'Synced 12 min ago and nothing is due yet.',
-      lastFullAt: '2026-09-01T09:30:00Z',
+      sweptAt: swept(3),
     }), NOW);
-    expect(line).toBe('Last checked 1 min ago. Synced 12 min ago and nothing is due yet. Next full pull tonight.');
+    expect(line).toBe(
+      'Last checked 1 min ago. Synced 12 min ago and nothing is due yet. '
+      + 'Everything here was re-read from the office within the last day.',
+    );
   });
 
   it('does not read a run time in the future as negative minutes', () => {

@@ -66,3 +66,16 @@ export async function unregisterAutoSyncTask(): Promise<void> {
     // A task that cannot be unregistered is one that was never registered.
   }
 }
+
+/**
+ * What the settings screen says about syncing while the app is not in front.
+ *
+ * The browser's half of this module says something different and shorter,
+ * because a browser cannot do it at all. Both are here rather than in the
+ * screen so neither can quietly describe the other's behaviour.
+ */
+export function backgroundSyncNote(): string {
+  return 'The phone keeps this up to date between jobs, in slices, so opening the app never '
+    + `waits on a sync. The system decides when — usually every ${AUTO_SYNC_MINIMUM_INTERVAL_MINUTES} `
+    + 'minutes or so, and sooner when the phone is on charge.';
+}

@@ -6,7 +6,7 @@ import { SimproClient } from '@/simpro/client';
 import { simproConfigFromPrefs } from '@/simpro/config';
 import { holdAutoSync, runAutoSync, useAutoSync } from '@/simpro/autoSync';
 import { describeAutoSync } from '@/simpro/autoSyncPolicy';
-import { registerAutoSyncTask, unregisterAutoSyncTask } from '@/simpro/autoSyncTask';
+import { backgroundSyncNote, registerAutoSyncTask, unregisterAutoSyncTask } from '@/simpro/autoSyncTask';
 import { clearKey as clearAiKey, hasKey as hasAiKey, storeKey as storeAiKey } from '@/ai/client';
 import { clearPlacesKey, hasPlacesKey, storePlacesKey } from '@/geo/placesKey';
 import { PRIVACY_NOTE } from '@/ai/grounding';
@@ -1033,9 +1033,13 @@ export default function SettingsScreen() {
         <Divider />
         <Label>Sync automatically</Label>
         <Txt size="xs" tone="faint" style={{ marginTop: 4, marginBottom: t.space(2), lineHeight: 17 }}>
-          Changes come down every half hour and everything is re-read once a day, whenever there is
-          signal. Anything queued for the office goes the moment it can. No popups: this line says
-          what happened last.
+          Changes come down every half hour, whenever there is signal. Everything is re-read in full
+          once a day as well, but a couple of things at a time while nothing is waiting on it —
+          never as one long pull when you open the app. Anything queued for the office goes the
+          moment it can. No popups: this line says what happened last.
+        </Txt>
+        <Txt size="xs" tone="faint" style={{ marginBottom: t.space(2), lineHeight: 17 }}>
+          {backgroundSyncNote()}
         </Txt>
         <Rowed gap={2}>
           <Txt

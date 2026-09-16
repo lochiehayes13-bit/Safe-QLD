@@ -18,20 +18,19 @@ import { validEndpoint } from '@/domain/photoSend';
  * route below does the job without any of it.
  */
 
-export interface PhotoToSend {
-  /** A blob or data URL for the picture. */
-  uri: string;
-  name: string;
-  size: number;
-}
+/*
+ * The shapes are the phone half's, imported rather than written out again:
+ * TypeScript resolves the bare name to ./photos and the import is erased
+ * before Metro sees it, so nothing from expo-sharing reaches the browser
+ * bundle. Two copies of an interface are two things to keep in step, and this
+ * is the arrangement MapCanvas and the geocoder already use.
+ *
+ * On the web a `uri` is a blob: or data: URL rather than a path on disk;
+ * `fileFor` below is what turns one back into bytes.
+ */
+import type { PhotoPost, PhotoToSend } from './photos';
 
-export interface PhotoPost {
-  endpointUrl: string;
-  subject: string;
-  body: string;
-  technicianName: string;
-  photos: readonly PhotoToSend[];
-}
+export type { PhotoPost, PhotoToSend };
 
 const POST_TIMEOUT_MS = 120_000;
 

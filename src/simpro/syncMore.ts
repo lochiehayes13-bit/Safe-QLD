@@ -65,6 +65,11 @@ export interface MoreSyncInput {
   client: SimproClient;
   /** True to read everything regardless of watermarks. */
   force: boolean;
+  /**
+   * Resources to re-read in full even when `force` is off — the slice the
+   * rolling re-read picked. See ./autoSyncPolicy.
+   */
+  fullResources?: readonly SyncResource[];
   /** The run's start instant, ISO; every row written this run is stamped with it. */
   startedAt: string;
   /**
@@ -165,7 +170,10 @@ async function listStage<T extends Stamped>(
   index: number,
   spec: StageSpec<T>,
 ): Promise<T[] | undefined> {
-  const { startedAt, force, progress } = input;
+  const { startedAt, progress } = input;
+  // Whole because the caller asked for the lot, or because this is one of the
+  // couple of resources the rolling re-read is spending this run on.
+  const force = input.force || (input.fullResources?.includes(spec.resource) ?? false);
   progress(spec.label, index);
   const state = await readSyncState(spec.resource);
   const plan = planIncremental(spec.resource, state.lastChangeSeenAt, { force });

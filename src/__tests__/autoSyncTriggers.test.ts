@@ -1,4 +1,7 @@
-import { decideAutoSync, TIMER_EVERY_MS, INCREMENTAL_EVERY_MS, type AutoSyncInput } from '@/simpro/autoSyncPolicy';
+import {
+  decideAutoSync, sweptEverything, TIMER_EVERY_MS, INCREMENTAL_EVERY_MS, SWEEP_EVERY_MS,
+  type AutoSyncInput,
+} from '@/simpro/autoSyncPolicy';
 import type { SyncResource, SyncState } from '@/simpro/incremental';
 
 /**
@@ -8,6 +11,11 @@ import type { SyncResource, SyncState } from '@/simpro/incremental';
  * screen that does not yet know their jobs. `timer` is the open app's own
  * tick, for a phone left on a job all morning with none of the other
  * moments — no launch, no foreground, no signal coming back.
+ *
+ * The tick has since taken on the other half of the job: it is one of the two
+ * triggers the rolling full re-read is allowed to spend time on, because a
+ * phone ticking to itself in a ute is nobody's wait. That is what took the
+ * six-minute pull off the front of opening the app.
  */
 
 const NOW = new Date('2026-09-09T00:00:00Z');
@@ -32,6 +40,8 @@ function current(over: Partial<AutoSyncInput> = {}): AutoSyncInput {
     syncState: [state('sites', 10), state('jobs', 10), state('assets', 10)],
     trigger: 'timer',
     lastFullAt: new Date(NOW.getTime() - 3 * 3_600_000).toISOString(),
+    sweptAt: sweptEverything(new Date(NOW.getTime() - 3 * 3_600_000).toISOString()),
+    lastSweepAt: new Date(NOW.getTime() - 3 * 3_600_000).toISOString(),
     ...over,
   };
 }
@@ -69,5 +79,17 @@ describe('the open app\'s own tick', () => {
   it('ticks often enough to notice the half hour without spending the battery on it', () => {
     expect(TIMER_EVERY_MS).toBeLessThanOrEqual(INCREMENTAL_EVERY_MS / 4);
     expect(TIMER_EVERY_MS).toBeGreaterThanOrEqual(60_000);
+  });
+
+  it('spends the quiet ticks on the rolling re-read instead of on nothing', () => {
+    // Everything is current, so before the sweep existed this tick did nothing
+    // and the re-read it was not doing turned up on the next launch instead.
+    const d = decideAutoSync(current({ trigger: 'timer', sweptAt: {}, lastSweepAt: null }));
+    expect(d.action).toBe('sweep');
+    expect(d.sweep?.length).toBeGreaterThan(0);
+  });
+
+  it('does not turn every tick into one', () => {
+    expect(SWEEP_EVERY_MS).toBeGreaterThan(TIMER_EVERY_MS);
   });
 });

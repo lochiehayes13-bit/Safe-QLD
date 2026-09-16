@@ -8,7 +8,7 @@ import { flushQueue, pullFromSimpro, type FlushResult, type SyncProgress, type S
 import { readAllSyncState } from './watermark';
 import { flushSoon, setFlushRunner } from './flushSoon';
 import {
-  decideAutoSync, latestFullPull, networkLooksOnline, summariseRun, EMPTY_AUTO_SYNC,
+  decideAutoSync, latestFullPull, networkLooksOnline, summariseRun, sweptEverything, EMPTY_AUTO_SYNC,
   type AutoSyncDecision, type AutoSyncRecord, type AutoSyncTrigger,
 } from './autoSyncPolicy';
 
@@ -150,6 +150,7 @@ export async function runAutoSync(trigger: AutoSyncTrigger): Promise<AutoSyncDec
     const now = new Date();
     const decision = decideAutoSync({
       now, enabled: prefs.autoSync, credentialsProblem, online, inFlight, syncState, trigger, lastFullAt,
+      sweptAt: record.sweptAt, lastSweepAt: record.lastSweepAt,
     });
 
     if (decision.action === 'none') {
@@ -189,10 +190,15 @@ export async function runAutoSync(trigger: AutoSyncTrigger): Promise<AutoSyncDec
     if (decision.action !== 'flush-only') {
       try {
         pull = await pullFromSimpro(config, reportProgress, {
-          incremental: decision.action === 'incremental',
+          incremental: decision.action === 'incremental' || decision.action === 'sweep',
+          // A slice re-reads these two in full and asks the rest only for what
+          // changed, which is what keeps the daily ceiling without the wall.
+          fullResources: decision.action === 'sweep' ? decision.sweep : undefined,
           // A run asked for by a queued note reads the lists and leaves the
-          // dozen requests a job's children cost to the next foreground.
-          prefetchDetails: trigger !== 'queued',
+          // dozen requests a job's children cost to the next foreground. A
+          // sweep skips them too: it is meant to be unnoticed, and a job's
+          // children are read on the next foreground anyway.
+          prefetchDetails: trigger !== 'queued' && decision.action !== 'sweep',
           // Whose phone this is, so their booked jobs get their children read
           // first. By id where the phone knows it, by the name on reports
           // otherwise — the same rule My day uses to pick out their blocks.
@@ -205,17 +211,30 @@ export async function runAutoSync(trigger: AutoSyncTrigger): Promise<AutoSyncDec
       }
     }
     const error = errors.length ? errors.join(' ') : null;
+    /*
+     * What this run earned towards the daily ceiling.
+     *
+     * A full pull stamps every resource; a slice stamps the two it re-read.
+     * Both count even with errors in them, for the reason the old note gave:
+     * a resource that failed has no watermark, so the next run reads it in
+     * full anyway, and re-running against an endpoint that will keep failing
+     * helps nobody. The difference now is that the cost of being wrong is one
+     * slice rather than six minutes.
+     */
+    const swept = !pull ? null
+      : decision.action === 'full' ? sweptEverything(startedAt)
+        : decision.action === 'sweep'
+          ? { ...record.sweptAt, ...Object.fromEntries((decision.sweep ?? []).map((r) => [r, startedAt])) }
+          : null;
     await remember({
       lastRunAt: startedAt,
       lastTrigger: trigger,
       lastAction: decision.action,
       lastError: error,
       lastResultSummary: summariseRun(decision.action, pull, flush),
-      // A full attempt counts even with errors in it. A resource that failed
-      // has no watermark, so the next incremental run reads it in full
-      // anyway; re-running the whole six minutes every half hour against an
-      // endpoint that will keep failing helps nobody.
       lastFullAt: decision.action === 'full' && pull ? startedAt : lastFullAt,
+      ...(swept ? { sweptAt: swept } : {}),
+      ...(decision.action === 'sweep' ? { lastSweepAt: startedAt } : {}),
     });
     return decision;
   } catch (e) {
