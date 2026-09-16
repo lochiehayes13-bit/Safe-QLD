@@ -103,6 +103,97 @@ export function readMode(value: unknown): { mode: AppMode; assumed?: string } {
 // Tabs
 // ---------------------------------------------------------------------------
 
+/**
+ * The trade a phone is on, which is a different question from how much of the
+ * app it shows.
+ *
+ * "A service module and a construction module, so my service boys see one side
+ * of the app and the construction boys see their side." The temptation was to
+ * add them beside technician and office as two more values of one setting, and
+ * that would have been wrong: a service technician and a construction
+ * technician are both technicians, and neither of them is the office. The two
+ * questions are independent —
+ *
+ *   how much of the app   technician / office
+ *   which trade's work    service / construction / both
+ *
+ * — so they are two settings, and a phone answers both. Four values on one
+ * setting would have forced a construction technician to choose between seeing
+ * the wiring tables and seeing a technician-sized app.
+ *
+ * The stream is a softer filter than the mode, deliberately. It narrows the
+ * hubs and nothing else: All modules still lists every module in the app and
+ * search still finds everything, so anything a stream holds back is one tap
+ * from the home screen. That makes rule 1 at the top of this file trivially
+ * true on this axis — nothing is deleted, and nobody has to know a screen
+ * exists to get to it.
+ */
+export type TradeStream = 'service' | 'construction';
+
+export const TRADE_STREAMS: readonly TradeStream[] = ['service', 'construction'];
+
+/** A phone's answer: one stream, or both. */
+export type StreamChoice = TradeStream | 'both';
+
+export const STREAM_CHOICES: readonly StreamChoice[] = ['both', 'service', 'construction'];
+
+/**
+ * Both, and it is not a coin toss either.
+ *
+ * Most of this company's technicians do both kinds of work in a week, and the
+ * failure of showing somebody too much is a longer list, while the failure of
+ * showing them too little is a job they cannot do from the van. So a phone
+ * shows everything until somebody decides otherwise on that phone.
+ */
+export const DEFAULT_STREAM: StreamChoice = 'both';
+
+export const STREAM_LABEL: Record<StreamChoice, string> = {
+  both: 'Both',
+  service: 'Service',
+  construction: 'Construction',
+};
+
+export const STREAM_BLURB: Record<StreamChoice, string> = {
+  both:
+    'Everything, which is what most people want: the routine servicing side and the install side '
+    + 'in the same lists.',
+  service:
+    'Routine servicing of systems that are already in: routines, what is due, test sheets, occupier '
+    + 'statements and the history behind them. The install and design tools move out of the hubs.',
+  construction:
+    'Putting systems in: cable sizing, the wiring tables, fault loop, maximum demand, labelling and '
+    + 'the register import. The routine servicing lists move out of the hubs.',
+};
+
+/** Reads a stored stream, and says so where it could not. */
+export function readStream(value: unknown): { stream: StreamChoice; assumed?: string } {
+  if (value === 'service' || value === 'construction' || value === 'both') return { stream: value };
+  if (value === undefined || value === null || value === '') return { stream: DEFAULT_STREAM };
+  return {
+    stream: DEFAULT_STREAM,
+    assumed: `This phone has "${String(value)}" saved as its trade, which is not one this app knows. `
+      + 'It is showing both until you pick one.',
+  };
+}
+
+/**
+ * What a phone is set to, on both axes.
+ *
+ * Every function below takes either a bare mode — which is what it always took
+ * — or this. A bare mode means both streams, so nothing that was written
+ * against the old signature changes behaviour by being left alone.
+ */
+export interface AppView {
+  mode: AppMode;
+  stream: StreamChoice;
+}
+
+export type ViewLike = AppMode | AppView;
+
+function asView(v: ViewLike): AppView {
+  return typeof v === 'string' ? { mode: v, stream: 'both' } : v;
+}
+
 export type TabKey = 'today' | 'sites' | 'map' | 'tools' | 'work' | 'settings';
 
 /**
@@ -151,6 +242,17 @@ export interface Destination {
   section: string;
   /** The modes whose lists show it. Never empty — see `validateManifest`. */
   modes: readonly AppMode[];
+  /**
+   * The trade streams whose hubs list it. Absent means both, which is almost
+   * everything: the split is deliberately narrow, because a module hidden from
+   * somebody who needed it costs more than a module they scroll past.
+   */
+  streams?: readonly TradeStream[];
+  /**
+   * Why the other stream does not need it in its hubs. Required exactly where
+   * `streams` is set, and `validateManifest` checks both directions.
+   */
+  streamBecause?: string;
   /**
    * True where the screen cannot do its job without knowing which record —
    * a dynamic segment, or a required `siteId`. These are never listed in a
@@ -248,7 +350,12 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/work/due', file: 'app/work/due.tsx', tab: 'today', section: 'The day',
-    label: 'Overdue and due', modes: BOTH, openedFrom: ['/work', '/shortcuts'],
+    label: 'Overdue and due', modes: BOTH,
+    streams: ['service'],
+    streamBecause:
+      'Routines past their tolerance window. Construction work is due on a program, not on a '
+      + 'service frequency.',
+    openedFrom: ['/work', '/shortcuts'],
     blurb: 'Routines past their tolerance window, across every site.',
     terms: ['due', 'overdue', 'lapsed', 'tolerance', 'schedule'],
     keptBecause:
@@ -264,7 +371,12 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/work/recurring', file: 'app/work/recurring.tsx', tab: 'today', section: 'The day',
-    label: 'Recurring failures', modes: BOTH, openedFrom: ['/shortcuts'],
+    label: 'Recurring failures', modes: BOTH,
+    streams: ['service'],
+    streamBecause:
+      'Devices that keep failing across services, which is a pattern only routine servicing '
+      + 'produces.',
+    openedFrom: ['/shortcuts'],
     blurb: 'Assets that keep failing, where replacing it a fourth time will not fix it.',
     terms: ['recurring', 'repeat', 'keeps failing', 'again'],
   },
@@ -417,7 +529,10 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/import', file: 'app/import.tsx', tab: 'sites', section: 'Your sites',
-    label: 'Import', modes: BOTH, openedFrom: ['/sites', '/site/[id]', '/shortcuts'],
+    label: 'Import', modes: BOTH,
+    streams: ['construction'],
+    streamBecause:
+      'Importing a register in bulk is how a new or newly documented site arrives on the phone.', openedFrom: ['/sites', '/site/[id]', '/shortcuts'],
     blurb: 'Reads a panel configuration or an asset register, and describes what it cannot parse rather than dismissing it.',
     terms: ['import', 'config', 'csv', 'panel file', 'register'],
   },
@@ -518,7 +633,12 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/routine/run', file: 'app/routine/run.tsx', tab: 'sites', section: 'In front of you',
-    label: 'Run a routine', needsContext: true, modes: BOTH, openedFrom: ['/site/[id]'],
+    label: 'Run a routine', needsContext: true, modes: BOTH,
+    streams: ['service'],
+    streamBecause:
+      'A routine is the AS 1851 service of a system that is already in and already commissioned. A '
+      + 'construction crew commissions; they do not run the six-monthly.',
+    openedFrom: ['/site/[id]'],
     blurb: 'Turns a service routine into work: the app finds the assets it applies to, you answer each check.',
     terms: ['routine', 'service', 'run', 'monthly', 'annual', 'test'],
   },
@@ -537,7 +657,12 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/site/bulk-test', file: 'app/site/bulk-test.tsx', tab: 'sites', section: 'This site',
-    label: 'Bulk test', needsContext: true, modes: BOTH, openedFrom: ['/site/[id]'],
+    label: 'Bulk test', needsContext: true, modes: BOTH,
+    streams: ['service'],
+    streamBecause:
+      'Bulk testing works down a register that exists. On a new install the register is being '
+      + 'built, not swept.',
+    openedFrom: ['/site/[id]'],
     blurb: 'Walk the register and test every asset in turn, failing the ones that fail.',
     terms: ['bulk test', 'test assets', 'fail', 'walk'],
   },
@@ -555,7 +680,10 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/site/due', file: 'app/site/due.tsx', tab: 'sites', section: 'This site',
-    label: 'What is due', needsContext: true, modes: BOTH, openedFrom: ['/site/[id]'],
+    label: 'What is due', needsContext: true, modes: BOTH,
+    streams: ['service'],
+    streamBecause:
+      'The same, for one site: what its routines owe. Nothing on an install is due in that sense.', openedFrom: ['/site/[id]'],
     blurb: 'Every routine this site owes, including the ones with nothing recorded against them yet.',
     terms: ['due', 'next service', 'schedule', 'frequency'],
   },
@@ -567,13 +695,23 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/site/coverage', file: 'app/site/coverage.tsx', tab: 'sites', section: 'This site',
-    label: 'Not tested', needsContext: true, modes: BOTH, openedFrom: ['/site/[id]'],
+    label: 'Not tested', needsContext: true, modes: BOTH,
+    streams: ['service'],
+    streamBecause:
+      'What the routine has not reached this cycle. There is no cycle on a job that is being '
+      + 'installed.',
+    openedFrom: ['/site/[id]'],
     blurb: 'The devices nobody could reach — a hole in the year, and deliberately not a defect list.',
     terms: ['not tested', 'inaccessible', 'coverage', 'missed', 'no access'],
   },
   {
     route: '/site/history', file: 'app/site/history.tsx', tab: 'sites', section: 'This site',
-    label: 'Service history', needsContext: true, modes: BOTH, openedFrom: ['/site/[id]'],
+    label: 'Service history', needsContext: true, modes: BOTH,
+    streams: ['service'],
+    streamBecause:
+      'The service history behind a system. A new install has none, and the handover documents are '
+      + 'what stand in its place.',
+    openedFrom: ['/site/[id]'],
     blurb: 'Whether each service landed inside tolerance, measured against the date the schedule called for.',
     terms: ['history', 'past services', 'on time', 'tolerance'],
   },
@@ -631,7 +769,12 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/assessment/[id]', file: 'app/assessment/[id].tsx', tab: 'sites', section: 'Paperwork',
-    label: 'Effectiveness assessment', needsContext: true, modes: BOTH, openedFrom: ['/site/[id]'],
+    label: 'Effectiveness assessment', needsContext: true, modes: BOTH,
+    streams: ['service'],
+    streamBecause:
+      'An effectiveness assessment weighs a maintained system against what it is supposed to do. It '
+      + 'is a servicing judgement.',
+    openedFrom: ['/site/[id]'],
     blurb: 'Not a service: recommendations and observations, and nothing found here is a defect.',
     terms: ['assessment', 'effectiveness', 'recommendation', 'observation', 'audit'],
   },
@@ -681,19 +824,32 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/tools/cable', file: 'app/tools/cable.tsx', tab: 'tools', section: 'Calculators',
-    label: 'Cable sizing', modes: BOTH, openedFrom: ['/tools', '/tools/cable-tables'],
+    label: 'Cable sizing', modes: BOTH,
+    streams: ['construction'],
+    streamBecause:
+      'Sizing a run is design work. A service technician replacing a like-for-like run has the '
+      + 'existing size; picking a new one is an install decision.',
+    openedFrom: ['/tools', '/tools/cable-tables'],
     blurb: 'The four checks that decide a cable, run against the office\'s own capacity tables rather than against figures nobody can account for.',
     terms: ['cable', 'sizing', 'current carrying capacity', 'ccc', 'as 3008', 'as 3000', 'derating', 'submain', 'wiring rules'],
   },
   {
     route: '/tools/cable-tables', file: 'app/tools/cable-tables.tsx', tab: 'tools', section: 'Calculators',
-    label: 'Cable tables', modes: BOTH, openedFrom: ['/tools', '/tools/cable'],
+    label: 'Cable tables', modes: BOTH,
+    streams: ['construction'],
+    streamBecause:
+      'The wiring-rules current and impedance tables, which are the input to sizing a new run.', openedFrom: ['/tools', '/tools/cable'],
     blurb: 'The capacity figures themselves: loaded once from the office\'s licensed copy, searched by size or by what they carry.',
     terms: ['cable tables', 'as 3008', 'current rating', 'amps', 'mv/a/m', 'derating factor', 'import'],
   },
   {
     route: '/tools/sizing', file: 'app/tools/sizing.tsx', tab: 'tools', section: 'Calculators',
-    label: 'Size it from a description', modes: BOTH, openedFrom: ['/tools', '/tools/cable'],
+    label: 'Size it from a description', modes: BOTH,
+    streams: ['construction'],
+    streamBecause:
+      'Sizing a run from a description of the job, which is the same design decision one screen '
+      + 'over.',
+    openedFrom: ['/tools', '/tools/cable'],
     blurb:
       'Say what you are installing in a sentence and get the cable and the breaker back, worked off '
       + 'the standard’s own tables with the words it read printed beside them.',
@@ -702,7 +858,10 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/tools/wiring', file: 'app/tools/wiring.tsx', tab: 'tools', section: 'Calculators',
-    label: 'Wiring rules tables', modes: BOTH, openedFrom: ['/tools', '/tools/cable', '/tools/cable-tables'],
+    label: 'Wiring rules tables', modes: BOTH,
+    streams: ['construction'],
+    streamBecause:
+      'The wiring rules tables themselves: derating, grouping, installation methods. Design inputs.', openedFrom: ['/tools', '/tools/cable', '/tools/cable-tables'],
     blurb:
       'Every numbered table in AS/NZS 3008.1.1 and the sizing tables of AS/NZS 3000, searched by what is '
       + 'in the column headings rather than by table number.',
@@ -711,13 +870,21 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/tools/fault-loop', file: 'app/tools/fault-loop.tsx', tab: 'tools', section: 'Calculators',
-    label: 'Fault loop and earthing', modes: BOTH, openedFrom: ['/tools'],
+    label: 'Fault loop and earthing', modes: BOTH,
+    streams: ['construction'],
+    streamBecause:
+      'Fault loop impedance and earthing are proved when a circuit is installed, not when a '
+      + 'detector is serviced.',
+    openedFrom: ['/tools'],
     blurb: 'The check a long run fails silently: too little fault current to move the magnetic element, so the device takes seconds.',
     terms: ['fault loop', 'zs', 'ze', 'impedance', 'disconnection', 'earth', 'earthing', 'adiabatic', 'as 3000'],
   },
   {
     route: '/tools/max-demand', file: 'app/tools/max-demand.tsx', tab: 'tools', section: 'Calculators',
-    label: 'Maximum demand', modes: BOTH, openedFrom: ['/tools'],
+    label: 'Maximum demand', modes: BOTH,
+    streams: ['construction'],
+    streamBecause:
+      'Maximum demand sizes a supply. Nothing in a routine service changes the supply.', openedFrom: ['/tools'],
     blurb: 'Per phase rather than averaged, because the supply is sized on its worst phase and averaging trips a main.',
     terms: ['maximum demand', 'diversity', 'main switch', 'supply', 'phase balance', 'as 3000'],
   },
@@ -827,7 +994,12 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/tools/routines', file: 'app/tools/routines.tsx', tab: 'tools', section: 'Reference',
-    label: 'Service routines', modes: BOTH, openedFrom: ['/tools'],
+    label: 'Service routines', modes: BOTH,
+    streams: ['service'],
+    streamBecause:
+      'The AS 1851 service routines and their frequencies. Nothing on a construction job runs to '
+      + 'them.',
+    openedFrom: ['/tools'],
     blurb: 'What you are actually meant to do here, and why, with the source of every check named.',
     terms: ['routine', 'monthly', 'annual', 'checks', 'what to do'],
   },
@@ -896,7 +1068,12 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/occupier', file: 'app/occupier/index.tsx', tab: 'work', section: 'Records',
-    label: 'Occupier statements', modes: BOTH, openedFrom: ['/work'],
+    label: 'Occupier statements', modes: BOTH,
+    streams: ['service'],
+    streamBecause:
+      'The occupier statement is the annual declaration about maintained systems, and it is signed '
+      + 'off the year of servicing behind it.',
+    openedFrom: ['/work'],
     blurb: 'Every occupier statement across every site, ordered by what is closest to being late.',
     terms: ['occupier', 'statement', 'commissioner', 'annual statement', 'schedule 2', 'declaration'],
     keptBecause:
@@ -983,7 +1160,12 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/work/reports', file: 'app/work/reports.tsx', tab: 'work', section: 'Records',
-    label: 'Test sheets', modes: BOTH, openedFrom: ['/shortcuts', '/work'],
+    label: 'Test sheets', modes: BOTH,
+    streams: ['service'],
+    streamBecause:
+      'Test sheets are the record a routine service leaves. The install equivalent is the '
+      + 'commissioning paperwork, which is on the job.',
+    openedFrom: ['/shortcuts', '/work'],
     blurb: 'Every service report on this device, newest first.',
     terms: ['test sheets', 'reports', 'service reports'],
     keptBecause:
@@ -1101,7 +1283,10 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/work/portfolio', file: 'app/work/portfolio.tsx', tab: 'work', section: 'Planning',
-    label: 'Portfolio health', modes: OFFICE, openedFrom: ['/work'],
+    label: 'Portfolio health', modes: OFFICE,
+    streams: ['service'],
+    streamBecause:
+      'Portfolio health reads the servicing position across every site at once.', openedFrom: ['/work'],
     blurb: 'How the whole book is going, with the coverage figure printed before any health figure.',
     terms: ['portfolio', 'health', 'overview', 'dashboard', 'coverage', 'how are we going'],
     hiddenBecause:
@@ -1120,7 +1305,10 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/work/labels', file: 'app/work/labels.tsx', tab: 'work', section: 'Planning',
-    label: 'Asset labels', modes: OFFICE, openedFrom: ['/work'],
+    label: 'Asset labels', modes: OFFICE,
+    streams: ['construction'],
+    streamBecause:
+      'Labelling a register is handover work, done once when the devices go in.', openedFrom: ['/work'],
     blurb: 'Issues numbers to untagged assets and prints the sheet.',
     terms: ['labels', 'tags', 'print', 'numbering', 'untagged'],
     hiddenBecause:
@@ -1163,14 +1351,26 @@ export function destinationAt(route: string): Destination | undefined {
   return BY_ROUTE.get(route);
 }
 
-/** Does this mode put it in front of you? Unknown routes are not shown by anything. */
-export function shows(mode: AppMode, route: string): boolean {
-  return BY_ROUTE.get(route)?.modes.includes(mode) ?? false;
+/**
+ * Whether this stream's hubs list it. A destination with no `streams` is in
+ * every stream, and a phone set to both is in every destination's.
+ */
+export function inStream(stream: StreamChoice, d: Destination): boolean {
+  if (stream === 'both' || !d.streams) return true;
+  return d.streams.includes(stream);
 }
 
-/** Everything a mode shows, in manifest order — hub rows and record screens alike. */
-export function destinationsFor(mode: AppMode): Destination[] {
-  return DESTINATIONS.filter((d) => d.modes.includes(mode));
+/** Does this view put it in front of you? Unknown routes are not shown by anything. */
+export function shows(view: ViewLike, route: string): boolean {
+  const { mode, stream } = asView(view);
+  const d = BY_ROUTE.get(route);
+  return !!d && d.modes.includes(mode) && inStream(stream, d);
+}
+
+/** Everything a view shows, in manifest order — hub rows and record screens alike. */
+export function destinationsFor(view: ViewLike): Destination[] {
+  const { mode, stream } = asView(view);
+  return DESTINATIONS.filter((d) => d.modes.includes(mode) && inStream(stream, d));
 }
 
 // ---------------------------------------------------------------------------
@@ -1197,12 +1397,13 @@ export interface NavGroup {
  * trusting the menu. They are still in the manifest, still counted by
  * `destinationsFor`, and still reachable from the record that owns them.
  */
-export function navFor(mode: AppMode): NavGroup[] {
+export function navFor(view: ViewLike): NavGroup[] {
+  const { mode, stream } = asView(view);
   const groups: NavGroup[] = [];
   for (const tab of TAB_ORDER) {
     const sections: NavSection[] = [];
     for (const d of DESTINATIONS) {
-      if (d.tab !== tab || d.needsContext || !d.modes.includes(mode)) continue;
+      if (d.tab !== tab || d.needsContext || !d.modes.includes(mode) || !inStream(stream, d)) continue;
       const last = sections[sections.length - 1];
       if (last && last.title === d.section) last.destinations.push(d);
       else sections.push({ title: d.section, destinations: [d] });
@@ -1385,6 +1586,33 @@ export function hiddenFrom(mode: AppMode): HiddenNote[] {
     }));
 }
 
+export interface StreamNote {
+  destination: Destination;
+  /** Why this stream does not need it in its hubs. */
+  because: string;
+  /** The streams that do list it. */
+  shownIn: TradeStream[];
+}
+
+/**
+ * What a stream keeps out of the hubs, each with its reason.
+ *
+ * The way back is the same for every one of them and is worth saying in the
+ * same breath: All modules lists every module in the app whatever the stream
+ * is, and search finds everything. So this is a shorter list, not a smaller
+ * app, and the settings screen says so beside it.
+ */
+export function heldBackFrom(stream: StreamChoice): StreamNote[] {
+  if (stream === 'both') return [];
+  return DESTINATIONS
+    .filter((d) => d.streams && !d.streams.includes(stream))
+    .map((d) => ({
+      destination: d,
+      because: d.streamBecause ?? 'No reason recorded, which is itself a fault — see validateManifest.',
+      shownIn: TRADE_STREAMS.filter((t) => d.streams!.includes(t)),
+    }));
+}
+
 /**
  * Things that look like office work and stay anyway.
  *
@@ -1428,7 +1656,15 @@ function normalise(s: string): string {
  * statement about one mode, and a default would answer it for whichever mode
  * the caller forgot to mention.
  */
-export function searchDestinations(query: string, mode: AppMode, limit = 8): DestinationHit[] {
+export function searchDestinations(query: string, view: ViewLike, limit = 8): DestinationHit[] {
+  /*
+   * The stream is deliberately not applied here. Search is how somebody gets
+   * to a module their stream keeps out of the hubs, so filtering it by the
+   * stream would close the only door the stream left open. The mode still
+   * applies below, because that is a different guarantee with its own proof in
+   * `unreachableRoutes`.
+   */
+  const { mode } = asView(view);
   const q = normalise(query);
   if (q.length < 2) return [];
   const words = q.split(' ');
@@ -1580,6 +1816,29 @@ export function validateManifest(): string[] {
       problems.push(`${d.route} is not in Office. Office is the mode that shows everything.`);
     }
 
+    /*
+     * The stream axis, held to the same bargain as the mode one: nothing is
+     * held back without a reason a technician can read and disagree with, and
+     * a reason on something that is not held back is a rule somebody moved and
+     * did not finish moving.
+     */
+    if (d.streams) {
+      if (!d.streams.length) {
+        problems.push(`${d.route} lists no trade stream at all, so neither stream's hubs show it.`);
+      }
+      if (d.streams.length === TRADE_STREAMS.length) {
+        problems.push(`${d.route} lists every stream, which is what leaving streams off means.`);
+      }
+      if (!d.streamBecause) {
+        problems.push(`${d.route} is held back from a trade stream with no reason given.`);
+      }
+      if (d.root) {
+        problems.push(`${d.route} is a tab root, and a tab with no rows in a stream is a dead tab.`);
+      }
+    } else if (d.streamBecause) {
+      problems.push(`${d.route} carries a reason for being held back from a stream but is in both.`);
+    }
+
     if (d.root && d.openedFrom.length) problems.push(`${d.route} is a tab root and cannot be opened from anywhere.`);
     if (!d.root && !d.openedFrom.length) problems.push(`${d.route} is opened from nowhere.`);
     for (const parent of d.openedFrom) {
@@ -1642,23 +1901,29 @@ export function validateManifest(): string[] {
 
 export interface ModeSummary {
   mode: AppMode;
-  /** Rows this mode puts in a hub. */
+  stream: StreamChoice;
+  /** Rows this view puts in a hub. */
   listed: number;
   /** Record screens it shows, which are opened from a record rather than a menu. */
   contextual: number;
-  /** Destinations it holds back. */
+  /** Destinations it holds back, on either axis. */
   hidden: number;
+  /** Of those, the ones the stream holds back rather than the mode. */
+  heldByStream: number;
   total: number;
 }
 
 /** The numbers behind the setting, for the screen that offers it. */
-export function summarise(mode: AppMode): ModeSummary {
-  const shown = destinationsFor(mode);
+export function summarise(view: ViewLike): ModeSummary {
+  const { mode, stream } = asView(view);
+  const shown = destinationsFor(view);
   return {
     mode,
+    stream,
     listed: shown.filter((d) => !d.needsContext).length,
     contextual: shown.filter((d) => d.needsContext).length,
     hidden: DESTINATIONS.length - shown.length,
+    heldByStream: heldBackFrom(stream).filter((n) => n.destination.modes.includes(mode)).length,
     total: DESTINATIONS.length,
   };
 }

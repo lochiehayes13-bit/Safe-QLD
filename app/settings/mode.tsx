@@ -3,10 +3,10 @@ import { Pressable, View } from 'react-native';
 import { Stack, router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
-  DESTINATIONS, MODE_BLURB, MODE_LABEL, TAB_LABEL,
-  hiddenFrom, keptForTechnician, navFor, reach, readMode, searchDestinations, summarise,
-  validateManifest,
-  type AppMode, type Destination, type TabKey,
+  DESTINATIONS, MODE_BLURB, MODE_LABEL, STREAM_BLURB, STREAM_LABEL, TAB_LABEL,
+  heldBackFrom, hiddenFrom, keptForTechnician, navFor, reach, readMode, readStream,
+  searchDestinations, summarise, validateManifest,
+  type AppMode, type Destination, type StreamChoice, type TabKey,
 } from '@/domain/appMode';
 import { DEFAULT_PREFS, loadPrefs, patchPrefs, type Prefs } from '@/app-prefs';
 import { useTheme } from '@/theme';
@@ -15,7 +15,15 @@ import {
 } from '@/components/ui';
 
 /**
- * Choosing between the technician's app and the office's.
+ * Choosing between the technician's app and the office's, and between the
+ * service side and the construction side.
+ *
+ * Two settings, not one with four values, because they are two independent
+ * questions: how much of the app you see, and which trade's work you do. A
+ * service technician and a construction technician are both technicians, and
+ * putting all four on one switch would make a construction technician choose
+ * between the wiring tables and a technician-sized app. The note on
+ * TradeStream in @/domain/appMode sets that out.
  *
  * The setting itself is one line. The rest of this screen is the part that
  * makes the setting safe to use: it shows exactly what each mode holds back,
@@ -36,6 +44,7 @@ export default function ModeScreen() {
   const [open, setOpen] = useState<TabKey | null>(null);
   /** What this screen has been told to save, so a slow read cannot undo it. */
   const chosen = useRef<AppMode | null>(null);
+  const chosenStream = useRef<StreamChoice | null>(null);
   /** Saves run one after another: two quick taps must not land out of order. */
   const writes = useRef<Promise<unknown>>(Promise.resolve());
 
@@ -43,7 +52,11 @@ export default function ModeScreen() {
     void loadPrefs().then((stored) => {
       // A tap that landed before the read came back wins. The stored value is
       // older than the tap, and the person is looking at what they chose.
-      setPrefs(chosen.current ? { ...stored, appMode: chosen.current } : stored);
+      setPrefs({
+        ...stored,
+        ...(chosen.current ? { appMode: chosen.current } : {}),
+        ...(chosenStream.current ? { tradeStream: chosenStream.current } : {}),
+      });
     });
   }, []);
 
@@ -62,8 +75,19 @@ export default function ModeScreen() {
     writes.current = writes.current.then(() => patchPrefs({ appMode: next }));
   }, []);
 
-  const stats = summarise(mode);
+  const readTrade = useMemo(() => readStream(prefs.tradeStream), [prefs.tradeStream]);
+  const stream = readTrade.stream;
+
+  const chooseStream = useCallback((next: StreamChoice) => {
+    chosenStream.current = next;
+    setPrefs((prev) => ({ ...prev, tradeStream: next }));
+    writes.current = writes.current.then(() => patchPrefs({ tradeStream: next }));
+  }, []);
+
+  const view = useMemo(() => ({ mode, stream }), [mode, stream]);
+  const stats = summarise(view);
   const held = hiddenFrom('technician');
+  const streamHeld = heldBackFrom(stream);
   const kept = keptForTechnician();
   const problems = validateManifest();
   const hits = searchDestinations(query, mode);
@@ -83,6 +107,52 @@ export default function ModeScreen() {
 
         {read.assumed ? <Banner tone="warn" title="Mode not recognised" body={read.assumed} /> : null}
 
+        <H2>Which side of the work</H2>
+        <Txt size="xs" tone="faint" style={{ marginBottom: t.space(2), lineHeight: 17 }}>
+          A separate question from the one above, because a service technician and a construction
+          technician are both technicians. This one only shortens the hubs: All modules still lists
+          every module in the app, and the search below still finds everything.
+        </Txt>
+        <Segmented
+          value={stream}
+          onChange={chooseStream}
+          options={[
+            { value: 'both' as StreamChoice, label: STREAM_LABEL.both },
+            { value: 'service' as StreamChoice, label: STREAM_LABEL.service },
+            { value: 'construction' as StreamChoice, label: STREAM_LABEL.construction },
+          ]}
+        />
+        {readTrade.assumed ? (
+          <Banner tone="warn" title="Trade not recognised" body={readTrade.assumed} />
+        ) : null}
+        <Card>
+          <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>{STREAM_BLURB[stream]}</Txt>
+        </Card>
+
+        {streamHeld.length ? (
+          <>
+            <H2>What {STREAM_LABEL[stream]} keeps out of the hubs</H2>
+            <Card>
+              <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
+                {streamHeld.length} modules, and every one of them is still one tap away: All
+                modules on the home screen lists the whole app whatever this is set to. This is a
+                shorter list, not a smaller app.
+              </Txt>
+            </Card>
+            {streamHeld.map((note) => (
+              <Card key={note.destination.route}>
+                <Rowed gap={2} align="center">
+                  <Txt weight="700" size="sm" style={{ flex: 1 }}>{note.destination.label}</Txt>
+                  {note.shownIn.map((st) => (
+                    <Chip key={st} label={STREAM_LABEL[st]} tone="accent" />
+                  ))}
+                </Rowed>
+                <Txt size="sm" style={{ marginTop: t.space(2), lineHeight: 19 }}>{note.because}</Txt>
+              </Card>
+            ))}
+          </>
+        ) : null}
+
         {/*
           Said out loud rather than left to be discovered. The hubs still carry
           their own hardcoded rows, so today this setting changes what this
@@ -97,9 +167,10 @@ export default function ModeScreen() {
           title="Not wired to the hubs yet"
           body={
             'The Today, Tools and Work screens still list everything they always listed. Until '
-            + 'they are built from this list, choosing Technician changes what this screen reports '
-            + 'and not what those three show you. Nothing below is wrong about the app — it is '
-            + 'what each mode is for — but nothing is being hidden from you yet either.'
+            + 'they are built from this list, neither setting on this screen changes what those '
+            + 'three show you — they change what this screen reports. Nothing below is wrong about '
+            + 'the app; it is what each mode and each trade is for. But nothing is being hidden '
+            + 'from you yet either, on either axis.'
           }
         />
 
@@ -112,9 +183,11 @@ export default function ModeScreen() {
             <StatTile label="Held back" value={stats.hidden} tone={stats.hidden ? 'warn' : 'muted'} />
           </Rowed>
           <Txt size="xs" tone="faint" style={{ marginTop: t.space(2.5), lineHeight: 17 }}>
-            {stats.total} screens in all. Nothing is ever removed by this setting — everything held
-            back is still found by the search below, and every screen in the app is reachable in at
-            least one mode without it.
+            {stats.total} screens in all{stats.heldByStream
+              ? `, ${stats.heldByStream} of them held back by the trade rather than the mode`
+              : ''}. Nothing is ever removed by either setting — everything held back is still
+            found by the search below, and every screen in the app is reachable in at least one
+            mode without it.
           </Txt>
         </Card>
 
@@ -186,8 +259,8 @@ export default function ModeScreen() {
           </>
         ) : null}
 
-        <H2>What {MODE_LABEL[mode]} shows</H2>
-        {navFor(mode).map((group) => {
+        <H2>What {MODE_LABEL[mode]}{stream === 'both' ? '' : ` and ${STREAM_LABEL[stream]}`} shows</H2>
+        {navFor(view).map((group) => {
           const count = group.sections.reduce((n, s) => n + s.destinations.length, 0);
           const expanded = open === group.tab;
           return (

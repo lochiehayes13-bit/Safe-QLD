@@ -22,6 +22,18 @@ export interface Prefs {
    * a mode and says when it did not recognise what it found.
    */
   appMode: string;
+  /**
+   * Which trade's work this device is set up for: 'service', 'construction' or
+   * 'both'.
+   *
+   * A different question from `appMode`, and a second field rather than two
+   * more values on the first, because a service technician and a construction
+   * technician are both technicians — see the note on TradeStream in
+   * @/domain/appMode. Held as a plain string for the same reason `appMode` is,
+   * and `readStream` turns it into a choice and says when it did not recognise
+   * what it found.
+   */
+  tradeStream: string;
   technicianName: string;
   /**
    * Which Simpro employee this phone belongs to, and their address there.
@@ -164,6 +176,8 @@ export const DEFAULT_PREFS: Prefs = {
   // that starts by showing everything would only ever be found by the people
   // who did not need it.
   appMode: 'technician',
+  // Both, so nobody loses a module they did not choose to lose.
+  tradeStream: 'both',
   technicianName: '',
   simproEmployeeId: '',
   simproEmployeeEmail: '',
