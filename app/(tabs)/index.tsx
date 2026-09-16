@@ -108,7 +108,7 @@ export default function HomeScreen() {
   return (
     <Screen>
       <Hero name={prefs?.technicianName ?? ''} />
-      <PhotoDrop technicianName={prefs?.technicianName ?? ''} />
+      <PhotoDrop />
       <AskBar />
       <FindRow />
 

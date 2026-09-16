@@ -1,87 +1,29 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { View } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
+import { router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import {
-  MAX_PHOTOS_PER_EMAIL, PHOTO_DROP_SUBTITLE, PHOTO_DROP_TITLE, WEBSITE_PHOTOS_INBOX,
-  describePick, photoDropBody, photoDropSubject,
-} from '@/domain/photoDrop';
-import { sendMail } from '@/export/mail';
+import { PHOTO_DROP_SUBTITLE, PHOTO_DROP_TITLE } from '@/domain/photoSend';
 import { useTheme } from '@/theme';
 import { Txt } from '@/components/ui';
 import { Bounce } from '@/components/motion';
-import { showAlert } from '@/components/alert';
-import { describeActionFailure } from '@/domain/loadFailure';
 
 /**
  * The big button on the front page that asks for photos for the website.
  *
- * Pick from the library, and the mail app opens addressed to Lachlan with
- * the photos attached. The phone's own mail app does the sending, so the
- * technician sees exactly what goes and can add a line. A browser cannot put
- * a photo on an email, so there the photos are handed to the person first and
- * the addressed draft opens second, with the pictures a drag away in their
- * downloads.
+ * It used to do the whole job itself: open the library and, the instant
+ * anything was picked, hand it to a mail app. Nobody ever saw what they had
+ * chosen, there was nowhere to write a line about it, and in a browser the
+ * pictures went to the downloads folder with an empty draft and instructions
+ * to drag them on.
+ *
+ * So it is a button again, and the screen behind it is app/photos.tsx: the
+ * photos load in the app, you check them, and one send goes.
  */
-export function PhotoDrop({ technicianName }: { technicianName: string }) {
+export function PhotoDrop() {
   const t = useTheme();
-  const [busy, setBusy] = useState(false);
-
-  const pick = async () => {
-    setBusy(true);
-    try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) {
-        showAlert('Permission needed', 'Safe QLD needs to see your photos to pick the ones to send.');
-        return;
-      }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsMultipleSelection: true,
-        selectionLimit: MAX_PHOTOS_PER_EMAIL,
-        quality: 0.85,
-      });
-      if (result.canceled || !result.assets.length) return;
-
-      const pickNote = describePick(result.assets.length);
-      // Named and sized the way an export is, so the mail layer can attach
-      // them on a phone and hand them over in a browser without knowing they
-      // came from a camera roll rather than a spreadsheet writer.
-      const photos = result.assets.slice(0, pickNote.send).map((a, i) => ({
-        uri: a.uri,
-        name: a.fileName?.trim() || `photo-${i + 1}.jpg`,
-        size: a.fileSize ?? 0,
-      }));
-      const many = photos.length === 1 ? '' : 's';
-      const tail = pickNote.note ? `\n\n${pickNote.note}` : '';
-
-      const outcome = await sendMail({
-        to: WEBSITE_PHOTOS_INBOX,
-        subject: photoDropSubject(technicianName, photos.length),
-        body: photoDropBody(technicianName, photos.length, pickNote.note),
-      }, photos);
-
-      if (outcome === 'no-mail-app') {
-        showAlert('No mail app set up', `This phone has no email account configured, so the photos cannot be sent from here. They go to ${WEBSITE_PHOTOS_INBOX}.`);
-      } else if (outcome === 'sent') {
-        showAlert('Sent', `${photos.length} photo${many} on the way to ${WEBSITE_PHOTOS_INBOX}. Thanks.${tail}`);
-      } else if (outcome === 'handed-over') {
-        showAlert(
-          'Draft opened — drag the photos in',
-          `An email to ${WEBSITE_PHOTOS_INBOX} is open and ${photos.length} photo${many} ${photos.length === 1 ? 'has' : 'have'} downloaded. Drag them onto the email and send it.${tail}`,
-        );
-      } else {
-        showAlert('Not sent', 'The email was not sent, so the photos have not gone anywhere.');
-      }
-    } catch (e) {
-      showAlert('Could not send', describeActionFailure(e, 'sending the photos'));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
-    <Bounce onPress={() => { if (!busy) void pick(); }} haptic="light" scaleTo={0.97} style={{ opacity: busy ? 0.6 : 1 }}>
+    <Bounce onPress={() => router.push('/photos')} haptic="light" scaleTo={0.97}>
       <View
         accessibilityRole="button"
         accessibilityLabel={`${PHOTO_DROP_TITLE} ${PHOTO_DROP_SUBTITLE}`}
@@ -101,7 +43,7 @@ export function PhotoDrop({ technicianName }: { technicianName: string }) {
             {PHOTO_DROP_SUBTITLE} — they go straight to Lachlan
           </Txt>
         </View>
-        <MaterialCommunityIcons name="send-outline" size={22} color={t.color.onAccent} />
+        <MaterialCommunityIcons name="chevron-right" size={22} color={t.color.onAccent} />
       </View>
     </Bounce>
   );

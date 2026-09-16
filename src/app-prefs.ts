@@ -110,6 +110,20 @@ export interface Prefs {
   /** Where a suggestion about the app itself goes. Same reasoning. */
   suggestionsEmail: string;
   /**
+   * Where photographs for the website are POSTed, if the company has somewhere.
+   *
+   * Empty by default, and empty is not a fault: with nothing here the photo
+   * screen hands the pictures to the operating system's share sheet instead,
+   * which is one tap and works on every device. With an address, no mail app
+   * opens at all — which is the thing that was actually asked for, and it is
+   * this one field away. `server/photo-relay` in this repository is the forty
+   * lines that answer it.
+   *
+   * Https only; `validEndpoint` in @/domain/photoSend refuses anything else,
+   * because these are photographs of customers' buildings.
+   */
+  websitePhotoUrl: string;
+  /**
    * Which of the two inboxes a finished safe work method statement goes to.
    *
    * 'service' or 'projects'. Held as a plain string rather than the union for
@@ -181,6 +195,7 @@ export const DEFAULT_PREFS: Prefs = {
   shortcuts: DEFAULT_SHORTCUTS,
   supervisorEmail: company.email,
   swmsInbox: DEFAULT_SWMS_INBOX,
+  websitePhotoUrl: '',
   suggestionsEmail: company.email,
   normalHoursSellCents: 0,
   afterHoursSellCents: 0,

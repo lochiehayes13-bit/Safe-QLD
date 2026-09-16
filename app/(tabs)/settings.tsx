@@ -10,6 +10,7 @@ import { registerAutoSyncTask, unregisterAutoSyncTask } from '@/simpro/autoSyncT
 import { clearKey as clearAiKey, hasKey as hasAiKey, storeKey as storeAiKey } from '@/ai/client';
 import { clearPlacesKey, hasPlacesKey, storePlacesKey } from '@/geo/placesKey';
 import { PRIVACY_NOTE } from '@/ai/grounding';
+import { WEBSITE_PHOTOS_INBOX, endpointProblem } from '@/domain/photoSend';
 import { JOB_RECORDS_PRIVACY_NOTE } from '@/ai/jobBrief';
 import { loadPrefs, patchPrefs, DEFAULT_PREFS, type Prefs } from '@/app-prefs';
 import { clearExports, exportsSize } from '@/export/files';
@@ -538,6 +539,28 @@ export default function SettingsScreen() {
         <Field label="Supervisor" value={prefs.supervisorEmail} onChangeText={(v) => update({ supervisorEmail: v })} keyboardType="email-address" autoCapitalize="none" hint="Questions from Ask the office go here. Leave is booked straight onto your Simpro schedule, not emailed." />
         <View style={{ height: t.space(2.5) }} />
         <Field label="Suggestions about the app" value={prefs.suggestionsEmail} onChangeText={(v) => update({ suggestionsEmail: v })} keyboardType="email-address" autoCapitalize="none" hint="Every suggestion goes out with the subject tag [Safe QLD app], so an inbox rule can file them." />
+        <View style={{ height: t.space(2.5) }} />
+        {/*
+          * The one setting that takes the mail app out of the photo button.
+          * Empty is the normal state and costs nothing: the photos go to the
+          * phone's share sheet already attached, which is one tap. Filled in,
+          * they are posted straight to the office and no mail app opens at
+          * all — which is what was actually asked for. server/photo-relay in
+          * this repository is the forty lines that answer it.
+          */}
+        <Field
+          label="Photo address"
+          value={prefs.websitePhotoUrl}
+          onChangeText={(v) => update({ websitePhotoUrl: v })}
+          autoCapitalize="none"
+          placeholder="https://…"
+          hint={`Where website photos are posted. Leave it empty and they go out through the phone's share sheet to ${WEBSITE_PHOTOS_INBOX} instead.`}
+        />
+        {endpointProblem(prefs.websitePhotoUrl) ? (
+          <Txt size="xs" tone="fail" style={{ marginTop: t.space(1.5), lineHeight: 17 }}>
+            {endpointProblem(prefs.websitePhotoUrl)}
+          </Txt>
+        ) : null}
       </Card>
 
       <H2>Reading the standards for you</H2>

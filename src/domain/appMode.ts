@@ -212,11 +212,14 @@ const OFFICE: readonly AppMode[] = ['office'];
 export const DESTINATIONS: readonly Destination[] = [
   // -- Today -----------------------------------------------------------------
   {
-    route: '/', file: 'app/(tabs)/index.tsx', tab: 'today', section: 'The day',
+    route: '/', file: 'app/(tabs)/index.tsx', opensVia: 'src/components/PhotoDrop.tsx',
+    tab: 'today', section: 'The day',
     label: 'Home', root: true, modes: BOTH, openedFrom: [],
     // A hub, not a dashboard. It renders whichever modules the technician
     // pinned, so it is not credited here with opening any of them — the
-    // picker at /shortcuts is, because that one always does.
+    // picker at /shortcuts is, because that one always does. The photo button
+    // is the exception: it is not a pinned module and it always renders, and
+    // it holds its route in the component rather than on the screen.
     blurb: 'The question bar over everything the app holds, and the modules you chose, in your order.',
     terms: ['home', 'today', 'start', 'hub', 'front page'],
   },
@@ -323,6 +326,20 @@ export const DESTINATIONS: readonly Destination[] = [
     openedFrom: ['/'],
     blurb: 'The written notice the occupier is owed within 24 hours, counting down.',
     terms: ['notice', 'critical', 'occupier', '24 hours', 'commissioner'],
+  },
+  {
+    route: '/photos', file: 'app/photos.tsx', tab: 'today', section: 'Setup',
+    label: 'Photos for the website', modes: BOTH, openedFrom: ['/'],
+    // The big orange button on the home screen, which is not a pinned module
+    // and so is not covered by the /shortcuts row above. It is written down
+    // here because it is the only way in.
+    blurb:
+      'Pick photographs of a job worth showing, check them, write a line about them and send them '
+      + 'in one go.',
+    terms: ['photo', 'photos', 'photograph', 'picture', 'website', 'marketing', 'upload', 'camera'],
+    keptBecause:
+      'A technician standing in front of a tidy booster is the only person who can take the '
+      + 'photograph, so the button belongs on the phone and not at a desk.',
   },
   {
     route: '/shortcuts', file: 'app/shortcuts.tsx', opensVia: 'src/domain/modules.ts',
