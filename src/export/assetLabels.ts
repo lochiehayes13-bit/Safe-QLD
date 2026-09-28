@@ -30,6 +30,27 @@ import { TAG_LENGTH, compactTag, parseTag, tagPayload } from '@/domain/assetTag'
  * date on a tag would be read as one of those from six feet up a ladder, and
  * a label that implies a service happened is worse than no label.
  *
+ * **What is deliberately not printed: the letterhead.** Every other document
+ * this app prints now carries the Safe QLD masthead and swoosh, and this sheet
+ * is the one place where that would be a fault rather than an omission, so it is
+ * recorded here before somebody sweeps the export folder looking for the file
+ * that got missed.
+ *
+ * A letterhead needs page flow to sit in. This sheet has none: `@page` sets
+ * `margin: 0` because the printer must not inset anything, and every label is an
+ * absolutely positioned cell at a millimetre offset measured off the die-cut
+ * stock, with a per-printer nudge on top of that to correct a fraction of a
+ * millimetre of feed drift. There is nothing above the first row for a masthead
+ * to occupy — 36mm of artwork would be laid straight across the top two rows of
+ * labels, and they would come off the sheet with a piece of a logo on them.
+ * Shifting the grid down to make room is worse again, because the offsets are
+ * the stock's, not ours, and a label printed 36mm low misses the die cut
+ * entirely and the whole sheet is wasted.
+ *
+ * The labels are also not correspondence. A sticky label on an extinguisher is
+ * identified by the tag on it, which the scan screen reads back; nobody receives
+ * this sheet, so there is no reader to tell whose document it is.
+ *
  * Nothing here touches the file system or the database. It returns HTML, and
  * the screen hands that to expo-print.
  */

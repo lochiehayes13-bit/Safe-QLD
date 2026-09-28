@@ -1,4 +1,5 @@
 import { columnise, suggestedColumns, type ZoneChart } from '@/domain/zoneChart';
+import { LETTERHEAD_CSS, letterheadHeaderHtml } from './letterhead';
 import { formatAuDate } from './sheets';
 import type { Panel, Site } from '@/domain/types';
 
@@ -33,6 +34,24 @@ export interface ZoneChartInput {
   generatedAt: string;
   /** Landscape suits a wide chart on a panel door; portrait suits a tall one. */
   orientation?: 'portrait' | 'landscape';
+  /**
+   * Print the Safe QLD masthead above the chart. Off unless asked for.
+   *
+   * Every other document the app prints wears the letterhead, and this one is
+   * the deliberate exception, because the chart's whole job is to fit on one
+   * sheet. The masthead is 36mm of artwork across a 190mm column and the swoosh
+   * and entity line come to about another 40mm, and the file's rule at the top
+   * is that a chart in two halves is a chart nobody trusts — 76mm is enough to
+   * push the bottom of a 40-row chart onto a second page. So the copy that goes
+   * on the panel door stays bare, and the masthead is for the copy that gets
+   * emailed to a building manager who wants to know who produced it.
+   *
+   * Only the masthead, even then. The `.foot` line already carries the company
+   * name and "Verify against the panel before it is relied on", and that warning
+   * is the one that matters to someone reading this at a panel at night; burying
+   * it above a swoosh and an ABN line would not improve it.
+   */
+  letterhead?: boolean;
 }
 
 export function zoneChartHtml(input: ZoneChartInput): string {
@@ -46,6 +65,27 @@ export function zoneChartHtml(input: ZoneChartInput): string {
   // second page and a chart in two halves is a chart nobody trusts.
   const fontSize = chart.rows.length > 200 ? 8 : chart.rows.length > 100 ? 9.5 : 11;
   const numberWidth = chart.rows.length > 200 ? 30 : 38;
+
+  // The masthead is assembled by hand rather than through `letterheaded`,
+  // for two reasons that are both about this document specifically.
+  //
+  // The first is the page box. This chart works its own out at runtime, a line
+  // or two above — it flips to landscape once a panel has more zones than fit
+  // down a portrait column — and `letterheaded` would have to be handed that
+  // string back to avoid printing a wide chart on a portrait sheet with the
+  // right-hand column off the paper. Keeping the rule where it already is means
+  // there is nothing to hand back and nothing to get wrong, and importing
+  // LETTERHEAD_CSS alone is safe because the page box was split out of it: the
+  // furniture half declares no @page at all.
+  //
+  // The second is that `letterheaded` always closes a document with the swoosh
+  // and the entity line, and this one wants the head without the foot. The
+  // rules for both come in with LETTERHEAD_CSS; the unused half costs a few
+  // bytes and is worth more than a second copy of the masthead's proportions
+  // living in this file and drifting from the artwork.
+  const letterhead = input.letterhead === true;
+  const letterheadCss = letterhead ? LETTERHEAD_CSS : '';
+  const masthead = letterhead ? `${letterheadHeaderHtml()}\n` : '';
 
   const column = (rows: typeof chart.rows) => `<table>
 ${rows.map((r) => `  <tr${r.unused ? ' class="unused"' : ''}>
@@ -83,8 +123,8 @@ ${rows.map((r) => `  <tr${r.unused ? ' class="unused"' : ''}>
   .warn { border: 2px solid #C00000; background: #FDF2F2; padding: 6px 9px; margin: 8px 0; font-size: 9.5px; }
   .foot { margin-top: 10px; padding-top: 6px; border-top: 1px solid #BBB; color: #555; font-size: 8px;
           display: flex; justify-content: space-between; }
-  </style></head><body>
-<div class="bar"></div>
+${letterheadCss}  </style></head><body>
+${masthead}<div class="bar"></div>
 <div class="head">
   <div>
     <h1>Zone Chart</h1>

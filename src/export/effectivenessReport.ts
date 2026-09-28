@@ -2,6 +2,7 @@ import {
   KIND_MEANING, NOT_A_DESIGN_REVIEW, NOT_A_SERVICE_RECORD, NO_TESTING_CONDUCTED,
   PRIORITY_LABEL, findingRef, recommendationList, summariseFindings, type Finding,
 } from '@/domain/findings';
+import { letterheaded } from './letterhead';
 import { formatAuDate } from './sheets';
 
 /**
@@ -64,6 +65,18 @@ export interface EffectivenessReportInput {
   issueDate?: string;
   assessedBy: string;
   preparedBy: string;
+  /**
+   * Who prepared the report, named in the limitations paragraph under the
+   * details table.
+   *
+   * There is no fallback any more. It used to default to the trading name
+   * 'Safe QLD Fire Protection' spelled out in this file, and the letterhead foot
+   * now prints the registered entity and its ABN from the shared company
+   * constants — so a report with no company name supplied was stating the
+   * company twice, under two different names, one of them a literal nobody would
+   * think to update. Left unset the sentence simply does not claim a preparer,
+   * and the foot still says whose document it is.
+   */
   companyName?: string;
   /** Section 1. */
   summary?: string;
@@ -87,6 +100,20 @@ export interface EffectivenessReportInput {
   openDefectCaution?: string;
 }
 
+/*
+ * The report's own stylesheet.
+ *
+ * No `@page` rule here, and none wanted: the letterhead's 8mm/10mm/10mm page box
+ * applies, and that is the box the masthead artwork is drawn to the width of. A
+ * margin declared here would leave the band floating inside the sheet rather
+ * than sitting where the printed stock has it.
+ *
+ * `.sub` is the document's own subtitle — "Site Fire System Effectiveness
+ * Report" under the systems heading — not an entity line, so it stays. The
+ * photographic register is the thing to watch on this document: `.photo` is 47%
+ * of the column and a pair of photos can be most of a page's height, so a break
+ * lands between rows of the flex wrap rather than through a caption.
+ */
 const CSS = `
   * { box-sizing: border-box; }
   body { font-family: Helvetica, Arial, sans-serif; font-size: 10.5px; color: #1b1b1b; margin: 0; }
@@ -115,9 +142,22 @@ const CSS = `
   .action .id { font-weight: bold; }
   .pri { font-weight: bold; }
   .photos { display: flex; flex-wrap: wrap; gap: 10px; }
-  .photo { width: 47%; }
+  /*
+   * A photograph and the caption that says what it shows are one thing. Split
+   * across a page break the caption becomes the first line of the next sheet
+   * with no image above it, which in a register of a dozen similar detector
+   * photographs is unreadable rather than merely untidy.
+   */
+  .photo { width: 47%; page-break-inside: avoid; }
   .photo img { width: 100%; border: 1px solid #999; }
   .photo .cap { font-size: 8.5px; line-height: 1.4; margin-top: 3px; color: #333; }
+  /*
+   * Four rows naming who assessed, who wrote it, the client and the dates. It is
+   * the block a reader checks the report against, and split across a break it
+   * reads as two half-tables neither of which answers the question. Small enough
+   * to always fit, so the guard can always be honoured.
+   */
+  .signoff { page-break-inside: avoid; }
   .signoff td { border: 1px solid #999; padding: 7px; }
   .signoff td:first-child { width: 36%; background: #f2f2f2; font-weight: bold;
                             text-transform: uppercase; font-size: 9px; letter-spacing: 0.4px; }
@@ -202,7 +242,7 @@ function photoRegister(photos: ReportPhoto[]): string {
 export function effectivenessReportHtml(input: EffectivenessReportInput): string {
   const tally = summariseFindings(input.findings);
   const list = recommendationList(input.findings);
-  const company = input.companyName || 'Safe QLD Fire Protection';
+  const company = input.companyName?.trim();
 
   const activities = input.activities?.filter((a) => a.trim()) ?? [];
 
@@ -211,7 +251,10 @@ export function effectivenessReportHtml(input: EffectivenessReportInput): string
     list ? `As areas of recommended improvement, the upcoming project should incorporate: ${list}.` : '',
   ].filter(Boolean).join(' ');
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8" /><style>${CSS}</style></head><body>
+  return letterheaded({
+    title: `Fire System Effectiveness Report — ${input.siteName}`,
+    css: CSS,
+    body: `
     <h1>Fire Detection, Alarm &amp; Occupant Warning Systems</h1>
     <div class="sub">Site Fire System Effectiveness Report</div>
     <div class="caveat">Assessed against original design intent as installed — not an engineered
@@ -224,9 +267,10 @@ export function effectivenessReportHtml(input: EffectivenessReportInput): string
 
     ${metaTable(input)}
 
-    <p class="foot">Prepared by ${esc(company)}. This report records a visual fire system
-      effectiveness and readiness assessment. It does not constitute a routine service, inspection
-      or test record under AS 1851:2012, and no certificate of compliance is issued with it.</p>
+    <p class="foot">${company ? `Prepared by ${esc(company)}. ` : ''}This report records a visual
+      fire system effectiveness and readiness assessment. It does not constitute a routine service,
+      inspection or test record under AS 1851:2012, and no certificate of compliance is issued with
+      it.</p>
 
     <div class="confidential">Commercial in Confidence</div>
 
@@ -281,5 +325,6 @@ export function effectivenessReportHtml(input: EffectivenessReportInput): string
   esc([formatAuDate(input.attendanceDate), formatAuDate(input.issueDate)].filter(Boolean).join(' / '))
 }</td></tr>
     </table>
-  </body></html>`;
+`,
+  });
 }

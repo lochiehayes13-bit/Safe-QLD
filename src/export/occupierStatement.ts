@@ -3,6 +3,8 @@ import { occupierStatementIssues } from '@/domain/qldCompliance';
 import {
   COMMISSIONER_COPY_BUSINESS_DAYS, commissionerCopyDeadline,
 } from '@/domain/occupierForm';
+import { brand } from '@/theme/brand';
+import { letterheaded } from './letterhead';
 import { formatAuDate } from './sheets';
 import { qldIsoDay } from '@/domain/qldTime';
 
@@ -28,6 +30,63 @@ function esc(s: string | undefined | null): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 }
+
+/*
+ * The statement's own stylesheet, with no `@page` rule of its own.
+ *
+ * It used to open with `@page { size: A4; margin: 14mm 12mm }`, and that rule
+ * never once reached a printer: the letterhead's stylesheet was appended after
+ * the caller's, so its own page box won the cascade. Now that `letterheaded`
+ * emits the page box first a rule here would take effect, and it should not —
+ * the masthead artwork is drawn to the width of the 8mm/10mm box, and a wider
+ * page margin leaves the band floating inside the sheet instead of sitting
+ * where the printed stock has it.
+ *
+ * The navy stays. It is this document's structural colour — table heads, the
+ * declaration border, the Commissioner deadline — and it is the one thing
+ * distinguishing the statement the occupier signs from the defect notice
+ * handed over with it. It is not a second red competing with the masthead, so
+ * it does not have the problem the notices' #C00000 had. The two reds on the
+ * page do: `.bad` and the not-ready-to-sign box are now `brand.red`, because a
+ * warning in a red a shade off the red across the top of the sheet reads as a
+ * printing fault rather than as a warning.
+ */
+const CSS = `
+  body { font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; color: #111; font-size: 10.5px; line-height: 1.45; margin: 0; }
+  h1 { font-size: 19px; margin: 0 0 2px; color: #1F4E79; letter-spacing: -0.2px; }
+  h2 { font-size: 11.5px; margin: 16px 0 6px; padding-bottom: 3px; border-bottom: 1.5px solid #333;
+       text-transform: uppercase; letter-spacing: 0.6px; }
+  .sub { color: #555; margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
+  td, th { border: 1px solid #D5D8DC; padding: 4px 7px; vertical-align: top; text-align: left; }
+  th { background: #1F4E79; color: #fff; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.4px; }
+  td.k { width: 26%; background: #F4F6F8; font-weight: 600; }
+  tr.absent td { color: #999; }
+  td.na { font-style: italic; }
+  td.tick { font-weight: 700; color: #1F6F3D; width: 9%; }
+  .bad { color: ${brand.red}; }
+  .declare { border: 2px solid #1F4E79; background: #F2F7FC; padding: 10px 12px; margin: 14px 0; border-radius: 4px; }
+  .warn { border: 2px solid ${brand.red}; background: #FDF2F2; padding: 9px 11px; margin: 12px 0; border-radius: 4px; }
+  .clock { font-weight: 700; color: #1F4E79; }
+  .note { margin-top: 18px; padding: 9px 11px; background: #F4F6F8; border-left: 3px solid #888;
+          color: #444; font-size: 9px; line-height: 1.5; }
+  /*
+   * The occupier signs this one, so the block carrying the signature is the
+   * point of the document. It is 40px of white space above a rule, about 25mm
+   * with the name under it, and a break through that leaves the rule on one
+   * sheet and the occupier's name and position on the next — a signature block
+   * nobody can sign, on the one document that exists to be signed. It was never
+   * guarded, which did not show while the page had 14mm margins and nothing
+   * above the heading; the masthead is 36mm of the first sheet and moves every
+   * later element down the document.
+   */
+  .sig { margin-top: 22px; display: flex; gap: 28px; page-break-inside: avoid; }
+  .sigbox { flex: 1; }
+  .sigline { border-top: 1px solid #333; padding-top: 3px; font-size: 9.5px; color: #444; margin-top: 40px; }
+  .sigimg { height: 46px; margin-bottom: -6px; }
+  .footer { margin-top: 18px; padding-top: 7px; border-top: 1px solid #D5D8DC; color: #888; font-size: 8.5px;
+            display: flex; justify-content: space-between; }
+`;
 
 export interface OccupierStatementInput {
   statement: OccupierStatement;
@@ -82,35 +141,10 @@ export function occupierStatementHtml(input: OccupierStatementInput): string {
     })
     .join('\n');
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-  @page { size: A4; margin: 14mm 12mm; }
-  body { font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; color: #111; font-size: 10.5px; line-height: 1.45; margin: 0; }
-  .bar { height: 5px; background: #1F4E79; margin-bottom: 14px; }
-  h1 { font-size: 19px; margin: 0 0 2px; color: #1F4E79; letter-spacing: -0.2px; }
-  h2 { font-size: 11.5px; margin: 16px 0 6px; padding-bottom: 3px; border-bottom: 1.5px solid #333;
-       text-transform: uppercase; letter-spacing: 0.6px; }
-  .sub { color: #555; margin-bottom: 12px; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
-  td, th { border: 1px solid #D5D8DC; padding: 4px 7px; vertical-align: top; text-align: left; }
-  th { background: #1F4E79; color: #fff; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.4px; }
-  td.k { width: 26%; background: #F4F6F8; font-weight: 600; }
-  tr.absent td { color: #999; }
-  td.na { font-style: italic; }
-  td.tick { font-weight: 700; color: #1F6F3D; width: 9%; }
-  .bad { color: #C00000; }
-  .declare { border: 2px solid #1F4E79; background: #F2F7FC; padding: 10px 12px; margin: 14px 0; border-radius: 4px; }
-  .warn { border: 2px solid #C00000; background: #FDF2F2; padding: 9px 11px; margin: 12px 0; border-radius: 4px; }
-  .clock { font-weight: 700; color: #1F4E79; }
-  .note { margin-top: 18px; padding: 9px 11px; background: #F4F6F8; border-left: 3px solid #888;
-          color: #444; font-size: 9px; line-height: 1.5; }
-  .sig { margin-top: 22px; display: flex; gap: 28px; }
-  .sigbox { flex: 1; }
-  .sigline { border-top: 1px solid #333; padding-top: 3px; font-size: 9.5px; color: #444; margin-top: 40px; }
-  .sigimg { height: 46px; margin-bottom: -6px; }
-  .footer { margin-top: 18px; padding-top: 7px; border-top: 1px solid #D5D8DC; color: #888; font-size: 8.5px;
-            display: flex; justify-content: space-between; }
-  </style></head><body>
-<div class="bar"></div>
+  return letterheaded({
+    title: `Occupier's Statement — ${s.premisesName}`,
+    css: CSS,
+    body: `
 <h1>Occupier's Statement</h1>
 <div class="sub">Annual statement about prescribed fire safety installations</div>
 
@@ -175,8 +209,9 @@ ${deadline.due ? `<p class="clock" style="margin-top:14px">
 </div>
 
 <div class="footer">
-  <span>${esc(input.companyName)}</span>
+  <span>${esc(s.premisesName)} &middot; Occupier's statement</span>
   <span>Generated ${esc(formatAuDate(generatedAt))}</span>
 </div>
-</body></html>`;
+`,
+  });
 }

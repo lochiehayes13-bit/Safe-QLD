@@ -19,6 +19,35 @@ import { LETTERHEAD_FOOTER_DATA_URI, LETTERHEAD_HEADER_DATA_URI } from './letter
  */
 
 /**
+ * The page box, kept separate from the furniture so a caller can have its own.
+ *
+ * This rule used to be the first line of LETTERHEAD_CSS, and because that block
+ * is appended after the caller's stylesheet it won the cascade against every
+ * caller that set its own page margins. `routineServiceReport`'s
+ * `@page { size: A4; margin: 12mm 10mm 16mm }` has been in that file since the
+ * report was written and has never once reached the printer: the letterhead's
+ * 8mm/10mm/10mm came later in the stylesheet, and for @page the later
+ * declaration wins the same way it does anywhere else. Nothing looked broken
+ * enough to chase — the report still printed, just with the wrong bottom
+ * margin and the signature block sitting further down the sheet than intended.
+ *
+ * Two things follow from that. The default page box is emitted *before* the
+ * caller's CSS now, so a document that declares its own @page wins on ordering
+ * the way its author assumed it did. And a document that only knows its page
+ * box at runtime passes it in as the `page` option instead of declaring a rule
+ * — the zone chart flips to landscape when a panel has more zones than fit down
+ * a portrait column, and a hardcoded `size: A4` in here would quietly flip it
+ * back to portrait and cut the right-hand column off the paper.
+ */
+export const LETTERHEAD_PAGE = 'size: A4; margin: 8mm 10mm 10mm;';
+
+/**
+ * The default page box as a complete rule, for a caller that wants to place it
+ * itself (a document assembling its own `<style>` without `letterheaded`).
+ */
+export const LETTERHEAD_PAGE_CSS = `@page { ${LETTERHEAD_PAGE} }`;
+
+/**
  * Page furniture, in normal flow rather than fixed to each page.
  *
  * `position: fixed` is the obvious way to repeat a letterhead on every sheet,
@@ -39,9 +68,18 @@ import { LETTERHEAD_FOOTER_DATA_URI, LETTERHEAD_HEADER_DATA_URI } from './letter
  * across a 190mm column they come to 36.0mm and 20.5mm. `height: auto` keeps
  * that true at any page size — a fixed height is what makes a logo look
  * stretched on someone's letterhead.
+ *
+ * The `body { margin: 0 }` is here, after the caller's own stylesheet, on
+ * purpose: the paper inset is the job of the @page margin, and a body margin on
+ * top of it insets the masthead again so the band no longer lines up with the
+ * printed stock. Every document but the SWMS already set `margin: 0` on body,
+ * and the SWMS did not, which is why those two were the only letterheaded
+ * documents in the app and their mastheads sat at different heights. A document
+ * that wants breathing room inside the page box should pad a wrapper element or
+ * set `body { padding }`, both of which this rule leaves alone.
  */
 export const LETTERHEAD_CSS = `
-  @page { size: A4; margin: 8mm 10mm 10mm; }
+  body { margin: 0; }
   .lh-header { display: block; width: 100%; margin: 0 0 6mm; }
   .lh-footer { display: block; width: 100%; margin: 8mm 0 0; page-break-inside: avoid; }
   .lh-header img, .lh-footer img { display: block; width: 100%; height: auto; }
@@ -78,15 +116,47 @@ export function letterheadFooterHtml(): string {
 /**
  * Wraps a document body in the letterhead.
  *
- * Takes the caller's own CSS so each document keeps its own layout; only the
- * letterhead rules are added, and they come last so the body padding here wins
- * over a `body { margin: 0 }` in the document's own stylesheet.
+ * Takes the caller's own CSS so each document keeps its own layout. The pieces
+ * go into the stylesheet in a deliberate order, and the order is the whole
+ * subtlety of this function:
+ *
+ *  1. the page box, first, so a caller that declares its own `@page` overrides
+ *     it just by being later in the stylesheet;
+ *  2. the caller's stylesheet;
+ *  3. the letterhead furniture, last, so a document with a broad rule of its
+ *     own — an `img { width: 50% }` in a photo report, a `div { border }` in a
+ *     table-heavy form — cannot shrink the masthead or box the swoosh.
+ *
+ * The docstring that used to be here said the furniture came last so that the
+ * letterhead's body padding beat a caller's `body { margin: 0 }`. That was
+ * wrong twice over: LETTERHEAD_CSS had no body rule at all, and what appending
+ * last actually did was override the caller's `@page`. Correcting it here
+ * because the next person to read this file would otherwise reach the same
+ * wrong conclusion and move the block back.
+ *
+ * `page` holds the body of the @page rule — `size: A4 landscape; margin: 10mm`
+ * — for a document that works its page box out at runtime. Omit it and the
+ * standard A4 letterhead page is used.
+ *
+ * `masthead: false` prints the document without the top band. Form 72 needs
+ * that: it is an approved form with its own full-width statutory head, and
+ * stacking the Safe QLD band above it gives the reader two mastheads and pushes
+ * the signature part onto a second page. Such a document still gets the foot,
+ * because the entity line under the swoosh carries the legal name and ABN, and
+ * a document leaving this company without its ABN on it is a different problem.
  */
-export function letterheaded(options: { title?: string; css: string; body: string }): string {
+export function letterheaded(options: {
+  title?: string;
+  css: string;
+  body: string;
+  page?: string;
+  masthead?: boolean;
+}): string {
+  const page = `@page { ${options.page ?? LETTERHEAD_PAGE} }`;
   return `<!DOCTYPE html><html><head><meta charset="utf-8" />`
     + (options.title ? `<title>${escapeHtml(options.title)}</title>` : '')
-    + `<style>${options.css}${LETTERHEAD_CSS}</style></head><body>`
-    + letterheadHeaderHtml()
+    + `<style>${page}${options.css}${LETTERHEAD_CSS}</style></head><body>`
+    + (options.masthead === false ? '' : letterheadHeaderHtml())
     + options.body
     + letterheadFooterHtml()
     + `</body></html>`;

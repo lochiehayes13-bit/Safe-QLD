@@ -3,6 +3,7 @@ import {
   quoteTotals, unpriceableReason, type Quote, type QuoteLine, type QuoteSection, type QuoteTotals,
 } from '@/domain/quote';
 import { formatCents } from '@/domain/rates';
+import { letterheaded } from './letterhead';
 import { formatAuDate } from './sheets';
 
 /**
@@ -47,8 +48,24 @@ function qty(n: number): string {
 
 export interface QuoteDocumentInput {
   quote: Quote;
+  /**
+   * Who the quotation is from, as a row in the details table.
+   *
+   * It used to be a centred line under the title with the ABN, phone and email
+   * stacked beneath it. The letterhead foot prints all of that now, from the
+   * shared company constants, so the head was the entity a second time — and in
+   * a different form, because this value comes from the office's preferences
+   * while the foot carries the registered name. A quotation that names the
+   * quoting party two different ways is a quotation somebody queries.
+   */
   companyName?: string;
-  /** Printed under the company name where the office has supplied it. */
+  /**
+   * No longer printed. The letterhead foot carries the ABN, the phone number and
+   * the email address for every document the app produces, so a quotation that
+   * also printed them under the title printed them twice and could disagree with
+   * itself. These three are kept on the interface only because the two screens
+   * that build a quotation still pass them; they can go once those call sites do.
+   */
   companyAbn?: string;
   companyPhone?: string;
   companyEmail?: string;
@@ -79,6 +96,20 @@ export const DEFAULT_TERMS: string[] = [
   'Prices exclude GST unless a line says otherwise. GST is shown separately below.',
 ];
 
+/*
+ * The quotation's own stylesheet.
+ *
+ * There is no `@page` rule here and there never was, so the letterhead's
+ * 8mm/10mm/10mm page box applies. That is the right box rather than merely the
+ * inherited one: the masthead artwork is drawn to the width of that box, and a
+ * margin set here would leave the band floating inside the sheet instead of
+ * sitting where the printed stock has it.
+ *
+ * `.sub` still exists because the status line ("Draft — not a final issued
+ * quotation") uses it. What it no longer styles is the company name, ABN, phone
+ * and email that used to sit centred under the title; the letterhead foot prints
+ * those now.
+ */
 const CSS = `
   * { box-sizing: border-box; }
   body { font-family: Helvetica, Arial, sans-serif; font-size: 10.5px; color: #1b1b1b; margin: 0; }
@@ -116,6 +147,17 @@ const CSS = `
   .totals td:last-child { text-align: right; width: 120px; white-space: nowrap; }
   .totals .grand td { border-top: 1.5px solid #1b1b1b; border-bottom: 3px double #1b1b1b;
                       font-weight: bold; font-size: 12px; }
+  /*
+   * The acceptance block is what the client signs and sends back, and it is
+   * seven rows of about 34px each — roughly 65mm, comfortably inside a page. Let
+   * it split and the client gets "Accepted for the client by" and "Position
+   * held" at the foot of one sheet and the signature and date lines at the top of
+   * the next, which is how a quotation comes back signed in one place with the
+   * date blank. It was never guarded; the letterhead changing the page box from
+   * no rule at all to 8mm/10mm/10mm and adding 36mm of masthead to the first
+   * sheet moves every break in the document, so it is guarded now.
+   */
+  .accept { page-break-inside: avoid; }
   .accept td { border: 1px solid #999; padding: 9px 7px; height: 34px; vertical-align: bottom; }
   .accept td:first-child { width: 30%; background: #f2f2f2; font-weight: bold;
                            text-transform: uppercase; font-size: 9px; letter-spacing: 0.4px; }
@@ -128,6 +170,7 @@ const CSS = `
 function metaTable(input: QuoteDocumentInput): string {
   const q = input.quote;
   const rows: [string, string | undefined][] = [
+    ['Quotation From', input.companyName],
     ['Quotation Number', q.reference],
     ['Date of Issue', q.issuedAt ? formatAuDate(q.issuedAt) : 'Not yet issued'],
     ['Valid Until', q.expiresAt ? formatAuDate(q.expiresAt) : `${q.validityDays} days from issue`],
@@ -233,17 +276,15 @@ function notPricedNote(totals: QuoteTotals, quote: Quote): string {
 export function quoteDocumentHtml(input: QuoteDocumentInput): string {
   const q = input.quote;
   const totals = quoteTotals(q, input.asAt);
-  const company = input.companyName || 'Safe QLD Fire Protection';
   const terms = (input.terms ?? DEFAULT_TERMS).filter((t) => t.trim());
   const scope = (input.scopeItems ?? []).filter((s) => s.text.trim());
   const sources = pricingSources(q.lines);
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8" /><style>${CSS}</style></head><body>
+  return letterheaded({
+    title: `Quotation ${q.reference} — ${q.siteName}`,
+    css: CSS,
+    body: `
     <h1>Quotation — Fire Protection Rectification Works</h1>
-    <div class="sub">${esc(company)}${input.companyAbn ? ` &middot; ABN ${esc(input.companyAbn)}` : ''}</div>
-    ${input.companyPhone || input.companyEmail
-    ? `<div class="sub">${esc([input.companyPhone, input.companyEmail].filter(Boolean).join(' &middot; '))}</div>`
-    : ''}
 
     <div class="who">${esc(q.clientName)}</div>
     <div class="where">${esc(q.siteName)}${q.siteAddress ? `<br />${esc(q.siteAddress)}` : ''}</div>
@@ -314,5 +355,6 @@ export function quoteDocumentHtml(input: QuoteDocumentInput): string {
     ? `<p class="foot">Defects listed as not covered are excluded for the following reasons: ${
       esc([...new Set(q.unpriceable.map((u) => unpriceableReason(u.reason)))].join('; '))}.</p>`
     : ''}
-  </body></html>`;
+`,
+  });
 }

@@ -5,6 +5,8 @@ import {
   type ReportBundle,
 } from './sheets';
 import { qldIsoDay } from '@/domain/qldTime';
+import { brand } from '@/theme/brand';
+import { letterheaded } from './letterhead';
 
 /**
  * HTML report templates rendered to PDF by expo-print.
@@ -12,6 +14,28 @@ import { qldIsoDay } from '@/domain/qldTime';
  * Styling is deliberately print-first: white background, black text, no
  * dependence on the app's dark theme, and page-break rules so a 400-device test
  * sheet prints with repeating table headers rather than orphaned rows.
+ *
+ * Both documents in here go out on the letterhead now, and neither used to.
+ * The service report is the single most-issued document in the app — the client
+ * gets one after every service — and it left the phone on blank white paper
+ * under a 4mm red bar that was not a Safe QLD colour at all: #C92A2A, a red
+ * nobody sampled. It is the same hue as the brand's #9E1215 to within a degree
+ * and thirteen lightness points brighter, which is exactly the kind of near-miss
+ * that reads as a different company's red when the two sit on one desk — and it
+ * is nowhere near the orange that is actually the primary mark. So the one
+ * document a building manager sees most often was the one that looked least
+ * like the company's, and the bar was doing the letterhead's job badly rather than
+ * leaving room for the real thing. The bar is gone, the masthead and swoosh
+ * from `letterheaded` take its place, and the two rules that used that red for
+ * a rule line and a callout edge now read brand.red so there is one source for
+ * it.
+ *
+ * The @page rule went out of BASE_CSS with it. `letterheaded` emits the page
+ * box *before* the caller's stylesheet precisely so a document can still
+ * declare its own, and the matrix does — but it declares it through the `page`
+ * option rather than as a rule in BASE_CSS, because a landscape @page written
+ * into the caller's CSS is the trap that had routineServiceReport's margins
+ * silently dead for the life of that file.
  */
 
 function esc(s: string | number | undefined | null): string {
@@ -23,8 +47,18 @@ function esc(s: string | number | undefined | null): string {
     .replace(/"/g, '&quot;');
 }
 
+/*
+ * No @page rule in here on purpose.
+ *
+ * This block used to open with `@page { size: A4; margin: 14mm 12mm }`, and the
+ * letterhead's own page box is 8mm/10mm/10mm. Whichever of the two came later
+ * in the stylesheet would have won, silently, and the masthead artwork is drawn
+ * to bleed to the letterhead's inset — at 12mm side margins the band stops
+ * short of where the printed stock's does and the document stops matching the
+ * one the office sends. So the page box is the letterhead's for both documents
+ * here, and the matrix overrides it through the `page` option where it has to.
+ */
 const BASE_CSS = `
-  @page { size: A4; margin: 14mm 12mm; }
   * { box-sizing: border-box; }
   body {
     font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif;
@@ -32,9 +66,22 @@ const BASE_CSS = `
   }
   h1 { font-size: 20px; margin: 0 0 2px; letter-spacing: -0.2px; }
   h2 { font-size: 13px; margin: 20px 0 6px; padding-bottom: 4px;
-       border-bottom: 1.5px solid #C92A2A; text-transform: uppercase; letter-spacing: 0.6px; }
+       border-bottom: 1.5px solid ${brand.red}; text-transform: uppercase; letter-spacing: 0.6px; }
   .sub { color: #666; font-size: 11px; margin-bottom: 14px; }
-  .brandbar { height: 4px; background: #C92A2A; margin-bottom: 12px; }
+  /*
+   * The callout beside the certification wording. Its edge used to be the same
+   * unsampled red as the old brand bar; it is the wordmark's red now, so the two
+   * red things on the page are the same red as the one in the masthead above.
+   *
+   * It was an inline style on the div, which is why the colour hid from the
+   * search that found the other two. Pulling it up here also lets it say
+   * page-break-inside: avoid — a certification split across a sheet break, with
+   * the wording on one page and the "I certify" on the next, is the one block on
+   * this document where a page break changes what the reader thinks was signed.
+   */
+  .certify { margin-top: 10px; padding: 9px 11px; background: #F4F6F8;
+             border-left: 3px solid ${brand.red}; font-size: 10px; line-height: 1.5;
+             page-break-inside: avoid; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
   th, td { border: 1px solid #D5D8DC; padding: 4px 6px; text-align: left; vertical-align: top; }
   th { background: #333F50; color: #fff; font-weight: 600; font-size: 9.5px;
@@ -73,6 +120,16 @@ const BASE_CSS = `
   .sigline { border-top: 1px solid #333; padding-top: 3px; font-size: 9.5px; color: #444; }
   .photos { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
   .photos img { width: 30%; border: 1px solid #D5D8DC; border-radius: 3px; }
+  /*
+   * Kept, even though the letterhead now closes both documents with an entity
+   * line of its own. The two say different things: the entity line is who sent
+   * it — legal name, ABN, address, phone — and this strip is which document this
+   * is, which site it belongs to and when it was produced. That last part is
+   * what somebody holding two printouts of the same service uses to tell which
+   * is the later one, so it does not come off. What did come off is the
+   * "Generated by Safe QLD" wording, because the company's name is now on the
+   * line directly underneath and printing it twice reads like a mistake.
+   */
   .footer { margin-top: 22px; padding-top: 7px; border-top: 1px solid #D5D8DC;
             color: #888; font-size: 8.5px; display: flex; justify-content: space-between; }
   .empty { color: #888; font-style: italic; padding: 6px 0; }
@@ -164,8 +221,10 @@ export function serviceReportHtml(
     checksBySection.set(c.section, arr);
   }
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${BASE_CSS}</style></head><body>
-<div class="brandbar"></div>
+  return letterheaded({
+    title: report.title,
+    css: BASE_CSS,
+    body: `
 <h1>${esc(report.title)}</h1>
 <div class="sub">${jobNumber ? `Customer Job No. ${esc(jobNumber)} &middot; ` : ''}${esc(site.name)}${siteAddress ? ` &middot; ${esc(siteAddress)}` : ''}</div>
 
@@ -287,7 +346,7 @@ ${statutory ? `<h2>Record of maintenance</h2>
   <tr><td>Hardcopy left on site</td><td>${statutory.hardcopyLeftOnSite ? 'Yes' : 'Not stated'}</td></tr>
 </table>
 
-<div style="margin-top:10px;padding:9px 11px;background:#F4F6F8;border-left:3px solid #C92A2A;font-size:10px;line-height:1.5">
+<div class="certify">
   <strong>Certification.</strong> I certify that the matters stated in this record of maintenance are correct.
 </div>` : ''}
 
@@ -306,9 +365,10 @@ ${statutory ? `<h2>Record of maintenance</h2>
 
 <div class="footer">
   <span>${esc(site.name)} &middot; ${esc(report.title)}</span>
-  <span>Generated by Safe QLD &middot; ${esc(formatAuDate(generatedAt))}</span>
+  <span>Generated ${esc(formatAuDate(generatedAt))}</span>
 </div>
-</body></html>`;
+`,
+  });
 }
 
 /** Renders a cause-and-effect matrix as a landscape PDF. */
@@ -317,8 +377,19 @@ export function causeEffectHtml(panel: Panel, rules: CauseEffectRule[], siteName
   // two are issued together and describe one panel.
   const columns = matrixColumns(rules);
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${BASE_CSS}
-  @page { size: A4 landscape; margin: 10mm; }
+  /*
+   * Landscape comes in through `page`, not as an @page rule in the stylesheet.
+   *
+   * It was a rule, written after BASE_CSS so it beat BASE_CSS's portrait box,
+   * and that worked only because both rules were in the same stylesheet the
+   * matrix controlled. `letterheaded` appends its own furniture after the
+   * caller's CSS, so a landscape @page left down here would be competing with
+   * the letterhead's portrait one from the wrong side of the cascade and a
+   * twenty-effect matrix would print with its right-hand columns off the sheet.
+   * The `page` option exists for exactly this and puts the rule where nothing
+   * later contradicts it.
+   */
+  const css = `${BASE_CSS}
   /* Vertical effect headers keep a wide matrix on one page. */
   th.rot { height: 118px; white-space: nowrap; vertical-align: bottom; padding: 4px 2px; width: 26px; }
   th.rot > div { transform: rotate(-90deg); transform-origin: left top; width: 26px;
@@ -326,8 +397,13 @@ export function causeEffectHtml(panel: Panel, rules: CauseEffectRule[], siteName
   td.mark { text-align: center; font-weight: 700; background: #D4EDDA; }
   td.cond { text-align: center; font-weight: 700; background: #FFF3CD; }
   td.blank { background: #FAFAFA; }
-  </style></head><body>
-<div class="brandbar"></div>
+  `;
+
+  return letterheaded({
+    title: `Cause & Effect Matrix — ${siteName}`,
+    page: 'size: A4 landscape; margin: 10mm;',
+    css,
+    body: `
 <h1>Cause &amp; Effect Matrix</h1>
 <div class="sub">${esc(siteName)} &middot; ${esc(panel.name)}${panel.model ? ` (${esc(panel.model)})` : ''}</div>
 
@@ -353,7 +429,8 @@ ${rules.length ? `<table>
 
 <div class="footer">
   <span>${esc(siteName)} &middot; Cause &amp; Effect</span>
-  <span>Generated by Safe QLD &middot; ${esc(formatAuDate(generatedAt))}</span>
+  <span>Generated ${esc(formatAuDate(generatedAt))}</span>
 </div>
-</body></html>`;
+`,
+  });
 }

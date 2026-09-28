@@ -1,6 +1,8 @@
 import type { Site } from '@/domain/types';
 import type { ImpairmentRecord } from '@/db/opsRepo';
 import { qldMoment } from '@/domain/qldTime';
+import { brand } from '@/theme/brand';
+import { letterheaded } from './letterhead';
 
 /**
  * Impairment notice — the piece of paper the building gets.
@@ -34,6 +36,14 @@ export interface ImpairmentNoticeInput {
   technicianLicence?: string;
   /** Who the notice is being handed to, where the record does not name them. */
   responsibleName?: string;
+  /**
+   * The number to ring about this impairment, on the face of the notice.
+   *
+   * It stays even though the letterhead foot now prints the office number too.
+   * That line is 6.5px grey legal furniture; this row is the number a building
+   * manager rings at nine at night to ask when the sprinklers go back on, and it
+   * has to be readable at arm's length. The duplication is deliberate.
+   */
   companyPhone?: string;
   generatedAt: string;
 }
@@ -89,20 +99,32 @@ export function noticeUndertakings(rec: ImpairmentRecord): { label: string; done
   ];
 }
 
-export function impairmentNoticeHtml(input: ImpairmentNoticeInput): string {
-  const { record: r, site, generatedAt } = input;
-  const restored = !!r.restoredAt;
-  const address = [site.address, site.suburb, site.state, site.postcode].filter(Boolean).join(' ');
-  const accent = restored ? '#1E7B3C' : '#C00000';
-  const elapsed = impairmentDuration(
-    (r.restoredAt ? Date.parse(r.restoredAt) : Date.parse(generatedAt)) - Date.parse(r.startedAt),
-  );
-  const who = r.responsibleName || input.responsibleName || '';
-
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-  @page { size: A4; margin: 16mm 14mm; }
+/**
+ * The notice's own stylesheet.
+ *
+ * A function rather than a constant because the accent colour is the state of
+ * the impairment: red while the installation is out of service, green once it
+ * is back. That is the one thing a building manager takes in from across a
+ * desk, and it has to be the same colour in the heading, the border of the box
+ * they must not miss and the elapsed-time line.
+ *
+ * The red is now `brand.red` rather than the #C00000 that was here before. The
+ * masthead puts the company's red across the top of the sheet, and a heading in
+ * a second, nearly-but-not-quite-identical red an inch below it reads as a
+ * printing fault. The green is left alone: it is not competing with anything on
+ * the letterhead, and a green that matched a brand red would defeat the point.
+ *
+ * There is deliberately no `@page` rule. This file used to carry
+ * `@page { size: A4; margin: 16mm 14mm }`, which never reached the printer
+ * because the letterhead stylesheet was appended after it and its own page box
+ * won on ordering. Now that `letterheaded` emits the page box first, a rule here
+ * would win — and it should not, because the masthead artwork is drawn to the
+ * width of the 8mm/10mm box and a wider margin leaves the band floating inside
+ * the sheet rather than sitting where the printed stock has it.
+ */
+function noticeCss(accent: string, restored: boolean): string {
+  return `
   body { font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; color: #111; font-size: 11px; line-height: 1.5; margin: 0; }
-  .bar { height: 5px; background: ${accent}; margin-bottom: 14px; }
   h1 { font-size: 19px; margin: 0 0 2px; color: ${accent}; letter-spacing: -0.2px; }
   h2 { font-size: 12px; margin: 18px 0 6px; padding-bottom: 3px; border-bottom: 1.5px solid #333;
        text-transform: uppercase; letter-spacing: 0.6px; }
@@ -115,19 +137,43 @@ export function impairmentNoticeHtml(input: ImpairmentNoticeInput): string {
   .warn strong { color: ${accent}; }
   .clock { font-size: 15px; font-weight: 700; color: ${accent}; margin-top: 6px; }
   .yes { color: #1E7B3C; font-weight: 600; }
-  .no { color: #C00000; font-weight: 600; }
+  .no { color: ${brand.red}; font-weight: 600; }
   ul { margin: 4px 0 0; padding-left: 18px; }
   li { margin-bottom: 3px; }
   .note { margin-top: 20px; padding: 9px 11px; background: #F4F6F8; border-left: 3px solid #888;
           color: #444; font-size: 9.5px; line-height: 1.5; }
-  .sig { margin-top: 26px; display: flex; gap: 28px; }
+  /*
+   * The signature block is 44px of white space above a rule with the name under
+   * it, about 26mm all told, and a break through that hands the building manager
+   * a rule on one sheet and the words "Received by" on the next. It was
+   * unguarded, which was survivable while the page had 16mm margins and nothing
+   * above the heading; the masthead is 36mm of the first sheet and moves every
+   * later element down the document, so where the break lands has changed.
+   */
+  .sig { margin-top: 26px; display: flex; gap: 28px; page-break-inside: avoid; }
   .sigbox { flex: 1; }
   .sigline { border-top: 1px solid #333; padding-top: 3px; font-size: 9.5px; color: #444; margin-top: 44px; }
   .footer { margin-top: 20px; padding-top: 7px; border-top: 1px solid #D5D8DC; color: #888; font-size: 8.5px;
             display: flex; justify-content: space-between; }
-  </style></head><body>
-<div class="bar"></div>
-<h1>${restored ? 'Impairment Closed' : 'Fire Safety Impairment Notice'}</h1>
+`;
+}
+
+export function impairmentNoticeHtml(input: ImpairmentNoticeInput): string {
+  const { record: r, site, generatedAt } = input;
+  const restored = !!r.restoredAt;
+  const address = [site.address, site.suburb, site.state, site.postcode].filter(Boolean).join(' ');
+  const accent = restored ? '#1E7B3C' : brand.red;
+  const elapsed = impairmentDuration(
+    (r.restoredAt ? Date.parse(r.restoredAt) : Date.parse(generatedAt)) - Date.parse(r.startedAt),
+  );
+  const who = r.responsibleName || input.responsibleName || '';
+  const heading = restored ? 'Impairment Closed' : 'Fire Safety Impairment Notice';
+
+  return letterheaded({
+    title: `${heading} — ${site.name}`,
+    css: noticeCss(accent, restored),
+    body: `
+<h1>${heading}</h1>
 <div class="sub">${esc(site.name)}${address ? ` — ${esc(address)}` : ''}</div>
 
 <div class="warn">
@@ -197,8 +243,9 @@ ${r.notes ? `<h2>Notes</h2><table><tr><td>${lines(r.notes)}</td></tr></table>` :
 </div>
 
 <div class="footer">
-  <span>${esc(input.companyName)}</span>
-  <span>Impairment notice &middot; ${esc(qldMoment(generatedAt) ?? generatedAt)}</span>
+  <span>${esc(site.name)} &middot; ${restored ? 'Impairment closed' : 'Impairment notice'}</span>
+  <span>Issued ${esc(qldMoment(generatedAt) ?? generatedAt)}</span>
 </div>
-</body></html>`;
+`,
+  });
 }

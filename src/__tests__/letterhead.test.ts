@@ -1,6 +1,6 @@
 import { company } from '@/theme/brand';
 import { LETTERHEAD_FOOTER_DATA_URI, LETTERHEAD_HEADER_DATA_URI } from '@/export/letterheadArt';
-import { LETTERHEAD_CSS, letterheaded } from '@/export/letterhead';
+import { LETTERHEAD_CSS, LETTERHEAD_PAGE, LETTERHEAD_PAGE_CSS, letterheaded } from '@/export/letterhead';
 import { routineServiceReportHtml } from '@/export/routineServiceReport';
 
 /**
@@ -59,6 +59,15 @@ describe('page furniture', () => {
     expect(LETTERHEAD_CSS).toMatch(/\.lh-footer[^}]*page-break-inside:\s*avoid/);
   });
 
+  it('carries no page box of its own', () => {
+    // The furniture block is appended after the caller's stylesheet, so an
+    // @page in here wins against the caller's whether or not that was intended
+    // — which is exactly how the routine service report lost its own margins.
+    // The page box lives in LETTERHEAD_PAGE_CSS, which goes in first.
+    expect(LETTERHEAD_CSS).not.toContain('@page');
+    expect(LETTERHEAD_PAGE_CSS).toBe(`@page { ${LETTERHEAD_PAGE} }`);
+  });
+
   it('does not position furniture with `fixed`', () => {
     // Tried and measured: Chrome clips a fixed element to the page content box,
     // so a swoosh offset into the bottom margin is cut off, and a fixed footer
@@ -86,10 +95,23 @@ describe('letterheaded()', () => {
     expect(doc).toContain('.x{color:red}');
   });
 
-  it('lets the letterhead rules win over the document\'s own', () => {
-    // Appended last on purpose: a document that sets `body { margin: 0 }` would
-    // otherwise pull the masthead flush against the paper edge.
-    expect(doc.indexOf('.x{color:red}')).toBeLessThan(doc.indexOf('.lh-header'));
+  it('puts the furniture rules after the document\'s own so a broad rule cannot reach them', () => {
+    // The furniture comes last so a document-wide `img { width: 50% }` or
+    // `div { border }` cannot shrink the masthead or box the swoosh. Note this
+    // is NOT, as the docstring used to claim, about beating a caller's
+    // `body { margin: 0 }` — see the @page tests below for what appending last
+    // was really doing before this was split up.
+    expect(doc.indexOf('.x{color:red}')).toBeLessThan(doc.indexOf('.lh-header {'));
+  });
+
+  it('normalises the body margin so every document\'s masthead sits in the same place', () => {
+    // The paper inset is the @page margin's job. A body margin on top of it
+    // insets the band again, and the SWMS (which set no body margin) printed
+    // its masthead lower than the routine service report (which set 0) for
+    // exactly that reason.
+    expect(LETTERHEAD_CSS).toMatch(/body\s*\{[^}]*margin:\s*0/);
+    const styles = doc.slice(doc.indexOf('<style>'), doc.indexOf('</style>'));
+    expect(styles.indexOf('.x{color:red}')).toBeLessThan(styles.search(/body\s*\{[^}]*margin:\s*0/));
   });
 
   it('prints the entity details as real text, not as part of the picture', () => {
@@ -105,6 +127,94 @@ describe('letterheaded()', () => {
     const evil = letterheaded({ title: 'A "<script>" & co', css: '', body: '' });
     expect(evil).toContain('<title>A &quot;&lt;script&gt;&quot; &amp; co</title>');
     expect(evil).not.toContain('<script>');
+  });
+});
+
+describe('the page box', () => {
+  /** The rules inside the document's one stylesheet, which is where the cascade happens. */
+  function styles(html: string): string {
+    return html.slice(html.indexOf('<style>') + '<style>'.length, html.indexOf('</style>'));
+  }
+
+  it('uses the standard A4 letterhead page when the caller asks for nothing', () => {
+    const doc = letterheaded({ css: '.x{color:red}', body: '' });
+    expect(styles(doc)).toContain(`@page { ${LETTERHEAD_PAGE} }`);
+  });
+
+  it('prints the page box the caller asked for, including a landscape sheet', () => {
+    // Not hypothetical: the zone chart turns the paper sideways when a panel has
+    // more zones than fit down a portrait column. A letterhead that forced
+    // `size: A4` would rotate it back and cut the second column off the sheet.
+    const doc = letterheaded({ css: '.x{color:red}', body: '', page: 'size: A4 landscape; margin: 10mm;' });
+    expect(styles(doc)).toContain('@page { size: A4 landscape; margin: 10mm; }');
+    expect(styles(doc)).not.toContain('size: A4;');
+  });
+
+  it('declares the page box exactly once for a document that has none of its own', () => {
+    // Two @page rules is not an error, it is just something to reason about;
+    // for the common case there should be nothing to reason about.
+    const doc = letterheaded({ css: '.x{color:red}', body: '', page: 'size: A5; margin: 5mm;' });
+    expect(doc.match(/@page/g)).toHaveLength(1);
+  });
+
+  it('lets a document that declares its own @page beat the letterhead default', () => {
+    // This is the regression the split exists for. The letterhead's @page used
+    // to be appended after the caller's stylesheet, so a document that set its
+    // own page margins lost silently — the rule was right there in the file and
+    // simply never applied. Asserted on cascade order, because that is what
+    // decides it: at equal specificity the later declaration wins.
+    const doc = letterheaded({ css: '@page { size: A4; margin: 12mm 10mm 16mm; }', body: '' });
+    const sheet = styles(doc);
+    expect({
+      letterheadFirst: sheet.indexOf(LETTERHEAD_PAGE) < sheet.indexOf('margin: 12mm 10mm 16mm'),
+      callerPresent: sheet.includes('margin: 12mm 10mm 16mm'),
+    }).toEqual({ letterheadFirst: true, callerPresent: true });
+  });
+
+  it('gives the routine service report the margins its own stylesheet asks for', () => {
+    // The real document, not a fixture: routineServiceReport has asked for
+    // 12mm/10mm/16mm since it was written and, until the split, printed on the
+    // letterhead's 8mm/10mm/10mm instead. The bottom margin is the one that
+    // matters — it is the room the swoosh needs.
+    const html = routineServiceReportHtml({
+      customer: { name: 'A Customer' },
+      site: { name: 'A Site' },
+      sections: [],
+    });
+    const sheet = styles(html);
+    expect(sheet.indexOf(LETTERHEAD_PAGE)).toBeLessThan(sheet.indexOf('margin: 12mm 10mm 16mm'));
+  });
+});
+
+describe('a document that wants the foot but not the masthead', () => {
+  // Form 72 is an approved form with its own full-width statutory head. Stacking
+  // the Safe QLD band above it gives the reader two mastheads and pushes the
+  // signature part onto a second page. It still needs the foot, because that is
+  // where the legal name and ABN are.
+  const bare = letterheaded({ css: '', body: '<p id="content">body</p>', masthead: false });
+  const body = bare.slice(bare.indexOf('<body>'));
+
+  it('leaves the band off the page', () => {
+    expect(body).not.toContain('lh-header');
+  });
+
+  it('still closes with the swoosh and the ABN', () => {
+    expect({
+      swoosh: body.includes('lh-footer'),
+      abn: body.includes(company.abn),
+      legalName: body.includes(company.legalName),
+    }).toEqual({ swoosh: true, abn: true, legalName: true });
+  });
+
+  it('keeps the masthead when the option is left alone or passed as true', () => {
+    // A missing option must not silently drop the letterhead from the two
+    // documents that already wear it.
+    for (const options of [{}, { masthead: true }]) {
+      const doc = letterheaded({ css: '', body: '', ...options });
+      const docBody = doc.slice(doc.indexOf('<body>'));
+      expect({ options, masthead: docBody.includes('lh-header') })
+        .toEqual({ options, masthead: true });
+    }
   });
 });
 

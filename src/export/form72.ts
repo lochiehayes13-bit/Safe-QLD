@@ -5,6 +5,7 @@ import {
 } from '@/domain/form72';
 import { addQldBusinessDays } from '@/domain/occupierForm';
 import { qldIsoDay } from '@/domain/qldTime';
+import { letterheaded } from './letterhead';
 import { formatAuDate } from './sheets';
 
 /**
@@ -803,7 +804,7 @@ function partH(form: Form72): string {
 function partI(form: Form72): string {
   return `${band('Part I — Signature')}
   <div class="decl">${esc(DECLARATION)}</div>
-  <table class="grid">
+  <table class="grid sig">
     ${pair(['Licensee Name', cell(form.licenseeName, 'pass')], ['Licensee Signature', cell(form.signature, 'pass')])}
     ${pair(['Licence No. (QBCC/PIC)', cell(form.licenceNumber, 'pass')],
     // Not every job has one, so its absence is answered rather than flagged.
@@ -860,6 +861,14 @@ const CSS = `
   .stated.pass { border-left-color: #1E7B34; }
   .stated.fail { border-left-color: #B00020; }
   .decl { padding: 6px 2px; font-size: 8.5px; line-height: 1.5; }
+  /* Part I only. Every other part uses a bare table.grid and some of them — Part
+     E's flow table on a six-hydrant site — are taller than a page, so they have
+     to be allowed to break. The signature grid is the one that must not: the
+     swoosh and the entity line under it take roughly 40mm off the tail of the
+     last sheet now, which is enough to leave the licensee's name on one page and
+     the signature box on the next. A form whose signature is on a sheet of its
+     own is the argument an occupier's solicitor makes in a year's time. */
+  table.grid.sig { page-break-inside: avoid; }
   .issues { border: 1px solid #D5D8E4; background: #FAFAFC; padding: 6px 9px; margin-top: 5px;
             font-size: 8px; line-height: 1.5; }
   .issues ul { margin: 3px 0 0; padding-left: 16px; }
@@ -897,7 +906,33 @@ export function form72Html(input: Form72DocumentInput): string {
   const company = input.companyName?.trim() || 'Safe QLD Fire Protection';
   const generatedOn = qldCalendarDate(input.generatedAt);
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8" /><style>${CSS}</style></head><body>
+  // The company mark, and why this form gets only half of it.
+  //
+  // Every other document the app prints wears the full letterhead: the band at
+  // the top, the swoosh and the entity line at the bottom. This one must not.
+  // The `.head` block below is the department's own full-width head, reproduced
+  // because MP 6.1 is discharged by the department's form and not by a summary
+  // of it, and a Safe QLD band stacked above it gives the reader two mastheads
+  // and no way to tell whose document it is. Worse, it reads as though the
+  // company has altered a form the regulator prescribes.
+  //
+  // So `masthead: false`, which is the escape hatch `letterheaded` exists to
+  // offer, and the foot alone. The swoosh lands after DEPARTMENT_NOTE and after
+  // the dashed `.ours` block that already says "Not part of the department's
+  // form", so it reads as the producer's mark on a reproduced form rather than
+  // as part of the form. The entity line that comes with it is the reason to
+  // keep the foot at all: a statutory record leaving this company without its
+  // legal name and ABN on the page is its own problem.
+  //
+  // CSS's own @page at the top of this file stays where it is. `letterheaded`
+  // puts its default page box in ahead of the caller's stylesheet, so the
+  // form's `12mm 10mm` is the later declaration and wins — which is the whole
+  // point of the split, and the reason nothing here passes a `page` option.
+  return letterheaded({
+    title: FORM_TITLE,
+    css: CSS,
+    masthead: false,
+    body: `
   <div class="head">
     <div>
       <h1>${esc(FORM_TITLE)}</h1>
@@ -961,5 +996,6 @@ export function form72Html(input: Form72DocumentInput): string {
     : ''}
     The department's form and MP 6.1 are published at hpw.qld.gov.au.
   </div>
-  </body></html>`;
+  `,
+  });
 }

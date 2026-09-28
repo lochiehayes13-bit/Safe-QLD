@@ -1,4 +1,5 @@
 import { overloadCheck, type OverloadCheck } from '@/domain/form72';
+import { letterheaded } from './letterhead';
 import { formatAuDate } from './sheets';
 
 /**
@@ -96,6 +97,15 @@ export interface CombinedFlowInput {
   testedBy: string;
   licenceNumber?: string;
   position?: string;
+  /**
+   * The company certifying the test, as a row in the Certification table.
+   *
+   * It is not the letterhead. The letterhead foot prints the registered entity
+   * and its ABN from the shared company constants, and this is whatever the
+   * office has set as the company name in preferences — the two are the same
+   * business but not the same string, so this one is treated as data on the
+   * certificate rather than as a second masthead.
+   */
   company?: string;
   comments?: string;
 }
@@ -203,11 +213,29 @@ export function assessCombinedFlow(input: CombinedFlowInput): CombinedFlowAssess
   return { combinedLps, overload, staleEquipment, warnings, passed };
 }
 
+/*
+ * The certificate's own stylesheet.
+ *
+ * It never declared an `@page` rule and still does not, so the letterhead's
+ * 8mm/10mm/10mm page box applies. That is not an oversight either way: the
+ * masthead artwork is drawn to the width of that box, and a page margin set
+ * here would leave the band floating inside the sheet instead of sitting where
+ * the printed stock has it.
+ *
+ * The `.sub` rule that used to be here styled a centred line reading
+ * "<company> · Licence <number>" directly under the title. The letterhead foot
+ * now prints the legal name, ABN, address, phone and email from the shared
+ * company constants, so that line was the entity a second time and in a
+ * different form — the old default was the trading name while the foot carries
+ * the registered one, which is the sort of disagreement a certificate cannot
+ * afford. The company and the licence both appear once each in the Certification
+ * table at the bottom, which is where a reader checking a certificate looks for
+ * them anyway.
+ */
 const CSS = `
   * { box-sizing: border-box; }
   body { font-family: Helvetica, Arial, sans-serif; font-size: 10.5px; color: #1b1b1b; margin: 0; }
-  h1 { font-size: 15px; text-align: center; margin: 0 0 3px; letter-spacing: 0.4px; text-transform: uppercase; }
-  .sub { text-align: center; font-size: 10px; color: #444; margin: 0 0 14px; }
+  h1 { font-size: 15px; text-align: center; margin: 0 0 14px; letter-spacing: 0.4px; text-transform: uppercase; }
   h2 { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; background: #1b3a63;
        color: #fff; padding: 5px 8px; margin: 16px 0 0; }
   table { width: 100%; border-collapse: collapse; }
@@ -226,7 +254,6 @@ const row = (k: string, v: string | number | undefined) =>
 
 export function combinedFlowCertificateHtml(input: CombinedFlowInput): string {
   const a = assessCombinedFlow(input);
-  const company = input.company || 'Safe QLD Fire Protection';
 
   const verdict = a.passed === true
     ? '<span class="pass">Flow test PASSED</span>'
@@ -234,9 +261,11 @@ export function combinedFlowCertificateHtml(input: CombinedFlowInput): string {
       ? '<span class="fail">Flow test FAILED</span>'
       : '<span>Not determined from the figures recorded</span>';
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8" /><style>${CSS}</style></head><body>
+  return letterheaded({
+    title: `Combined Flow Test Certificate — ${input.buildingName || 'Safe QLD'}`,
+    css: CSS,
+    body: `
     <h1>Annual Combined Sprinkler &amp; Hydrant Flow Test Certificate</h1>
-    <div class="sub">${esc(company)}${input.licenceNumber ? ` · Licence ${esc(input.licenceNumber)}` : ''}</div>
 
     <h2>Building</h2>
     <table>
@@ -335,6 +364,7 @@ export function combinedFlowCertificateHtml(input: CombinedFlowInput): string {
 
     <h2>Certification</h2>
     <table>
+      ${row('Certifying company', input.company)}
       ${row('Test carried out by', input.testedBy)}
       ${row('Position', input.position)}
       ${row('Licence no.', input.licenceNumber)}
@@ -347,5 +377,6 @@ export function combinedFlowCertificateHtml(input: CombinedFlowInput): string {
       Queensland Form 70 under QDC MP 6.1. Where the outcome above is not determined, the figures
       recorded do not support a result either way and the test is incomplete rather than passed.
     </p>
-  </body></html>`;
+`,
+  });
 }
