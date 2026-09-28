@@ -1,7 +1,12 @@
 import {
   TIMESHEET_INBOX,
+  TIMESHEET_LACHLAN,
+  TIMESHEET_MATT,
+  TIMESHEET_ROUTES,
+  routeAddresses,
   timesheetBody,
   timesheetNotReady,
+  timesheetRoute,
   timesheetSubject,
 } from '@/domain/timesheetEmail';
 import type { Timesheet, TimesheetEntry } from '@/domain/timesheet';
@@ -51,6 +56,53 @@ function sheet(over: Partial<Timesheet> = {}): Timesheet {
 describe('where it goes', () => {
   it('is addressed to accounts', () => {
     expect(TIMESHEET_INBOX).toBe('accounts@safeqld.com.au');
+  });
+
+  it('offers accounts alone, accounts and Matt, and accounts and Lachlan', () => {
+    expect(TIMESHEET_ROUTES.map((r) => r.id)).toEqual(['accounts', 'accounts-matt', 'accounts-lachlan']);
+    expect(TIMESHEET_MATT).toBe('matt@safeqld.com.au');
+    expect(TIMESHEET_LACHLAN).toBe('lachlan@safeqld.com.au');
+    expect(timesheetRoute('accounts-matt').to).toEqual([TIMESHEET_INBOX, TIMESHEET_MATT]);
+    expect(timesheetRoute('accounts-lachlan').to).toEqual([TIMESHEET_INBOX, TIMESHEET_LACHLAN]);
+  });
+
+  /*
+   * The one that matters. Everything else in this block is wiring; this is the
+   * reason the choice is a fixed list of routes and not a recipient field.
+   */
+  it('never lets a route drop accounts, whichever one is chosen', () => {
+    for (const route of TIMESHEET_ROUTES) {
+      expect(route.to).toContain(TIMESHEET_INBOX);
+      // A week's pay addressed twice to the same inbox is a second copy of the
+      // same email for payroll to reconcile.
+      expect(new Set(route.to).size).toBe(route.to.length);
+      expect(route.to.every((a) => a.trim() === a && a.includes('@'))).toBe(true);
+    }
+  });
+
+  it('falls back to accounts alone rather than to whoever was chosen last', () => {
+    // An id nobody recognises -- a stale choice, a value from a build that had a
+    // fourth route -- must not copy somebody in on a week's pay by accident.
+    for (const id of [undefined, null, '', 'accounts-matt ', 'ACCOUNTS-MATT', 'accounts-everyone']) {
+      expect(timesheetRoute(id).to).toEqual([TIMESHEET_INBOX]);
+    }
+  });
+
+  it('gives every route a label short enough to sit three-across, and its own words', () => {
+    // `Segmented` renders one line and truncates, so a long label on a handset
+    // becomes a choice nobody can read.
+    for (const route of TIMESHEET_ROUTES) {
+      expect(route.short.length).toBeLessThanOrEqual(12);
+      expect(route.action.trim()).not.toBe('');
+      expect(route.who.trim()).not.toBe('');
+    }
+    expect(new Set(TIMESHEET_ROUTES.map((r) => r.action)).size).toBe(TIMESHEET_ROUTES.length);
+  });
+
+  it('reads the addresses out the way a person would, so the screen can show them', () => {
+    expect(routeAddresses(timesheetRoute('accounts'))).toBe('accounts@safeqld.com.au');
+    expect(routeAddresses(timesheetRoute('accounts-matt')))
+      .toBe('accounts@safeqld.com.au and matt@safeqld.com.au');
   });
 });
 

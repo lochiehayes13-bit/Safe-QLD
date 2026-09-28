@@ -9,13 +9,91 @@ import { dayName, entryHours, timesheetTotals, type Timesheet } from './timeshee
  * attachment, but the body has to be enough to see at a glance whether a week
  * looks right without opening anything.
  *
- * The subject is deliberately rigid. These land in one inbox from a dozen
- * technicians every week, and a subject that sorts and searches consistently is
- * worth more than one that reads nicely.
+ * The subject is deliberately rigid, and stays rigid whoever the week is
+ * addressed to. These land in one inbox from a dozen technicians every week,
+ * and a subject that sorts and searches consistently is worth more than one
+ * that reads nicely -- a subject that changed when somebody was copied in
+ * would break the sort for the sake of information already in the To field.
  */
 
-/** Where completed timesheets go. */
+/** Where completed timesheets go. On every route, without exception. */
 export const TIMESHEET_INBOX = 'accounts@safeqld.com.au';
+
+/** The two people a technician can put on the email beside accounts. */
+export const TIMESHEET_MATT = 'matt@safeqld.com.au';
+export const TIMESHEET_LACHLAN = 'lachlan@safeqld.com.au';
+
+/**
+ * Who a week goes to.
+ *
+ * Accounts alone is the week's ordinary path and stays the default. The other
+ * two exist because a week sometimes needs a person to see it the same day
+ * rather than whenever payroll next opens the inbox -- a big overtime week, a
+ * day somebody will query, a sheet that has to be approved before Friday.
+ *
+ * Accounts is on every one of them. That is the whole reason this is a fixed
+ * list of routes instead of a free recipient field: the failure worth designing
+ * out is a technician choosing "Matt" on a Tuesday and payroll never receiving
+ * the week at all. There is a test below the line that no route can drop it.
+ */
+export type TimesheetRouteId = 'accounts' | 'accounts-matt' | 'accounts-lachlan';
+
+export interface TimesheetRoute {
+  id: TimesheetRouteId;
+  /** The segment label. Short, because three of them share a handset's width. */
+  short: string;
+  /** What the send button says. */
+  action: string;
+  /** Who gets it, in words, for the screen's own sentences and its alerts. */
+  who: string;
+  /** Every address on the email. Accounts is always among them. */
+  to: readonly string[];
+}
+
+export const TIMESHEET_ROUTES: readonly TimesheetRoute[] = [
+  {
+    id: 'accounts',
+    short: 'Accounts',
+    action: 'Email to accounts',
+    who: 'accounts',
+    to: [TIMESHEET_INBOX],
+  },
+  {
+    id: 'accounts-matt',
+    short: '+ Matt',
+    action: 'Email accounts & Matt',
+    who: 'accounts and Matt',
+    to: [TIMESHEET_INBOX, TIMESHEET_MATT],
+  },
+  {
+    id: 'accounts-lachlan',
+    short: '+ Lachlan',
+    action: 'Email accounts & Lachlan',
+    who: 'accounts and Lachlan',
+    to: [TIMESHEET_INBOX, TIMESHEET_LACHLAN],
+  },
+];
+
+/**
+ * The route an id names, or accounts alone.
+ *
+ * Falls back rather than throwing, and falls back to the narrowest route there
+ * is. An id nobody recognises -- a stale choice, a typo, a value from a build
+ * that had a fourth route -- must not silently copy somebody in on a week's pay.
+ */
+export function timesheetRoute(id: string | null | undefined): TimesheetRoute {
+  const found = TIMESHEET_ROUTES.find((r) => r.id === id);
+  // The first route is accounts alone, and the test below the line holds it there.
+  return found ?? (TIMESHEET_ROUTES[0] as TimesheetRoute);
+}
+
+/** The addresses of a route as a person reads them: "a@x and b@x". */
+export function routeAddresses(route: TimesheetRoute): string {
+  const [first, ...rest] = route.to;
+  if (!first) return TIMESHEET_INBOX;
+  if (!rest.length) return first;
+  return `${[first, ...rest.slice(0, -1)].join(', ')} and ${rest[rest.length - 1]}`;
+}
 
 /** Formats an ISO date as the office writes it. */
 function auDate(iso: string): string {

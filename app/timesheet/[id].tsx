@@ -20,7 +20,8 @@ import {
   type DaySummary, type HourKind, type JobOption, type LeaveKind, type Timesheet, type TimesheetEntry,
 } from '@/domain/timesheet';
 import {
-  TIMESHEET_INBOX, timesheetBody, timesheetNotReady, timesheetSubject,
+  TIMESHEET_ROUTES, routeAddresses, timesheetBody, timesheetNotReady, timesheetRoute, timesheetSubject,
+  type TimesheetRouteId,
 } from '@/domain/timesheetEmail';
 import { timesheetSheet, timesheetSummarySheet } from '@/export/safeqldForms';
 import { formatAuDate } from '@/export/sheets';
@@ -31,7 +32,7 @@ import { newId, nowIso } from '@/db';
 import { qldIsoDay } from '@/domain/qldTime';
 import { BOARD_MAX, gridColumns, gridItemWidth, pageLayout } from '@/domain/layout';
 import { useTheme, type Theme } from '@/theme';
-import { Button, Card, Chip, Rowed, Screen, Txt } from '@/components/ui';
+import { Button, Card, Chip, Rowed, Screen, Segmented, Txt } from '@/components/ui';
 import { ProgressRing, Reveal } from '@/components/motion';
 import { RecordGate } from '@/components/RecordGate';
 import { useRecordPatch } from '@/hooks/useRecordPatch';
@@ -64,6 +65,16 @@ export default function TimesheetScreen() {
   const [jobs, setJobs] = useState<JobPick[]>([]);
   const [history, setHistory] = useState<Timesheet[]>([]);
   const [busy, setBusy] = useState(false);
+  /*
+   * Who this week is addressed to.
+   *
+   * Accounts alone every time the screen opens, deliberately. It is not stored
+   * on the sheet and not remembered between weeks: copying a person in is a
+   * decision about one particular week, and a remembered choice would quietly
+   * keep sending somebody every sheet a technician ever files after the one
+   * week they needed it seen.
+   */
+  const [routeId, setRouteId] = useState<TimesheetRouteId>('accounts');
   const [picking, setPicking] = useState<{ date: string } | null>(null);
   /**
    * The width the week of cards is actually handed, once it has been laid out.
@@ -300,6 +311,15 @@ export default function TimesheetScreen() {
     [timesheetSheet(sheet), timesheetSummarySheet(sheet)],
   );
 
+  /*
+   * The chosen route, resolved once.
+   *
+   * The sender and the sentence under the buttons read the same object, because
+   * two calls are two chances for the screen to promise one set of recipients
+   * and the mail app to be handed another.
+   */
+  const route = timesheetRoute(routeId);
+
   const emailSheet = async () => {
     const blocked = timesheetNotReady(sheet);
     if (blocked) { showAlert('Not ready to send', blocked); return; }
@@ -309,7 +329,7 @@ export default function TimesheetScreen() {
       // payroll works from the attachment, and the body is only the glance.
       const file = workbook();
       const outcome = await sendMail(
-        { to: TIMESHEET_INBOX, subject: timesheetSubject(sheet), body: timesheetBody(sheet) },
+        { to: route.to, subject: timesheetSubject(sheet), body: timesheetBody(sheet) },
         [file],
       );
 
@@ -319,7 +339,7 @@ export default function TimesheetScreen() {
       }
       if (outcome === 'sent') {
         void persist({ status: 'submitted' });
-        showAlert('Sent', `Your week has gone to ${TIMESHEET_INBOX} and is marked submitted.`);
+        showAlert('Sent', `Your week has gone to ${routeAddresses(route)} and is marked submitted.`);
         return;
       }
       if (outcome === 'handed-over') {
@@ -331,7 +351,7 @@ export default function TimesheetScreen() {
          */
         showAlert(
           'Draft opened — attach the file',
-          `An email to ${TIMESHEET_INBOX} is open and ${file.name} has downloaded. Drag it onto the email, send it, then tap Mark submitted.`,
+          `An email to ${routeAddresses(route)} is open and ${file.name} has downloaded. Drag it onto the email, send it, then tap Mark submitted.`,
         );
         return;
       }
@@ -474,7 +494,23 @@ export default function TimesheetScreen() {
 
   const sendIt = (
     <View style={{ gap: t.space(3) }}>
-      <Button title="Email to accounts" onPress={() => { void emailSheet(); }} loading={busy} icon={<MaterialCommunityIcons name="send-outline" size={20} color={t.color.onAccent} />} />
+      {/*
+        * Accounts is not one of the three choices, it is under all of them --
+        * which is why the label says so above the segments. "+ Matt" on its own
+        * would read as instead of accounts, and a technician who read it that
+        * way would be choosing not to get paid.
+        */}
+      <View style={{ gap: t.space(1.5) }}>
+        <Txt size="xs" tone="faint" weight="700" style={{ textTransform: 'uppercase', letterSpacing: 0.8 }}>
+          Who gets it — accounts always
+        </Txt>
+        <Segmented
+          options={TIMESHEET_ROUTES.map((r) => ({ value: r.id, label: r.short }))}
+          value={routeId}
+          onChange={setRouteId}
+        />
+      </View>
+      <Button title={route.action} onPress={() => { void emailSheet(); }} loading={busy} icon={<MaterialCommunityIcons name="send-outline" size={20} color={t.color.onAccent} />} />
       <Rowed gap={2}>
         <Button title="Export" variant="secondary" onPress={() => { void exportSheet(); }} loading={busy} style={{ flex: 1 }} />
         <Button
@@ -484,8 +520,13 @@ export default function TimesheetScreen() {
           style={{ flex: 1 }}
         />
       </Rowed>
+      {/*
+        * The addresses in full rather than the names, because "Matt" is a
+        * person and matt@safeqld.com.au is where the week actually lands, and
+        * the technician is the one who finds out if those differ.
+        */}
       <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-        Goes to {TIMESHEET_INBOX} from your own mail app, so payroll can reply to you. Nothing is
+        Goes to {routeAddresses(route)} from your own mail app, so they can reply to you. Nothing is
         marked submitted until the mail app says it sent.
       </Txt>
     </View>

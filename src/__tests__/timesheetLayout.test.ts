@@ -109,8 +109,24 @@ describe('the timesheet at whatever width it is given', () => {
     expect(timesheet.match(/workbook\(\)/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('still goes to accounts, and still only marks a week submitted when it went', () => {
-    expect(timesheet).toContain('to: TIMESHEET_INBOX');
+  it('addresses the week from the chosen route, and still only marks it submitted when it went', () => {
+    /*
+     * This guard used to quote `to: TIMESHEET_INBOX` because at the time the
+     * only thing to hold still was that accounts kept receiving the week. Now
+     * that a technician can add Matt or Lachlan, quoting that line would be
+     * pinning the diff rather than the behaviour, so it holds the behaviour
+     * instead: the draft is addressed from the resolved route, and the route is
+     * resolved through `timesheetRoute`, which is what turns an id nobody
+     * recognises into accounts alone rather than into nobody.
+     *
+     * That accounts is on EVERY route is not checkable from this file -- it is a
+     * fact about the route table -- so `timesheetEmail.test.ts` owns it.
+     */
+    expect(timesheet).toContain('to: route.to');
+    expect(timesheet).toContain('timesheetRoute(routeId)');
+    // Resolved once, so the sentence under the buttons cannot name one set of
+    // recipients while the mail app is handed another.
+    expect(timesheet.match(/timesheetRoute\(routeId\)/g)).toHaveLength(1);
     expect(timesheet).toContain("persist({ status: 'submitted' })");
     // On the one outcome that means the mail app said so, and no other. A
     // browser answers `handed-over`, and a week marked submitted on that is a
