@@ -97,15 +97,16 @@ export default function NoticeScreen() {
    * the job per letter typed. So the typing accumulates on the row and one note
    * goes up when the notice actually changes hands, carrying all of it.
    *
-   * One limit worth knowing about, because the wording the technician reads says
-   * it too. The note is built from the defect, and the defect's note has no line
-   * for the fact that the written notice was given -- `noticeIssuedAt` is in
-   * neither half of its key. So a notice handed over on a defect nothing else
-   * changed on produces a duplicate and nothing is sent, which is honest but is
-   * not the office being told the occupier has their notice. In practice this
-   * screen is where the interim measures and the verbal notification get typed,
-   * so there is nearly always an amendment to carry; where there is not, the
-   * banner says so rather than implying otherwise.
+   * Handing the notice over is a reportable fact in its own right, which it was
+   * not when this screen was first written. `noticeIssuedAt` and
+   * `noticeRecipient` are both in the note's key material and both have a line
+   * in its body, so a notice given on a defect that changed in no other way
+   * still moves the key and still sends. That matters more than it looks: the
+   * handover is usually the ONLY thing that changed that day, and it is the fact
+   * a regulator asks about after a fire, because the 24 hour clock in the
+   * Queensland provisions runs from it. Before those two fields were in the key
+   * the send loop read its own earlier note back off the job, called this one a
+   * duplicate and dropped it, so the office was never told at all.
    *
    * No maintenance instant is passed, so `queueDefectNote` falls back to the
    * moment the defect was raised -- which is the same instant this screen already

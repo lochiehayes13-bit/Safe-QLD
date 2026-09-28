@@ -1958,6 +1958,22 @@ export interface RaisedDefect extends OutboundDefect {
   notes?: string;
   /** Zones, floors or devices affected. Supports the limb (b) judgement, and tells a scheduler how much is out. */
   extentOfImpairment?: string;
+  /**
+   * When the written notice was physically handed over, and to whom.
+   *
+   * These two are the whole reason the notice screen can report anything at
+   * all. Handing over the notice is often the only thing that changes about a
+   * defect that day: the description, the severity and the class are all
+   * exactly as they were an hour ago. If the moment of handover is not part of
+   * the note's key material then the key does not move, the send loop reads its
+   * own earlier note back off the job, calls the new one a duplicate and drops
+   * it. The office would then never learn the notice was given — which is the
+   * one fact a regulator asks about after a fire, because the 24-hour clock in
+   * the Queensland provisions runs from it.
+   */
+  noticeIssuedAt?: string;
+  /** Who took the written notice. A name makes the handover provable rather than merely claimed. */
+  noticeRecipient?: string;
 }
 
 /** Where the defect was raised, which the defect row itself does not know. */
@@ -2092,6 +2108,10 @@ export function defectRaisedNote(defect: RaisedDefect, context: DefectRaisedCont
     defect.qldLimbInoperable, defect.qldLimbAdverseImpact,
     defect.verbalNotifiedAt, defect.verbalNotifiedTo, defect.interimMeasures, defect.extentOfImpairment,
     defect.rectifiedAt, defect.notes, defect.assetNumber, photoTotal,
+    // Handing the notice over is routinely the only thing that changed today,
+    // so without these two the key is identical to the note already on the job
+    // and the send loop discards the very report the statute cares about.
+    defect.noticeIssuedAt, defect.noticeRecipient,
     // The resolved instant, not the caller's optional field, so a caller that
     // omits it and one that passes the same moment the defect was raised agree.
     // It belongs in the key at all because it sets the two deadlines the note
@@ -2111,11 +2131,21 @@ export function defectRaisedNote(defect: RaisedDefect, context: DefectRaisedCont
   const body = critical
     ? criticalBlock(defect, { completedAt: maintenanceAt }, photos)
     : routineDefectBlock(defect, photos);
-  // These four sit under both blocks rather than inside either, so the critical
+  // These five sit under both blocks rather than inside either, so the critical
   // and the routine note carry them in the same place and the same words.
   if (defect.assetNumber?.trim()) body.push(`Asset: #${defect.assetNumber.trim()}.`);
   if (defect.extentOfImpairment?.trim()) body.push(`Extent: ${defect.extentOfImpairment.trim()}.`);
   if (defect.rectifiedAt) body.push(`Recorded rectified: ${qldDay(defect.rectifiedAt) ?? 'date not readable'}.`);
+  // Said in the body as well as counted in the key, because a key the office
+  // cannot see is no use to the person reading the job. Named recipient where
+  // there is one: "given to the building manager" is provable, "given" is not.
+  if (defect.noticeIssuedAt) {
+    const when = qldDay(defect.noticeIssuedAt) ?? 'date not readable';
+    const who = defect.noticeRecipient?.trim();
+    body.push(who
+      ? `Written notice given ${when} to ${who}.`
+      : `Written notice given ${when}. Recipient not recorded.`);
+  }
   if (defect.defectCode?.trim()) body.push(`Raised from defect code ${defect.defectCode.trim()}.`);
 
   const where = [`Site: ${context.siteName}`];

@@ -851,6 +851,13 @@ export async function queueDefectNote(
     rectifiedAt: defect.rectifiedAt,
     notes: defect.notes,
     extentOfImpairment: defect.extentOfImpairment,
+    // Without these two the notice screen has nothing to report. Handing the
+    // written notice over is usually the only thing that changed about the
+    // defect that day, so if they are dropped here the note's key is identical
+    // to the one already on the job and the send loop discards it as a
+    // duplicate -- silently, which is the worst way to lose a statutory fact.
+    noticeIssuedAt: defect.noticeIssuedAt,
+    noticeRecipient: defect.noticeRecipient,
   };
 
   const siteName = options.siteName?.trim()

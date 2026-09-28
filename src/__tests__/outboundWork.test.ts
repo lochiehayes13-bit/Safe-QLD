@@ -2086,4 +2086,60 @@ describe('defectRaisedNote', () => {
     expect(note.note).toContain('Rectification due by');
     expect(keysInNoteText(note.note)).toEqual([note.key]);
   });
+
+  it('reports the written notice being handed over, and names who took it', () => {
+    /*
+     * The date the written notice changed hands is the one the Queensland
+     * provisions count from, so the office has to be told it in words rather
+     * than left to infer it from the notice document turning up as an
+     * attachment. Named recipient where the technician recorded one: "given to
+     * the building manager" is provable, "given" is a claim.
+     */
+    const named = defectRaisedNote(
+      raised({ noticeIssuedAt: '2026-07-03T04:30:00.000Z', noticeRecipient: '  The Building Manager  ' }),
+      context(),
+    );
+    expect(named.note).toContain('Written notice given 03/07/2026 to The Building Manager.');
+
+    const anonymous = defectRaisedNote(raised({ noticeIssuedAt: '2026-07-03T04:30:00.000Z' }), context());
+    expect(anonymous.note).toContain('Written notice given 03/07/2026. Recipient not recorded.');
+    // A gap says it is a gap. Silence would read as a notice handed to nobody.
+    expect(anonymous.note).not.toContain('to undefined');
+
+    // Nothing invented from an unreadable date: the handover is still reported,
+    // because a notice given on a date nobody can parse still went out.
+    expect(defectRaisedNote(raised({ noticeIssuedAt: 'not a date' }), context()).note)
+      .toContain('Written notice given date not readable.');
+
+    // Said nowhere else in the note, so a defect with no notice yet says nothing.
+    expect(defectRaisedNote(raised(), context()).note).not.toContain('Written notice given');
+  });
+
+  it('gives a notice handed over on an otherwise unchanged defect a key of its own', () => {
+    /*
+     * This is the assertion the whole pair of fields exists for. Handing the
+     * notice over is routinely the only thing that changed at the site today.
+     * If the moment of handover is not key material then the key is identical to
+     * the note already sitting on the job, the send loop's read-back recognises
+     * its own earlier marker, calls the new note a duplicate and drops the one
+     * report the statute actually asks for.
+     */
+    const before = defectRaisedNote(raised(), context());
+    const issued = defectRaisedNote(raised({ noticeIssuedAt: '2026-07-03T04:30:00.000Z' }), context());
+    const toNamed = defectRaisedNote(
+      raised({ noticeIssuedAt: '2026-07-03T04:30:00.000Z', noticeRecipient: 'The Building Manager' }),
+      context(),
+    );
+    expect(issued.key).not.toBe(before.key);
+    // And a recipient recorded afterwards moves it again, so correcting "given"
+    // to "given to the building manager" is not silently discarded either.
+    expect(toNamed.key).not.toBe(issued.key);
+    // Same defect throughout, so the identity half of the key is untouched and
+    // the office still sees one thread of notes about one defect. Asserted
+    // against the pattern first, because two undefineds compare equal and would
+    // let a malformed key pass this as agreement.
+    expect(keyIdentity(before.key)).toMatch(/^DEF-[0-9a-f]{16}$/);
+    expect(keyIdentity(issued.key)).toBe(keyIdentity(before.key));
+    expect(keyIdentity(toNamed.key)).toBe(keyIdentity(before.key));
+  });
 });
