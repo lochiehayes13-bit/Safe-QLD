@@ -540,6 +540,14 @@ export const PUSHED_TO_SIMPRO: { what: string; how: string }[] = [
       + 'subject line, with the statutory clocks stated in Queensland time.',
   },
   {
+    what: 'Every defect raised, on the job it was raised against',
+    how: 'One appended job note per defect: what failed and where, how bad it is, the AS 1851 class and what '
+      + 'that class expects of notification and rectification, the state the technician left it in and their '
+      + 'own words. Keyed on the job, the site and the defect itself, so the same defect cannot post twice '
+      + 'from a second handset or after a reinstall. The list of defects inside the service record stays as '
+      + 'well: it is the roll-up somebody reads at a glance, and this is the one they can act on.',
+  },
+  {
     what: 'Photographs of each defect',
     how: `One job attachment per photograph, named "${'<site> — <defect location> — <date>.jpg'}" and numbered `
       + 'where a defect has several, so the office can read what a file is without opening it. Photographs '
@@ -1092,7 +1100,7 @@ function reasonsLine(summary: ServiceSummary): string | undefined {
 }
 
 /** How many of a defect's photographs are going to the job now, how many are already there, and under what name. */
-interface PhotoOutcome {
+export interface PhotoOutcome {
   going: number;
   /** Queued on an earlier send, or accepted: on the job, or about to be, and not sent again. */
   alreadyOnJob: number;
@@ -1101,7 +1109,23 @@ interface PhotoOutcome {
 
 const NO_PHOTOS: PhotoOutcome = { going: 0, alreadyOnJob: 0 };
 
-function criticalBlock(defect: OutboundDefect, run: CompletedRoutineRun, photos: PhotoOutcome): string[] {
+/**
+ * The critical defect block, shared by every path that reports one.
+ *
+ * The second parameter was the whole `CompletedRoutineRun` until a defect could
+ * be logged on a job on its own. A defect raised on a call-out, or from a bulk
+ * test, or changed a week later has no run behind it, and the only thing this
+ * block ever read off the run was the instant the maintenance was carried out.
+ * Narrowing it to that one field is what lets both callers share this block,
+ * which is the whole point: a critical defect's two statutory clocks have to
+ * read the same wherever the defect came from, and a second copy of the 24-hour
+ * rule written for the per-defect note would drift from this one within a month.
+ */
+function criticalBlock(
+  defect: OutboundDefect,
+  maintenance: { completedAt: string },
+  photos: PhotoOutcome,
+): string[] {
   const basis = criticalBasis(defect);
   /*
    * Both clocks run from the maintenance, not from the moment the defect was
@@ -1114,11 +1138,10 @@ function criticalBlock(defect: OutboundDefect, run: CompletedRoutineRun, photos:
    * time. Twenty-four hours after a date with no time in it is a moment nobody
    * recorded, and "due by 04/07/2026 10:00" is read as a deadline somebody set.
    */
-  const maintenanceHasTime = qldMoment(run.completedAt) !== undefined;
-  const noticeDue = maintenanceHasTime
-    ? qldMoment(criticalNoticeDueAt(run.completedAt) ?? undefined)
-    : undefined;
-  const rectifyDue = qldDay(rectificationDueAt(qldIsoDay(run.completedAt) ?? run.completedAt) ?? undefined);
+  const carriedOutAt = maintenance.completedAt;
+  const maintenanceHasTime = qldMoment(carriedOutAt) !== undefined;
+  const noticeDue = maintenanceHasTime ? qldMoment(criticalNoticeDueAt(carriedOutAt) ?? undefined) : undefined;
+  const rectifyDue = qldDay(rectificationDueAt(qldIsoDay(carriedOutAt) ?? carriedOutAt) ?? undefined);
   const lines = [
     `*** CRITICAL DEFECT *** ${defect.location.trim() || 'location not recorded'}`,
     defect.description.trim(),
@@ -1899,6 +1922,258 @@ export function workCompletedNote(job: WorkCompletedJob, run?: WorkCompletedRun)
   return {
     jobId,
     subject: subjectFor(`Work completed - ${job.siteName} - ${qldDay(job.completedAt) ?? ''}`),
+    note: note.text,
+    key,
+    truncated: note.truncated,
+    omittedChars: note.omittedChars,
+    omittedSections: note.omittedSections,
+    fullRecordAt,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// One defect, logged on the job it was raised against
+// ---------------------------------------------------------------------------
+
+/**
+ * A defect as the phone holds it, at the moment it is raised or changed.
+ *
+ * Everything `OutboundDefect` carries plus the five fields the defect row has
+ * that a service note never had room for: the grade inside non-critical, the
+ * library code it came from, when it was recorded rectified, how much of the
+ * installation it takes out, and the technician's own remarks. The service
+ * record gives each defect one line and none of those five fit in a line. A
+ * note about one defect has room for all of them, and every one is something
+ * somebody in the office acts on — the grade decides what gets booked first,
+ * and the code is how they find the same fault at eleven other sites.
+ */
+export interface RaisedDefect extends OutboundDefect {
+  /** The grade inside non-critical, from the defect library's own rating. Never set on a critical defect. */
+  priority?: 'high' | 'medium' | 'low';
+  /** The library code this defect was raised from, so the office can group it with the same fault elsewhere. */
+  defectCode?: string;
+  /** When it was recorded rectified. Can be set while the status is still open, on a partial fix. */
+  rectifiedAt?: string;
+  /** The technician's own remarks, beyond the description. */
+  notes?: string;
+  /** Zones, floors or devices affected. Supports the limb (b) judgement, and tells a scheduler how much is out. */
+  extentOfImpairment?: string;
+}
+
+/** Where the defect was raised, which the defect row itself does not know. */
+export interface DefectRaisedContext {
+  /** The Simpro job number this defect is being logged against. Without one there is nowhere to put the note. */
+  jobId: string;
+  /** Part of the key, so the same wording at two sites is two defects and not one. */
+  siteId: string;
+  siteName: string;
+  /** Whoever raised it, as the phone knows them. */
+  technician?: string;
+  /**
+   * The instant the maintenance was carried out, where this defect was found
+   * during one.
+   *
+   * This is what the statutory clocks run from and not `raisedAt`: the written
+   * notice is due within 24 hours of the maintenance and the rectification
+   * within one month of it, so a defect typed up at the start of a two-day
+   * attendance must not get a deadline of its own that nothing in the regulation
+   * supports. Left out — a call-out, a walk past, a defect raised from the
+   * office a week later — and the moment it was raised is the best the app has
+   * and is used instead. That is a deliberate approximation rather than a
+   * silence: a critical defect note with no clock on it at all is the one
+   * outcome worse than a clock that is a few hours out.
+   *
+   * Pass the same instant every time this defect is composed. It is part of the
+   * content half of the key precisely because it sets two stated deadlines and a
+   * correction to it has to reach the office — which also means a defect
+   * composed once with the attendance instant and once without it states two
+   * different deadlines and goes out as two notes.
+   */
+  maintenanceAt?: string;
+  /** What the technician was doing when they found it, in their words: "Annual detection service", "Bulk test". */
+  foundDuring?: string;
+  /** Reference of the issued record that holds the whole story, where one exists. */
+  reportRef?: string;
+  /** Overrides the sentence naming where the full record is. */
+  fullRecordAt?: string;
+  /** How many of this defect's photographs are going to the job's attachments, and under what name. */
+  photos?: PhotoOutcome;
+}
+
+/**
+ * The block for a defect that is not critical, shaped like the critical one.
+ *
+ * Deliberately the same order of lines as `criticalBlock`: what it is, where it
+ * is, when it was raised, what class it falls under, what that class expects,
+ * the state it was left in, and where the photographs went. Somebody in the
+ * office reads both kinds in the same job's notes, and two different layouts for
+ * the same handful of facts is how a reader learns to skim one of them.
+ */
+function routineDefectBlock(defect: RaisedDefect, photos: PhotoOutcome): string[] {
+  const cls: As1851Class = defect.as1851Class ?? 'non-critical';
+  const lines = [
+    `DEFECT RAISED - ${defect.location.trim() || 'location not recorded'}`,
+    defect.description.trim() || 'No description was recorded on site.',
+    `Raised: ${qldDay(defect.raisedAt) ?? 'date not readable'}.`,
+  ];
+  /*
+   * Where nobody classified it the note says which way it has been read rather
+   * than presenting the default as a finding. A reader who sees "Non-critical
+   * defect" has been told something; if nobody on site chose it, they have been
+   * told something nobody checked, and a non-critical class is exactly what an
+   * unclassified critical defect looks like from a desk.
+   */
+  lines.push(`Classification: ${AS1851_CLASS_LABEL[cls]}`
+    + `${defect.priority ? `, priority ${defect.priority}` : ''}`
+    + `${defect.as1851Class ? '.' : '. Nobody classified it on site, so it is read as non-critical here.'}`);
+  // Both obligations named, because the class on its own only means something to
+  // a reader who has AS 1851 open in front of them.
+  lines.push(`Notification: ${AS1851_CLASS_OBLIGATION[cls].notify}`);
+  lines.push(`Rectification: ${AS1851_CLASS_OBLIGATION[cls].rectify}`);
+  lines.push(`Status recorded on site: ${defect.status}.`);
+  if (defect.interimMeasures?.trim()) lines.push(`Interim measures: ${defect.interimMeasures.trim()}.`);
+  const photoNote = photoLine(defect, photos, photos.filename);
+  if (photoNote) lines.push(photoNote);
+  return lines;
+}
+
+/**
+ * The note that goes on the job when a defect is raised against it.
+ *
+ * One note per defect, which is the decision and not an accident. The service
+ * record already lists every defect from a visit in one block, and the bulk test
+ * screen posts its own per-visit summary; both are roll-ups somebody reads at a
+ * glance, and neither of them is a thing the office can act on one at a time. A
+ * defect raised on a call-out, from a job card, or a fortnight after the walk
+ * appears in no roll-up at all, which is why the owner could raise a defect and
+ * find nothing about it on the job. So each defect gets its own note: one
+ * subject line a scheduler can tell apart from the one above it, one key, and
+ * one thing to book.
+ *
+ * Keyed on the job, the site, and what a person would use to point at this
+ * defect — where it is, what it says, when it was raised — and deliberately not
+ * on the local row id, which changes when the app is reinstalled or the defect
+ * is re-entered, and keying on which is how the same defect posts twice. See
+ * `outboundKey`.
+ *
+ * One consequence worth stating out loud, because it is a choice and not an
+ * oversight: since the wording sits in the identity half, rewording a defect
+ * reads as a different defect rather than an amendment of this one. That is the
+ * right way round on this build. There is no office-side defect id to hang an
+ * amendment off, and two defects found in the same spot on the same visit are
+ * told apart by nothing but their wording — so the choice is between an
+ * occasional second note after a re-word and two genuinely different defects
+ * collapsing into one. A second note somebody can read is recoverable; a defect
+ * that never went anywhere is not. Every other field an edit should re-report
+ * sits in the content half, so a status change, a verbal notification recorded
+ * late, or interim measures added go out as an amendment with the identity half
+ * intact, and the send layer recognises them as the same defect.
+ *
+ * Pure: no database, no network, no clock. It composes a note and returns it,
+ * which is what makes every sentence below testable without a Simpro build.
+ * Money typed into a technician's own words goes up as written, the same way the
+ * service record treats it — dropping somebody's words silently is worse — but
+ * nothing in here reads a price, a rate or a total out of the office system.
+ */
+export function defectRaisedNote(defect: RaisedDefect, context: DefectRaisedContext): OutboundJobNote {
+  const jobId = context.jobId.trim();
+  const location = defect.location.trim();
+  const description = defect.description.trim();
+  const photos = context.photos ?? NO_PHOTOS;
+  // The same reckoning photoLine makes: a caller that listed the files and one
+  // that only counted them must not produce two different keys for one defect.
+  const photoTotal = Math.max(defect.photoCount ?? 0, defect.photos?.length ?? 0);
+  const critical = isCriticalDefect(defect);
+
+  const maintenanceAt = context.maintenanceAt ?? defect.raisedAt;
+  const identity = ['defect-raised', jobId, context.siteId, location, description, defect.raisedAt];
+  const content = [
+    description, defect.severity, defect.priority, defect.as1851Class, defect.status, defect.defectCode,
+    defect.qldLimbInoperable, defect.qldLimbAdverseImpact,
+    defect.verbalNotifiedAt, defect.verbalNotifiedTo, defect.interimMeasures, defect.extentOfImpairment,
+    defect.rectifiedAt, defect.notes, defect.assetNumber, photoTotal,
+    // The resolved instant, not the caller's optional field, so a caller that
+    // omits it and one that passes the same moment the defect was raised agree.
+    // It belongs in the key at all because it sets the two deadlines the note
+    // states: a maintenance time corrected from 9am to 5pm moves the written
+    // notice deadline by eight hours, and a note that cannot re-report that is
+    // a wrong statutory date the office can never be told about.
+    maintenanceAt,
+  ];
+  // DEF, not SRV, and not a bare queue key. MARKER_PATTERN matches only
+  // SRV- and DEF-prefixed keys, and that pattern is the only reason the send
+  // loop's read-back of the job's notes ever recognises our own work. A note
+  // queued without one of these keys loses the protection against a second
+  // handset and against a reinstall, which is how a defect ends up on the job
+  // twice with nobody able to tell which copy the office quoted from.
+  const key = outboundKey('DEF', identity, content);
+
+  const body = critical
+    ? criticalBlock(defect, { completedAt: maintenanceAt }, photos)
+    : routineDefectBlock(defect, photos);
+  // These four sit under both blocks rather than inside either, so the critical
+  // and the routine note carry them in the same place and the same words.
+  if (defect.assetNumber?.trim()) body.push(`Asset: #${defect.assetNumber.trim()}.`);
+  if (defect.extentOfImpairment?.trim()) body.push(`Extent: ${defect.extentOfImpairment.trim()}.`);
+  if (defect.rectifiedAt) body.push(`Recorded rectified: ${qldDay(defect.rectifiedAt) ?? 'date not readable'}.`);
+  if (defect.defectCode?.trim()) body.push(`Raised from defect code ${defect.defectCode.trim()}.`);
+
+  const where = [`Site: ${context.siteName}`];
+  if (context.foundDuring?.trim()) {
+    const day = qldDay(maintenanceAt);
+    where.push(`Found during: ${context.foundDuring.trim()}${day ? `, ${day}` : ''}.`);
+  }
+  where.push(context.technician?.trim() ? `Raised by: ${context.technician.trim()}` : 'Raised by: not recorded');
+
+  const sections: NoteSection[] = [
+    // The defect first and essential. A reader who stops after one line has to
+    // have been told it is critical, and where it is.
+    { id: 'defect', text: body.join('\n'), essential: true },
+    { id: 'where', text: where.join('\n'), essential: true },
+  ];
+  if (defect.notes?.trim()) {
+    sections.push({ id: 'technician notes', text: `TECHNICIAN NOTES\n${defect.notes.trim()}`, essential: false });
+  }
+  sections.push({
+    id: 'footer',
+    // Both footers say what the note does not do, because a note appearing on a
+    // job reads to a scheduler as something having been actioned. The critical
+    // one has to go further: a critical defect note in the activity feed could
+    // otherwise be taken for the written notice, and the written notice is a
+    // separate act with its own record.
+    text: critical
+      ? 'Raised in the Safe QLD field app. This note is not the written critical defect notice: that notice is '
+        + 'its own document, issued to the occupier and filed on this job as an attachment, and giving it is a '
+        + 'separate act. Nothing here moves the job\'s stage or status, and no quote is raised from it.'
+      : 'Raised in the Safe QLD field app so the office can see it and book the work. Nothing here moves the '
+        + 'job\'s stage or status, and no quote is raised from it.',
+    essential: true,
+  });
+
+  const fullRecordAt = context.fullRecordAt
+    ?? (context.reportRef
+      ? `routine service report ${context.reportRef} for ${context.siteName}, in the Safe QLD field app`
+      : `the defect record for ${context.siteName} in the Safe QLD field app`);
+
+  /*
+   * The subject is what somebody scrolling a job's notes actually reads, and on
+   * a site with nine defects on one job every one of these notes is otherwise
+   * called the same thing. So it leads with how bad it is, then where, then the
+   * wording — in that order because the location is short and fixed and the
+   * description is neither, so a long description loses its tail to the cut
+   * rather than pushing the location out of sight. The site name is left off on
+   * purpose: every note on a job shares it, so it is 25 characters that tell a
+   * reader nothing they did not know before they opened the job.
+   */
+  const headline = critical ? 'CRITICAL DEFECT' : defect.priority ? `DEFECT (${defect.priority})` : 'DEFECT';
+  const subject = subjectFor(
+    [headline, location || 'location not recorded', description || 'no description recorded'].join(' - '),
+  );
+
+  const note = assemble(sections, key, fullRecordAt, NOTE_LIMITS.body.chars);
+  return {
+    jobId,
+    subject,
     note: note.text,
     key,
     truncated: note.truncated,

@@ -31,6 +31,7 @@ import { MIGRATION_V29 } from './schemaV29';
 import { MIGRATION_V30 } from './schemaV30';
 import { MIGRATION_V31 } from './schemaV31';
 import { MIGRATION_V32 } from './schemaV32';
+import { MIGRATION_V33 } from './schemaV33';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -373,6 +374,10 @@ export const MIGRATIONS: string[] = [
   MIGRATION_V30,
   MIGRATION_V31,
   MIGRATION_V32,
+
+  // v33 — the Simpro job a defect belongs to, and when the office accepted its
+  // note, so a fault can be booked as work rather than phoned through
+  MIGRATION_V33,
 ];
 
 /**

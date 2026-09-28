@@ -413,6 +413,33 @@ export interface Defect {
   interimMeasures?: string;
   /** Zones, floors or devices affected — supports the limb (b) judgement. */
   extentOfImpairment?: string;
+
+  // --- The office's side of it ----------------------------------------------
+  /**
+   * Simpro's own id for the job this defect belongs to.
+   *
+   * A defect has always been raised against a site, and the office does not
+   * work in sites — it works in jobs. Without this the only route from a fault
+   * on a phone to work booked in Simpro is a phone call and somebody typing it
+   * in again. The site cannot stand in for it either: a centre with six jobs
+   * open at once is named by none of them.
+   *
+   * It is Simpro's id, set only by picking a job, and never a job number
+   * somebody typed — that is free text and can hold a purchase order or a note
+   * to themselves, which is the trap v28 wrote down for the report.
+   */
+  jobId?: string;
+  /**
+   * When the office accepted the note about this defect.
+   *
+   * The question is "has the office got this?", asked in the driveway before
+   * leaving, and until now nothing on the row could answer it. Absent means it
+   * has not gone — which covers a note still queued on a phone in a basement as
+   * well as one never raised — so a defect that never reached anybody can be
+   * sent again instead of the technician either assuming it went or telling the
+   * office twice. Set from the office's acceptance, not from the queueing.
+   */
+  sentToOfficeAt?: string;
 }
 
 // ---------------------------------------------------------------------------

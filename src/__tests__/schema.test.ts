@@ -4,7 +4,7 @@ import { join } from 'path';
 import { MIGRATIONS, SCHEMA_VERSION } from '@/db/schema';
 import { applyMigrations } from '@/db/migrate';
 import { nextAssetCode } from '@/db/assetRepo';
-import { createDefect, createSite, listDefects, listSiteSummaries } from '@/db/repo';
+import { createDefect, createSite, getDefect, listDefects, listSiteSummaries, updateDefect } from '@/db/repo';
 import { listJobPage, upsertJob } from '@/db/opsRepo';
 import { customerStats, listQuotePage, scheduledJobExternalIds, siteStats } from '@/db/mirrorRepo';
 import { openMigrated, wrapNodeSqlite, type NodeSqliteDb } from './support/nodeSqlite';
@@ -81,6 +81,24 @@ describe('migrations', () => {
       'simpro_asset_type', 'asset_change',
     ]) {
       expect({ table, present: present.has(table) }).toEqual({ table, present: true });
+    }
+    db.close();
+  });
+
+  it('gives the defect the columns the office side of it needs', () => {
+    /*
+     * A defect was raised against a site and nothing else, and the office works
+     * in jobs — so "book the rectify" meant a phone call. The column has to
+     * exist before anything can name the job, and a migration that adds it to
+     * the wrong table, or spells it differently from the repository, passes the
+     * "all apply" check above and then throws the first time a technician saves.
+     *
+     * Reported per column so a failure says which one is missing.
+     */
+    const db = migrated();
+    const columns = tableColumns(db, 'defect');
+    for (const column of ['siteId', 'severity', 'priority', 'jobId', 'sentToOfficeAt']) {
+      expect({ column, present: columns.has(column) }).toEqual({ column, present: true });
     }
     db.close();
   });
@@ -308,6 +326,77 @@ describe('repositories, run', () => {
     // And it reads back through the repository the same way it went in.
     const [read] = await listDefects(site.id);
     expect(read).toMatchObject({ defectCode: 'DET-SMK-004', as1851Class: 'critical', qldLimbInoperable: true });
+    await db.closeAsync();
+  });
+
+  it('writes the job a defect was raised on into the row, not just onto the record it returns', async () => {
+    /*
+     * The same failure as the statutory columns above, one column later. The
+     * note that tells the office about a defect is built by reading the row
+     * back, so a jobId that lives only on the object createDefect returned
+     * means the note has no job to go on — and the screen would look right
+     * while nothing ever arrived in Simpro.
+     *
+     * So this reads the raw row rather than trusting the return value.
+     */
+    const db = openMigrated();
+    const site = await createSite({ name: 'Baldwin Living' });
+    const made = await createDefect({
+      siteId: site.id,
+      location: 'Pump room',
+      description: 'Jockey pump not cutting in',
+      severity: 'non-critical',
+      priority: 'high',
+      status: 'open',
+      photos: [],
+      jobId: '38412',
+    });
+
+    const row = await db.getFirstAsync<Record<string, unknown>>('SELECT * FROM defect WHERE id = ?', made.id);
+    expect(row).toMatchObject({ jobId: '38412', sentToOfficeAt: null });
+    // And it survives the read path, which is what every defect screen uses.
+    await expect(getDefect(made.id)).resolves.toMatchObject({ jobId: '38412' });
+    await db.closeAsync();
+  });
+
+  it('patches the job and the office stamp onto an existing defect', async () => {
+    /*
+     * updateDefect does not build its SET clause from the patch it was given —
+     * it walks a hard-coded list of column names and ignores everything else.
+     * A field added to the Defect type and to the migration but not to that
+     * list typechecks, resolves without error and saves nothing: the caller
+     * sees a successful await and the row keeps its old value.
+     *
+     * That is invisible from the outside, which is why it is checked from the
+     * outside. A defect raised on the wrong job has to be movable, and the
+     * stamp saying the office took it is written by a patch long after the row
+     * was inserted — if either silently no-ops, a technician is told the office
+     * has a defect it has never seen.
+     */
+    const db = openMigrated();
+    const site = await createSite({ name: 'Baldwin Living' });
+    const made = await createDefect({
+      siteId: site.id,
+      location: 'Level 3 stair',
+      description: 'Exit sign out',
+      severity: 'non-critical',
+      status: 'open',
+      photos: [],
+    });
+    expect(made.jobId).toBeUndefined();
+
+    await updateDefect(made.id, { jobId: '38412', sentToOfficeAt: '2026-09-28T04:15:00Z' });
+
+    const row = await db.getFirstAsync<Record<string, unknown>>('SELECT jobId, sentToOfficeAt FROM defect WHERE id = ?', made.id);
+    expect(row).toEqual({ jobId: '38412', sentToOfficeAt: '2026-09-28T04:15:00Z' });
+
+    // A defect can be moved to another job, and moving it must not disturb the
+    // stamp: undefined is "not in this patch", not "clear it", which is the
+    // same rule reopenDefect exists to work around for rectifiedAt. Getting
+    // this backwards would tell a technician the office had never seen a defect
+    // it already has.
+    await updateDefect(made.id, { jobId: '38413', sentToOfficeAt: undefined });
+    await expect(getDefect(made.id)).resolves.toMatchObject({ jobId: '38413', sentToOfficeAt: '2026-09-28T04:15:00Z' });
     await db.closeAsync();
   });
 });

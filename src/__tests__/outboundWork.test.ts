@@ -1,10 +1,10 @@
 import {
   ATTACHMENT_NAME_MAX, NOTE_LIMITS, PUSHED_TO_SIMPRO, SOURCES, WITHHELD_FROM_SIMPRO,
-  attachmentContentKey, attachmentFilename, attachmentsForDefect, isAttachmentItem, isCriticalDefect, isNoteItem,
-  keyIdentity, keysInNoteText, mimeTypeForPhoto, outboundKey, planOutboundWork, qldDay, qldIsoDay,
-  qldMoment, summariseRun, truncateOnSentence, workCompletedNote,
-  type CompletedRoutineRun, type OutboundAttachment, type OutboundDefect, type OutboundNoteItem, type OutboundPlan,
-  type OutboundResult,
+  attachmentContentKey, attachmentFilename, attachmentsForDefect, defectRaisedNote, isAttachmentItem,
+  isCriticalDefect, isNoteItem, keyIdentity, keysInNoteText, mimeTypeForPhoto, outboundKey, planOutboundWork,
+  qldDay, qldIsoDay, qldMoment, summariseRun, truncateOnSentence, workCompletedNote,
+  type CompletedRoutineRun, type DefectRaisedContext, type OutboundAttachment, type OutboundDefect,
+  type OutboundNoteItem, type OutboundPlan, type OutboundResult, type RaisedDefect,
 } from '@/domain/outboundWork';
 import {
   acceptedKeys, keysAlreadyOnJob, sendOutboundPlan, type SimproPoster,
@@ -1748,5 +1748,342 @@ describe('sendOutboundPlan — photographs', () => {
     });
     expect({ sent: report.sent, failed: report.failed }).toEqual({ sent: 1, failed: 1 });
     expect(report.outcomes.find((o) => o.status === 'failed')?.error).toBe('database is locked');
+  });
+});
+
+/**
+ * One defect, logged on the job it was raised against.
+ *
+ * The owner's complaint was that raising a defect left no trace on the Simpro
+ * job, and the reason was structural: the only paths that mentioned a defect to
+ * the office were the per-visit roll-ups, so a defect raised on a call-out or
+ * changed a fortnight later appeared nowhere. These tests hold the two things
+ * that fix has to get right. The note has to read as something a scheduler can
+ * act on without opening the app — what failed, where, how bad, what class, and
+ * the technician's own words — and it has to carry a DEF-prefixed marker,
+ * because that marker is the only reason the send loop's read-back of the job's
+ * notes recognises our own work. A note keyed on its own words instead, which is
+ * what the bulk test screen does today, posts a second copy from a second
+ * handset and nobody can tell which one the office quoted from.
+ */
+describe('defectRaisedNote', () => {
+  const raised = (over: Partial<RaisedDefect> = {}): RaisedDefect => ({ ...defect(), ...over });
+  const context = (over: Partial<DefectRaisedContext> = {}): DefectRaisedContext => ({
+    jobId: '39114',
+    siteId: 'site-1',
+    siteName: 'An Example Building',
+    technician: 'A Technician',
+    maintenanceAt: '2026-07-03T04:30:00.000Z',
+    foundDuring: 'Annual detection service',
+    ...over,
+  });
+
+  it('says what failed, where, how bad, what class it falls under and what that class expects', () => {
+    const note = defectRaisedNote(
+      raised({ priority: 'high', as1851Class: 'non-critical', defectCode: 'SPR-VLV-01' }),
+      context(),
+    );
+    expect(note.jobId).toBe('39114');
+    expect(note.note).toContain('DEFECT RAISED - Level 3 east');
+    expect(note.note).toContain('Sprinkler control valve found closed.');
+    expect(note.note).toContain('Raised: 03/07/2026.');
+    expect(note.note).toContain('Classification: Non-critical defect, priority high.');
+    // The class on its own only means something to a reader with AS 1851 open in
+    // front of them, so both obligations are spelled out.
+    expect(note.note).toContain('Notification: In writing to the responsible entity within one week.');
+    expect(note.note).toContain('Rectification: As soon as practicable');
+    expect(note.note).toContain('Status recorded on site: open.');
+    expect(note.note).toContain('Raised from defect code SPR-VLV-01.');
+    expect(note.note).toContain('Site: An Example Building');
+    expect(note.note).toContain('Found during: Annual detection service, 03/07/2026.');
+    expect(note.note).toContain('Raised by: A Technician');
+    // Queensland dates only. An ISO instant in a note is read as a foreign date.
+    expect(note.note).not.toContain('2026-07-03');
+    expect(note.truncated).toBe(false);
+  });
+
+  it('says which way an unclassified defect was read, rather than presenting the default as a finding', () => {
+    /*
+     * "Non-critical defect" with nobody's name against it is what an
+     * unclassified critical defect looks like from a desk. A reader who is told
+     * the class was chosen has been told something; a reader who is told a
+     * default was applied knows to ask.
+     */
+    const note = defectRaisedNote(raised({ as1851Class: undefined }), context());
+    expect(note.note).toContain('Nobody classified it on site, so it is read as non-critical here.');
+    const classified = defectRaisedNote(raised({ as1851Class: 'non-conformance' }), context());
+    expect(classified.note).toContain('Classification: Non-conformance.');
+    expect(classified.note).not.toContain('Nobody classified it');
+  });
+
+  it("keeps the technician's own words as their own block rather than folding them into the description", () => {
+    const note = defectRaisedNote(raised({ notes: 'Valve tagged out. Reception told before leaving.' }), context());
+    expect(note.note).toContain('TECHNICIAN NOTES\nValve tagged out. Reception told before leaving.');
+  });
+
+  it('records a rectification and the date it was recorded on', () => {
+    const note = defectRaisedNote(
+      raised({ status: 'rectified', rectifiedAt: '2026-07-10T01:00:00.000Z' }),
+      context(),
+    );
+    expect(note.note).toContain('Status recorded on site: rectified.');
+    expect(note.note).toContain('Recorded rectified: 10/07/2026.');
+  });
+
+  it('gives a scheduler a subject line that tells one defect on a job from another', () => {
+    /*
+     * Nine defects on one job all called "Defect raised" is a list nobody can
+     * use. How bad it is comes first because that decides what gets booked, then
+     * where, then the wording — in that order because the location is short and
+     * the description is not, so a long description loses its own tail to the
+     * cut instead of pushing the location out of sight.
+     */
+    const valve = defectRaisedNote(raised({ priority: 'high' }), context());
+    const detector = defectRaisedNote(
+      raised({ id: 'd-2', location: 'Plant room', description: 'Detector head missing.', priority: 'low' }),
+      context(),
+    );
+    expect(valve.subject).toBe('DEFECT (high) - Level 3 east - Sprinkler control valve found closed.');
+    expect(detector.subject).toBe('DEFECT (low) - Plant room - Detector head missing.');
+    expect(defectRaisedNote(raised({ severity: 'critical', priority: undefined }), context()).subject)
+      .toBe('CRITICAL DEFECT - Level 3 east - Sprinkler control valve found closed.');
+  });
+
+  it('cuts an overlong subject itself rather than letting the client cut it, and keeps the location', () => {
+    const note = defectRaisedNote(raised({ description: `Valve found closed. ${'Details follow. '.repeat(40)}` }), context());
+    expect(note.subject.length).toBeLessThanOrEqual(NOTE_LIMITS.subject.chars);
+    expect(note.subject).toContain('Level 3 east');
+    expect(note.subject.endsWith('…')).toBe(true);
+  });
+
+  it('says plainly what the note is not: neither the written notice nor a move of the job', () => {
+    // A note landing in the activity feed reads to a scheduler as something
+    // having been actioned, and a critical defect note could be taken for the
+    // written notice, which is a separate act with its own record.
+    const critical = defectRaisedNote(raised({ severity: 'critical' }), context());
+    expect(critical.note).toContain('This note is not the written critical defect notice');
+    expect(critical.note).toContain('issued to the occupier and filed on this job as an attachment');
+    expect(critical.note).toContain('no quote is raised from it');
+    const routine = defectRaisedNote(raised(), context());
+    expect(routine.note).toContain('Nothing here moves the job\'s stage or status, and no quote is raised from it.');
+    expect(routine.note).not.toContain('written critical defect notice');
+  });
+
+  it('carries a DEF marker in the text, which is the only shape the read-back guard recognises', () => {
+    /*
+     * The send loop reads a job's notes and skips a note whose key is already
+     * there. It finds keys by the marker pattern, which matches only an SRV- or
+     * DEF-prefixed key of two sixteen-digit halves. A note queued under a key of
+     * any other shape — the note's own words, a row id — is invisible to that
+     * read-back, so a second handset posts a second copy of the same defect and
+     * the office cannot tell which one it quoted from.
+     */
+    const note = defectRaisedNote(raised(), context());
+    expect(note.key).toMatch(/^DEF-[0-9a-f]{16}-[0-9a-f]{16}$/);
+    expect(note.note).toMatch(/\[SQ-REF:DEF-[0-9a-f]{16}-[0-9a-f]{16}\]/);
+    expect(keysInNoteText(note.note)).toEqual([note.key]);
+    expect(keyIdentity(note.key)).toBe(`DEF-${note.key.split('-')[1]}`);
+    // The shape is load-bearing, not decorative: anything else reads as no key.
+    expect(keysInNoteText('Defects raised today.\n[SQ-REF:defect-note-43747]')).toEqual([]);
+  });
+
+  it('gives a retry of the same defect the same key, so it cannot post twice', () => {
+    const first = defectRaisedNote(raised(), context());
+    const second = defectRaisedNote(raised(), context());
+    expect(second.key).toBe(first.key);
+    expect(second.note).toBe(first.note);
+  });
+
+  it('keys the defect and not the row it happens to live in, so a reinstall does not post it again', () => {
+    /*
+     * The local row id changes when the app is reinstalled or the defect is
+     * re-entered from the report, and the queue is emptied with it. What survives
+     * on the server is the job's notes, so the key has to be derivable from the
+     * defect itself — where it is, what it says, when it was raised — or the
+     * replacement handset posts everything a second time.
+     */
+    const before = defectRaisedNote(raised({ id: 'local-row-1' }), context());
+    const afterReinstall = defectRaisedNote(raised({ id: 'a-completely-different-row-id' }), context());
+    expect(afterReinstall.key).toBe(before.key);
+    // Retyped with a double space and a capital: the same defect, not a new one.
+    expect(defectRaisedNote(raised({ location: 'Level  3  East' }), context()).key).toBe(before.key);
+  });
+
+  it('reads a genuine change as an amendment of this defect, not as a second defect', () => {
+    const open = defectRaisedNote(raised(), context());
+    for (const change of [
+      raised({ status: 'quoted' }),
+      raised({ severity: 'critical' }),
+      raised({ priority: 'high' }),
+      raised({ as1851Class: 'critical' }),
+      raised({ verbalNotifiedAt: '2026-07-03T05:00:00.000Z', verbalNotifiedTo: 'The site contact' }),
+      raised({ interimMeasures: 'Fire watch in place.' }),
+      raised({ rectifiedAt: '2026-07-10T01:00:00.000Z' }),
+      raised({ photoCount: 2 }),
+    ]) {
+      const amended = defectRaisedNote(change, context());
+      // A new content half, so the office is told; the same identity half, so it
+      // is told about this defect rather than about a second one.
+      expect(amended.key).not.toBe(open.key);
+      expect(keyIdentity(amended.key)).toBe(keyIdentity(open.key));
+    }
+  });
+
+  it('re-reports a corrected maintenance instant, because it moves a statutory deadline', () => {
+    // Nine in the morning corrected to five in the afternoon moves the written
+    // notice deadline by eight hours. A note that could not re-report that would
+    // leave a wrong statutory date the office can never be told about.
+    const nine = defectRaisedNote(raised({ severity: 'critical' }), context({ maintenanceAt: '2026-07-02T23:00:00.000Z' }));
+    const five = defectRaisedNote(raised({ severity: 'critical' }), context({ maintenanceAt: '2026-07-03T07:00:00.000Z' }));
+    expect(five.key).not.toBe(nine.key);
+    expect(keyIdentity(five.key)).toBe(keyIdentity(nine.key));
+    expect(nine.note).toContain('due by 04/07/2026 09:00 (Qld)');
+    expect(five.note).toContain('due by 04/07/2026 17:00 (Qld)');
+  });
+
+  it('is a different note on a different job, because a note on one job is not on the other', () => {
+    const onThisJob = defectRaisedNote(raised(), context());
+    const onThatJob = defectRaisedNote(raised(), context({ jobId: '39115' }));
+    expect(onThatJob.key).not.toBe(onThisJob.key);
+    expect(keyIdentity(onThatJob.key)).not.toBe(keyIdentity(onThisJob.key));
+    expect(onThatJob.jobId).toBe('39115');
+    // And a different site: the same wording in two buildings is two defects.
+    expect(keyIdentity(defectRaisedNote(raised(), context({ siteId: 'site-2' })).key))
+      .not.toBe(keyIdentity(onThisJob.key));
+  });
+
+  it("states a critical defect's two clocks exactly as the routine service path states them", () => {
+    /*
+     * The two paths share one block on purpose. A defect raised during a walk and
+     * the same defect raised on a call-out start the same 24-hour written notice
+     * clock and the same one-month rectification clock, and a second copy of
+     * those rules written for this note would drift from the first within a
+     * month. So the sentences are compared, not just the dates.
+     */
+    const plan = planOutboundWork(
+      run({ completedAt: '2026-07-03T07:00:00.000Z' }),
+      [pass('1')],
+      [defect({ severity: 'critical', raisedAt: '2026-07-02T23:00:00.000Z' })],
+    );
+    const onItsOwn = defectRaisedNote(
+      raised({ severity: 'critical', raisedAt: '2026-07-02T23:00:00.000Z' }),
+      context({ maintenanceAt: '2026-07-03T07:00:00.000Z' }),
+    );
+    const clocks = (text: string): string[] => text.split('\n').filter((l) => /due (by|within)/.test(l));
+    expect(clocks(onItsOwn.note)).toHaveLength(2);
+    expect(clocks(onItsOwn.note)).toEqual(clocks(noteAt(plan).payload.note));
+    expect(onItsOwn.note).toContain('*** CRITICAL DEFECT *** Level 3 east');
+    expect(onItsOwn.note).toContain('Classified critical because: recorded critical on site');
+    expect(onItsOwn.note).toContain('Verbal notification: NOT RECORDED in the app.');
+  });
+
+  it('runs the clocks from the maintenance, not from when the defect was typed up', () => {
+    // A defect written up at nine on the first morning of a two-day attendance
+    // does not get a deadline of its own a day early.
+    const note = defectRaisedNote(
+      raised({ severity: 'critical', raisedAt: '2026-07-02T23:00:00.000Z' }),
+      context({ maintenanceAt: '2026-07-03T07:00:00.000Z' }),
+    );
+    expect(note.note).toContain('Raised: 03/07/2026.');
+    expect(note.note).toContain('due by 04/07/2026 17:00 (Qld)');
+  });
+
+  it('falls back to when it was raised where there was no maintenance, rather than stating no clock at all', () => {
+    /*
+     * A defect raised on a call-out, from a job card, or a fortnight after the
+     * walk has no maintenance instant behind it. An approximation the note can be
+     * read against beats the one outcome that is worse than a clock a few hours
+     * out, which is a critical defect note with no deadline on it anywhere.
+     */
+    const note = defectRaisedNote(
+      raised({ severity: 'critical', raisedAt: '2026-07-03T04:30:00.000Z' }),
+      context({ maintenanceAt: undefined, foundDuring: undefined }),
+    );
+    expect(note.note).toContain('due by 04/07/2026 14:30 (Qld)');
+    expect(note.note).toContain('Rectification due by 03/08/2026');
+    expect(note.note).not.toContain('Found during:');
+  });
+
+  it('will not put an hour on the deadline when the maintenance carries no time', () => {
+    // "Due by 04/07/2026 10:00" out of a date with no time in it is a deadline a
+    // formatter invented, and it is read as one somebody set.
+    const note = defectRaisedNote(raised({ severity: 'critical' }), context({ maintenanceAt: '2026-07-03' }));
+    expect(note.note).toContain('due within 24 hours of the maintenance');
+    expect(note.note).not.toMatch(/due by \d\d\/\d\d\/\d{4} \d\d:\d\d/);
+    expect(note.note).toContain('Rectification due by 03/08/2026');
+  });
+
+  it('says where the photographs went in the same words the service record uses', () => {
+    const note = defectRaisedNote(
+      raised({ photoCount: 2 }),
+      context({ photos: { going: 2, alreadyOnJob: 0, filename: 'An Example Building — Level 3 east — 03-07-2026.jpg' } }),
+    );
+    expect(note.note)
+      .toContain('2 photos being sent to this job\'s attachments as "An Example Building — Level 3 east — 03-07-2026.jpg".');
+    // A caller that only counted them has given nothing to attach, and the note
+    // must not read as though something was.
+    expect(defectRaisedNote(raised({ photoCount: 3 }), context()).note)
+      .toContain('3 photos held with the report');
+    expect(defectRaisedNote(raised(), context()).note).not.toContain('photo');
+  });
+
+  it('names where the whole record is, in the note as well as on the plan', () => {
+    const withReport = defectRaisedNote(raised(), context({ reportRef: 'SR-0001' }));
+    expect(withReport.fullRecordAt).toBe('routine service report SR-0001 for An Example Building, in the Safe QLD field app');
+    expect(withReport.note).toContain(`Full record: ${withReport.fullRecordAt}.`);
+    const withoutReport = defectRaisedNote(raised(), context());
+    expect(withoutReport.note).toContain('Full record: the defect record for An Example Building in the Safe QLD field app.');
+  });
+
+  it('holds a defect whose fields were never filled in without inventing any of them', () => {
+    /*
+     * The screens can produce a defect with no location, no description and no
+     * class. It still has to go up — a defect nobody can read is recoverable, a
+     * defect nobody was told about is not — and every gap has to say it is a gap.
+     */
+    const note = defectRaisedNote(
+      raised({ location: '  ', description: '', as1851Class: undefined }),
+      context({ technician: undefined, foundDuring: undefined, maintenanceAt: undefined }),
+    );
+    expect(note.note).toContain('DEFECT RAISED - location not recorded');
+    expect(note.note).toContain('No description was recorded on site.');
+    expect(note.note).toContain('Raised by: not recorded');
+    expect(note.subject).toBe('DEFECT - location not recorded - no description recorded');
+    expect(note.key).toMatch(/^DEF-[0-9a-f]{16}-[0-9a-f]{16}$/);
+    expect(note.truncated).toBe(false);
+  });
+
+  it('never states a figure out of the office system, and sends a price the technician typed as written', () => {
+    /*
+     * Money is Simpro's record and a second unreconciled number in a note is how
+     * a job gets billed twice, so nothing here reads a rate, a price or a total.
+     * A price in the technician's own words is a different thing: dropping
+     * somebody's words silently is worse than sending them, which is the same
+     * call the service record makes.
+     */
+    const note = defectRaisedNote(raised({ notes: 'Head is $40 and I have one on the van.' }), context());
+    expect(note.note).toContain('Head is $40 and I have one on the van.');
+    expect(defectRaisedNote(raised(), context()).note).not.toMatch(/\$\s?\d/);
+  });
+
+  it('fits inside the note field, and says what was shortened when a defect will not', () => {
+    // The composed note is budgeted the same way the service record is, so a
+    // technician who typed four pages gets a note that says four pages were cut
+    // rather than a note the server silently trimmed the end off.
+    const note = defectRaisedNote(
+      raised({ severity: 'critical', notes: 'Very long remarks. '.repeat(600) }),
+      context(),
+    );
+    expect(note.note.length).toBeLessThanOrEqual(NOTE_LIMITS.body.chars);
+    expect(note.truncated).toBe(true);
+    expect(note.omittedChars).toBeGreaterThan(0);
+    // Shortened rather than dropped whole: what fits of the remarks is kept,
+    // and the footer names it so nobody reads the note as the whole of them.
+    expect(note.omittedSections).toContain('technician notes shortened');
+    expect(note.note).toContain('TRUNCATED to fit the note field');
+    // The defect itself and its clocks are never what gets dropped.
+    expect(note.note).toContain('*** CRITICAL DEFECT *** Level 3 east');
+    expect(note.note).toContain('Rectification due by');
+    expect(keysInNoteText(note.note)).toEqual([note.key]);
   });
 });

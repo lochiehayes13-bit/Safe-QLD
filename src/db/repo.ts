@@ -744,14 +744,23 @@ export async function createDefect(input: Omit<Defect, 'id' | 'raisedAt'> & { id
   await db.runAsync(
     `INSERT INTO defect (id,siteId,reportId,pointId,location,description,severity,status,raisedAt,rectifiedAt,photos,notes,
        defectCode,as1851Class,qldLimbInoperable,qldLimbAdverseImpact,noticeIssuedAt,noticeRecipient,
-       verbalNotifiedAt,verbalNotifiedTo,rectificationDueAt,interimMeasures,extentOfImpairment,priority)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       verbalNotifiedAt,verbalNotifiedTo,rectificationDueAt,interimMeasures,extentOfImpairment,priority,
+       jobId,sentToOfficeAt)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     d.id, d.siteId, d.reportId ?? null, d.pointId ?? null, d.location, d.description,
     d.severity, d.status, d.raisedAt, d.rectifiedAt ?? null, JSON.stringify(d.photos ?? []), d.notes ?? null,
     d.defectCode ?? null, d.as1851Class ?? 'non-critical', fromBool(d.qldLimbInoperable), fromBool(d.qldLimbAdverseImpact),
     d.noticeIssuedAt ?? null, d.noticeRecipient ?? null, d.verbalNotifiedAt ?? null, d.verbalNotifiedTo ?? null,
     d.rectificationDueAt ?? null, d.interimMeasures ?? null, d.extentOfImpairment ?? null,
     d.priority ?? null,
+    // The job goes in with the row for the same reason the statutory columns
+    // had to: the note that tells the office about this defect is built from
+    // the row, so a job that only ever existed on the record this function
+    // returned would leave the note with nowhere to go. sentToOfficeAt is
+    // almost always null here — nothing has been sent at the moment a defect is
+    // raised — but it is carried so a defect written back from a sync that
+    // already knows the answer is not forced to insert and then update.
+    d.jobId ?? null, d.sentToOfficeAt ?? null,
   );
   return d;
 }
@@ -760,9 +769,15 @@ export async function updateDefect(id: string, patch: Partial<Defect>): Promise<
   const db = await getDb();
   const sets: string[] = [];
   const vals: SqlValue[] = [];
+  // Every patchable column is named here and nowhere else, so a field added to
+  // the Defect type but not added to this list typechecks, passes review and
+  // then silently never saves — the caller gets no error and the row keeps its
+  // old value. jobId and sentToOfficeAt are in it for exactly that reason:
+  // sending a defect to the office is a patch, not an insert.
   for (const f of ['location', 'description', 'severity', 'status', 'rectifiedAt', 'notes',
     'defectCode', 'as1851Class', 'noticeIssuedAt', 'noticeRecipient', 'verbalNotifiedAt',
-    'verbalNotifiedTo', 'rectificationDueAt', 'interimMeasures', 'extentOfImpairment', 'priority'] as const) {
+    'verbalNotifiedTo', 'rectificationDueAt', 'interimMeasures', 'extentOfImpairment', 'priority',
+    'jobId', 'sentToOfficeAt'] as const) {
     if (patch[f] !== undefined) { sets.push(`${f} = ?`); vals.push((patch[f] as string | undefined) ?? null); }
   }
   if (patch.photos !== undefined) { sets.push('photos = ?'); vals.push(JSON.stringify(patch.photos)); }

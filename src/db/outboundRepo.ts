@@ -98,6 +98,36 @@ export async function queuedAttachmentKeys(): Promise<string[]> {
   return rows.map((r) => r.contentKey).filter((k): k is string => !!k);
 }
 
+/**
+ * The job notes already in the outbound queue, by content key.
+ *
+ * The same argument as the photographs above, and it took longer to notice
+ * because notes used to be posted from the send screen rather than queued. A
+ * note that goes through the queue — `queueDefectNote` in opsRepo is the one
+ * that does, and it hands the note's own DEF key over as the content key, which
+ * is why the keys in this table are the same strings a plan produces — is not in
+ * `outbound_accepted` until the office answers, and between the queueing and the
+ * answer there is a gap a technician can walk straight through. Finish a walk in
+ * a carpark with no signal, open the send screen again ten minutes later at the
+ * front door, and the plan reads an accepted table that has heard nothing and
+ * queues the same critical defect notice a second time. Two notes, two defects
+ * as the office reads them, two jobs raised against one fault.
+ *
+ * So a key sitting in the queue counts as sent. 'failed' is left out for the
+ * same reason `queuedAttachmentKeys` leaves it out: a note that has given up
+ * has not reached anybody, and if it also suppressed the defect from this run's
+ * service note the fault would disappear from the office's view entirely.
+ * Pressing send again is how a person asks for another go, and they must get
+ * one.
+ */
+export async function queuedNoteKeys(): Promise<string[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ contentKey: string | null }>(
+    "SELECT contentKey FROM sync_queue WHERE kind = 'job-note' AND status IN ('pending', 'sending', 'sent', 'unknown')",
+  );
+  return rows.map((r) => r.contentKey).filter((k): k is string => !!k);
+}
+
 export async function recordAccepted(input: {
   key: string;
   jobId: string;
@@ -187,6 +217,15 @@ export async function resultsForRun(run: RoutineRun): Promise<OutboundResult[]> 
  * The photographs are handed over only where the caller looked them up on
  * disk: a path with no size is a file the plan cannot send, and a defect
  * record alone does not know whether its files are still there.
+ *
+ * `sentToOfficeAt` is the defect row's own stamp, passed in rather than read
+ * off `d` so a caller reporting a defect it has just composed in memory can
+ * say "not sent" without writing a row. It is normalised on the way through
+ * because the row does not arrive as this type promises: `listDefects` spreads
+ * the SQL row, so a column that is NULL reads back as `null`, not `undefined`,
+ * and a `null` here would travel into the plan and out into anything that
+ * serialises it. The plan's own test is truthiness, so nothing was broken by
+ * it — but a field documented as an optional string should not hold null.
  */
 export function toOutboundDefect(d: Defect, sentToOfficeAt?: string, photos?: OutboundPhoto[]): OutboundDefect {
   return {
@@ -206,7 +245,7 @@ export function toOutboundDefect(d: Defect, sentToOfficeAt?: string, photos?: Ou
     verbalNotifiedTo: d.verbalNotifiedTo,
     interimMeasures: d.interimMeasures,
     photoCount: d.photos.length || undefined,
-    sentToOfficeAt,
+    sentToOfficeAt: sentToOfficeAt?.trim() || undefined,
   };
 }
 
@@ -252,12 +291,13 @@ export async function planForRun(
     photoSizes?: (paths: readonly string[]) => OutboundPhoto[];
   } = {},
 ): Promise<RunPlan> {
-  const [jobId, results, rawDefects, sent, queuedPhotos] = await Promise.all([
+  const [jobId, results, rawDefects, sent, queuedPhotos, queuedNotes] = await Promise.all([
     jobForRun(run.id),
     resultsForRun(run),
     defectsForRun(run),
     acceptedKeys(),
     queuedAttachmentKeys(),
+    queuedNoteKeys(),
   ]);
 
   const completed: CompletedRoutineRun = {
@@ -275,8 +315,20 @@ export async function planForRun(
     reportRef: options.reportRef,
   };
 
+  /*
+   * The defect's own stamp goes in, where this used to hand over a hard-coded
+   * undefined. That one word is why the plan's "the office already has this
+   * defect" refusal has never fired on a real handset: the stamp was a
+   * parameter nothing populated, so every defect inside the run's window looked
+   * unsent no matter how many times it had gone up, and the only thing standing
+   * between the office and a second copy was the content key — which does not
+   * help once the defect has been edited, because an edited defect is a new key
+   * and goes up as an amendment of a note the office may already have quoted
+   * from. Read from the row, a defect the office accepted last Tuesday is
+   * declined by name and date instead.
+   */
   const defects = rawDefects.map((d) => toOutboundDefect(
-    d, undefined, options.photoSizes && d.photos.length ? options.photoSizes(d.photos) : undefined,
+    d, d.sentToOfficeAt, options.photoSizes && d.photos.length ? options.photoSizes(d.photos) : undefined,
   ));
 
   /*
@@ -286,7 +338,10 @@ export async function planForRun(
    * nothing, because the office would act on whichever number went out.
    */
   const plan = planOutboundWork(completed, results, defects, {
-    alreadySentKeys: [...sent, ...queuedPhotos],
+    // Accepted, plus everything still in the queue. A queued item is as sent as
+    // this plan is concerned — see queuedNoteKeys and queuedAttachmentKeys for
+    // why, and for why a failed one is deliberately not in here.
+    alreadySentKeys: [...sent, ...queuedPhotos, ...queuedNotes],
     sendPhotos: options.sendPhotos,
     declaredCounts: results.length
       ? { passed: run.checksPassed, failed: run.checksFailed, notTested: run.checksNotTested }

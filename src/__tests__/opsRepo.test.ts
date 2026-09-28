@@ -1,11 +1,14 @@
 import {
   failedSync, forgetSync, getJob, jobSummariesByExternalIds, listJobPage, listJobSummaries, listJobs,
-  openJobPicks, setJobStatus, upsertJob,
+  openJobPicks, queueDefectNote, setJobStatus, upsertJob,
   searchJobPicks,
   jobCount,
 } from '@/db/opsRepo';
 import { scheduledJobExternalIds } from '@/db/mirrorRepo';
 import { applyJobFilter, type JobListFilter } from '@/domain/jobPresentation';
+import { keyIdentity } from '@/domain/outboundWork';
+import { queueKey } from '@/domain/queueKey';
+import type { Defect } from '@/domain/types';
 import type { WhoseSchedule } from '@/domain/myDay';
 import { flushSoon } from '@/simpro/flushSoon';
 import { openMigrated, type NodeSqliteDb } from './support/nodeSqlite';
@@ -524,5 +527,163 @@ describe('the job list as a query', () => {
     const rows = await jobSummariesByExternalIds(['43751', '43747', '43751', 'nope']);
     expect([...rows.map((j) => j.externalId)].sort()).toEqual(['43747', '43751']);
     expect(await jobSummariesByExternalIds([])).toEqual([]);
+  });
+});
+/**
+ * A defect going up on its Simpro job.
+ *
+ * The point of queueing it rather than posting it is that a technician standing
+ * in a basement plant room with no signal loses nothing: the row waits in
+ * sync_queue and goes with the next flush. So what these check is the queue's
+ * behaviour around it -- one note per defect however many times a screen asks,
+ * an amended defect recognised as an amendment rather than swallowed, and a
+ * defect with no job on it recorded as not gone instead of thrown away.
+ */
+describe('a defect raised against a job', () => {
+  const { pendingSync } = jest.requireActual('@/db/opsRepo') as typeof import('@/db/opsRepo');
+
+  beforeEach(() => { jest.mocked(flushSoon).mockClear(); });
+
+  const aDefect = (over: Partial<Defect> = {}): Defect => ({
+    id: 'def-1',
+    siteId: 'site-1',
+    location: 'Level 2 riser cupboard',
+    description: 'Hydrant isolation valve strapped open and not monitored',
+    severity: 'non-critical',
+    priority: 'high',
+    status: 'open',
+    raisedAt: '2026-09-21T23:15:00.000Z',
+    photos: [],
+    ...over,
+  });
+
+  const rows = async () => (await pendingSync()).map((r) => ({
+    kind: r.kind,
+    contentKey: r.contentKey,
+    payload: JSON.parse(r.payload) as { jobId: string; subject: string; note: string },
+  }));
+
+  it('queues one note for the office, however many times the screen asks', async () => {
+    // A save that re-queues on focus, or a technician pressing the button twice
+    // because nothing visibly happened the first time, is one defect.
+    const first = await queueDefectNote(aDefect(), '39901');
+    const second = await queueDefectNote(aDefect(), '39901');
+
+    expect(first.queued).toBe(true);
+    expect(second).toEqual({ queued: false, key: first.key });
+    const queued = await rows();
+    expect(queued.map((q) => q.kind)).toEqual(['job-note']);
+    expect(queued[0]!.payload.jobId).toBe('39901');
+    expect(queued[0]!.payload.subject).toContain('DEFECT (high) - Level 2 riser cupboard');
+    expect(queued[0]!.payload.note).toContain('Hydrant isolation valve strapped open and not monitored');
+    // The radio is woken for the new row and not for the duplicate: a phone in a
+    // bad-signal building has an afternoon of battery to get through.
+    expect(flushSoon).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends the correction when a defect is re-read as critical, instead of silently dropping it', async () => {
+    // The severity sits in the content half of the key and not the identity
+    // half, so this is the same defect saying something different -- which is
+    // exactly the case the office must hear about, because critical carries the
+    // 24-hour written notice and a month to rectify.
+    const routine = await queueDefectNote(aDefect(), '39901');
+    const critical = await queueDefectNote(aDefect({ severity: 'critical', priority: undefined }), '39901');
+
+    expect(critical.queued).toBe(true);
+    expect(critical.key).not.toBe(routine.key);
+    // Same defect, not a second one: the identity half is untouched.
+    expect(keyIdentity(critical.key!)).toBe(keyIdentity(routine.key!));
+    const queued = await rows();
+    expect(queued).toHaveLength(2);
+    expect(queued[1]!.payload.subject).toContain('CRITICAL DEFECT');
+    expect(queued[1]!.payload.note).toContain('CRITICAL DEFECT');
+    expect(flushSoon).toHaveBeenCalledTimes(2);
+  });
+
+  it('keys the queue row on the defect’s own DEF key, not on the note text', async () => {
+    // This is the whole reason the entry point exists here. Left to itself
+    // enqueueSync hashes the payload it is handed, so the wording of the note
+    // becomes the identity of the work -- and a defect reworded, or composed by
+    // a screen that happened to name the site differently, queues twice.
+    const { key } = await queueDefectNote(aDefect(), '39901');
+    const [row] = await rows();
+
+    expect(key).toMatch(/^DEF-[0-9a-f]{16}-[0-9a-f]{16}$/);
+    expect(row!.contentKey).toBe(key);
+    expect(row!.contentKey).not.toBe(queueKey('job-note', row!.payload));
+    // The marker is already in the text, so the sender adds no second one.
+    expect(row!.payload.note).toContain(`[SQ-REF:${key}]`);
+  });
+
+  it('holds the same defect back after the site is renamed, because the name is not the work', async () => {
+    // Simpro site names get tidied up, and a tidy-up must not re-report every
+    // defect already on the job.
+    await queueDefectNote(aDefect(), '39901', { siteName: 'Fictional Arcade' });
+    const again = await queueDefectNote(aDefect(), '39901', { siteName: 'Fictional Arcade (Stage 1)' });
+
+    expect(again.queued).toBe(false);
+    expect(await pendingSync()).toHaveLength(1);
+  });
+
+  it('names the site off the site table when the screen that raised it does not know the name', async () => {
+    await db.runAsync("INSERT INTO site (id,name,createdAt,updatedAt) VALUES ('site-1','Fictional Arcade','','')");
+    await queueDefectNote(aDefect(), '39901');
+    const [row] = await rows();
+    expect(row!.payload.note).toContain('Site: Fictional Arcade');
+  });
+
+  it('says so plainly rather than naming no building when the site is not on this device', async () => {
+    await queueDefectNote(aDefect({ siteId: 'site-never-synced' }), '39901');
+    const [row] = await rows();
+    expect(row!.payload.note).toContain('Site: site not recorded');
+  });
+
+  it('takes the job off the defect row when the caller passes none', async () => {
+    const { queued } = await queueDefectNote(aDefect({ jobId: '39902' }));
+    expect(queued).toBe(true);
+    expect((await rows())[0]!.payload.jobId).toBe('39902');
+  });
+
+  it('records a defect with nowhere to put it as not gone, without throwing', async () => {
+    // A site with no open job is an ordinary Tuesday. The defect still has to be
+    // saved on the phone, so this reports that the office has not got it rather
+    // than failing the save underneath the technician.
+    await expect(queueDefectNote(aDefect())).resolves.toEqual({ queued: false });
+    await expect(queueDefectNote(aDefect({ jobId: '   ' }), '  ')).resolves.toEqual({ queued: false });
+    expect(await pendingSync()).toHaveLength(0);
+    expect(flushSoon).not.toHaveBeenCalled();
+  });
+
+  it('re-reports a defect the office already accepted once, when something about it has changed', async () => {
+    // sentToOfficeAt says an earlier note landed, not that this defect can never
+    // change again. A status moving to rectified is the office’s to know.
+    const open = await queueDefectNote(aDefect({ sentToOfficeAt: '2026-09-22T01:00:00.000Z' }), '39901');
+    const fixed = await queueDefectNote(
+      aDefect({ sentToOfficeAt: '2026-09-22T01:00:00.000Z', status: 'rectified', rectifiedAt: '2026-09-25T02:00:00.000Z' }),
+      '39901',
+    );
+    expect(open.queued).toBe(true);
+    expect(fixed.queued).toBe(true);
+    const queued = await rows();
+    expect(queued).toHaveLength(2);
+    expect(queued[1]!.payload.note).toContain('Status recorded on site: rectified.');
+    expect(queued[1]!.payload.note).toContain('Recorded rectified: 25/09/2026.');
+  });
+
+  it('carries the statutory clocks off the maintenance instant, not off when it was typed up', async () => {
+    // A critical defect found on Monday morning and typed up on Tuesday has its
+    // deadlines from the maintenance, and the same defect composed twice with
+    // that instant is still one note.
+    const context = { maintenanceAt: '2026-09-21T00:30:00.000Z', foundDuring: 'Annual detection service' };
+    const first = await queueDefectNote(aDefect({ severity: 'critical', priority: undefined }), '39901', context);
+    const repeat = await queueDefectNote(aDefect({ severity: 'critical', priority: undefined }), '39901', context);
+    expect(repeat).toEqual({ queued: false, key: first.key });
+
+    const [row] = await rows();
+    expect(row!.payload.note).toContain('Found during: Annual detection service, 21/09/2026.');
+    // Dropping the instant states different deadlines, so it is a different note.
+    const without = await queueDefectNote(aDefect({ severity: 'critical', priority: undefined }), '39901', { foundDuring: 'Annual detection service' });
+    expect(without.queued).toBe(true);
+    expect(without.key).not.toBe(first.key);
   });
 });

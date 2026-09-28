@@ -1,6 +1,10 @@
 import { getDb, newId, nowIso } from './index';
 import { queueKey } from '@/domain/queueKey';
-import { workCompletedNote, type WorkCompletedRun } from '@/domain/outboundWork';
+import {
+  defectRaisedNote, workCompletedNote,
+  type PhotoOutcome, type RaisedDefect, type WorkCompletedRun,
+} from '@/domain/outboundWork';
+import type { Defect } from '@/domain/types';
 import { jobIsMine, type JobListFilter } from '@/domain/jobPresentation';
 import type { WhoseSchedule } from '@/domain/myDay';
 import { QLD_UTC_OFFSET_HOURS } from '@/domain/qldTime';
@@ -735,6 +739,157 @@ export async function queueWorkCompletedNote(
     { jobId: note.jobId, subject: note.subject, note: note.note },
     { contentKey: note.key },
   );
+  if (!duplicate) flushSoon();
+  return { queued: !duplicate, key: note.key };
+}
+
+/** What the defect row cannot tell the note, because it is about where the defect was raised and not what it is. */
+export interface QueueDefectNoteOptions {
+  /**
+   * The site's name for the note's own "Site:" line.
+   *
+   * Left out, the site is read back here from the site table, because a screen
+   * holding a defect does not always hold the site it belongs to and a note that
+   * names no building is a note a scheduler has to open the job to understand.
+   * Either way the name is outside both halves of the note's key, so a site
+   * renamed in Simpro next month does not turn every defect already reported
+   * into a second note.
+   */
+  siteName?: string;
+  /** Whoever raised it, as the phone knows them. Absent reads as "not recorded" rather than as nobody. */
+  technician?: string;
+  /** What they were doing when they found it, in their words: "Annual detection service", "Bulk test". */
+  foundDuring?: string;
+  /**
+   * The instant the maintenance was carried out, where the defect was found
+   * during one. This is what the statutory clocks run from, so pass the same
+   * instant every time this defect is queued: it sits in the content half of the
+   * key, and a defect queued once with it and once without states two different
+   * deadlines and goes up as two notes. See `defectRaisedNote`.
+   */
+  maintenanceAt?: string;
+  /** Reference of the issued record holding the whole story, where there is one. */
+  reportRef?: string;
+  /** How many of this defect's photographs are going onto the job, and under what name. */
+  photos?: PhotoOutcome;
+}
+
+/**
+ * Puts a defect on its Simpro job, durably.
+ *
+ * This exists because the one path in the app that carried a defect's words to
+ * the office posted them itself, straight out of the screen, with no queue
+ * behind it. That made it the only outbound path in the app that loses work:
+ * every other thing a technician records goes into `sync_queue` first and is
+ * sent afterwards, so a plant room in a basement with no signal costs them
+ * nothing but a wait. A direct post in the same basement fails, the screen has
+ * already moved on, and the defect is on the phone and nowhere else — which is
+ * exactly the complaint that started this, a defect raised on site that the
+ * office never saw. Queued, the row sits there until the next flush, whether
+ * that is thirty seconds later in the car park or the following morning.
+ *
+ * It lives in opsRepo and not repo.ts on purpose. repo.ts is deliberately free
+ * of network concerns and importing `flushSoon` into it would end that; opsRepo
+ * already queues and already asks for a send, so this is one more thing it does
+ * the same way `queueWorkCompletedNote` above does it.
+ *
+ * `jobId` is Simpro's own job id. It is taken as a parameter as well as off the
+ * row so a screen that has just picked a job can queue the note in the same
+ * breath as saving it, without depending on having read the row back first; the
+ * row's own `jobId` stands in when nothing is passed. No job means no note,
+ * reported as `queued: false` rather than thrown, because a defect raised at a
+ * site with no open job is an ordinary thing that must still be recorded on the
+ * phone — the screen's job is to say the office has not got it yet, not to fail
+ * the save.
+ *
+ * A defect already stamped `sentToOfficeAt` is deliberately still queued. That
+ * stamp means the office took an earlier note about this defect, not that
+ * nothing about it can have changed since: a status moving to rectified, interim
+ * measures added, a verbal notification recorded late are all things the office
+ * has to be told, and every one of them sits in the content half of the note's
+ * key. So an unchanged defect queued twice is caught as a duplicate below and an
+ * amended one goes up as an amendment, which is a judgement the key makes
+ * properly and a flag on the row cannot make at all.
+ */
+export async function queueDefectNote(
+  defect: Defect,
+  jobId?: string,
+  options: QueueDefectNoteOptions = {},
+): Promise<{ queued: boolean; key?: string }> {
+  const target = (jobId ?? defect.jobId)?.trim();
+  if (!target) return { queued: false };
+
+  const db = await getDb();
+  /*
+   * The row is read straight back out of SQLite with SELECT *, so severity and
+   * status are whatever is in the column rather than whatever the type says --
+   * the same reason `toOutboundDefect` narrows them. A row written by an older
+   * build, or by a hand-edited database, must not put a word the note has no
+   * sentence for into a statutory classification line.
+   */
+  const raised: RaisedDefect = {
+    id: defect.id,
+    location: defect.location,
+    description: defect.description,
+    severity: defect.severity === 'critical' ? 'critical' : 'non-critical',
+    status: defect.status === 'rectified' || defect.status === 'quoted' || defect.status === 'closed'
+      ? defect.status
+      : 'open',
+    raisedAt: defect.raisedAt,
+    as1851Class: defect.as1851Class,
+    qldLimbInoperable: defect.qldLimbInoperable,
+    qldLimbAdverseImpact: defect.qldLimbAdverseImpact,
+    verbalNotifiedAt: defect.verbalNotifiedAt,
+    verbalNotifiedTo: defect.verbalNotifiedTo,
+    interimMeasures: defect.interimMeasures,
+    // Zero photographs is told as "none" by leaving it out, which is what the
+    // note's photograph line reads; a literal 0 in the key would be the same
+    // thing said a second way and would not match a caller that omitted it.
+    photoCount: defect.photos.length || undefined,
+    priority: defect.priority,
+    defectCode: defect.defectCode,
+    rectifiedAt: defect.rectifiedAt,
+    notes: defect.notes,
+    extentOfImpairment: defect.extentOfImpairment,
+  };
+
+  const siteName = options.siteName?.trim()
+    || (await db.getFirstAsync<{ name: string }>('SELECT name FROM site WHERE id = ?', defect.siteId))?.name?.trim()
+    // Every other line of the note is still worth sending, so an unnamed site
+    // says so in plain words instead of holding the whole defect back.
+    || 'site not recorded';
+
+  const note = defectRaisedNote(raised, {
+    jobId: target,
+    siteId: defect.siteId,
+    siteName,
+    technician: options.technician,
+    maintenanceAt: options.maintenanceAt,
+    foundDuring: options.foundDuring,
+    reportRef: options.reportRef,
+    photos: options.photos,
+  });
+
+  /*
+   * The note's own DEF key is handed to the queue as the content key, and that
+   * is the whole point of this function rather than an incidental tidiness.
+   * Without it `enqueueSync` falls back to `queueKey`, which hashes the payload
+   * it is given -- subject and body text included. That fallback is what breaks
+   * the bulk-test note today: the composed text carries the marker, the site
+   * name and anything else the wording picked up, so two spellings of one defect
+   * are two queue rows, while a genuinely amended defect whose text happens to
+   * come out the same length of nothing is not recognised as the amendment it is.
+   * The DEF key is built from the defect's identity and its content separately,
+   * which is the judgement the queue needs and cannot make from the text.
+   */
+  const { duplicate } = await enqueueSync(
+    'job-note',
+    { jobId: note.jobId, subject: note.subject, note: note.note },
+    { contentKey: note.key },
+  );
+  // Only on a row that is actually new. Asking for a flush on a duplicate would
+  // wake the radio for nothing, which on a phone in a bad-signal building is the
+  // battery a technician needs for the rest of the afternoon.
   if (!duplicate) flushSoon();
   return { queued: !duplicate, key: note.key };
 }
