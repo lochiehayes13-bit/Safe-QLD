@@ -171,6 +171,75 @@ export function jobDetailIsStale(
   return now - at >= maxAgeMs;
 }
 
+/**
+ * How long a record's children may stand unread once the office has stopped
+ * touching the record: a day.
+ *
+ * This is the backstop for what the office's own stamp cannot tell us. A
+ * DateModified moves when the office edits the job, but not when somebody
+ * deletes an attachment through a path that leaves the parent's stamp alone,
+ * and not at all on a build where a field the phone reads is not one the
+ * office counts as a modification. A day means a record the office has
+ * finished with is re-read once overnight instead of forty-eight times, and
+ * a divergence nobody noticed lives for a shift rather than forever.
+ */
+export const DETAIL_REREAD_HORIZON_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The SQL that decides a record's children are worth reading this run, and
+ * the two instants it compares them against. Both the job and the quote
+ * prefetch use it, because they had the same fault.
+ *
+ * The fault: the gate used to be `jobDetailIsStale` alone, a clock. The sync
+ * runs every thirty minutes and the freshness window is fifteen, so the clock
+ * had always expired by the time it was asked, and every job the office had
+ * touched in the last fortnight was read again in full on every single run.
+ * Full is not cheap here — a job's children are one record read, five sibling
+ * families, and then one cost-centre read per section plus one read per item
+ * kind per cost centre, which is about fourteen requests for the simplest
+ * one-section job. At the sixty-job cap that is roughly 840 requests an hour,
+ * around the clock, to re-read rows that had not changed since the last time.
+ * Quotes cost less each but ran on the same expired clock.
+ *
+ * So a record already read is wanted again only when the office has touched
+ * it since. The clock stays as a guard rather than a trigger: a record read
+ * inside `maxAgeMs` is left alone even if it did change, because a job opened
+ * twice in one visit should cost one read.
+ *
+ * "Touched since it was read" is not a text comparison, and getting that
+ * wrong is worse than not gating at all. The read stamp is the phone's UTC
+ * instant and the office's DateModified carries its own +10:00, so as text a
+ * read at 00:30Z sorts before a change at 09:00+10:00 that happened ninety
+ * minutes earlier — every record the office touched that morning would be
+ * re-read on every run until the afternoon, which is exactly the waste we
+ * came to remove. SQLite's datetime() brings both to UTC first.
+ *
+ * Three ways a record still comes through on the clock alone, each of them
+ * deliberate:
+ *   - never read, so there is nothing to compare and it must be fetched;
+ *   - a stamp SQLite cannot parse, which we treat as never read rather than
+ *     trusting a text compare against something that is not a date;
+ *   - no DateModified at all, which the list-level pull can leave null on
+ *     some record types. Gating on a missing stamp would starve the record
+ *     forever, so those fall back to the plain freshness window.
+ * Past `horizonMs` everything is read again regardless, so a change the
+ * office's stamp never reflected does not hide indefinitely.
+ */
+function wantsDetailSql(maxAgeMs: number, horizonMs: number, now: number): { sql: string; args: string[] } {
+  // A horizon shorter than the freshness window would fire for every row and
+  // quietly undo the change gate, so it cannot be shorter than the window.
+  const freshAfter = new Date(now - maxAgeMs).toISOString();
+  const horizonAfter = new Date(now - Math.max(horizonMs, maxAgeMs)).toISOString();
+  return {
+    sql: `(detailSyncedAt IS NULL
+           OR datetime(detailSyncedAt) IS NULL
+           OR datetime(detailSyncedAt) < datetime(?)
+           OR (datetime(detailSyncedAt) < datetime(?)
+               AND (dateModified IS NULL OR datetime(detailSyncedAt) < datetime(dateModified))))`,
+    args: [horizonAfter, freshAfter],
+  };
+}
+
 export async function listJobsFor(filter: {
   siteId?: string;
   customerExternalId?: string;
@@ -545,15 +614,21 @@ export async function getJobFull(localId: string): Promise<JobFull | null> {
  *
  * `preferExternalIds` are the ones somebody is booked to, in the order the
  * caller wants them; after those come jobs the office touched since
- * `modifiedSince`, newest change first. Jobs read within `maxAgeMs` are
- * left out, and the whole list is cut at `limit` — a sync reads a dozen
- * requests per job, and sixty jobs is already a minute and a half.
+ * `modifiedSince`, newest change first. The whole list is cut at `limit` —
+ * a job's children are about fourteen requests, and sixty jobs is already a
+ * minute and a half of somebody's morning.
+ *
+ * Which of those candidates actually gets read is `wantsDetailSql`: read it
+ * for why the freshness window on its own was re-reading all sixty every
+ * half hour whether or not the office had changed anything.
  */
 export async function jobsWantingDetail(options: {
   preferExternalIds?: string[];
   modifiedSince?: string;
   maxAgeMs: number;
   limit: number;
+  /** A job unread for longer than this is read again even if the office's stamp never moved. */
+  horizonMs?: number;
   now?: number;
 }): Promise<{ id: string; externalId: string }[]> {
   const db = await getDb();
@@ -573,13 +648,14 @@ export async function jobsWantingDetail(options: {
   }
   if (!where.length) return [];
 
+  const wants = wantsDetailSql(options.maxAgeMs, options.horizonMs ?? DETAIL_REREAD_HORIZON_MS, now);
   const rows = await db.getAllAsync<Pick<JobRecord, 'id' | 'externalId' | 'dateModified' | 'detailSyncedAt'>>(
     `SELECT id, externalId, dateModified, detailSyncedAt FROM job
-     WHERE externalId IS NOT NULL AND (${where.join(' OR ')})`,
-    ...args,
+     WHERE externalId IS NOT NULL AND (${where.join(' OR ')}) AND ${wants.sql}`,
+    ...args, ...wants.args,
   );
   return rows
-    .filter((r) => r.externalId && jobDetailIsStale(r, options.maxAgeMs, now))
+    .filter((r) => r.externalId)
     .sort((a, b) => {
       const ra = rank.get(a.externalId!) ?? Number.MAX_SAFE_INTEGER;
       const rb = rank.get(b.externalId!) ?? Number.MAX_SAFE_INTEGER;
@@ -937,25 +1013,31 @@ export async function listQuotePage(q: {
   };
 }
 
-/** Quotes whose children are worth reading now: never read, or older than `maxAgeMs`, and modified since. */
+/**
+ * Quotes whose children are worth reading now: modified since `modifiedSince`,
+ * and either never read or touched by the office since the phone last read
+ * them. Same gate as the jobs above, same reason — see `wantsDetailSql`.
+ */
 export async function quotesWantingDetail(options: {
   modifiedSince?: string;
   maxAgeMs: number;
   limit: number;
+  /** A quote unread for longer than this is read again even if the office's stamp never moved. */
+  horizonMs?: number;
   now?: number;
 }): Promise<string[]> {
   const db = await getDb();
   const now = options.now ?? Date.now();
-  const rows = options.modifiedSince
-    ? await db.getAllAsync<{ externalId: string; detailSyncedAt: string | null }>(
-      'SELECT externalId, detailSyncedAt FROM simpro_quote WHERE dateModified >= ? ORDER BY dateModified DESC',
-      options.modifiedSince,
-    )
-    : [];
-  return rows
-    .filter((r) => jobDetailIsStale({ detailSyncedAt: r.detailSyncedAt ?? undefined }, options.maxAgeMs, now))
-    .slice(0, options.limit)
-    .map((r) => r.externalId);
+  if (!options.modifiedSince) return [];
+  const wants = wantsDetailSql(options.maxAgeMs, options.horizonMs ?? DETAIL_REREAD_HORIZON_MS, now);
+  const rows = await db.getAllAsync<{ externalId: string }>(
+    `SELECT externalId FROM simpro_quote
+     WHERE dateModified >= ? AND ${wants.sql}
+     ORDER BY dateModified DESC
+     LIMIT ?`,
+    options.modifiedSince, ...wants.args, options.limit,
+  );
+  return rows.map((r) => r.externalId);
 }
 
 // ---------------------------------------------------------------------------

@@ -1064,6 +1064,60 @@ const statusOf = (e: unknown): number | undefined =>
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
+/**
+ * How many of a job's section reads may be on the wire at one time.
+ *
+ * Eight, because the client paces itself at eight requests a second
+ * (REQUESTS_PER_SECOND in client.ts) and every request takes its slot from
+ * one lane shared per build URL. Holding exactly one second of slots in
+ * flight is the point where the traversal stops waiting on round trips and
+ * starts waiting on the pacer, which is the limit we actually want to be
+ * bound by. Going higher buys nothing — the pacer would just make the extra
+ * requests queue on a timer — and it costs: a forty-section job would put
+ * hundreds of pending fetches and their response buffers on a phone that is
+ * often on one bar of mobile data.
+ */
+export const SECTION_READ_FAN_OUT = 8;
+
+/**
+ * A ceiling on how many reads run at once, shared across a whole traversal.
+ *
+ * The section tree is three levels deep, so bounding each level separately
+ * would multiply out: eight sections times eight cost centres times five
+ * item families is not a bound anybody would choose. One gate handed down
+ * through all three levels means the number in flight is the number here,
+ * whatever shape the job is.
+ *
+ * A caller only ever holds a slot for the single request inside `run`, never
+ * while awaiting the reads below it, so the tree cannot deadlock waiting on
+ * itself. The `while` rather than an `if` matters: a slot freed by one
+ * release can be taken by a fresh caller before the woken one resumes, so
+ * the woken one has to look again instead of assuming the slot is still
+ * there.
+ */
+class ReadGate {
+  private inFlight = 0;
+  private readonly waiting: (() => void)[] = [];
+
+  constructor(private readonly limit: number) {}
+
+  async run<T>(read: () => Promise<T>): Promise<T> {
+    while (this.inFlight >= this.limit) {
+      await new Promise<void>((resolve) => { this.waiting.push(resolve); });
+    }
+    this.inFlight++;
+    try {
+      return await read();
+    } finally {
+      this.inFlight--;
+      // Wake exactly one waiter per slot released. A read that threw still
+      // releases, which is what keeps a failing item family from stranding
+      // the rest of the job behind a slot nobody will ever give back.
+      this.waiting.shift()?.();
+    }
+  }
+}
+
 export class SimproMirror {
   constructor(private readonly client: SimproClient) {}
 
@@ -1120,6 +1174,9 @@ export class SimproMirror {
    * request each and are read anyway — the build returns [] rather than
    * refusing, and a job with labour lines and no parts is exactly the one a
    * technician wants to see.
+   *
+   * A dozen requests is not a dozen round trips: see sectionsUnder, which
+   * overlaps everything below the sections list.
    */
   async jobSections(id: string): Promise<SimproSection[]> {
     return this.sectionsUnder(
@@ -1255,30 +1312,83 @@ export class SimproMirror {
 
   // ---------------------------------------------------------------- shared
 
+  /**
+   * Every section under a job or a quote, with its cost centres and lines.
+   *
+   * The build fixes the shape of this read and there is no endpoint that
+   * answers for a whole job at once: the lines live four levels down, at
+   * `.../sections/{s}/costCenters/{c}/{catalogs|oneOffs|labor|prebuilds|serviceFees}`.
+   * So the number of requests cannot come down — a one-section,
+   * one-cost-centre job is 1 + 1 + 5 = 7 reads, and three sections with two
+   * cost centres apiece is 1 + 3 + 30 = 34 — but the wall clock can, because
+   * almost none of those reads depends on the answer to another.
+   *
+   * This was three nested loops each with its own `await`, so those 34 reads
+   * were 34 round trips one after the other. Against the 200-400ms a round
+   * trip to this build costs, that is about ten seconds for a single job,
+   * and the sync's detail prefetch does up to sixty jobs a run. Now only the
+   * sections list is read alone, because nothing else can start before the
+   * section ids are known; after that every section's cost-centre read goes
+   * together, and the five item families under a cost centre go together.
+   * Three levels of latency instead of thirty-four, with the client's pacer
+   * as the thing that actually sets the pace.
+   *
+   * Two guarantees are deliberate, because a caller and the mirror tables
+   * both depend on them:
+   *
+   * **Order is the build's order, not the order the answers arrive in.**
+   * `Promise.all` resolves to its input order, sections are then sorted by
+   * displayOrder as before, and the per-family item arrays are concatenated
+   * in ITEM_KINDS order rather than as each one lands. Without that a job's
+   * materials list would shuffle itself between syncs for no reason a
+   * technician could explain, purely on which request happened to be quick.
+   *
+   * **A failed read still fails the read.** A rejection propagates exactly
+   * as it did when this was serial. It is not swallowed per family here, and
+   * it must not be: readOneJobDetail wraps this call in its `attempt` helper,
+   * so the job itself survives and the run reports the job as read without
+   * every family under it. Returning a half-built section list instead would
+   * write that gap into the mirror as though it were the truth, and the next
+   * sync would have no way to tell the difference.
+   */
   private async sectionsUnder(
     sectionsPath: string,
     costCentersPath: (sectionId: string) => string,
     itemsPath: (sectionId: string, ccId: string, kind: SimproItemKind) => string,
   ): Promise<SimproSection[]> {
     const rawSections = await this.client.listAll<RawSection>(sectionsPath, {}, 200);
-    const sections: SimproSection[] = [];
-    for (const rs of rawSections) {
-      const sid = idOf(rs.ID);
-      if (!sid) continue;
-      const rawCostCenters = await this.client.listAll<RawCostCenter>(costCentersPath(sid), {}, 200);
-      const costCenters: SimproCostCenter[] = [];
-      for (const rc of rawCostCenters) {
-        const ccId = idOf(rc.ID);
-        if (!ccId) continue;
-        const items: SimproItem[] = [];
-        for (const kind of ITEM_KINDS) {
-          const rows = await this.client.listAll<RawItem>(itemsPath(sid, ccId, kind), {}, 1000);
-          items.push(...rows.map((r) => mapItem(kind, r)));
-        }
-        costCenters.push(mapCostCenter(rc, items));
-      }
-      sections.push(mapSection(rs, costCenters));
-    }
+    const gate = new ReadGate(SECTION_READ_FAN_OUT);
+
+    // A section or cost centre the build returned without an id is dropped
+    // before the fan-out rather than inside it, so a hole in the list does
+    // not leave a gap in the results array that the types would then have to
+    // admit could be undefined.
+    const sections = await Promise.all(
+      rawSections
+        .map((rs) => ({ rs, sid: idOf(rs.ID) }))
+        .filter((s): s is { rs: RawSection; sid: string } => !!s.sid)
+        .map(async ({ rs, sid }) => {
+          const rawCostCenters = await gate.run(
+            () => this.client.listAll<RawCostCenter>(costCentersPath(sid), {}, 200),
+          );
+          const costCenters = await Promise.all(
+            rawCostCenters
+              .map((rc) => ({ rc, ccId: idOf(rc.ID) }))
+              .filter((c): c is { rc: RawCostCenter; ccId: string } => !!c.ccId)
+              .map(async ({ rc, ccId }) => {
+                const byKind = await Promise.all(ITEM_KINDS.map(async (kind) => {
+                  const rows = await gate.run(
+                    () => this.client.listAll<RawItem>(itemsPath(sid, ccId, kind), {}, 1000),
+                  );
+                  return rows.map((r) => mapItem(kind, r));
+                }));
+                return mapCostCenter(rc, byKind.flat());
+              }),
+          );
+          return mapSection(rs, costCenters);
+        }),
+    );
+
     return sections.sort((a, b) => a.displayOrder - b.displayOrder);
   }
 }

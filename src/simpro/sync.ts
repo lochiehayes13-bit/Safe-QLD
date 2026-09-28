@@ -23,7 +23,7 @@ import {
 import {
   getQuote, heldJobExternalIds, invoiceRowIsWhole, jobDetailIsStale, jobRowFromSimpro, jobsWantingDetail,
   linkJobInvoice, pruneCustomersNotSyncedAt, quotesWantingDetail, replaceJobChildren, replaceQuoteChildren,
-  scheduledJobExternalIds, setSiteOffice, upsertCustomer, upsertInvoice, upsertQuote, upsertTasks,
+  scheduledJobExternalIds, setSiteOffice, upsertCustomer, upsertInvoice, upsertQuote,
   withMirrorTransaction, type JobChildren, type QuoteChildren,
 } from '@/db/mirrorRepo';
 import { markerFor, withMarker } from '@/domain/queueKey';
@@ -66,8 +66,14 @@ export interface SyncProgress {
   total: number;
 }
 
-/** The main pull's list stages, before the rest of Simpro and the detail reads. */
-const LIST_STAGES = 10;
+/**
+ * The main pull's list stages, before the rest of Simpro and the detail reads.
+ *
+ * Nine since the company-wide task stage went: sites, jobs, assets, rates,
+ * employees, schedules, customers, quotes, invoices. It is the offset ./syncMore's
+ * progress is numbered from, so it has to match the last stage number used below.
+ */
+const LIST_STAGES = 9;
 /** Stages a pull reports progress across: the lists, the rest of Simpro, then job and quote details. */
 const TOTAL_STAGES = LIST_STAGES + MORE_STAGES + 2;
 
@@ -108,10 +114,18 @@ export interface SyncResult {
   employeesRead: number;
   /** Schedule blocks in the window around today, for everyone — the day screen filters. */
   schedulesRead: number;
-  /** The mirror's list-level reads: companies and individuals, quotes, invoices in the window, tasks. */
+  /** The mirror's list-level reads: companies and individuals, quotes, invoices in the window. */
   customersRead: number;
   quotesRead: number;
   invoicesRead: number;
+  /**
+   * Task rows that came down under the jobs whose children were read.
+   *
+   * It used to be the company-wide task list, which this pull no longer
+   * reads — see the note where that stage used to be for why those rows were
+   * unreachable. The only tasks a screen can show are the ones under a job,
+   * so those are the ones counted.
+   */
   tasksRead: number;
   /** Jobs and quotes whose children were read this run. */
   jobDetailsRead: number;
@@ -128,6 +142,65 @@ export interface SyncResult {
    */
   modes: Partial<Record<SyncResource, 'incremental' | 'full'>>;
   notes: string[];
+  /**
+   * What the run actually cost, measured rather than reasoned about.
+   *
+   * Nothing in the sync path counted anything until now, so every claim about
+   * how long a pull takes — including the ones in the comments above — was
+   * arithmetic: a count of requests read off the code multiplied by a
+   * round-trip somebody assumed. That is how a change that removed 24 requests
+   * out of roughly a thousand got written up as making syncing quick. So the
+   * client this pull uses counts its own requests and times them, and the
+   * figures come back with the result where a test, the live harness or a
+   * screen can compare a before with an after.
+   *
+   * `requestMs` is the sum of each request's own wall clock, so it exceeds
+   * `elapsedMs` wherever requests overlapped. That is not an error to fix: the
+   * gap between the two is exactly how much concurrency the run got. A
+   * lists-only pull sits about level — only the rate card's two reads overlap
+   * there — and a pull that reads job details should come back well past it.
+   */
+  requests: number;
+  requestMs: number;
+  /** Wall clock for the whole pull, including the database writes between reads. */
+  elapsedMs: number;
+}
+
+/**
+ * The client a pull uses: the ordinary one, keeping a tally.
+ *
+ * Every read in this app funnels through SimproClient.request — the paged
+ * list readers and the mirror both go through it — so counting here counts
+ * everything, including the pacing wait the limiter imposes before the
+ * request goes out. That wait is part of what a sync costs a technician
+ * standing in a plant room, so it belongs inside the measurement rather than
+ * outside it.
+ *
+ * A subclass rather than a wrapper because the client is handed to
+ * SimproResources, SimproMirror and ./syncMore as a SimproClient, and a
+ * hand-written stand-in would have to be kept in step with all of them for
+ * ever.
+ */
+class MeteredClient extends SimproClient {
+  requests = 0;
+  requestMs = 0;
+
+  override async request<T>(
+    method: string,
+    path: string,
+    options: { query?: Record<string, string | number>; body?: unknown } = {},
+  ): Promise<{ data: T; total: number | null }> {
+    this.requests++;
+    const started = Date.now();
+    try {
+      return await super.request<T>(method, path, options);
+    } finally {
+      // Counted whether it answered or threw: a request that failed still
+      // spent the time, and a run full of 403s that looked instant would
+      // otherwise read as a fast sync.
+      this.requestMs += Date.now() - started;
+    }
+  }
 }
 
 export interface PullOptions {
@@ -311,7 +384,7 @@ export async function pullFromSimpro(
    */
   const force = (resource: SyncResource): boolean =>
     readsAll || (options?.fullResources?.includes(resource) ?? false);
-  const client = new SimproClient(config);
+  const client = new MeteredClient(config);
   const api = new SimproResources(client);
   const mirror = new SimproMirror(client);
   const result: SyncResult = {
@@ -321,8 +394,24 @@ export async function pullFromSimpro(
     customersRead: 0, quotesRead: 0, invoicesRead: 0, tasksRead: 0,
     jobDetailsRead: 0, quoteDetailsRead: 0, more: {},
     errors: [], modes: {}, notes: [],
+    requests: 0, requestMs: 0, elapsedMs: 0,
   };
   const startedAt = new Date().toISOString();
+  const startedMs = Date.now();
+  /**
+   * The cost figures, read off the client at every way out of this function.
+   *
+   * Written at each return rather than once at the end because the
+   * not-connected exit returns early, and a result that reported zero requests
+   * and zero milliseconds for a run that did go looking for credentials would
+   * be the first figure anybody doubted.
+   */
+  const meter = (): SyncResult => {
+    result.requests = client.requests;
+    result.requestMs = client.requestMs;
+    result.elapsedMs = Date.now() - startedMs;
+    return result;
+  };
   const progress = (stage: string, done: number, total = TOTAL_STAGES) => onProgress?.({ stage, done, total });
 
   // One check, before any stage runs. Each stage would otherwise fail on its
@@ -332,7 +421,7 @@ export async function pullFromSimpro(
   if (missing) {
     result.errors.push(missing);
     progress('Not connected', 0);
-    return result;
+    return meter();
   }
 
   progress('Reading sites', 0);
@@ -923,26 +1012,22 @@ export async function pullFromSimpro(
     result.errors.push(describe(e, 'invoices'));
   }
 
-  progress('Reading tasks', 9);
-
-  // A handful of rows, read whole; the company list carries no job link, so
-  // the rows are upserted rather than replaced and keep the link a job read made.
-  try {
-    const read = await mirror.tasks();
-    const refused = columnsRefused('task', read);
-    if (refused) throw new Error(refused);
-    result.tasksRead = await upsertTasks(read.items, startedAt);
-    result.modes.tasks = 'full';
-    await writeSyncState({
-      resource: 'tasks',
-      lastSyncedAt: startedAt,
-      lastChangeSeenAt: startedAt,
-      lastRecordCount: result.tasksRead,
-      mode: 'full',
-    }, startedAt);
-  } catch (e) {
-    result.errors.push(describe(e, 'tasks'));
-  }
+  /*
+   * There is no company-wide task stage any more.
+   *
+   * It read the whole task list on every pull and wrote every row with no job
+   * against it, because the company list carries no job link. Nothing could
+   * ever read those rows back: the only query on the table is
+   * listTasks({ jobId }) from getJobFull, and a row with a null jobId never
+   * matches it. So the stage spent requests on every sync to fill a table
+   * nobody could see out of.
+   *
+   * The tasks a screen does show come down with the job they belong to, in
+   * readOneJobDetail's jobTasks read, which writes them against the local job
+   * and is therefore the read that matters. The 'tasks' watermark is stamped
+   * from there now, so "how current this device is" still answers for tasks,
+   * and answers about the rows that actually exist.
+   */
 
   /*
    * The rest of Simpro — purchase orders, suppliers, the catalogue, contacts,
@@ -988,6 +1073,27 @@ export async function pullFromSimpro(
       });
       const out = await readJobDetails(mirror, siteIdByRemote, wanted, (done, total) => progress('Job details', done, total));
       result.jobDetailsRead = out.read;
+      result.tasksRead = out.tasksRead;
+      if (out.read) {
+        /*
+         * The tasks watermark, stamped from here now the company-wide task
+         * stage is gone.
+         *
+         * Settings lists a staleness line per resource off SYNC_RESOURCES, and
+         * tasks is on that list, so dropping the stage without this left a
+         * technician looking at a red "tasks" row for something that was in
+         * fact read a minute ago. Only stamped where a job detail actually came
+         * down: a lists-only pull has read no tasks and must not claim to have.
+         */
+        result.modes.tasks = 'full';
+        await writeSyncState({
+          resource: 'tasks',
+          lastSyncedAt: startedAt,
+          lastChangeSeenAt: startedAt,
+          lastRecordCount: out.tasksRead,
+          mode: 'full',
+        }, startedAt);
+      }
       if (out.partial.length) {
         // One line for the whole run, not one per job: a key that cannot
         // read notes says so once, in the server's words.
@@ -1038,7 +1144,7 @@ export async function pullFromSimpro(
   }
 
   progress('Done', TOTAL_STAGES);
-  return result;
+  return meter();
 }
 
 function describe(e: unknown, what: string): string {
@@ -1062,6 +1168,17 @@ export type JobDetailOutcome =
   | { status: 'failed'; error: string };
 
 /**
+ * The families under a job, in the order the note about a part-read job lists them.
+ *
+ * Fixed here rather than taken from the order the reads finished in. The reads
+ * overlap now, so which one fails first is down to the network, and a run that
+ * named "notes; sections" one minute and "sections; notes" the next would read
+ * as two different faults to whoever is comparing this run with the last.
+ */
+const JOB_FAMILIES = ['sections', 'notes', 'attachments', 'timeline', 'tasks', 'invoices'] as const;
+type JobFamily = typeof JOB_FAMILIES[number];
+
+/**
  * Reads one job's record and everything under it, and stores it.
  *
  * The record itself has to come back or nothing is written. Each child
@@ -1074,6 +1191,39 @@ export type JobDetailOutcome =
  * failed read and says so, rather than a fresh stamp over last week's
  * children.
  *
+ * The six family reads go out together, which they did not until now.
+ *
+ * They were six awaits in a row, so a job cost the sum of six round trips
+ * end to end even though not one of them depends on another — they all
+ * depend only on the job record read above, and none of them reads what
+ * another wrote. On a phone on mobile data, where a Simpro round trip is a
+ * few hundred milliseconds, that was seconds per job for no reason, times
+ * the sixty jobs a prefetch reads.
+ *
+ * Three things keep that safe rather than merely fast:
+ *
+ *  - It is one job's worth of requests in the air, never more. The jobs
+ *    themselves are still read one at a time in readJobDetails, so a sixty-job
+ *    prefetch has six families plus whatever the sections read fans out to
+ *    under it (see sectionsUnder in ./mirrorResources) — a dozen sockets on the
+ *    worst job, not hundreds, and no need for a pool. The client's own limiter
+ *    takes its slot before it awaits anything (see pace in ./client), so
+ *    requests handed to it together are still spaced out at the build's rate
+ *    and cannot trip a 429. That pacing is also what stops this being the
+ *    six-times win it looks like: at eight requests a second the slots alone
+ *    put a floor of an eighth of a second on each read, so what is saved is the
+ *    round trip after the slot, not the slot. Expect a job to come down in
+ *    something like a third of the time, and take the figures on SyncResult
+ *    over that guess.
+ *  - The per-family try is untouched: it is still `attempt` that catches, so a
+ *    family that fails is still recorded and the rest still land. Nothing here
+ *    throws, so allSettled is belt and braces — it means a rejection added to
+ *    one of these paths later cannot leave the others unhandled.
+ *  - Nothing is written until every read is in. The database work below stays
+ *    outside the concurrency, because two overlapping writers on one SQLite
+ *    connection interleave their statements inside withMirrorTransaction's
+ *    transaction.
+ *
  * The record is written as the record (`fromDetail`), so a note the office
  * deleted leaves the phone. Invoices under the job are only linked, not
  * written whole, unless the row plainly is the invoice — see
@@ -1083,36 +1233,52 @@ async function readOneJobDetail(
   mirror: SimproMirror,
   siteIdByRemote: Map<string, string>,
   job: Pick<JobRecord, 'id' | 'externalId'>,
-): Promise<string[]> {
+): Promise<{ partial: string[]; tasksRead: number }> {
   const externalId = job.externalId!;
   const detail = await mirror.jobDetail(externalId);
   const siteId = detail.siteId ? siteIdByRemote.get(detail.siteId) : undefined;
   await upsertJob({ ...jobRowFromSimpro(detail, siteId), id: job.id }, { fromDetail: true });
 
-  const partial: string[] = [];
+  // Keyed by family rather than pushed as they fail, so the order the messages
+  // come out in is JOB_FAMILIES' order and not the order the network answered in.
+  const couldNotRead = new Map<JobFamily, string>();
   let familiesRead = 0;
   const children: Partial<JobChildren> = {};
-  const attempt = async <K extends keyof JobChildren>(key: K, what: string, read: () => Promise<JobChildren[K]>) => {
+  const why = (e: unknown) => (e instanceof Error ? e.message : String(e));
+  const attempt = async <K extends keyof JobChildren>(key: K, what: JobFamily, read: () => Promise<JobChildren[K]>) => {
     try {
       children[key] = await read();
       familiesRead++;
     } catch (e) {
-      partial.push(`${what}: ${e instanceof Error ? e.message : String(e)}`);
+      couldNotRead.set(what, why(e));
     }
   };
-  await attempt('sections', 'sections', () => mirror.jobSections(externalId));
-  await attempt('notes', 'notes', () => mirror.jobNotes(externalId));
-  await attempt('attachments', 'attachments', () => mirror.jobAttachments(externalId));
-  await attempt('timeline', 'timeline', () => mirror.jobTimelines(externalId));
-  await attempt('tasks', 'tasks', () => mirror.jobTasks(externalId));
 
   let invoices: SimproInvoice[] = [];
-  try {
-    invoices = await mirror.jobInvoices(externalId);
-    familiesRead++;
-  } catch (e) {
-    partial.push(`invoices: ${e instanceof Error ? e.message : String(e)}`);
-  }
+  const readInvoices = async () => {
+    try {
+      invoices = await mirror.jobInvoices(externalId);
+      familiesRead++;
+    } catch (e) {
+      couldNotRead.set('invoices', why(e));
+    }
+  };
+
+  // Called here, not deferred: each call starts its request, and the await is
+  // on all six of them together.
+  await Promise.allSettled([
+    attempt('sections', 'sections', () => mirror.jobSections(externalId)),
+    attempt('notes', 'notes', () => mirror.jobNotes(externalId)),
+    attempt('attachments', 'attachments', () => mirror.jobAttachments(externalId)),
+    attempt('timeline', 'timeline', () => mirror.jobTimelines(externalId)),
+    attempt('tasks', 'tasks', () => mirror.jobTasks(externalId)),
+    readInvoices(),
+  ]);
+
+  const partial = JOB_FAMILIES.flatMap((family) => {
+    const reason = couldNotRead.get(family);
+    return reason ? [`${family}: ${reason}`] : [];
+  });
 
   if (!familiesRead) {
     throw new Error(`nothing under the job could be read: ${partial.join('; ')}`);
@@ -1127,9 +1293,18 @@ async function readOneJobDetail(
       else await linkJobInvoice(externalId, inv, at);
     }
   });
-  return partial;
+  return { partial, tasksRead: children.tasks?.length ?? 0 };
 }
 
+/**
+ * Reads the children of a list of jobs, one job at a time.
+ *
+ * One at a time on purpose. Each job now fans out to six family reads of its
+ * own, with more again under the sections read, and reading several jobs at
+ * once on top of that would put dozens of requests in flight from a handset and
+ * hand overlapping writers to one SQLite connection. The families are where the
+ * round trips were being spent; the jobs are where the writing is.
+ */
 async function readJobDetails(
   mirror: SimproMirror,
   siteIdByRemote: Map<string, string>,
@@ -1140,20 +1315,25 @@ async function readJobDetails(
   failures: { externalId: string; error: string }[];
   /** The distinct family errors across the jobs that were read, for one note. */
   partial: string[];
+  /** Task rows that came down with these jobs, for the tasks watermark. */
+  tasksRead: number;
 }> {
   let read = 0;
+  let tasksRead = 0;
   const failures: { externalId: string; error: string }[] = [];
   const partial = new Set<string>();
   for (const [i, job] of jobs.entries()) {
     onProgress?.(i, jobs.length);
     try {
-      for (const p of await readOneJobDetail(mirror, siteIdByRemote, job)) partial.add(p);
+      const out = await readOneJobDetail(mirror, siteIdByRemote, job);
+      for (const p of out.partial) partial.add(p);
+      tasksRead += out.tasksRead;
       read++;
     } catch (e) {
       failures.push({ externalId: job.externalId, error: e instanceof Error ? e.message : String(e) });
     }
   }
-  return { read, failures, partial: [...partial] };
+  return { read, failures, partial: [...partial], tasksRead };
 }
 
 /**
@@ -1180,7 +1360,7 @@ export async function syncJobDetail(
   try {
     const mirror = new SimproMirror(new SimproClient(config));
     const siteIdByRemote = indexSitesByRemote(await listSites());
-    const partial = await readOneJobDetail(mirror, siteIdByRemote, job);
+    const { partial } = await readOneJobDetail(mirror, siteIdByRemote, job);
     return { status: 'synced', partial };
   } catch (e) {
     return { status: 'failed', error: describe(e, `job ${job.externalId}`) };
@@ -1458,6 +1638,24 @@ export async function flushQueue(config: SimproConfig): Promise<FlushResult> {
   let sent = 0;
   let failed = 0;
   let stopped: FlushResult['stopped'];
+  /*
+   * The markers already on each job, read once per job per run.
+   *
+   * Every keyed note is checked against the job's notes before it goes, and a
+   * job's notes are a paged read of up to two hundred rows. One note per job
+   * that cost one read; a walk that fails ten devices on one site queues ten
+   * notes against the same job and cost ten reads of the same two hundred
+   * rows, in front of ten posts. Held for this run only — a fresh flush a
+   * minute later reads again, which is what makes the duplicate check worth
+   * anything.
+   *
+   * `undefined` is stored as an answer in its own right, which is why this is a
+   * Map tested with `has` rather than a lookup tested for truthiness. A key
+   * that may not read job notes, or a tunnel that dropped, answers undefined —
+   * "nobody knows" — and re-asking it per item only spends the same failure
+   * again, ten times, while a technician waits.
+   */
+  const markersOnJob = new Map<string, Set<string> | undefined>();
 
   try {
     await client.listCompanies();
@@ -1495,7 +1693,8 @@ export async function flushQueue(config: SimproConfig): Promise<FlushResult> {
          * completion is not.
          */
         if (key && keysInNoteText(markerFor(key)).length) {
-          const onJob = await keysAlreadyOnJob(client, p.jobId);
+          if (!markersOnJob.has(p.jobId)) markersOnJob.set(p.jobId, await keysAlreadyOnJob(client, p.jobId));
+          const onJob = markersOnJob.get(p.jobId);
           if (onJob?.has(key)) {
             await markSynced(item.id);
             sent++;
@@ -1505,6 +1704,11 @@ export async function flushQueue(config: SimproConfig): Promise<FlushResult> {
         // The marker rides in the note itself, so the job carries the proof
         // that this was sent even if the phone that sent it is gone.
         await api.addJobNote(p.jobId, p.subject, key ? withMarker(p.note, key) : p.note);
+        // What this run just put on the job counts as being on the job. Two
+        // rows with the same key should not exist — the queue keys on content —
+        // but if one ever does, the second must not post the same words again
+        // just because the read happened before the first went out.
+        if (key) markersOnJob.get(p.jobId)?.add(key);
       } else if (item.kind === 'purchase-order') {
         const p = payload as PurchaseOrderPayload;
         const order = await api.createPurchaseOrder({ ...p, notes: key ? withMarker(p.notes, key) : p.notes });

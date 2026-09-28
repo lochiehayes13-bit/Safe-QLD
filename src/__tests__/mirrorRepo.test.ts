@@ -271,6 +271,100 @@ describe('deciding which jobs to read in full', () => {
     expect(await jobsWantingDetail({ maxAgeMs: 1, limit: 2 })).toEqual([]);
   });
 
+  /*
+   * The change gate, which is the reason this query exists at all.
+   *
+   * Before it, the only question asked was how long ago the phone last read
+   * the job. The sync runs every thirty minutes and the window is fifteen, so
+   * the answer was always "too long ago", and the sixty jobs the office had
+   * touched in the last fortnight were each re-read in full — about fourteen
+   * requests apiece — every run, forever, whether or not anything had moved.
+   * Each case below is one the old rule got wrong or one the new rule must
+   * not break.
+   */
+  describe('the change gate on a job already read', () => {
+    // Four in the morning UTC, two in the afternoon in Brisbane. Every read
+    // stamp below except the deliberately fresh one sits well outside the
+    // fifteen-minute window, so the window is never what decides these.
+    const NOW = Date.parse('2026-09-02T04:00:00.000Z');
+    const FIFTEEN = 15 * 60_000;
+
+    const seed = async (externalId: string, dateModified: string | undefined, readAt?: string) => {
+      await upsertJob(jobRowFromSimpro(job({ id: externalId, DateModified: dateModified }), undefined));
+      if (readAt) await replaceJobChildren(`simpro-${externalId}`, {}, readAt);
+    };
+    // Asked over every id the block uses; only the rows a case seeded exist.
+    const asked = async (over: { maxAgeMs?: number; horizonMs?: number } = {}) => (
+      await jobsWantingDetail({
+        preferExternalIds: ['10', '11', '12', '13', '14', '15', '16', '17', '18', '19'],
+        maxAgeMs: FIFTEEN, limit: 20, now: NOW, ...over,
+      })
+    ).map((w) => w.externalId);
+
+    it('leaves a job alone when the office has not touched it since the phone read it', async () => {
+      await seed('10', '2026-09-01T09:00:00+10:00', '2026-09-02T00:30:00.000Z');
+      expect(await asked()).toEqual([]);
+      // And the clock on its own would have wanted it, every run: that gap
+      // between the two is the whole saving.
+      expect(jobDetailIsStale({ detailSyncedAt: '2026-09-02T00:30:00.000Z' }, FIFTEEN, NOW)).toBe(true);
+    });
+
+    it('reads a job the office has touched since the last read', async () => {
+      await seed('11', '2026-09-02T12:00:00+10:00', '2026-09-02T00:30:00.000Z');
+      expect(await asked()).toEqual(['11']);
+    });
+
+    it('reads a job whose children have never been read, and one whose read stamp is not a date', async () => {
+      await seed('12', '2026-09-01T09:00:00+10:00');
+      await seed('13', '2026-09-01T09:00:00+10:00', '2026-09-02T00:30:00.000Z');
+      // A stamp nothing can parse is treated as never read rather than
+      // compared as text: 'last tuesday' sorts after every real stamp, so a
+      // text compare would decide the job was read in the future.
+      await db.runAsync("UPDATE job SET detailSyncedAt = 'last tuesday' WHERE externalId = ?", '13');
+      expect((await asked()).sort()).toEqual(['12', '13']);
+    });
+
+    it("does not read a job again because the office's +10:00 sorts after the phone's Z", async () => {
+      // 10:30+10:00 is 00:30Z — the same instant the phone read it. As text
+      // the Z stamp sorts first, so a naive string compare calls that a change
+      // and re-reads every job the office touched that morning on every run
+      // until the afternoon.
+      await seed('14', '2026-09-02T10:30:00+10:00', '2026-09-02T00:30:00.000Z');
+      expect(await asked()).toEqual([]);
+      // One second later in Brisbane is a real change and must come through.
+      await seed('15', '2026-09-02T10:30:01+10:00', '2026-09-02T00:30:00.000Z');
+      expect(await asked()).toEqual(['15']);
+    });
+
+    it('does not starve a job the office sent with no change stamp at all', async () => {
+      // A list-level pull can leave dateModified null. Gating on a stamp that
+      // is not there would mean the job's children were never read again, so
+      // those fall back to the freshness window on its own.
+      await seed('16', undefined, '2026-09-02T00:30:00.000Z');
+      expect(await asked()).toEqual(['16']);
+      await seed('17', undefined, '2026-09-02T03:55:00.000Z');
+      expect(await asked()).toEqual(['16']);
+    });
+
+    it('reads a job the office has left alone all day, unless the caller wants a longer horizon', async () => {
+      // Read twenty-six hours ago, unchanged since: past the day-long
+      // backstop, so it is read once more in case the office's stamp did not
+      // move for something the phone shows.
+      await seed('18', '2026-08-31T09:00:00+10:00', '2026-09-01T02:00:00.000Z');
+      expect(await asked()).toEqual(['18']);
+      expect(await asked({ horizonMs: 48 * 60 * 60_000 })).toEqual([]);
+    });
+
+    it('keeps the freshness window as a guard, so opening a job twice in a visit costs one read', async () => {
+      // Changed at 03:58Z, read at 03:56Z, asked at 04:00Z: the office has
+      // touched it since, but four minutes is inside the window and the next
+      // run will pick it up.
+      await seed('19', '2026-09-02T13:58:00+10:00', '2026-09-02T03:56:00.000Z');
+      expect(await asked()).toEqual([]);
+      expect(await asked({ maxAgeMs: 60_000 })).toEqual(['19']);
+    });
+  });
+
   it('reads the booked job numbers off the schedule, soonest first, for one person or everyone', async () => {
     const rows: [string, string, string, string][] = [
       ['s1', '43749', '12', '2026-09-04'], ['s2', '43747', '12', '2026-09-02'], ['s3', '43748', '15', '2026-09-03'],
@@ -342,6 +436,43 @@ describe('quotes', () => {
     await upsertQuote(quote({ siteId: '4000' }), undefined, AT);
     expect(await listQuotes({ siteId: 'site-1' })).toEqual([]);
     expect((await listQuotes({ siteExternalId: '4000' }))[0]!.siteId).toBeUndefined();
+  });
+
+  /*
+   * The quote prefetch had the jobs' fault, on the same expired clock: twenty
+   * quotes re-read in full every half hour whether or not the office had
+   * opened one. The cases are the jobs' cases, because the gate is shared.
+   */
+  describe('the change gate on a quote already read', () => {
+    const NOW = Date.parse('2026-09-02T04:00:00.000Z');
+    const asked = (over: { maxAgeMs?: number; horizonMs?: number } = {}) => quotesWantingDetail({
+      modifiedSince: '2026-08-20', maxAgeMs: 15 * 60_000, limit: 20, now: NOW, ...over,
+    });
+    const seed = async (externalId: string, dateModified: string, readAt?: string) => {
+      await upsertQuote(quote({ id: externalId, DateModified: dateModified }), undefined, AT);
+      if (readAt) await replaceQuoteChildren(externalId, {}, readAt);
+    };
+
+    it('asks only for the quotes the office has touched since the phone read them', async () => {
+      // 11 was read after the office's last change; 12 was changed after the
+      // read; 13 has never been read; 14's +10:00 stamp is the same instant as
+      // the phone's Z stamp and only looks later as text.
+      await seed('11', '2026-09-01T09:00:00+10:00', '2026-09-02T00:30:00.000Z');
+      await seed('12', '2026-09-02T12:00:00+10:00', '2026-09-02T00:30:00.000Z');
+      await seed('13', '2026-09-01T09:00:00+10:00');
+      await seed('14', '2026-09-02T10:30:00+10:00', '2026-09-02T00:30:00.000Z');
+      // Newest change first, which is the order the run spends its budget in.
+      expect(await asked()).toEqual(['12', '13']);
+    });
+
+    it('reads a quote whose read stamp is not a date, and one left alone all day', async () => {
+      await seed('15', '2026-09-01T09:00:00+10:00', '2026-09-02T00:30:00.000Z');
+      await db.runAsync("UPDATE simpro_quote SET detailSyncedAt = 'last tuesday' WHERE externalId = ?", '15');
+      await seed('16', '2026-08-31T09:00:00+10:00', '2026-09-01T02:00:00.000Z');
+      expect((await asked()).sort()).toEqual(['15', '16']);
+      // The day-long backstop is what wants 16; a longer one leaves it.
+      expect(await asked({ horizonMs: 48 * 60 * 60_000 })).toEqual(['15']);
+    });
   });
 
   it('names the quotes changed lately whose children have not been read', async () => {
