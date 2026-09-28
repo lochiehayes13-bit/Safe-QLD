@@ -2,11 +2,12 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { Image, View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import { deleteDefect, getDefect, getSite, updateDefect } from '@/db/repo';
+import { deleteDefect, getDefect, getSite, reopenDefect, updateDefect } from '@/db/repo';
 import { attachmentsForDefect } from '@/domain/outboundWork';
+import { defectMove, describeDefectReport, type DefectReportNotice, type DefectReportOccasion } from '@/domain/defectReport';
 import { photosWithSizes } from '@/simpro/attachmentFiles';
 import { queueJobAttachment } from '@/simpro/sync';
-import { listJobPage, type JobSummary } from '@/db/opsRepo';
+import { listJobPage, queueDefectNote, type JobSummary } from '@/db/opsRepo';
 import { keepPhoto, photoUri } from '@/export/photoFiles';
 import { shrinkForStorage } from '@/export/photoResize';
 import { SEVERITY_LABEL, searchDefects, type Severity } from '@/seed/defectLibrary';
@@ -63,8 +64,18 @@ export default function DefectScreen() {
   const [site, setSite] = useState<Site | null>(null);
   const [busy, setBusy] = useState(false);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
-  const [pickingJob, setPickingJob] = useState(false);
+  /*
+   * Which picker is open, because there are now two things a job is picked for
+   * on this screen and they are not the same act. 'photos' puts the attachments
+   * on whatever job the office asked about, which can be any job at all;
+   * 'job' sets the job this defect belongs to, which is the one thing every note
+   * about it goes to. One piece of state rather than two booleans so both cannot
+   * be open at once over the same list of jobs.
+   */
+  const [picking, setPicking] = useState<'photos' | 'job' | null>(null);
   const [jobQuery, setJobQuery] = useState('');
+  /** What happened the last time this screen tried to tell the office something. */
+  const [report, setReport] = useState<DefectReportNotice | null>(null);
   const [wordingQuery, setWordingQuery] = useState('');
 
   const load = useCallback(async () => {
@@ -139,9 +150,9 @@ export default function DefectScreen() {
     ]);
   };
 
-  const openJobPicker = async () => {
+  const openJobPicker = async (mode: 'photos' | 'job') => {
     if (!defect) return;
-    setPickingJob(true);
+    setPicking(mode);
     try {
       const page = await listJobPage({ filter: 'all', today: qldIsoDay(nowIso()) ?? '', siteId: defect.siteId, limit: 50 });
       setJobs(page.rows);
@@ -159,7 +170,7 @@ export default function DefectScreen() {
    */
   const attachPhotos = async (job: JobSummary) => {
     if (!defect || !job.externalId) return;
-    setPickingJob(false);
+    setPicking(null);
     setBusy(true);
     try {
       const plan = attachmentsForDefect(
@@ -188,13 +199,168 @@ export default function DefectScreen() {
     }
   };
 
+  /**
+   * Puts the defect's current state onto the Simpro job it belongs to.
+   *
+   * Nothing on this screen reached the office before. A defect could be reworded,
+   * regraded, photographed, marked rectified and reopened, and Simpro still held
+   * the one note written the day it was raised -- so the office read a fault as
+   * outstanding weeks after it was fixed, and the only thing that ever corrected
+   * that was somebody ringing up. The job comes off the defect's own row rather
+   * than out of the picker below, because the picker below is for photographs
+   * onto any job the office asks about, which is a different question.
+   *
+   * The row is read back rather than composed from what is on screen. The note is
+   * what the office reads, so it is built from what is stored -- and this screen
+   * in particular writes on every keystroke, so the copy in state is ahead of the
+   * row as often as it is level with it.
+   *
+   * Nobody's name goes on it. The note's only person line reads "Raised by", and
+   * whoever is holding the phone today is often not who found it -- a name there
+   * would be a false statement in a record the occupier statement reads back.
+   */
+  const reportToOffice = async (occasion: DefectReportOccasion) => {
+    if (!defect) return;
+    try {
+      const fresh = await getDefect(defect.id);
+      // Deleted underneath us, from another handset or the button at the bottom
+      // of this screen. Nothing to report and nothing broken.
+      if (!fresh) return;
+      // The site name sits outside both halves of the note's key, so handing it
+      // over saves the queue a read and cannot fork one defect into two notes.
+      const { queued } = await queueDefectNote(fresh, undefined, { siteName: site?.name });
+      // Trimmed to nothing counts as no job: a row holding "   " would otherwise
+      // print as "Job    " and read as though the office had been told.
+      setReport(describeDefectReport({ occasion, jobId: fresh.jobId?.trim() || undefined, queued }));
+    } catch (e) {
+      setReport({
+        tone: 'warn',
+        title: 'The office has not been told',
+        body: describeActionFailure(e, 'queueing the note for the office'),
+      });
+    }
+  };
+
+  /**
+   * A status chip, written and then reported.
+   *
+   * Separate from `patch` and deliberately so. `patch` is what the description,
+   * the location and the notes fields go through, and those fire once per
+   * keystroke -- reporting from there would put one note on the Simpro job for
+   * every letter typed, and because the wording sits in the identity half of the
+   * note's key while the status sits in the content half, not one of those notes
+   * would be recognised as a duplicate of the one before it. A status change is
+   * a single deliberate tap, so that is what gets reported. `defectMove` returns
+   * nothing where the chip tapped is the one the defect is already on, which is
+   * the other half of the same guard.
+   */
+  const moveStatus = (next: Defect['status']) => {
+    if (!defect) return;
+    const d = defect;
+    const move = defectMove(d.status, next);
+    setReport(null);
+    /*
+     * One instant, read once. The optimistic state below and the row written a
+     * few lines down have to agree: two `nowIso()` calls are two different
+     * moments a second apart, and the rectification date is what the occupier
+     * statement and the critical defect notice print.
+     */
+    const at = nowIso();
+    // Optimistic, the same way `patch` is, so the chip moves under the finger
+    // rather than after a round trip to SQLite.
+    setDefect(next === 'rectified'
+      ? { ...d, status: 'rectified', rectifiedAt: at }
+      : { ...d, status: next, ...(next === 'open' ? { rectifiedAt: undefined } : {}) });
+    void (async () => {
+      try {
+        if (next === 'open') {
+          // Its own statement because `updateDefect` skips a field set to
+          // undefined and so cannot take a date off a row. Going back to Open
+          // through `patch` left the rectification date on the defect, which is
+          // what the occupier statement and the critical defect notice print --
+          // an open defect carrying the day it was fixed.
+          await reopenDefect(d.id);
+        } else {
+          await updateDefect(d.id, next === 'rectified' ? { status: 'rectified', rectifiedAt: at } : { status: next });
+        }
+      } catch (e) {
+        showAlert('Not saved', describeActionFailure(e, 'saving the defect'));
+        void load();
+        return;
+      }
+      const fresh = await getDefect(d.id).catch(() => null);
+      if (fresh) setDefect(fresh);
+      if (move) await reportToOffice(move);
+    })();
+  };
+
+  /**
+   * Gives a defect the job it belongs to.
+   *
+   * Every defect raised before the app started recording a job has nothing in
+   * this column, and without a job there is nowhere on the office's side to put a
+   * note -- they work in jobs, not sites. Those defects would otherwise be
+   * permanently unreportable, which is the same silence this whole change exists
+   * to end, so there has to be a way to link one after the fact and this is it.
+   *
+   * Linking is itself the occasion for a note. It is the first moment anything
+   * about this defect can reach Simpro, so the whole defect goes up as it now
+   * stands rather than waiting for its next status change -- which for a defect
+   * that was fixed last month is a change that is never coming.
+   */
+  const linkJob = async (job: JobSummary) => {
+    if (!defect) return;
+    setPicking(null);
+    if (!job.externalId) {
+      showAlert(
+        'That job is not in Simpro yet',
+        'This job only exists on this phone, so a note about the defect has nowhere to go. Pick one that has a '
+          + 'job number, or sync first and try again.',
+      );
+      return;
+    }
+    setReport(null);
+    setBusy(true);
+    try {
+      await updateDefect(defect.id, { jobId: job.externalId });
+      const fresh = await getDefect(defect.id);
+      if (fresh) setDefect(fresh);
+      await reportToOffice('job linked');
+    } catch (e) {
+      showAlert('Not saved', describeActionFailure(e, 'setting the job on this defect'));
+      void load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Deletes the defect from this phone, and only from this phone.
+   *
+   * Nothing is retracted at the other end, and that is a limit rather than an
+   * oversight. `postJobNote` only ever POSTs: there is nothing in the Simpro
+   * client that can amend or delete a note once it is on a job, and no existing
+   * code in this app establishes how a correction to something already sent
+   * should be worded -- an appended "disregard the note above" is a decision
+   * about what the office and possibly the customer reads, not a mechanical one.
+   * So where a defect has already been reported, deleting it here leaves that
+   * note on the job. The wording below says as much, and the right fix is a
+   * retraction note somebody in the office has agreed the words for.
+   */
   const remove = () => {
     if (!defect) return;
     showAlert(
       'Delete this defect?',
-      defect.status === 'rectified'
-        ? 'It is already rectified, so deleting it removes the record that it was ever found or fixed.'
-        : 'Only do this for one raised in error. A defect that was real and is not fixed should be left open.',
+      [
+        defect.status === 'rectified'
+          ? 'It is already rectified, so deleting it removes the record that it was ever found or fixed.'
+          : 'Only do this for one raised in error. A defect that was real and is not fixed should be left open.',
+        // Only where there is actually a note out there to be left behind.
+        defect.jobId?.trim()
+          ? `Anything already sent to job ${defect.jobId.trim()} stays on that job. Deleting it here does not take `
+            + 'it back off, so ring the office if they need to know it was raised in error.'
+          : undefined,
+      ].filter(Boolean).join('\n\n'),
       [
         { text: 'Keep it' },
         {
@@ -223,6 +389,31 @@ export default function DefectScreen() {
   const jobMatches = jobQuery.trim()
     ? jobs.filter((j) => `${j.externalId ?? ''} ${j.title}`.toLowerCase().includes(jobQuery.trim().toLowerCase()))
     : jobs;
+
+  /*
+   * The same list of jobs, for whichever of the two questions is being asked.
+   * Written once because a second copy of it would be the one that drifts: the
+   * search box, the cap at twenty and the way a job with no Simpro number reads
+   * all have to match, or picking a job for photographs and picking a job for the
+   * defect become two subtly different screens doing the same thing.
+   */
+  const jobPicker = (onPick: (job: JobSummary) => void) => (
+    <View style={{ marginTop: t.space(2) }}>
+      <SearchBox value={jobQuery} onChange={setJobQuery} placeholder="Job number or title" />
+      {jobMatches.slice(0, 20).map((j) => (
+        <Card key={j.id} onPress={() => onPick(j)}>
+          <Txt weight="600">{j.externalId ? `Job ${j.externalId}` : j.title}</Txt>
+          <Txt size="sm" tone="muted">{j.title}</Txt>
+        </Card>
+      ))}
+      {!jobMatches.length ? (
+        <Txt size="sm" tone="muted" style={{ marginTop: t.space(1), lineHeight: 19 }}>
+          No jobs for this site on this phone. Sync, or ask the office to raise one.
+        </Txt>
+      ) : null}
+      <Button title="Close" variant="ghost" onPress={() => setPicking(null)} />
+    </View>
+  );
 
   if (!defect) {
     return (
@@ -350,45 +541,52 @@ export default function DefectScreen() {
             title="Pick the job"
             variant="secondary"
             disabled={!defect.photos.length}
-            onPress={() => { void openJobPicker(); }}
+            onPress={() => { void openJobPicker('photos'); }}
             style={{ marginTop: t.space(2) }}
           />
           {!defect.photos.length ? (
             <Txt size="sm" tone="muted" style={{ marginTop: t.space(1) }}>Nothing to send yet.</Txt>
           ) : null}
-          {pickingJob ? (
-            <View style={{ marginTop: t.space(2) }}>
-              <SearchBox value={jobQuery} onChange={setJobQuery} placeholder="Job number or title" />
-              {jobMatches.slice(0, 20).map((j) => (
-                <Card key={j.id} onPress={() => { void attachPhotos(j); }}>
-                  <Txt weight="600">{j.externalId ? `Job ${j.externalId}` : j.title}</Txt>
-                  <Txt size="sm" tone="muted">{j.title}</Txt>
-                </Card>
-              ))}
-              <Button title="Close" variant="ghost" onPress={() => setPickingJob(false)} />
-            </View>
-          ) : null}
+          {picking === 'photos' ? jobPicker((j) => { void attachPhotos(j); }) : null}
+        </Card>
+
+        <H2>The job it belongs to</H2>
+        <Card>
+          <Label>Where the office reads about this defect</Label>
+          {defect.jobId?.trim() ? (
+            <Txt size="sm" style={{ marginTop: t.space(1), lineHeight: 19 }}>
+              Job {defect.jobId.trim()}. Every change recorded here goes onto that job as a note, and the office
+              reads it there.
+            </Txt>
+          ) : (
+            <Txt size="sm" tone="muted" style={{ marginTop: t.space(1), lineHeight: 19 }}>
+              No job yet. The office works in jobs rather than sites, so nothing about this defect can reach them
+              until one is set — a defect raised before the app started recording the job always looks like this.
+              Set it and the whole defect goes up as it now stands.
+            </Txt>
+          )}
+          <Button
+            title={defect.jobId?.trim() ? 'Change the job' : 'Set the job'}
+            variant={defect.jobId?.trim() ? 'ghost' : 'primary'}
+            loading={busy}
+            onPress={() => { void openJobPicker('job'); }}
+            style={{ marginTop: t.space(2) }}
+          />
+          {picking === 'job' ? jobPicker((j) => { void linkJob(j); }) : null}
         </Card>
 
         <H2>Where it stands</H2>
         <Rowed gap={2} wrap>
-          <Chip
-            label="Open"
-            selected={defect.status === 'open'}
-            onPress={() => patch({ status: 'open', rectifiedAt: undefined })}
-          />
-          <Chip label="Quoted" selected={defect.status === 'quoted'} onPress={() => patch({ status: 'quoted' })} />
-          <Chip
-            label="Rectified"
-            selected={defect.status === 'rectified'}
-            onPress={() => patch({ status: 'rectified', rectifiedAt: nowIso() })}
-          />
+          <Chip label="Open" selected={defect.status === 'open'} onPress={() => moveStatus('open')} />
+          <Chip label="Quoted" selected={defect.status === 'quoted'} onPress={() => moveStatus('quoted')} />
+          <Chip label="Rectified" selected={defect.status === 'rectified'} onPress={() => moveStatus('rectified')} />
         </Rowed>
         {defect.rectifiedAt ? (
           <Txt size="sm" tone="muted">
             Rectified {formatAuDate(qldIsoDay(defect.rectifiedAt) ?? defect.rectifiedAt)}.
           </Txt>
         ) : null}
+        {report ? <Banner tone={report.tone} title={report.title} body={report.body} /> : null}
 
         <Divider />
         <Button title="Delete this defect" variant="ghost" onPress={remove} />

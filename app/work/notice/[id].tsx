@@ -3,6 +3,8 @@ import { View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getDefect, getSite, updateDefect } from '@/db/repo';
+import { queueDefectNote } from '@/db/opsRepo';
+import { describeDefectReport, type DefectReportNotice } from '@/domain/defectReport';
 import type { Defect, Site } from '@/domain/types';
 import {
   AS1851_CLASS_LABEL, AS1851_CLASS_OBLIGATION, criticalNoticeDueAt, isQldCriticalDefect,
@@ -21,7 +23,7 @@ import {
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
 import { useRecordPatch } from '@/hooks/useRecordPatch';
-import { describeLoadFailure } from '@/domain/loadFailure';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { showAlert } from '@/components/alert';
 
 /**
@@ -42,6 +44,8 @@ export default function NoticeScreen() {
   const [site, setSite] = useState<Site | null>(null);
   const [occupier, setOccupier] = useState('');
   const [busy, setBusy] = useState(false);
+  /** What happened the last time this screen tried to tell the office something. */
+  const [report, setReport] = useState<DefectReportNotice | null>(null);
   const [, tick] = useState(0);
 
   const load = useCallback(async () => {
@@ -82,6 +86,55 @@ export default function NoticeScreen() {
   const overdue = remainingMs < 0;
   const hours = Math.floor(Math.abs(remainingMs) / 3_600_000);
   const minutes = Math.floor((Math.abs(remainingMs) % 3_600_000) / 60_000);
+
+  /**
+   * Tells the Simpro job what this screen has established about the defect.
+   *
+   * Hand-over is the moment to do it, and it is the only moment on this screen.
+   * Everything a technician fills in here -- the extent of the impairment, the
+   * interim measures, who was told verbally and when -- goes through `update`,
+   * which writes once per keystroke; reporting from there would put one note on
+   * the job per letter typed. So the typing accumulates on the row and one note
+   * goes up when the notice actually changes hands, carrying all of it.
+   *
+   * One limit worth knowing about, because the wording the technician reads says
+   * it too. The note is built from the defect, and the defect's note has no line
+   * for the fact that the written notice was given -- `noticeIssuedAt` is in
+   * neither half of its key. So a notice handed over on a defect nothing else
+   * changed on produces a duplicate and nothing is sent, which is honest but is
+   * not the office being told the occupier has their notice. In practice this
+   * screen is where the interim measures and the verbal notification get typed,
+   * so there is nearly always an amendment to carry; where there is not, the
+   * banner says so rather than implying otherwise.
+   *
+   * No maintenance instant is passed, so `queueDefectNote` falls back to the
+   * moment the defect was raised -- which is the same instant this screen already
+   * uses for the notice's own 24 hour and one month clocks a few lines above. Two
+   * different answers to that question would state two different statutory
+   * deadlines and go up as two notes.
+   */
+  const reportToOffice = async () => {
+    try {
+      const fresh = await getDefect(defect.id);
+      // Deleted underneath us from another handset. Nothing to report.
+      if (!fresh) return;
+      // The site name is outside both halves of the note's key, so handing it
+      // over saves the queue a read and cannot fork one defect into two notes.
+      const { queued } = await queueDefectNote(fresh, undefined, { siteName: site?.name });
+      // Trimmed to nothing counts as no job rather than printing as "Job    ".
+      setReport(describeDefectReport({
+        occasion: 'notice issued',
+        jobId: fresh.jobId?.trim() || undefined,
+        queued,
+      }));
+    } catch (e) {
+      setReport({
+        tone: 'warn',
+        title: 'The office has not been told',
+        body: describeActionFailure(e, 'queueing the note for the office'),
+      });
+    }
+  };
 
   const issue = async () => {
     if (!site) return;
@@ -130,12 +183,13 @@ export default function NoticeScreen() {
       const reissue = defect.noticeIssuedAt
         ? `Notice reissued ${qldMoment(now) ?? now}${recipient ? ` to ${recipient}` : ''}.`
         : undefined;
-      update({
+      await update({
         noticeIssuedAt: defect.noticeIssuedAt ?? now,
         noticeRecipient: recipient,
         rectificationDueAt: rectifyBy,
         ...(reissue ? { notes: [defect.notes?.trim(), reissue].filter(Boolean).join('\n') } : {}),
       });
+      await reportToOffice();
     } catch (e) {
       showAlert('Could not create the notice', e instanceof Error ? e.message : String(e));
     } finally {
@@ -295,6 +349,7 @@ export default function NoticeScreen() {
           loading={busy}
           disabled={!isCritical}
         />
+        {report ? <Banner tone={report.tone} title={report.title} body={report.body} /> : null}
 
         <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
           This carries the same information as the regulator's approved form so it can be handed over on site

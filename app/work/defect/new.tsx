@@ -7,14 +7,17 @@ import { createDefect, listSitePicks, type SitePick } from '@/db/repo';
 import { newId } from '@/db';
 import { listJobsFor } from '@/db/mirrorRepo';
 import type { JobRecord } from '@/db/opsRepo';
+import { queueDefectNote } from '@/db/opsRepo';
 import { CAPTURE_QUALITY } from '@/domain/photoStore';
 import { jobIsOpen } from '@/domain/jobPresentation';
-import { attachmentsForDefect } from '@/domain/outboundWork';
+import { attachmentsForDefect, type PhotoOutcome } from '@/domain/outboundWork';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { shrinkForStorage } from '@/export/photoResize';
 import { keepPhoto } from '@/export/photoFiles';
 import { addAssetEvent } from '@/db/assetRepo';
 import { photosWithSizes } from '@/simpro/attachmentFiles';
 import { queueJobAttachment } from '@/simpro/sync';
+import { loadPrefs } from '@/app-prefs';
 import { hasKey } from '@/ai/client';
 import { draftDefectWording, MAX_CANDIDATES } from '@/ai/defectWording';
 import { SYSTEM_LABELS, type SystemKind } from '@/seed/assetTypes';
@@ -37,6 +40,26 @@ import { SitePicker } from '@/components/SitePicker';
  * quote without anyone retyping it. Free text is still there for the specifics
  * only the person standing in front of it knows.
  */
+
+/**
+ * What the mirror said about one site's jobs, with the site it was asked about.
+ *
+ * The site is kept alongside the answer so the screen can tell "the office has
+ * no open job here" from "nobody has asked yet". Those two look identical as an
+ * empty array, and only one of them is a fact about Simpro — a technician who is
+ * told the site has no job when the read is still in flight, or threw, will put
+ * the phone in their pocket believing the office cannot be told. Comparing the
+ * site on the answer to the site on screen is what keeps them apart without a
+ * second flag being set inside the effect.
+ */
+interface JobsAtSite {
+  siteId: string;
+  /** Open jobs with an office number on them. See jobIsOpen. */
+  open: JobRecord[];
+  /** Why the mirror would not read, in words a technician can act on. */
+  failed?: string;
+}
+
 export default function NewDefectScreen() {
   const t = useTheme();
   const params = useLocalSearchParams<{ siteId?: string; assetId?: string; location?: string }>();
@@ -47,16 +70,36 @@ export default function NewDefectScreen() {
   const [sites, setSites] = useState<SitePick[]>([]);
   const [saving, setSaving] = useState(false);
   /**
-   * The office's open jobs at the chosen site, and which of them the
-   * photographs go to. A photograph of a defect belongs on the job the
-   * office raised for the visit, where the scheduler and the customer's
-   * report both find it; until now it stayed on the phone until a routine
-   * run was sent. Nothing is chosen by default where there is more than
-   * one open job, because the wrong job files the evidence against
-   * somebody else's work.
+   * The office's open jobs at the chosen site, and which of them this defect
+   * belongs to.
+   *
+   * This used to be "where the photographs go", and that is the whole reason a
+   * defect raised here could never reach Simpro: the card offering the jobs was
+   * rendered only when there was at least one photograph, so a defect written up
+   * without one had no path to a job even in principle. A broken seal on an
+   * extinguisher — the commonest defect there is, and one nobody photographs —
+   * existed on the phone and nowhere else, and the only way the office heard
+   * about it was somebody remembering to ring them. The job is the defect's own
+   * now: it goes on the row, it carries the note, and the photographs follow it
+   * rather than the other way round.
+   *
+   * Nothing is chosen by default where there is more than one open job, because
+   * filing a fault against somebody else's attendance is worse than filing it
+   * against none — but the card says that out loud rather than leaving an
+   * untouched chip row to be read as "done".
    */
-  const [officeJobs, setOfficeJobs] = useState<JobRecord[]>([]);
-  const [attachTo, setAttachTo] = useState<string | null>(null);
+  const [jobsAtSite, setJobsAtSite] = useState<JobsAtSite | null>(null);
+  /**
+   * What the technician actually tapped, and at which site.
+   *
+   * Only their own choice is stored: null inside it means "keep it on the phone",
+   * which is a decision and not the same as never having looked. Everything else
+   * — including the default where the site has exactly one open job — is worked
+   * out below from the jobs that were read, so the effect that reads them never
+   * has to write a default and a site changed halfway through cannot leave the
+   * previous site's job number sitting selected.
+   */
+  const [jobPick, setJobPick] = useState<{ siteId: string; jobId: string | null } | null>(null);
   /*
    * The model's offer to write the specifics up in the record's register.
    * Optional and small: with no key the button says why, and nothing else
@@ -152,16 +195,48 @@ export default function NewDefectScreen() {
   };
 
   React.useEffect(() => {
+    if (!siteId) return;
     let cancelled = false;
-    if (!siteId) { setOfficeJobs([]); setAttachTo(null); return; }
-    void listJobsFor({ siteId, limit: 50 }).then((rows) => {
-      if (cancelled) return;
-      const open = rows.filter((j) => j.externalId && jobIsOpen(j));
-      setOfficeJobs(open);
-      setAttachTo(open.length === 1 ? open[0]!.externalId! : null);
-    });
+    const forSite = siteId;
+    void listJobsFor({ siteId: forSite, limit: 50 })
+      .then((rows) => {
+        if (cancelled) return;
+        setJobsAtSite({ siteId: forSite, open: rows.filter((j) => j.externalId && jobIsOpen(j)) });
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        // A mirror that would not read used to throw into nothing here, and the
+        // screen then offered no jobs at all — which on screen is
+        // indistinguishable from a site the office has no work at. Said out loud
+        // instead, and the defect still saves: a read that failed is no reason to
+        // lose the write-up.
+        setJobsAtSite({ siteId: forSite, open: [], failed: describeLoadFailure(e, "the office's jobs at this site") });
+      });
     return () => { cancelled = true; };
   }, [siteId]);
+
+  /*
+   * Only the answer for the site currently chosen counts. Change site and the
+   * previous site's jobs are not this site's jobs, so they read as "not asked
+   * yet" until the read for the new one lands.
+   */
+  const jobsHere = jobsAtSite && jobsAtSite.siteId === siteId ? jobsAtSite : null;
+  const officeJobs = jobsHere?.open ?? [];
+  const jobsFailed = jobsHere?.failed;
+  const chosenJob = jobPick && jobPick.siteId === siteId ? jobPick : null;
+  /**
+   * The job this defect is filed against, or null for nowhere.
+   *
+   * One open job at the site is not a guess, it is the only answer there is, so
+   * it is the default. Two or more and the default is nothing, because picking
+   * for them would file the fault against somebody else's attendance — the card
+   * below says so rather than leaving it to be noticed. A choice already made
+   * wins, and is checked against the jobs read for this site so a number that
+   * belongs to a job at another building can never be the answer.
+   */
+  const jobId: string | null = chosenJob
+    ? (chosenJob.jobId && officeJobs.some((j) => j.externalId === chosenJob.jobId) ? chosenJob.jobId : null)
+    : (officeJobs.length === 1 ? officeJobs[0]!.externalId! : null);
 
   const systems = useMemo(
     () => [...new Set(DEFECT_LIBRARY.map((d) => d.system))],
@@ -248,9 +323,21 @@ export default function NewDefectScreen() {
       const technicianNote = observation ? `Technician note: ${observation}` : undefined;
       const grade = severity ?? selected.severity;
       const critical = grade === 'critical';
+      /*
+       * Re-checked against the jobs actually read for this site rather than
+       * trusted from the chip that was tapped. The site can be changed after a
+       * job is picked, and a job number belonging to the previous site would
+       * otherwise go onto the row and into the note — a fault reported against a
+       * building it is not in.
+       */
+      const job = jobId && officeJobs.some((j) => j.externalId === jobId) ? jobId : null;
       const defect = await createDefect({
         siteId,
         pointId: params.assetId,
+        // The job on the row, not only in the note. The defect list, the notice
+        // screen and the send screen all read the row, and a job that lived only
+        // in a note nobody can query is a job this defect does not have.
+        jobId: job ?? undefined,
         location: location.trim() || 'Location not recorded',
         description,
         severity: critical ? 'critical' : 'non-critical',
@@ -284,18 +371,36 @@ export default function NewDefectScreen() {
 
       await draft.discard();
 
-      // The photographs to the office's job, queued rather than sent, after
-      // the defect is safely on the phone: a queue that cannot be written
-      // must not take the defect with it. The plan declines a photograph
-      // whose file has gone and the queue declines one it already holds,
-      // and both are said out loud rather than counted as sent.
-      const jobId = attachTo && officeJobs.some((j) => j.externalId === attachTo) ? attachTo : null;
-      if (jobId && defect.photos.length) {
-        const siteName = sites.find((s) => s.id === siteId)?.name ?? '';
+      /*
+       * Now the office's copy, and everything below happens after the defect is
+       * safely on the phone: a queue that cannot be written must not take the
+       * write-up with it.
+       *
+       * Photographs first, then the note, and that order is deliberate. The note
+       * states how many photographs are going to the job and under what name, and
+       * it can only state that truthfully once the queue has answered — a note
+       * composed first would promise attachments that turned out to be duplicates
+       * or missing files.
+       *
+       * Nothing is posted from here. Every item is queued, so a plant room in a
+       * basement costs a wait rather than the defect: the queue survives the app
+       * closing and goes up the moment there is signal.
+       */
+      const siteName = sites.find((s) => s.id === siteId)?.name ?? '';
+      const plural = (n: number) => `${n} photo${n === 1 ? '' : 's'}`;
+      const noteLines: string[] = [];
+      const photoLines: string[] = [];
+      let photoOutcome: PhotoOutcome | undefined;
+      let title = 'Saved on the phone only';
+
+      if (job && defect.photos.length) {
+        // The plan declines a photograph whose file has gone and the queue
+        // declines one it already holds, and both are said out loud rather than
+        // counted as sent.
         try {
           const plan = attachmentsForDefect(
             { id: defect.id, location: defect.location, raisedAt: defect.raisedAt, photos: photosWithSizes(defect.photos) },
-            { jobId, siteName },
+            { jobId: job, siteName },
           );
           let queued = 0;
           let duplicate = 0;
@@ -303,25 +408,56 @@ export default function NewDefectScreen() {
             const row = await queueJobAttachment(item.payload);
             if (row.duplicate) duplicate++; else queued++;
           }
-          const plural = (n: number) => `${n} photo${n === 1 ? '' : 's'}`;
-          const lines = [
-            queued ? `${plural(queued)} queued for job #${jobId}. They go up with the next send.` : undefined,
-            duplicate ? `${plural(duplicate)} already queued or on the job, so not sent twice.` : undefined,
-            plan.missing ? `${plural(plan.missing)} could not be found on this device and stay with the defect only.` : undefined,
-          ].filter(Boolean);
-          await new Promise<void>((resolve) => {
-            showAlert(queued ? 'Photos queued for the office' : 'Nothing new to send', lines.join('\n'), [{ text: 'OK', onPress: () => resolve() }]);
-          });
+          // Handed to the note so its photograph line is the queue's own
+          // reckoning and not a second count of the same files.
+          photoOutcome = { going: queued, alreadyOnJob: duplicate, filename: plan.items[0]?.payload.filename };
+          if (queued) photoLines.push(`${plural(queued)} queued for job #${job}. They go up with the next send.`);
+          if (duplicate) photoLines.push(`${plural(duplicate)} already queued or on the job, so not sent twice.`);
+          if (plan.missing) {
+            photoLines.push(`${plural(plan.missing)} could not be found on this device and stay with the defect only.`);
+          }
         } catch (e) {
-          await new Promise<void>((resolve) => {
-            showAlert(
-              'Defect saved, photos not queued',
-              `The defect is on the phone. Its photos could not be queued for job #${jobId}: ${e instanceof Error ? e.message : String(e)}`,
-              [{ text: 'OK', onPress: () => resolve() }],
-            );
-          });
+          photoLines.push(describeActionFailure(e, `queue the photos for job #${job}`));
         }
       }
+
+      if (job) {
+        try {
+          // Read here rather than before the save, so a settings file that will
+          // not open costs the note its "Raised by" line and not the defect.
+          const prefs = await loadPrefs();
+          const note = await queueDefectNote(defect, job, {
+            siteName,
+            technician: prefs.technicianName || undefined,
+            photos: photoOutcome,
+          });
+          title = note.queued ? 'The office has been told' : 'The office already has this';
+          noteLines.push(note.queued
+            ? `A note goes on job #${job} saying what failed, where it is, and what its class requires. `
+              + 'It is queued now and sent as soon as this phone has signal.'
+            : `Job #${job} already has this defect, word for word, so a second note was not queued.`);
+        } catch (e) {
+          // The one outcome that must never be quiet. The defect is on the phone
+          // either way, but a technician who is not told the note failed drives
+          // off believing the office is dealing with it.
+          title = 'Saved, but the office was not told';
+          noteLines.push(`${describeActionFailure(e, `queue the note for job #${job}`)}\n\n`
+            + 'The defect is on the phone and on the job. Ring the office about this one.');
+        }
+      } else if (jobsFailed) {
+        noteLines.push(`The defect is saved on this phone. The office's jobs here could not be read, so it has not `
+          + `been sent to anybody: ${jobsFailed}`);
+      } else if (!officeJobs.length) {
+        noteLines.push('The defect is saved on this phone. The office has no open job at this site, so there is '
+          + 'nowhere in Simpro to put it. Ring it through, or ask the office to raise a job here.');
+      } else {
+        noteLines.push('The defect is saved on this phone. No job was picked, so nothing about it has gone to the '
+          + 'office.');
+      }
+
+      await new Promise<void>((resolve) => {
+        showAlert(title, [...noteLines, ...photoLines].join('\n\n'), [{ text: 'OK', onPress: () => resolve() }]);
+      });
 
       router.back();
     } catch (e) {
@@ -499,27 +635,64 @@ export default function NewDefectScreen() {
               <Txt size="sm" tone="warn">This defect type needs photographic evidence.</Txt>
             ) : null}
 
-            {photos.length && officeJobs.length ? (
+            {/*
+              * Which job this defect belongs to — shown whenever a site is
+              * chosen, photograph or no photograph. It sat behind
+              * `photos.length && officeJobs.length` until now, which meant the
+              * only defect that could reach the office was one somebody had
+              * taken a picture of, and every state where it cannot reach the
+              * office was silent. Each of those states says so here in words,
+              * because a technician must never walk away believing the office
+              * was told when it was not.
+              */}
+            {siteId ? (
               <Card>
                 <Label>Send to the office</Label>
-                <Txt size="sm" style={{ marginTop: 4, lineHeight: 20 }}>
-                  {attachTo
-                    ? `Attach ${photos.length === 1 ? 'the photo' : `these ${photos.length} photos`} to job #${attachTo} in Simpro when the defect is saved.`
-                    : officeJobs.length === 1
-                      ? 'The photos stay on the phone with the defect.'
-                      : `The office has ${officeJobs.length} open jobs here. Pick the one this defect belongs to, or leave the photos on the phone.`}
-                </Txt>
-                <Rowed gap={2} wrap style={{ marginTop: t.space(2) }}>
-                  {officeJobs.map((j) => (
-                    <Chip
-                      key={j.id}
-                      label={`Job #${j.externalId}${j.title ? ` · ${j.title}` : ''}`}
-                      selected={attachTo === j.externalId}
-                      onPress={() => setAttachTo(attachTo === j.externalId ? null : j.externalId!)}
-                    />
-                  ))}
-                  <Chip label="Keep on the phone" selected={attachTo === null} onPress={() => setAttachTo(null)} />
-                </Rowed>
+                {jobsFailed ? (
+                  <Txt size="sm" tone="warn" style={{ marginTop: 4, lineHeight: 20 }}>
+                    {jobsFailed}{' '}The defect still saves on this phone; it just cannot be put on a job until the
+                    office&apos;s work here can be read.
+                  </Txt>
+                ) : !jobsHere ? (
+                  <Txt size="sm" tone="muted" style={{ marginTop: 4, lineHeight: 20 }}>
+                    Reading the office&apos;s open jobs at this site.
+                  </Txt>
+                ) : (
+                  <>
+                    <Txt size="sm" style={{ marginTop: 4, lineHeight: 20 }}>
+                      {jobId
+                        ? `This defect goes on job #${jobId}: one note saying what failed, where it is and what its `
+                          + `class requires${photos.length ? `, and ${photos.length === 1 ? 'the photo' : `all ${photos.length} photos`} onto the same job` : ''}. `
+                          + 'Queued when you save and sent as soon as there is signal.'
+                        : !officeJobs.length
+                          ? 'The office has no open job at this site, so there is nowhere in Simpro to put this '
+                            + 'defect. It saves on the phone either way — ring it through, or ask the office to raise '
+                            + 'a job here.'
+                          : officeJobs.length === 1
+                            ? 'Nothing goes to the office. The defect stays on this phone only.'
+                            : `The office has ${officeJobs.length} open jobs here, and picking the wrong one files `
+                              + 'this fault against somebody else\'s work. Pick the job this defect belongs to, or '
+                              + 'nothing about it reaches the office.'}
+                    </Txt>
+                    {officeJobs.length ? (
+                      <Rowed gap={2} wrap style={{ marginTop: t.space(2) }}>
+                        {officeJobs.map((j) => (
+                          <Chip
+                            key={j.id}
+                            label={`Job #${j.externalId}${j.title ? ` · ${j.title}` : ''}`}
+                            selected={jobId === j.externalId}
+                            onPress={() => setJobPick({ siteId, jobId: jobId === j.externalId ? null : j.externalId! })}
+                          />
+                        ))}
+                        <Chip
+                          label="Keep on the phone"
+                          selected={jobId === null}
+                          onPress={() => setJobPick({ siteId, jobId: null })}
+                        />
+                      </Rowed>
+                    ) : null}
+                  </>
+                )}
               </Card>
             ) : null}
 

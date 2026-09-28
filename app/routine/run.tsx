@@ -5,6 +5,8 @@ import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { addAssetEvent, queryAssets, updateAsset, type AssetRecord } from '@/db/assetRepo';
 import { createDefect, getSite } from '@/db/repo';
+import { listJobsFor } from '@/db/mirrorRepo';
+import { queueDefectNote } from '@/db/opsRepo';
 import { recordRoutineRun } from '@/db/routineRunRepo';
 import { defectByCode } from '@/seed/defectLibrary';
 import {
@@ -12,7 +14,9 @@ import {
   type ServiceRoutine, type TestDef,
 } from '@/seed/serviceRoutines';
 import { SYSTEM_LABELS, assetTypeById } from '@/seed/assetTypes';
-import type { Site } from '@/domain/types';
+import type { Defect, Site } from '@/domain/types';
+import { jobIsOpen } from '@/domain/jobPresentation';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { loadPrefs } from '@/app-prefs';
 import { nowIso } from '@/db';
 import { useDraft } from '@/hooks/useDraft';
@@ -51,6 +55,18 @@ interface Answer {
   measurement?: string;
   /** Why it could not be tested — required when the verdict is not-tested. */
   reason?: string;
+}
+
+/**
+ * What the mirror said about the site's open jobs, with the site it was asked about.
+ *
+ * Kept together so "the office has no open job here" can be told from "nobody
+ * has asked yet". Both look like an empty list, and only one of them is a fact.
+ */
+interface JobsAtSite {
+  siteId: string;
+  open: { externalId: string; title?: string }[];
+  failed?: string;
 }
 
 const NOT_TESTED_REASONS = [
@@ -93,6 +109,60 @@ export default function RunRoutineScreen() {
   useEffect(() => {
     if (siteId) void getSite(siteId).then(setSite);
   }, [siteId]);
+
+  /**
+   * The office's open jobs at this site, read for the defects this run raises.
+   *
+   * There is no job picker on this screen and there is deliberately not one now:
+   * a routine run is a walk answered check by check, and interrupting it to ask
+   * which Simpro job it belongs to is a question the technician already answered
+   * by being here. But the defects a run raises have to reach the office, and
+   * until this read existed they reached nothing — `recordRoutineRun` files the
+   * run on the phone and the defects went onto the site's list with no job on
+   * them at all.
+   *
+   * `jobForRun` looks like the answer and is not, which is worth writing down so
+   * nobody spends an afternoon on it again. It reads `outbound_job_link` by run
+   * id, and that link is written by the send screen once somebody picks a job for
+   * a run that has already been recorded. At the moment a defect is raised here
+   * the run does not exist yet, so there is no id to look up and nothing to find.
+   * The site's own open jobs are what this screen can honestly know.
+   */
+  const [jobsAtSite, setJobsAtSite] = useState<JobsAtSite | null>(null);
+
+  useEffect(() => {
+    if (!siteId) return;
+    let cancelled = false;
+    const forSite = siteId;
+    void listJobsFor({ siteId: forSite, limit: 50 })
+      .then((rows) => {
+        if (cancelled) return;
+        setJobsAtSite({
+          siteId: forSite,
+          open: rows
+            .filter((j) => j.externalId && jobIsOpen(j))
+            .map((j) => ({ externalId: j.externalId!, title: j.title })),
+        });
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setJobsAtSite({ siteId: forSite, open: [], failed: describeLoadFailure(e, "the office's jobs at this site") });
+      });
+    return () => { cancelled = true; };
+  }, [siteId]);
+
+  const jobsHere = jobsAtSite && jobsAtSite.siteId === siteId ? jobsAtSite : null;
+  /**
+   * The job this run's defects are reported against, or undefined for nowhere.
+   *
+   * Exactly one open job, or nothing. Two open jobs at a site is the case where
+   * guessing does real harm — a fault filed against the wrong attendance is
+   * somebody else's work, and the office quotes and invoices off it — so the app
+   * declines to choose and the footer says it declined. That limit is stated on
+   * screen for the same reason it exists: a technician must never leave a site
+   * believing the office was told when it was not.
+   */
+  const officeJob = jobsHere?.open.length === 1 ? jobsHere.open[0]!.externalId : undefined;
 
   const load = useCallback(async () => {
     if (!routine || !siteId) return;
@@ -178,6 +248,13 @@ export default function RunRoutineScreen() {
       let gaps = 0;
       let passed = 0;
       let failed = 0;
+      /*
+       * The defects this run raises, kept so each one can be reported to the
+       * office once the run itself is on the phone. Nothing is queued inside the
+       * loop: a queue that will not write must not stop the run being recorded,
+       * and a run recorded is what stops the schedule asking for it again.
+       */
+      const raised: Defect[] = [];
 
       for (const test of routine.tests) {
         const targets = test.assetTypeId
@@ -233,9 +310,13 @@ export default function RunRoutineScreen() {
           if (a.verdict === 'fail' && test.defectCode) {
             const code = defectByCode(test.defectCode);
             if (code) {
-              await createDefect({
+              raised.push(await createDefect({
                 siteId: site.id,
                 pointId: asset?.id,
+                // The office's job on the row, where the site has exactly one
+                // open. It is what carries the defect out of this phone, and what
+                // every later screen reads to answer "where did this one go?".
+                jobId: officeJob,
                 location: asset
                   ? [asset.level, asset.room, asset.name || assetTypeById(asset.assetTypeId)?.label].filter(Boolean).join(' ')
                   : site.name,
@@ -253,7 +334,7 @@ export default function RunRoutineScreen() {
                 // notice screen asks the question properly.
                 defectCode: code.code,
                 as1851Class: code.severity === 'critical' ? 'critical' : 'non-critical',
-              });
+              }));
               defectsRaised++;
             }
           }
@@ -277,12 +358,81 @@ export default function RunRoutineScreen() {
         defectsRaised,
       });
 
+      /*
+       * Each defect to the office, after the run is safely recorded.
+       *
+       * Queued, never posted: a plant room in a basement is where most of these
+       * are raised, and the queue survives the app closing and goes up the moment
+       * there is signal. One note per defect rather than one per run, because a
+       * paragraph listing three failures is not three pieces of work a scheduler
+       * can book, quote or invoice.
+       *
+       * This is in addition to the run's own record on the send screen, not
+       * instead of it — that screen carries the service record, the coverage gaps
+       * and the statutory critical defect notices, and it lets the technician pick
+       * any job rather than only an unambiguous one. What it does not do is go
+       * without somebody remembering to open it, which is why a defect raised here
+       * is told now. The consequence is stated in the summary below so nobody is
+       * surprised by it: a critical defect gets this note now and its written
+       * notice later, and the two are not the same document.
+       */
+      let notesQueued = 0;
+      let notesAlready = 0;
+      let noteFailure: string | undefined;
+      if (officeJob) {
+        for (const defect of raised) {
+          try {
+            const note = await queueDefectNote(defect, officeJob, {
+              siteName: site.name,
+              technician: prefs.technicianName || undefined,
+              foundDuring: routine.label,
+              // The instant the routine was carried out, and the same one for
+              // every defect in the run. A critical defect's statutory clocks run
+              // from the maintenance, and the instant sits in the note's key — so
+              // one instant for the whole run is also what stops a defect
+              // re-composed later stating a different deadline and posting twice.
+              maintenanceAt: now,
+            });
+            if (note.queued) notesQueued++; else notesAlready++;
+          } catch (e) {
+            noteFailure ??= describeActionFailure(e, 'queue the defect notes to the office');
+          }
+        }
+      }
+      const notesFailed = raised.length - notesQueued - notesAlready;
+
       await draft.discard();
       showAlert(
         'Routine recorded',
         [
           `${recorded} asset result${recorded === 1 ? '' : 's'} written to history.`,
           defectsRaised ? `${defectsRaised} defect${defectsRaised === 1 ? '' : 's'} raised automatically.` : null,
+          notesQueued
+            ? `${notesQueued} of them queued as ${notesQueued === 1 ? 'a note' : 'notes'} on job ${officeJob}, `
+              + 'going up with the next send. A critical defect still needs its written notice, which goes with the '
+              + 'run\'s record on the Send screen.'
+            : null,
+          notesAlready
+            ? `${notesAlready} ${notesAlready === 1 ? 'was' : 'were'} already on job ${officeJob} word for word, so `
+              + `${notesAlready === 1 ? 'it was' : 'they were'} not sent twice.`
+            : null,
+          // Counted rather than assumed: a defect that failed to queue and one
+          // raised with no job are different states and a technician needs the
+          // difference. Both say the office has not got it.
+          officeJob && notesFailed
+            ? `${notesFailed} could not be queued, so the office has not been told about `
+              + `${notesFailed === 1 ? 'it' : 'them'}. ${noteFailure ?? ''} Ring them through.`
+            : null,
+          !officeJob && raised.length
+            ? `The office has not been told about ${raised.length === 1 ? 'it' : 'them'}: `
+              + `${jobsHere?.failed
+                ? 'this site\'s jobs could not be read on this phone'
+                : jobsHere?.open.length
+                  ? `the office has ${jobsHere.open.length} jobs open at this site and the app will not guess which `
+                    + 'one this run belongs to'
+                  : 'the office has no open job at this site'}`
+              + '. Send the run from the Send screen and pick the job there, or ring the failures through.'
+            : null,
           gaps ? `${gaps} check${gaps === 1 ? '' : 's'} recorded as not tested, with the reason against the asset.` : null,
           progress.total - progress.done - gaps > 0
             ? `${progress.total - progress.done - gaps} check${progress.total - progress.done - gaps === 1 ? '' : 's'} left blank — these show as a coverage gap, not a pass.`
@@ -383,6 +533,43 @@ export default function RunRoutineScreen() {
         <Banner tone="info" title="Picked up where you left off" body="Answers from your last session were still here." />
       ) : null}
 
+      {/*
+        * Where this run's failures will go, said before the walk rather than
+        * after it. There is no picker here on purpose — see officeJob — so the
+        * one thing this card owes the technician is the truth about what the app
+        * can and cannot do with a defect, while there is still time to do
+        * something about it.
+        */}
+      {jobsHere ? (
+        <Card>
+          <Label>Defects to the office</Label>
+          {jobsHere.failed ? (
+            <Txt size="sm" tone="warn" style={{ marginTop: 4, lineHeight: 19 }}>
+              {jobsHere.failed} Until they can be read, a failure here records on the phone and goes no further. Send
+              the run from the Send screen afterwards and pick the job there.
+            </Txt>
+          ) : officeJob ? (
+            <Txt size="sm" style={{ marginTop: 4, lineHeight: 19 }}>
+              Each failure raises its coded defect and is queued as its own note on job {officeJob} — the only job the
+              office has open at this site. A critical defect still needs its written notice, which goes with the run’s
+              record on the Send screen.
+            </Txt>
+          ) : jobsHere.open.length ? (
+            <Txt size="sm" tone="warn" style={{ marginTop: 4, lineHeight: 19 }}>
+              The office has {jobsHere.open.length} jobs open at this site, and filing a fault against the wrong one
+              makes it somebody else’s work — so nothing is chosen here. Failures still raise their defects on the
+              phone. Send the run from the Send screen afterwards and pick the job there.
+            </Txt>
+          ) : (
+            <Txt size="sm" tone="warn" style={{ marginTop: 4, lineHeight: 19 }}>
+              The office has no open job at this site, so there is nowhere in Simpro for a defect raised here to go.
+              Failures still record on the phone and on the site’s defect list — ring them through, or ask the office to
+              raise a job.
+            </Txt>
+          )}
+        </Card>
+      ) : null}
+
       {systemChecks.length ? (
         <>
           <H2>System checks</H2>
@@ -436,7 +623,9 @@ export default function RunRoutineScreen() {
       <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
         {nothingAnswered
           ? 'Answer at least one check first. A run recorded with nothing on it would still count as the routine done, and push its next due date out.'
-          : 'Failures raise their coded defect automatically. Anything left untested is reported as a coverage gap, never as a pass.'}
+          : officeJob
+            ? `Failures raise their coded defect automatically, and each one is queued as a note on job ${officeJob}. Anything left untested is reported as a coverage gap, never as a pass.`
+            : 'Failures raise their coded defect automatically, on this phone only — no job here for them to go on. Anything left untested is reported as a coverage gap, never as a pass.'}
       </Txt>
     </View>
   );

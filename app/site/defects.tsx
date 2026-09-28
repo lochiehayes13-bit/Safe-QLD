@@ -1,7 +1,9 @@
 import React, { useCallback, useState } from 'react';
 import { FlatList, View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { getSite, listDefects, reopenDefect, updateDefect } from '@/db/repo';
+import { getDefect, getSite, listDefects, reopenDefect, updateDefect } from '@/db/repo';
+import { queueDefectNote } from '@/db/opsRepo';
+import { defectMove, describeDefectReport, type DefectReportNotice, type DefectReportOccasion } from '@/domain/defectReport';
 import { nowIso } from '@/db';
 import type { Defect, Site } from '@/domain/types';
 import { formatAuDate } from '@/export/sheets';
@@ -30,6 +32,18 @@ export default function SiteDefectsScreen() {
   // about the site, so a read that threw says so instead of making it.
   const [failed, setFailed] = useState<string | null>(null);
 
+  /*
+   * What happened the last time this screen tried to tell the office something.
+   * A banner rather than a modal on purpose: a technician clearing six defects
+   * on the way out of a building should not have to dismiss six alerts, and the
+   * one outcome they have to act on -- a defect with no job, which cannot reach
+   * Simpro at all -- reads just as loudly in a warn banner as in a dialog and
+   * does not block the next tap. Deliberately not cleared by `load`, which runs
+   * on every focus, so walking into the defect and back out does not wipe the
+   * only record that the office was or was not told.
+   */
+  const [report, setReport] = useState<DefectReportNotice | null>(null);
+
   const load = useCallback(async () => {
     if (!siteId) return;
     setFailed(null);
@@ -47,6 +61,51 @@ export default function SiteDefectsScreen() {
 
   const shown = defects.filter((d) => (status === 'open' ? d.status === 'open' : true));
 
+  /**
+   * Puts the defect's new state onto the Simpro job it belongs to.
+   *
+   * Until this existed, a defect's life ended at the phone the moment it was
+   * raised: the office was told it was there and never told it had been fixed,
+   * so a scheduler kept booking a return visit for work that was done weeks ago
+   * and the only thing that ever corrected it was somebody ringing up. The job
+   * comes off the defect's own row rather than out of a picker, because the
+   * technician already answered that question when the defect was raised and
+   * being asked it again on the way out of a plant room is how a step gets
+   * skipped.
+   *
+   * The row is read back rather than composed from the copy this list is holding.
+   * The note is what the office reads, so it is built from what is actually
+   * stored -- a write that half landed, or a row another screen changed while
+   * this list sat open, then shows up as a note that disagrees with the record
+   * rather than one that quietly invents a state nothing on the phone holds.
+   *
+   * Nobody's name is passed. The note's only person line reads "Raised by", and
+   * the technician tapping Rectified today is often not the one who found it
+   * last month -- putting the current name there would be a false statement in a
+   * record the occupier statement reads back. "Not recorded" is the honest
+   * answer, and `queueDefectNote` leaves it at that.
+   */
+  const reportToOffice = async (defectId: string, occasion: DefectReportOccasion) => {
+    try {
+      const fresh = await getDefect(defectId);
+      // Gone between the write and the read: another handset or the delete on
+      // the defect screen. There is nothing to report and nothing broken.
+      if (!fresh) return;
+      // The site name is outside both halves of the note's key, so handing it
+      // over saves the queue a read and cannot fork the note in two.
+      const { queued } = await queueDefectNote(fresh, undefined, { siteName: site?.name });
+      // Trimmed to nothing counts as no job. A row holding "   " is what an
+      // older import left behind and it would otherwise print as "Job    ".
+      setReport(describeDefectReport({ occasion, jobId: fresh.jobId?.trim() || undefined, queued }));
+    } catch (e) {
+      setReport({
+        tone: 'warn',
+        title: 'The office has not been told',
+        body: describeActionFailure(e, 'queueing the note for the office'),
+      });
+    }
+  };
+
   /*
    * Rectified is a statutory fact, not a tidy-up. The date it stamps is what
    * the occupier statement and a critical defect notice read back, so one tap
@@ -63,7 +122,20 @@ export default function SiteDefectsScreen() {
           text: 'Rectified',
           onPress: () => {
             void (async () => {
-              await updateDefect(d.id, { status: 'rectified', rectifiedAt: nowIso() });
+              setReport(null);
+              // Worked out before the write, because afterwards the row says
+              // rectified and there is no longer anything to compare against.
+              const move = defectMove(d.status, 'rectified');
+              try {
+                await updateDefect(d.id, { status: 'rectified', rectifiedAt: nowIso() });
+              } catch (e) {
+                // This used to be an unhandled rejection inside `void`, which
+                // goes nowhere at all: the list reloaded, the defect was still
+                // open, and nothing said why.
+                showAlert('Not saved', describeActionFailure(e, 'marking this defect rectified'));
+                return;
+              }
+              if (move) await reportToOffice(d.id, move);
               void load();
             })();
           },
@@ -80,7 +152,15 @@ export default function SiteDefectsScreen() {
         style: 'destructive',
         onPress: () => {
           void (async () => {
-            await reopenDefect(d.id);
+            setReport(null);
+            const move = defectMove(d.status, 'open');
+            try {
+              await reopenDefect(d.id);
+            } catch (e) {
+              showAlert('Not saved', describeActionFailure(e, 'reopening this defect'));
+              return;
+            }
+            if (move) await reportToOffice(d.id, move);
             void load();
           })();
         },
@@ -132,6 +212,7 @@ export default function SiteDefectsScreen() {
             <Button title="Export" variant="secondary" style={{ flex: 1 }} onPress={exportList} loading={busy} />
           </Rowed>
           {failed ? <Banner tone="fail" title="This list could not be read" body={failed} /> : null}
+          {report ? <Banner tone={report.tone} title={report.title} body={report.body} /> : null}
         </View>
 
         <FlatList

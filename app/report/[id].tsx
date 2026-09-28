@@ -10,10 +10,11 @@ import {
 } from '@/db/repo';
 import { queryAssets, setTestSheetEventDetail, type AssetRecord } from '@/db/assetRepo';
 import { getCustomer, listJobsFor, readJobJson, scheduledJobExternalIds } from '@/db/mirrorRepo';
-import type { JobRecord } from '@/db/opsRepo';
+import { queueDefectNote, type JobRecord } from '@/db/opsRepo';
 import type { CheckRow, Defect, Panel, ServiceReport, Site, TestResult, TestRow } from '@/domain/types';
 import { isServiceable, testRowsFromAssets } from '@/domain/formsFromAssets';
 import { jobToOffer, type JobOffer } from '@/domain/reportJobMatch';
+import { jobIsOpen } from '@/domain/jobPresentation';
 import { qldIsoDay } from '@/domain/qldTime';
 import { DEVICE_TYPE_LABEL, DEFAULT_TEST_METHOD } from '@/parsers/deviceType';
 import { SERVICE_ROUTINES, type ServiceRoutine } from '@/seed/serviceRoutines';
@@ -168,6 +169,72 @@ export default function ReportScreen() {
   }, [assets, rows]);
 
   /**
+   * The Simpro job a defect raised on this sheet is reported against, and the
+   * sentence that says so on screen.
+   *
+   * A defect marked here used to be written to the phone and stop there: no
+   * note, no job, nothing the office could see — which on a sheet is the worst
+   * place for it, because a test sheet is the one screen where a technician marks
+   * twenty failures in a row and trusts the app to be doing something with them.
+   *
+   * `jobExternalId` is what is read and `jobNumber` deliberately is not. The type
+   * says why in as many words: the number is free text for the customer's copy
+   * and can hold a purchase order or a note to somebody, while
+   * `jobExternalId` is Simpro's own id and is only ever set by picking a job off
+   * the mirror's list — the same field the report's PDF is filed under. Putting a
+   * defect on a job number somebody typed would be reporting a fault against
+   * whatever that text happened to match.
+   *
+   * With no job picked, the one-open-job rule stands in, and only that: where the
+   * office has two jobs open at a site nothing is chosen, because filing a fault
+   * against the wrong attendance is worse than filing it against none. Every
+   * branch below returns a sentence, including the ones that return no job, so
+   * the card that raises the defect can say what will and will not reach the
+   * office before the technician taps it.
+   */
+  const defectJob = useMemo<{ jobId?: string; why: string }>(() => {
+    const open = jobs.filter((j) => j.externalId && jobIsOpen(j));
+    const picked = report?.jobExternalId?.trim();
+    if (picked) {
+      const known = jobs.find((j) => j.externalId === picked);
+      // Known to the mirror and closed off: the note would still post, but it
+      // would land on work the office has finished or invoiced and nobody is
+      // looking at it. Said rather than hidden, because the technician is the
+      // only one who can tell whether the sheet is on the right job.
+      const closed = known && !jobIsOpen(known);
+      return {
+        jobId: picked,
+        why: closed
+          ? `Defects raised here go on Simpro job ${picked}, the job this sheet is filed under — but the office has `
+            + 'closed that job off, so a note on it may not be picked up. Change the job under Finish if this sheet '
+            + 'belongs to a job that is still open.'
+          : `Defects raised here go on Simpro job ${picked}, the job this sheet is filed under. Each one is queued as `
+            + 'its own note and sent as soon as this phone has signal.',
+      };
+    }
+    if (open.length === 1) {
+      const only = open[0]!.externalId!;
+      return {
+        jobId: only,
+        why: `Defects raised here go on Simpro job ${only} — the only job the office has open at this site. Pick the `
+          + 'job under Finish if this sheet belongs to a different one.',
+      };
+    }
+    if (open.length > 1) {
+      return {
+        why: `The office has ${open.length} jobs open at this site, so the app will not pick one: a fault filed `
+          + 'against the wrong attendance is somebody else\'s work. Defects raised now stay on this phone. Pick the '
+          + 'job under Finish and the ones you raise after that go up on it.',
+      };
+    }
+    return {
+      why: 'The office has no open job at this site, so there is nowhere in Simpro to put a defect raised here. It '
+        + 'still goes on the site\'s defect list and onto the customer\'s report — ring it through, or ask the office '
+        + 'to raise a job.',
+    };
+  }, [jobs, report]);
+
+  /**
    * The row whose failure has not been written up yet.
    *
    * Marking a device FAIL on the sheet used to write the result and stop.
@@ -205,15 +272,25 @@ export default function ReportScreen() {
    * office quotes from, so it is offered rather than typed. `reportId` is set
    * on the way in: it is what lets this visit's defects be told from the ones
    * that were already outstanding when the technician walked in.
+   *
+   * And the office is told, which until now it never was from this screen. The
+   * note is queued rather than posted, so a sheet filled in inside a sprinkler
+   * valve room with no signal costs a wait and not the defect. Nothing but the
+   * note failing is said out loud: a sheet can raise twenty defects in a row and
+   * twenty confirmations is a screen a technician taps through blind. What is
+   * going to happen is stated on the card that raises it instead, before the tap.
    */
   const raiseDefect = async (row: TestRow, code: DefectCode) => {
     if (!report) return;
     const asset = row.assetId ? assets.find((a) => a.id === row.assetId) : undefined;
     try {
-      await createDefect({
+      const defect = await createDefect({
         siteId: report.siteId,
         reportId: report.id,
         pointId: row.assetId,
+        // Simpro's own job id off the report, never the typed job number. See
+        // defectJob above, and the warning on ServiceReport.jobExternalId.
+        jobId: defectJob.jobId,
         location: asset
           ? [asset.level, asset.room, asset.name || assetTypeById(asset.assetTypeId)?.label].filter(Boolean).join(' ')
           : [row.zoneText, row.deviceText].filter(Boolean).join(' — ') || row.pointRef || 'Location not recorded',
@@ -226,6 +303,47 @@ export default function ReportScreen() {
         photos: [],
       });
       setRaiseFor(null);
+      if (defectJob.jobId) {
+        try {
+          await queueDefectNote(defect, defectJob.jobId, {
+            siteName: site?.name,
+            technician: technician.trim() || undefined,
+            // What the technician was doing when they found it, in the words
+            // already on the record rather than a phrase invented here.
+            foundDuring: report.title,
+            /*
+             * The service date, not the moment the row was tapped. A critical
+             * defect's two statutory clocks run from when the maintenance was
+             * carried out, and a sheet is often finished the evening after the
+             * attendance — dating the clocks from the tap would state a deadline
+             * the regulation does not support. A date with no time in it is
+             * handled honestly by the note itself: it states the rectification
+             * day and leaves the 24-hour notice deadline unstated rather than
+             * inventing an hour nobody recorded.
+             */
+            maintenanceAt: report.serviceDate,
+            /*
+             * The customer's job number is what the office files this report by,
+             * so it is the reference that actually finds the full record from a
+             * desk — the note's closing line reads "routine service report
+             * <that number> for <site>". It is free text and could be anything,
+             * which is
+             * exactly why it is only ever used to point somebody at a document
+             * and never, above, to decide which job a defect goes on.
+             */
+            reportRef: report.jobNumber?.trim() || undefined,
+          });
+        } catch (e) {
+          // The defect is on the phone and on the customer's report either way.
+          // This is the one thing worth interrupting for, because a technician
+          // who is not told will assume the office is dealing with it.
+          showAlert(
+            'Defect raised, the office not told',
+            `${describeActionFailure(e, `queue the note for job ${defectJob.jobId}`)}\n\n`
+            + 'The defect is recorded on this phone and on the report. Ring the office about this one.',
+          );
+        }
+      }
       await load();
     } catch (e) {
       showAlert('Defect not raised', describeActionFailure(e, 'raising the defect'));
@@ -568,6 +686,20 @@ export default function ReportScreen() {
                     A failed device with no defect against it does not reach the customer’s report, the site’s defect
                     list or the office.
                   </Txt>
+                  {/*
+                    * Where this one is going, said before it is raised rather
+                    * than confirmed twenty times afterwards. Both answers are
+                    * here — the job it lands on, or why it lands nowhere — so a
+                    * technician marking a wall of failures is never left
+                    * believing the office was told when it was not.
+                    */}
+                  <Txt
+                    size="sm"
+                    tone={defectJob.jobId ? 'muted' : 'warn'}
+                    style={{ marginTop: t.space(1), lineHeight: 19 }}
+                  >
+                    {defectJob.why}
+                  </Txt>
                   <SearchBox value={raiseQuery} onChange={setRaiseQuery} placeholder="battery, obstruction, no alarm" />
                   {defectChoices(raiseFor, assets, raiseQuery).map((c) => (
                     <Card key={c.code} onPress={() => { void raiseDefect(raiseFor, c); }}>
@@ -809,6 +941,17 @@ export default function ReportScreen() {
               disabled={report.status !== 'complete'}
               disabledWhy="Mark the report complete first. A draft on the job file reads as the finished record of a service."
             />
+
+            {/*
+              * The same sentence the raise card shows, here beside the picker
+              * that decides it. The job on this card is not only where the PDF
+              * is filed any more — it is the job every defect marked on this
+              * sheet is reported against, and somebody choosing it should be
+              * told that while they are choosing.
+              */}
+            <Txt size="sm" tone={defectJob.jobId ? 'muted' : 'warn'} style={{ lineHeight: 19 }}>
+              {defectJob.why}
+            </Txt>
 
             <Button
               title={report.status === 'complete' ? 'Reopen as draft' : 'Mark complete'}

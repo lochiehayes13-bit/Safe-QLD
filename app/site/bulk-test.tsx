@@ -5,11 +5,12 @@ import * as ImagePicker from 'expo-image-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { addAssetEvent, queryAssets, updateAsset, type AssetRecord } from '@/db/assetRepo';
 import { createDefect, getSite } from '@/db/repo';
-import { listJobPage, type JobSummary } from '@/db/opsRepo';
+import { listJobPage, queueDefectNote, type JobSummary } from '@/db/opsRepo';
 import { getDb, inTransaction, newId, nowIso } from '@/db';
 import { queueAssetTest } from '@/simpro/assetTestQueue';
 import { queueJobNote } from '@/simpro/sync';
 import { explainRefusal, type AssetTestRefusal } from '@/domain/assetTestDecision';
+import { outboundKey } from '@/domain/outboundWork';
 import {
   NOT_TESTED_REASONS, applyVerdictToAll, assetTestFor, buildServiceNote, candidateDefects, clearSelection,
   clearVerdict, decidedCount, defectFor, describeOutcome, eventFor, failIsComplete, finalWording, isSelected,
@@ -20,7 +21,7 @@ import { draftDefectWording, MAX_CANDIDATES } from '@/ai/defectWording';
 import { hasKey } from '@/ai/client';
 import { SEVERITY_LABEL, defectByCode, type Severity } from '@/seed/defectLibrary';
 import { SYSTEM_LABELS, assetTypeById, type SystemKind } from '@/seed/assetTypes';
-import type { Site } from '@/domain/types';
+import type { Defect, Site } from '@/domain/types';
 import { loadPrefs } from '@/app-prefs';
 import { qldIsoDay } from '@/domain/qldTime';
 import { CAPTURE_QUALITY } from '@/domain/photoStore';
@@ -70,6 +71,32 @@ interface WalkDraft {
 
 const BLANK_FAIL: FailDetail = { observation: '', severity: 'high', photos: [] };
 
+/**
+ * What happened to the per-defect notes, counted.
+ *
+ * It is separate from `RecordOutcome` because that type belongs to
+ * `@/domain/bulkTest` and describes the walk — passes, failures, the one visit
+ * note. These are a different question with a different answer per defect, and a
+ * walk can perfectly well have its visit note queued and one defect's note
+ * refused, or the other way round. Counted rather than listed: a level of thirty
+ * failed extinguishers produces thirty notes, and thirty lines on a summary card
+ * is a card nobody reads.
+ */
+interface DefectNoteOutcome {
+  /** Queued, and going up with the next send. */
+  queued: number;
+  /** The office already had this defect word for word, so nothing was queued twice. */
+  already: number;
+  /** The queue would not take it. */
+  failed: number;
+  /** Why the first failure failed, which is almost always why all of them did. */
+  failure?: string;
+  /** Raised with no job picked, so on the phone and nowhere else. */
+  noJob: number;
+  /** The office job the notes went to, where there was one. */
+  jobId?: string;
+}
+
 /** The words a technician might type to find an asset. */
 function searchText(a: AssetRecord): string {
   return [a.name, a.code, a.level, a.room, a.locationNote, a.serial, assetTypeById(a.assetTypeId)?.label]
@@ -91,6 +118,13 @@ export default function BulkTestScreen() {
   const [failed, setFailed] = useState<string | null>(null);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [jobsFailed, setJobsFailed] = useState<string | null>(null);
+  /*
+   * Whether the mirror has been asked about this site's jobs yet. "The office
+   * has no open job here" is a statement about Simpro and a read still in flight
+   * must not be allowed to make it — the walk records either way, but a
+   * technician told there is no job to report to will not go looking for one.
+   */
+  const [jobsRead, setJobsRead] = useState(false);
   const [system, setSystem] = useState<SystemKind | null>(null);
   const [level, setLevel] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -100,6 +134,7 @@ export default function BulkTestScreen() {
   const [aiNote, setAiNote] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [outcome, setOutcome] = useState<RecordOutcome | null>(null);
+  const [defectNotes, setDefectNotes] = useState<DefectNoteOutcome | null>(null);
 
   const draft = useDraft<WalkDraft>(`bulk-test:${siteId ?? 'x'}`, {
     selection: [], batch: {}, jobId: null, fail: BLANK_FAIL,
@@ -113,6 +148,7 @@ export default function BulkTestScreen() {
     if (!siteId) { setLoading(false); return; }
     setLoading(true);
     setFailed(null);
+    setJobsRead(false);
     try {
       const [s, a] = await Promise.all([getSite(siteId), queryAssets({ siteId, limit: 5000 })]);
       setSite(s);
@@ -133,6 +169,8 @@ export default function BulkTestScreen() {
     } catch (e) {
       setJobs([]);
       setJobsFailed(describeLoadFailure(e, "the office's jobs at this site"));
+    } finally {
+      setJobsRead(true);
     }
   }, [siteId]);
 
@@ -285,6 +323,17 @@ export default function BulkTestScreen() {
       const technician = prefs.technicianName || undefined;
       const jobId = d.jobId && jobs.some((j) => j.externalId === d.jobId) ? d.jobId : null;
       const out: RecordOutcome = { passed: 0, failed: 0, notTested: 0, defectsRaised: 0, queued: 0, refused: {} };
+      /*
+       * The defects this walk raises, kept so each one can get its own note to
+       * the office once every asset is on the phone.
+       *
+       * It is safe to collect them inside the per-asset transactions even though
+       * a transaction can roll back: the notes are queued after the loop, and a
+       * transaction that throws leaves this function through the catch below
+       * without ever reaching them. So a defect in here has committed by the time
+       * anything reads it.
+       */
+      const raised: Defect[] = [];
 
       for (const asset of assets) {
         const v = d.batch[asset.id];
@@ -308,9 +357,13 @@ export default function BulkTestScreen() {
           }
           if (v.kind === 'fail') {
             const def = defectFor(asset, v.fail);
-            await createDefect({
+            raised.push(await createDefect({
               siteId: site.id,
               pointId: asset.id,
+              // The job on the defect's own row, not only on the walk's note.
+              // Every screen that later asks "where did this fault go?" reads the
+              // row, and the summary note is a paragraph nothing can query.
+              jobId: jobId ?? undefined,
               location: def.location,
               description: def.description,
               severity: def.severity,
@@ -322,7 +375,7 @@ export default function BulkTestScreen() {
               // note: the notice screen and the report read them from there.
               defectCode: def.defectCode,
               as1851Class: def.severity,
-            });
+            }));
           }
         });
         // On record from here: the event and the defect are the things a
@@ -338,6 +391,51 @@ export default function BulkTestScreen() {
         else out.refused[decision.reason] = (out.refused[decision.reason] ?? 0) + 1;
       }
 
+      /*
+       * One note per defect, after every asset is safely written. Same rule as
+       * the visit note below: a queue that cannot be written must not take the
+       * results with it, and a note that did not queue is not a result that was
+       * not recorded.
+       *
+       * This is the note the office can act on. The visit summary is a roll-up
+       * somebody reads at a glance — "22 passed, 3 failed" — and a scheduler
+       * cannot book work off a paragraph, cannot quote from it, and cannot tell
+       * from it which of the three failures is the critical one. Each defect now
+       * arrives on its own with its class, what that class requires of
+       * notification and rectification, and the state it was left in, which is
+       * what the owner meant by wanting defects logged on the Simpro job.
+       *
+       * Both notes go, and that is deliberate rather than a leftover: the summary
+       * is how the office sees the whole attendance at once, and losing it to gain
+       * the detail would be a trade nobody asked for.
+       */
+      const notes: DefectNoteOutcome = {
+        queued: 0, already: 0, failed: 0, noJob: jobId ? 0 : raised.length, jobId: jobId ?? undefined,
+      };
+      if (jobId) {
+        for (const defect of raised) {
+          try {
+            const note = await queueDefectNote(defect, jobId, {
+              siteName: site.name,
+              technician,
+              foundDuring: 'Bulk test',
+              // The walk's own instant, and the same one for every defect in it.
+              // The statutory clocks a critical defect states run from when the
+              // maintenance was carried out, and it also sits in the note's key —
+              // so one instant for the whole walk is what stops the same defect
+              // being re-composed later with a different deadline and posting
+              // twice.
+              maintenanceAt: now,
+            });
+            if (note.queued) notes.queued++; else notes.already++;
+          } catch (e) {
+            notes.failed++;
+            notes.failure ??= describeActionFailure(e, 'queue the defect notes to the office');
+          }
+        }
+      }
+      setDefectNotes(notes);
+
       // One note for the whole walk, after the assets are safely written: a
       // queue that cannot be written must not take the results with it, and
       // a note that could not be queued is not a result that was not
@@ -345,11 +443,33 @@ export default function BulkTestScreen() {
       // the summary says the note is the one thing that did not go.
       if (jobId) {
         try {
-          await queueJobNote({
-            jobId,
-            subject: serviceNoteSubject(d.batch, assets),
-            note: buildServiceNote(d.batch, assets, site, technician, now),
-          });
+          const subject = serviceNoteSubject(d.batch, assets);
+          const note = buildServiceNote(d.batch, assets, site, technician, now);
+          /*
+           * Keyed, which it was not until now, and that omission was a real
+           * duplicate rather than a tidiness. With no `contentKey`, `enqueueSync`
+           * falls back to `queueKey('job-note', payload)`, which is a hash with no
+           * SRV or DEF prefix on it. A marker still got written into the note —
+           * the send loop appends one whenever there is a key at all — but
+           * `keysInNoteText` matches only the SRV and DEF shapes, so the read-back
+           * of the job's own notes could never recognise the marker it had put
+           * there itself, and the guard simply never fired. Reinstall the app, or
+           * finish the same walk on a second handset, and the office got the
+           * identical summary a second time with an unreadable reference on both.
+           *
+           * The identity half is the attendance: this job, this site, this
+           * Queensland day. The content half is what was actually found, so a walk
+           * re-recorded after an amended verdict goes up as an amendment, while an
+           * unchanged one produces the same key and is recognised and skipped. Two
+           * genuinely different walks on one day — extinguishers in the morning,
+           * hydrants after lunch — differ in their content and both go.
+           */
+          const key = outboundKey(
+            'SRV',
+            ['bulk-test', jobId, site.id, qldIsoDay(now) ?? now],
+            [subject, note],
+          );
+          await queueJobNote({ jobId, subject, note }, { contentKey: key });
           out.noteJobId = jobId;
         } catch (e) {
           out.noteError = describeActionFailure(e, 'queue the note to the office');
@@ -400,9 +520,55 @@ export default function BulkTestScreen() {
                 ))}
               </View>
             ) : null}
+            {/*
+              * What the office was told about each defect, said plainly and
+              * separately from the walk's own figures. A technician standing in
+              * the driveway is asking one question — has the office got these? —
+              * and the visit summary above cannot answer it, because a note
+              * listing three failures is not three pieces of work anybody can book.
+              */}
+            {defectNotes && (defectNotes.queued || defectNotes.already || defectNotes.failed || defectNotes.noJob) ? (
+              <View style={{ marginTop: t.space(3), gap: 6 }}>
+                <Label>Defects to the office</Label>
+                {defectNotes.queued ? (
+                  <Txt size="sm" tone="pass" style={{ lineHeight: 19 }}>
+                    {defectNotes.queued} defect note{defectNotes.queued === 1 ? '' : 's'} queued on job{' '}
+                    {defectNotes.jobId} — what failed, where it is, and what its class requires. They go up with the
+                    next send.
+                  </Txt>
+                ) : null}
+                {defectNotes.already ? (
+                  <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+                    {defectNotes.already} {defectNotes.already === 1 ? 'was' : 'were'} already on job{' '}
+                    {defectNotes.jobId} word for word, so {defectNotes.already === 1 ? 'it was' : 'they were'} not
+                    sent twice.
+                  </Txt>
+                ) : null}
+                {defectNotes.failed ? (
+                  <Txt size="sm" tone="fail" style={{ lineHeight: 19 }}>
+                    {defectNotes.failed} defect note{defectNotes.failed === 1 ? '' : 's'} could not be queued, so the
+                    office has not been told about {defectNotes.failed === 1 ? 'it' : 'them'}. The defects themselves
+                    are recorded. {defectNotes.failure}
+                  </Txt>
+                ) : null}
+                {defectNotes.noJob ? (
+                  <Txt size="sm" tone="warn" style={{ lineHeight: 19 }}>
+                    {defectNotes.noJob} defect{defectNotes.noJob === 1 ? '' : 's'} raised with no job picked, so the
+                    office has not been told about {defectNotes.noJob === 1 ? 'it' : 'them'}.{' '}
+                    {defectNotes.noJob === 1 ? 'It is' : 'They are'} on this site&apos;s defect list. Ring the office,
+                    or pick the job before you record the next lot.
+                  </Txt>
+                ) : null}
+              </View>
+            ) : null}
           </Card>
           <Rowed gap={2}>
-            <Button title="Test more here" variant="secondary" style={{ flex: 1 }} onPress={() => { setOutcome(null); void load(); }} />
+            <Button
+              title="Test more here"
+              variant="secondary"
+              style={{ flex: 1 }}
+              onPress={() => { setOutcome(null); setDefectNotes(null); void load(); }}
+            />
             <Button title="Done" style={{ flex: 1 }} onPress={() => router.back()} />
           </Rowed>
         </Screen>
@@ -434,20 +600,30 @@ export default function BulkTestScreen() {
       ) : null}
 
       {/*
-        * Which job the note goes on. Nothing is chosen where the office has
-        * more than one open job here, because a note on the wrong job files
-        * the visit against somebody else's work. Optional: the walk records
-        * without one.
+        * Which job the walk reports to. Nothing is chosen where the office has
+        * more than one open job here, because a note on the wrong job files the
+        * visit against somebody else's work. Optional: the walk records without
+        * one — but it now says what that costs, because until this card said it,
+        * a site with no open job showed nothing at all and a technician had no
+        * way to know their failures were going nowhere.
         */}
-      {jobs.length || jobsFailed ? (
+      {jobsRead || jobsFailed ? (
         <Card>
           <Label>Note the office's job</Label>
           {jobsFailed ? (
             <Txt size="sm" tone="muted" style={{ marginTop: 4 }}>{jobsFailed}</Txt>
+          ) : !jobs.length ? (
+            <Txt size="sm" tone="warn" style={{ marginTop: 4, lineHeight: 19 }}>
+              The office has no open job at this site, so there is nowhere in Simpro to put this walk or the defects it
+              raises. Everything still records on the phone — ring the failures through, or ask the office to raise a
+              job here and report them from the defect list afterwards.
+            </Txt>
           ) : (
             <>
               <Txt size="xs" tone="faint" style={{ marginTop: 4, lineHeight: 17 }}>
-                One note listing what passed, failed and was not tested is queued on the job you pick.
+                On the job you pick: one note listing what passed, failed and was not tested, and one note for each
+                defect raised — the class it falls under, what that class requires, and the state you left it in. Pick
+                no job and nothing reaches the office.
               </Txt>
               <Rowed gap={2} wrap style={{ marginTop: t.space(2) }}>
                 {jobs.map((j) => (
