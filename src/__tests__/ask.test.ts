@@ -1,0 +1,342 @@
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { ANSWER_THRESHOLD, CALCULATORS, COVERAGE, KIND_LABEL, ask, explainQuery } from '@/domain/ask';
+import { DEFECT_LIBRARY } from '@/seed/defectLibrary';
+
+/**
+ * Answering from what the app holds.
+ *
+ * The behaviour worth testing is not that it finds things — it is that it
+ * refuses to. A confident wrong answer about a fire system is worse than no
+ * answer, so most of these check the refusal.
+ */
+
+describe('finding the right thing', () => {
+  it('finds a defect code typed exactly', () => {
+    const [top] = ask('DET-DET-001');
+    expect(top?.kind).toBe('defect');
+    expect(top?.title).toContain('DET-DET-001');
+  });
+
+  it('finds a defect code regardless of case or punctuation', () => {
+    expect(ask('det det 001')[0]?.title).toContain('DET-DET-001');
+    expect(ask('detdet001')[0]?.title).toContain('DET-DET-001');
+  });
+
+  it('answers a question about a thing, not just its tool name', () => {
+    // Nobody types "battery calculator"; they ask how big a battery.
+    const answers = ask('how many amp hours battery');
+    expect(answers.some((a) => a.kind === 'calculator' && /battery/i.test(a.title))).toBe(true);
+  });
+
+  it('finds the end-of-line reference by panel', () => {
+    const answers = ask('end of line');
+    expect(answers.some((a) => a.kind === 'eol' || /end-of-line/i.test(a.title))).toBe(true);
+  });
+
+  it('finds an addressing protocol by name', () => {
+    const answers = ask('Hochiki ESP');
+    expect(answers.some((a) => a.kind === 'protocol' && /hochiki/i.test(a.title))).toBe(true);
+  });
+});
+
+describe('refusing to answer', () => {
+  it('returns nothing for a question about something it does not hold', () => {
+    expect(ask('what is the capital of France')).toEqual([]);
+    expect(ask('zzzzqqqq')).toEqual([]);
+  });
+
+  it('returns nothing for a query too short to mean anything', () => {
+    expect(ask('')).toEqual([]);
+    expect(ask('a')).toEqual([]);
+    expect(ask('   ')).toEqual([]);
+  });
+
+  it('never returns an answer below the threshold', () => {
+    // A query sharing one common word with many entries should not drag in
+    // everything that happens to contain it.
+    for (const answer of ask('the panel and the system and something else entirely')) {
+      expect(answer.score).toBeGreaterThanOrEqual(ANSWER_THRESHOLD);
+    }
+  });
+
+  it('has something to say about its own coverage when it cannot answer', () => {
+    expect(COVERAGE.length).toBeGreaterThan(3);
+    for (const line of COVERAGE) expect(line.trim().length).toBeGreaterThan(0);
+  });
+});
+
+describe('every answer carries where it came from', () => {
+  const samples = ['DET-DET-001', 'battery', 'detector', 'address', 'end of line', 'extinguisher'];
+
+  it('names a source and a confidence on every answer', () => {
+    for (const q of samples) {
+      for (const answer of ask(q)) {
+        expect(answer.source.trim().length).toBeGreaterThan(0);
+        expect(['high', 'medium', 'low']).toContain(answer.confidence);
+        expect(answer.title.trim().length).toBeGreaterThan(0);
+        expect(KIND_LABEL[answer.kind]).toBeTruthy();
+      }
+    }
+  });
+
+  it('does not claim high confidence for a check whose figure comes from elsewhere', () => {
+    // A check flagged verify:true is one where the standard or the manual
+    // governs, so the app's own wording is not the answer.
+    const answers = ask('battery terminal voltage float range');
+    const routine = answers.find((a) => a.kind === 'routine');
+    if (routine) expect(routine.confidence).not.toBe('high');
+  });
+
+  it('distinguishes a standard from a manufacturer requirement in the source', () => {
+    const sources = new Set<string>();
+    for (const q of ['detector', 'battery', 'panel', 'valve']) {
+      for (const a of ask(q, 40)) if (a.kind === 'routine') sources.add(a.source);
+    }
+    // If every routine answer named the same source, the promise that the app
+    // never blurs a standard with a manufacturer instruction would be empty.
+    expect(sources.size).toBeGreaterThan(1);
+  });
+});
+
+describe('ranking', () => {
+  it('puts an exact identifier first, ahead of anything that merely mentions it', () => {
+    const code = DEFECT_LIBRARY[0]!.code;
+    const [top] = ask(code);
+    expect(top?.title).toContain(code);
+    expect(top?.score).toBeGreaterThan(100);
+  });
+
+  it('returns results in descending score', () => {
+    const answers = ask('detector');
+    for (let i = 1; i < answers.length; i++) {
+      expect(answers[i - 1]!.score).toBeGreaterThanOrEqual(answers[i]!.score);
+    }
+  });
+
+  it('honours the limit', () => {
+    expect(ask('detector', 3).length).toBeLessThanOrEqual(3);
+  });
+
+  it('prefers an answer matching more of the question', () => {
+    const answers = ask('detector failed to alarm on test');
+    expect(answers.length).toBeGreaterThan(0);
+    // The defect that is exactly this should outrank a generic detector entry.
+    expect(answers[0]!.title.toLowerCase()).toMatch(/alarm|detector/);
+  });
+});
+
+describe('the standards catalogue', () => {
+  it('answers a spacing question with the clause that governs it', () => {
+    // The question a technician actually types shares one word with the
+    // clause heading, and it is "from". Getting this to the top is the whole
+    // reason the trade vocabulary exists.
+    const best = ask('how far off the wall can a detector go')[0]!;
+    expect(best.kind).toBe('clause');
+    expect(best.title).toContain('AS 1670.1');
+    expect(best.title).toContain('5.1.4');
+  });
+
+  it('puts the clause a question is about above one that mentions it in passing', () => {
+    /*
+     * The catalogue grew from five hundred clauses to three thousand, and the
+     * ranking had been resting on there not being much text to match against.
+     *
+     * The haystack is one flat string, so a word in a clause TITLE and the same
+     * word buried in a description counted the same. Once every clause carried
+     * a description, "how far off the wall" started returning the sloping-
+     * ceiling clause and the fan-control clause — each of which mentions a wall
+     * once, incidentally — above the clause actually titled for it.
+     */
+    const best = ask('how far off the wall can a detector go')[0]!;
+    expect(best.title).toContain('Spacing from walls');
+  });
+
+  it('does not let a word that is in every title decide anything', () => {
+    // "detector" is in a third of the titles of a detection standard and tells
+    // you nothing about which clause is wanted; "wall" is in a handful and
+    // tells you almost everything. Counting them equally left the two level.
+    const titles = ask('how far off the wall can a detector go').slice(0, 2).map((a) => a.title);
+    expect(titles.every((t) => /Spacing from walls/.test(t))).toBe(true);
+  });
+
+  it('never answers with the section heading over the clause inside it', () => {
+    /*
+     * The demotion that handles this matched a child by its ref starting with
+     * the parent's ref and a dot, which works for "5.1" owning "5.1.4" and not
+     * at all for "SECTION 5" — so the newly described section headings sat on
+     * top of the clauses that answered the question. It also has to settle the
+     * whole chain: reading a child's original score rather than its demoted one
+     * sank a heading below where its child STARTED, which left it on top anyway.
+     */
+    for (const q of ['how far off the wall can a detector go', 'detector spacing', 'sound pressure level']) {
+      const top = ask(q)[0];
+      if (top?.kind === 'clause') expect(top.title).not.toMatch(/ SECTION \d+ —/);
+    }
+  });
+
+  it('jumps straight to a clause the technician named outright', () => {
+    // Someone typing a reference is navigating, not searching.
+    const best = ask('AS 2419.1 clause 10.4')[0]!;
+    expect(best.title).toContain('AS 2419.1:2005 10.4');
+    expect(best.score).toBeGreaterThan(100);
+  });
+
+  it('says an edition is superseded rather than letting it be quoted as current', () => {
+    const hit = ask('AS 2419.1 clause 10.4')[0]!;
+    expect(hit.source).toContain('superseded by');
+  });
+
+  it("marks a clause nobody has written up as low confidence and says so", () => {
+    /*
+     * The app holds the reference, not the standard. A clause with no
+     * description is a pointer and must not read as an answer.
+     *
+     * Clause 1.1 rather than 8.8: 8.8 has since been written up, and a test
+     * pinned to a clause that gets described later is a test that quietly
+     * changes what it is checking. A scope clause is a safer choice — it is the
+     * kind nobody writes up, because nothing on site turns on it.
+     */
+    const bare = ask('AS 2419.1 clause 1.1')[0]!;
+    expect(bare.confidence).toBe('low');
+    expect(bare.body).toContain('not going to guess');
+  });
+
+  it('still refuses a question it cannot answer', () => {
+    expect(ask('what is the capital of France')).toEqual([]);
+  });
+
+  it('shows its working, so the search is never a black box', () => {
+    const e = explainQuery('can i still use this extinguisher');
+    expect(e.readings).toContain('whether equipment can stay in service');
+    expect(e.alsoSearched.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * A search result that goes nowhere.
+ *
+ * The ask bar is how a technician finds a tool without knowing what the app
+ * calls it, and two of its answers pointed at screens that do not exist:
+ * '/tools/electrical' for the volt drop tool, which lives at '/tools/voltdrop',
+ * and '/tools/units' for the converter. Typing "volt drop" found the right
+ * answer, tapped it, and landed on the unmatched-route screen — the one thing
+ * worse than not finding it, because the technician now believes the tool was
+ * removed.
+ *
+ * Route strings are not checked by the typechecker, so this is what checks them.
+ */
+/**
+ * Naming a standard is navigation, not search, and it was answering the wrong
+ * document. The owner asked where AS 1670.4:2018 had gone and the search's own
+ * answer to "1670 2018" was a hundred and forty-seven clauses of it, all cut,
+ * behind three hundred and fifty-eight of a different part.
+ */
+describe('naming a standard, and an edition', () => {
+  const sources = (q: string): string[] => [...new Set(ask(q, 12).map((a) => a.source))];
+
+  it('reads the edition year instead of parsing it and throwing it away', () => {
+    // "as 1670 2018" used to return twenty-three clauses of AS 1670-1986, a
+    // standard withdrawn in 2004, because the year was captured by the regular
+    // expression and never put on the query.
+    for (const q of ['as 1670 2018', '1670 2018']) {
+      expect(sources(q).every((s) => /2018/.test(s))).toBe(true);
+    }
+  });
+
+  it('answers with every part of a family published in the year asked for', () => {
+    // The whole complaint: AS 1670.4:2018 exists, it is described, and the
+    // owner's own phrasing could not reach it.
+    const found = sources('1670 2018');
+    expect(found).toContain('AS 1670.1:2018');
+    expect(found).toContain('AS 1670.4:2018');
+  });
+
+  it('lets no single document take the whole answer', () => {
+    // A thousand clauses across eight AS 1670 documents scored identically,
+    // and the largest of them filled all twenty-five slots outright.
+    expect(sources('1670 2018').length).toBeGreaterThan(1);
+  });
+
+  it('keeps a part number a part number', () => {
+    // "as 1670.4" must not drag in AS 1670.1 or the 1986 edition.
+    expect(sources('as 1670.4').every((s) => /1670\.4/.test(s))).toBe(true);
+  });
+
+  it('does not let a number that stopped short match a longer one', () => {
+    // "as 167" is not "AS 1670". A digit straight after the match means the
+    // query never named this standard at all, so it falls through to the word
+    // scorer rather than jumping.
+    const top = ask('as 167', 5)[0];
+    expect(top?.score ?? 0).toBeLessThan(700);
+  });
+
+  it('still returns answers in descending score after the spreading', () => {
+    // The decay is applied before the single final sort, so this holds.
+    const scores = ask('1670 2018', 20).map((a) => a.score);
+    expect([...scores].sort((a, b) => b - a)).toEqual(scores);
+    expect(scores.every((s) => s >= ANSWER_THRESHOLD)).toBe(true);
+  });
+});
+
+describe('every answer the ask bar gives has a screen behind it', () => {
+  const APP = join(__dirname, '..', '..', 'app');
+
+  function screens(dir: string, out: string[] = []): string[] {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) screens(full, out);
+      else if (/\.tsx$/.test(entry) && !entry.startsWith('_')) out.push(full);
+    }
+    return out;
+  }
+
+  /** The route a file answers to, with group folders and index stripped as expo-router does. */
+  const routes = screens(APP).map((f) => {
+    const r = `/${relative(APP, f).replace(/\.tsx$/, '')}`.replace(/\/index$/, '').replace(/\/\([^/]+\)/g, '');
+    return r || '/';
+  });
+
+  it('found the screens it means to check against', () => {
+    expect(routes.length).toBeGreaterThan(30);
+    expect(routes).toContain('/tools/voltdrop');
+  });
+
+  const matches = (route: string) => routes.some((r) => new RegExp(
+    `^${r.replace(/\[\.\.\.[^\]]+\]/g, '.+').replace(/\[[^\]]+\]/g, '[^/]+')}$`,
+  ).test(route));
+
+  it('has no answer pointing at a route with no file', () => {
+    const dead = CALCULATORS.filter((topic) => !matches(topic.route)).map((topic) => `${topic.title} → ${topic.route}`);
+    expect(dead).toEqual([]);
+  });
+
+  it('checks the routes the calculators list does not hold, too', () => {
+    /*
+     * CALCULATORS is one of six places in ask.ts that name a route. Four more
+     * are written inline in the answer builders — the defect library, the
+     * routines, the end-of-line values, the addressing — and one is built from
+     * a document id. Walking only the calculators and calling it "every
+     * answer" is how the two dead routes this check was written for could have
+     * been joined by a third without anybody hearing about it.
+     *
+     * So the source is read for every literal route it names, whatever list it
+     * sits in. The dynamic one is exercised with a stand-in id, since what is
+     * being asked is whether a file answers to that shape.
+     */
+    const source = readFileSync(join(__dirname, '..', 'domain', 'ask.ts'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+
+    const literals = [...source.matchAll(/route:\s*'(\/[^']*)'/g)].map((m) => m[1] ?? '');
+    const templated = [...source.matchAll(/route:\s*`(\/[^`]*)`/g)]
+      .map((m) => (m[1] ?? '').replace(/\$\{[^}]*\}/g, 'stand-in'));
+
+    // The matcher has to be seeing something, or this passes over nothing.
+    expect(literals.length).toBeGreaterThanOrEqual(10);
+    expect(templated.length).toBeGreaterThanOrEqual(1);
+
+    const dead = [...literals, ...templated].filter((r) => !matches(r));
+    expect(dead).toEqual([]);
+  });
+});
