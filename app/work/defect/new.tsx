@@ -280,7 +280,7 @@ export default function NewDefectScreen() {
     // is evidence on a statutory notice — losing it produces no error, just a
     // record that quietly stops pointing at anything.
     try {
-      const kept = keepPhoto({
+      const kept = await keepPhoto({
         id: newId(),
         sourceUri,
         subject: 'defect',

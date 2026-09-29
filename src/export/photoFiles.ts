@@ -16,6 +16,11 @@ import {
  * cache while a technician fills in the rest of a defect form is already at
  * risk, and the window is exactly when the phone is most likely to be low on
  * space — it has just taken a photograph.
+ *
+ * `keepPhoto` is async here although this half does its work synchronously.
+ * There is a `.web.ts` beside this file which has to read bytes out of a blob
+ * URL before it can keep anything, and one signature across both halves is the
+ * only arrangement in which a screen cannot be written against the wrong one.
  */
 
 function photoDir(): Directory {
@@ -44,7 +49,7 @@ export interface StoredPhoto extends PhotoRef {
  * which happens when a photograph is re-attached — it is left where it is
  * rather than duplicated.
  */
-export function keepPhoto(input: {
+export async function keepPhoto(input: {
   id: string;
   sourceUri: string;
   subject: PhotoSubject;
@@ -52,7 +57,7 @@ export function keepPhoto(input: {
   takenAt: string;
   takenBy?: string;
   caption?: string;
-}): StoredPhoto {
+}): Promise<StoredPhoto> {
   const fileName = photoFileName({ ...input, sourceUri: input.sourceUri });
   const relative = photoPath(fileName);
 

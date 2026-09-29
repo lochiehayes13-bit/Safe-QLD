@@ -48,8 +48,14 @@ export interface ReadAttachment {
  * the moment of use and never stored absolute. An absolute URI is used as it
  * is: that is what a photograph re-attached from somewhere permanent looks
  * like.
+ *
+ * Deliberately not exported. It hands back an `expo-file-system` `File`, which
+ * is a thing the browser half of this module has no equivalent of and no way to
+ * fake — there it is a `data:` URI and a split, not a handle. Exporting it
+ * would oblige that half to offer a name it cannot mean, and the platform-split
+ * guard is right to insist the two halves match.
  */
-export function fileForPhoto(localUri: string): File {
+function fileForPhoto(localUri: string): File {
   const absolute = /^[a-z]+:\/\//i.test(localUri) || localUri.startsWith('/');
   return new File(absolute ? localUri : photoUri(localUri));
 }

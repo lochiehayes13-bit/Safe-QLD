@@ -281,7 +281,7 @@ export default function BulkTestScreen() {
       // the picker's URI is the operating system's to clear, and a defect
       // photograph is evidence.
       const sourceUri = await shrinkForStorage(result.assets[0]!);
-      const kept = keepPhoto({
+      const kept = await keepPhoto({
         id: newId(),
         sourceUri,
         subject: 'defect',

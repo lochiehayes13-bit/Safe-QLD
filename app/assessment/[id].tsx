@@ -493,7 +493,7 @@ function FindingCard({
     // every site offline.
     const sourceUri = await shrinkForStorage(result.assets[0]!);
     try {
-      const kept = keepPhoto({
+      const kept = await keepPhoto({
         id: newId(),
         sourceUri,
         subject: 'report',

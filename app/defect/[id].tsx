@@ -125,7 +125,7 @@ export default function DefectScreen() {
       const kept: string[] = [];
       for (const asset of picked.assets) {
         const sourceUri = await shrinkForStorage(asset);
-        const stored = keepPhoto({
+        const stored = await keepPhoto({
           id: newId(),
           sourceUri,
           subject: 'defect',

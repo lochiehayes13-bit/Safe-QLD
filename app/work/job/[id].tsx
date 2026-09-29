@@ -409,7 +409,7 @@ export default function JobScreen() {
       const takenAt = nowIso();
       const sourceUri = await shrinkForStorage(result.assets[0]!);
       // 'site' is the nearest subject the photo store names; the job is the subject id.
-      const kept = keepPhoto({ id: newId(), sourceUri, subject: 'site', subjectId: job.id, takenAt });
+      const kept = await keepPhoto({ id: newId(), sourceUri, subject: 'site', subjectId: job.id, takenAt });
       const filename = attachmentFilename({
         siteName: job.siteName, location: `Job ${job.externalId} ${qldClock(takenAt)?.replace(':', '') ?? ''}`.trim(), raisedAt: takenAt, path: kept.path,
       });

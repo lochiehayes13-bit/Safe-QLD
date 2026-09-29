@@ -1,4 +1,5 @@
 import { getDb } from '@/db';
+import { dataUriByteSize, isDataUri } from '@/domain/dataUri';
 import { PHOTO_DIR, reconcilePhotos, type PhotoRef, type StorageReport } from '@/domain/photoStore';
 
 /**
@@ -25,9 +26,15 @@ function paths(raw: string | null): string[] {
   }
 }
 
-/** Only paths this app wrote; a leftover cache URI is not ours to reconcile. */
+/**
+ * Only paths this app wrote; a leftover cache URI is not ours to reconcile.
+ *
+ * A `data:` URI is one of ours. That is what the browser build stores, because
+ * it has no file system to copy into — the photograph travels inside the record
+ * instead of being pointed at from it.
+ */
 function ours(path: string): boolean {
-  return path.startsWith(`${PHOTO_DIR}/`);
+  return path.startsWith(`${PHOTO_DIR}/`) || isDataUri(path);
 }
 
 export async function listPhotoRecords(): Promise<PhotoRef[]> {
@@ -61,9 +68,26 @@ export async function listPhotoRecords(): Promise<PhotoRef[]> {
  * Both directions are reported. A record whose file has gone is evidence lost;
  * a file nothing references is only wasted space, but on a device holding
  * hundreds of sites offline that adds up.
+ *
+ * A photograph the browser build kept inline is neither, and is taken out
+ * before the comparison rather than run through it. It has no file to have
+ * gone and no file to be orphaned: the bytes are the record. Left in, every one
+ * of them would come back as "recorded but no longer on this device" — a report
+ * telling a technician their evidence is lost while it sits in front of them —
+ * because `listPhotoFiles` on that build has an empty directory to list and is
+ * right to say so.
  */
 export async function photoStorageReport(
   filesOnDisk: { path: string; byteSize: number }[],
 ): Promise<StorageReport> {
-  return reconcilePhotos(await listPhotoRecords(), filesOnDisk);
+  const records = await listPhotoRecords();
+  const inline = records.filter((r) => isDataUri(r.path));
+  const report = reconcilePhotos(records.filter((r) => !isDataUri(r.path)), filesOnDisk);
+
+  if (!inline.length) return report;
+  return {
+    ...report,
+    count: report.count + inline.length,
+    totalBytes: report.totalBytes + inline.reduce((n, r) => n + (dataUriByteSize(r.path) ?? 0), 0),
+  };
 }
