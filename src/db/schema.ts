@@ -32,6 +32,7 @@ import { MIGRATION_V30 } from './schemaV30';
 import { MIGRATION_V31 } from './schemaV31';
 import { MIGRATION_V32 } from './schemaV32';
 import { MIGRATION_V33 } from './schemaV33';
+import { MIGRATION_V34 } from './schemaV34';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -378,6 +379,11 @@ export const MIGRATIONS: string[] = [
   // v33 — the Simpro job a defect belongs to, and when the office accepted its
   // note, so a fault can be booked as work rather than phoned through
   MIGRATION_V33,
+
+  // v34 — who owns the building, who did the work, what class it is, and the
+  // defects found: the six facts a Form 72 needs and the department's form has
+  // no box for
+  MIGRATION_V34,
 ];
 
 /**

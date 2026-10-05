@@ -59,11 +59,16 @@ export function hydrantInputsFrom(form: Pick<Form72, 'flowTest' | 'booster'>): H
   const flow = form.flowTest;
   const booster = form.booster;
 
+  // Only a metered row carries a flow in litres per second. A nozzle row gives
+  // a bore and a pitot reading, and the litres it passed depend on that reading
+  // — so it is left for the hydrant tool's own nozzle maths rather than guessed
+  // at here.
   const row = flow.rows.find((r) => num(r.hydrant1Kpa) !== undefined && num(r.rateLps) !== undefined);
-  if (row) {
-    out.flowLpm = row.rateLps * LPM_PER_LPS;
+  const rowRateLps = row ? num(row.rateLps) : undefined;
+  if (row && rowRateLps !== undefined) {
+    out.flowLpm = rowRateLps * LPM_PER_LPS;
     out.residualKpa = row.hydrant1Kpa;
-    out.sources.push(`Part D: ${row.rateLps} L/s duty gave ${row.hydrant1Kpa} kPa at one hydrant${row.devices ? ` (${row.devices})` : ''}.`);
+    out.sources.push(`Part D: ${rowRateLps} L/s duty gave ${row.hydrant1Kpa} kPa at one hydrant${row.devices ? ` (${row.devices})` : ''}.`);
     if (flow.hydrantLocations.length) out.hydrantRef = flow.hydrantLocations[0];
   }
 

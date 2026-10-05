@@ -2,8 +2,8 @@ import { getDb, newId, nowIso } from '@/db';
 import {
   canIssue, emptyForm72, validateForm72,
   type BoosterTest, type FlowDeviceKind, type FlowTest, type Form72, type HydrostaticTest,
-  type MaintenanceTest, type PartResult, type SprinklerFlowTest, type SprinklerHydrostatic,
-  type TestDevice,
+  type FormDefect, type MaintenanceTest, type PartResult, type SprinklerFlowTest,
+  type SprinklerHydrostatic, type TestDevice,
 } from '@/domain/form72';
 
 /**
@@ -74,6 +74,12 @@ interface Form72Row {
   licenceNumber: string;
   licenseeReportNumber: string;
   signature: string;
+  owner: string | null;
+  ownerContact: string | null;
+  buildingClassification: string | null;
+  technician: string | null;
+  qualification: string | null;
+  defects: string | null;
   status: string;
   issuedAt: string | null;
   copyGivenAt: string | null;
@@ -177,6 +183,12 @@ function toForm(r: Form72Row): StoredForm72 {
     licenceNumber: r.licenceNumber,
     licenseeReportNumber: r.licenseeReportNumber || undefined,
     signature: r.signature || undefined,
+    owner: r.owner || undefined,
+    ownerContact: r.ownerContact || undefined,
+    buildingClassification: r.buildingClassification || undefined,
+    technician: r.technician || undefined,
+    qualification: r.qualification || undefined,
+    defects: readJsonArray<FormDefect>(r.defects ?? '', 'defect list'),
     status: readStatus(r.status),
     issuedAt: r.issuedAt ?? undefined,
     copyGivenAt: r.copyGivenAt ?? undefined,
@@ -236,9 +248,11 @@ export async function createForm72(input: {
         maintenanceTest, hydrostatic, flowDeviceKinds, devices, flowTest, booster,
         sprinklerHydrostatic, sprinklerFlow, overloadFlowLps, overloadPressureKpa,
         criticalDefectsIdentified, repairsRequired, systemResult, systemNotes,
-        licenseeName, licenceNumber, licenseeReportNumber, signature, status, issuedAt,
-        copyGivenAt, jobExternalId, jobTitle, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        licenseeName, licenceNumber, licenseeReportNumber, signature,
+        owner, ownerContact, buildingClassification, technician, qualification, defects,
+        status, issuedAt, copyGivenAt, jobExternalId, jobTitle, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       record.id, record.siteId, record.siteName, record.siteAddress ?? '', record.contractor,
       record.systemLabel, record.testDate ?? null, record.testTime ?? null,
@@ -250,7 +264,10 @@ export async function createForm72(input: {
       writeTriState(record.criticalDefectsIdentified), writeTriState(record.repairsRequired),
       record.systemResult, record.systemNotes ?? '',
       record.licenseeName, record.licenceNumber, record.licenseeReportNumber ?? '',
-      record.signature ?? '', record.status, null, null,
+      record.signature ?? '',
+      record.owner ?? null, record.ownerContact ?? null, record.buildingClassification ?? null,
+      record.technician ?? null, record.qualification ?? null, JSON.stringify(record.defects),
+      record.status, null, null,
       record.jobExternalId ?? null, record.jobTitle ?? null, record.createdAt, record.updatedAt,
     ],
   );
@@ -384,6 +401,14 @@ export async function updateForm72(id: string, patch: Form72Patch): Promise<void
   if (patch.licenceNumber !== undefined) put('licenceNumber', patch.licenceNumber);
   if (patch.licenseeReportNumber !== undefined) put('licenseeReportNumber', patch.licenseeReportNumber ?? '');
   if (patch.signature !== undefined) put('signature', patch.signature ?? '');
+  if (patch.owner !== undefined) put('owner', patch.owner ?? null);
+  if (patch.ownerContact !== undefined) put('ownerContact', patch.ownerContact ?? null);
+  if (patch.buildingClassification !== undefined) {
+    put('buildingClassification', patch.buildingClassification ?? null);
+  }
+  if (patch.technician !== undefined) put('technician', patch.technician ?? null);
+  if (patch.qualification !== undefined) put('qualification', patch.qualification ?? null);
+  if (patch.defects !== undefined) put('defects', JSON.stringify(patch.defects));
 
   if (!fields.length) return;
   put('updatedAt', nowIso());

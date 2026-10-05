@@ -51,6 +51,19 @@ export interface TestDevice {
   digitalReader?: boolean;
   /** Gauge increments in kPa. */
   incrementsKpa?: number;
+  /**
+   * The gauge's correction, as kPa or a percentage.
+   *
+   * A row the department's form asks for and this model did not hold, which
+   * made the Part C note a promise the page could not keep: it told the reader
+   * the correction factor must be kPa or a percentage, and then printed no
+   * correction factor. A gauge that reads 40 kPa high is usable once the
+   * correction is on the page beside its serial number, and unusable without
+   * it — the reader cannot tell a corrected figure from an uncorrected one.
+   *
+   * Free text rather than a number because the unit is part of the answer.
+   */
+  correctionFactor?: string;
 }
 
 export type FlowDeviceKind = 'orifice' | 'mechanical' | 'electromagnetic';
@@ -66,25 +79,108 @@ export interface HydrostaticTest {
   comments?: string;
 }
 
-/** One row of Part D's flow table: a duty, and what was achieved. */
+/**
+ * One row of Part D's flow table: a duty, and what was achieved.
+ *
+ * The department's table runs down the left in one column headed "size/flow
+ * rate", and the two things it lists there are not the same kind of thing. The
+ * top rows are nozzle bores — a 19, 22 or 25 mm nozzle held open, which is how
+ * a hydrant is proved where there is no flow device on the truck. The rows
+ * below are metered duties in litres per second. A model that held only the
+ * litres-per-second rows could not record a nozzle test at all, and the three
+ * nozzle rows are the ones a technician with a pitot and no flow meter
+ * actually fills in.
+ *
+ * So a row is identified by whichever of the two it is, and exactly one is set.
+ * Rows stored before the nozzle rows existed carry rateLps alone and read back
+ * unchanged, which is why rateLps stayed optional rather than becoming part of
+ * a tagged union: a migration of somebody's signed form is not worth a tidier
+ * type.
+ */
 export interface FlowRow {
-  /** The duty being proved, in litres per second. */
-  rateLps: number;
+  /** The duty being proved, in litres per second, on a metered row. */
+  rateLps?: number;
+  /** The nozzle bore in millimetres, on a nozzle row. */
+  nozzleMm?: number;
   devices: string;
   hydrant1Kpa?: number;
   hydrants12Kpa?: number;
   hydrants123Kpa?: number;
+  /**
+   * Four hydrants running together.
+   *
+   * The department's table has this fourth column and the model did not, so a
+   * four-hydrant reading taken on site had nowhere to go and was either
+   * dropped or written into the three-hydrant column, where it reads as a
+   * different test than the one that was run.
+   */
+  hydrants1234Kpa?: number;
 }
 
 export interface FlowTest {
   result: PartResult | 'refer-to-report';
   hydrantLocations: string[];
+  /**
+   * What the system is required to deliver, which is the figure every reading
+   * in the table is judged against. Without it the table is a column of
+   * pressures and the reader has to know the design to say whether it passed.
+   */
+  requiredLps?: number;
+  requiredKpa?: number;
   staticPressureKpa?: number;
   pressureZone?: string;
   onSitePumpSet?: boolean;
   rows: FlowRow[];
+  /**
+   * What it actually delivered, as the pair the form asks for.
+   *
+   * systemAchieved held the same answer as one free-text line and is kept so
+   * that forms already signed still print what they said. New forms record the
+   * two numbers, because a pair of numbers can be compared with the
+   * requirement above and a sentence cannot.
+   */
+  achievedLps?: number;
+  achievedKpa?: number;
   systemAchieved?: string;
   comment?: string;
+}
+
+/** The nozzle bores printed down Part D, in millimetres. */
+export const PART_D_NOZZLE_SIZES_MM = [19, 22, 25] as const;
+
+/** The metered duties printed down Part D, in litres per second. */
+export const PART_D_DEVICE_RATES_LPS = [5, 10, 15, 20, 30] as const;
+
+/** Part D's eight printed rows, in the order the department prints them. */
+export const PART_D_ROWS: FlowRow[] = [
+  ...PART_D_NOZZLE_SIZES_MM.map((nozzleMm) => ({ nozzleMm, devices: '' })),
+  ...PART_D_DEVICE_RATES_LPS.map((rateLps) => ({ rateLps, devices: '' })),
+];
+
+/**
+ * A row's identity, so the screen and the printed page agree on which line is
+ * which without comparing floats in two places.
+ */
+export function flowRowKey(row: FlowRow): string {
+  if (row.nozzleMm !== undefined) return `nozzle-${row.nozzleMm}`;
+  if (row.rateLps !== undefined) return `device-${row.rateLps}`;
+  return 'unidentified';
+}
+
+/** How a row prints down the left of Part D. */
+export function flowRowLabel(row: FlowRow): string {
+  if (row.nozzleMm !== undefined) return `${row.nozzleMm} mm nozzle`;
+  if (row.rateLps !== undefined) return `${row.rateLps} L/s device`;
+  return 'Unlabelled row';
+}
+
+/** True where the technician put nothing at all on this line. */
+export function flowRowUntouched(row: FlowRow): boolean {
+  return !row.devices?.trim()
+    && row.hydrant1Kpa === undefined
+    && row.hydrants12Kpa === undefined
+    && row.hydrants123Kpa === undefined
+    && row.hydrants1234Kpa === undefined;
 }
 
 /** Part E — the pump appliance booster test. */
@@ -100,6 +196,22 @@ export interface BoosterTest {
   boostPressureKpa?: number;
   /** Measured at the hydrant being proved, which the printed form assumes. */
   hydrantResidualKpa?: number;
+  /**
+   * A frictional loss the technician worked out and wrote down.
+   *
+   * The department's form has a box for this figure and expects it to be
+   * filled in by hand. Where the residual at the hydrant was measured the app
+   * can derive it instead and show its working, which is better evidence than
+   * a number on its own — but a technician who measured at the booster and not
+   * at the hydrant has a loss to record and no way for the app to check it,
+   * and the box on the form still has to be filled.
+   *
+   * So both are held. The page prefers the derived figure and says how it got
+   * there; where only this one exists it prints as stated rather than
+   * calculated; and where the two disagree the page says so instead of
+   * choosing a winner quietly.
+   */
+  statedFrictionalLossKpa?: number;
   comments?: string;
 }
 
@@ -116,6 +228,20 @@ export interface SprinklerTestPoint {
   resultFlowLpm?: number;
   requiredPressureKpa?: number;
   resultPressureKpa?: number;
+  /**
+   * The Pass / Fail boxes the department prints on each of these two lines.
+   *
+   * The app can work the comparison out from the two figures beside them, and
+   * does. These hold what the technician actually ticked, which is not always
+   * the same answer — a required flow of 540 L/min achieved at 538 is a fail
+   * by subtraction and may be a pass by the standard's tolerance, and the
+   * person on the ladder is the one who knows which.
+   *
+   * Holding both means the page can print the tick and flag the disagreement,
+   * rather than silently overruling a licensee on a form they sign.
+   */
+  flowResult?: 'pass' | 'fail';
+  pressureResult?: 'pass' | 'fail';
 }
 
 export interface SprinklerFlowTest {
@@ -155,8 +281,41 @@ export interface Form72 {
   licenseeReportNumber?: string;
   signature?: string;
 
+  /*
+   * What the department's form does not have a box for.
+   *
+   * Part H asks that repair details be attached to the licensee's report, and
+   * the form itself never names the owner, the technician who did the work, or
+   * the building's classification. Those belong to the record whatever the
+   * printed layout does with them, so they are held here and printed on an
+   * attachment page after Part I — added to the department's form rather than
+   * written into it, which is the distinction a reader has to be able to make.
+   */
+  owner?: string;
+  ownerContact?: string;
+  buildingClassification?: string;
+  /** The person who did the work, where that is not the licensee who signs. */
+  technician?: string;
+  qualification?: string;
+  defects: FormDefect[];
+
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * One defect found on the day.
+ *
+ * Critical is its own flag rather than a word in the description, because it
+ * decides something: a critical defect obliges the owner or occupier to be
+ * given a notice, and Part H's first question is whether any were found. A
+ * form with a defect flagged critical and that question answered "no"
+ * contradicts itself, which the validation can only catch if the flag is a
+ * field.
+ */
+export interface FormDefect {
+  description: string;
+  critical: boolean;
 }
 
 export const PART_RESULT_LABEL: Record<PartResult, string> = {
@@ -190,6 +349,122 @@ export function frictionalLossKpa(b: BoosterTest): number | undefined {
   if (highestHydrantAboveBoosterM === undefined) return undefined;
   const loss = boostPressureKpa - elevationHeadKpa(highestHydrantAboveBoosterM) - hydrantResidualKpa;
   return Math.round(loss * 10) / 10;
+}
+
+/**
+ * Which frictional loss the page should print, and why.
+ *
+ * Two figures can exist: one the app derived from the boost, the climb and the
+ * residual, and one the technician wrote down. The derived figure is preferred
+ * because it carries its own working, but it is not always available, and
+ * where both exist and disagree the disagreement is the finding — one of the
+ * readings behind it is wrong, and overwriting either with the other hides
+ * which.
+ *
+ * A kilopascal of slack is allowed before calling it a disagreement. Both
+ * numbers are rounded to a tenth and the derived one runs through 9.81 kPa per
+ * metre, so exact agreement is not something either side can promise.
+ */
+export const FRICTIONAL_LOSS_TOLERANCE_KPA = 1;
+
+export interface FrictionalLoss {
+  kpa?: number;
+  source: 'calculated' | 'stated' | 'none';
+  /** The stated figure, where one exists and the calculated one was used. */
+  disagreesWithKpa?: number;
+}
+
+export function resolveFrictionalLoss(b: BoosterTest): FrictionalLoss {
+  const calculated = frictionalLossKpa(b);
+  const stated = b.statedFrictionalLossKpa;
+
+  if (calculated === undefined) {
+    return stated === undefined
+      ? { source: 'none' }
+      : { kpa: stated, source: 'stated' };
+  }
+
+  const disagrees = stated !== undefined
+    && Math.abs(stated - calculated) > FRICTIONAL_LOSS_TOLERANCE_KPA;
+
+  return {
+    kpa: calculated,
+    source: 'calculated',
+    disagreesWithKpa: disagrees ? stated : undefined,
+  };
+}
+
+/**
+ * Part A's maintenance test grid, read as the two questions it really asks.
+ *
+ * The department prints a three-by-two grid — hydrant, sprinkler or combined
+ * down the side, annual or five-yearly across the top — and the six booleans
+ * model it cell for cell. A technician does not think in six cells; they think
+ * "combined system, annual test", which is one choice on each axis.
+ *
+ * So the screen asks the two questions and this maps the answers onto the grid
+ * the form prints. The six booleans stay the stored shape, because a form
+ * already on a phone may have ticked two cells that no pair of axes can
+ * express, and the grid can still say exactly what was ticked.
+ */
+export type SystemType = 'hydrant' | 'sprinkler' | 'combined';
+export type TestInterval = 'annual' | 'fiveYear';
+
+export const SYSTEM_TYPE_LABEL: Record<SystemType, string> = {
+  hydrant: 'Fire hydrant',
+  sprinkler: 'Fire sprinkler',
+  combined: 'Combined',
+};
+
+export const TEST_INTERVAL_LABEL: Record<TestInterval, string> = {
+  annual: 'Annual',
+  fiveYear: '5 year',
+};
+
+const CELL: Record<SystemType, Record<TestInterval, keyof MaintenanceTest>> = {
+  hydrant: { annual: 'hydrantAnnual', fiveYear: 'hydrantFiveYear' },
+  sprinkler: { annual: 'sprinklerAnnual', fiveYear: 'sprinklerFiveYear' },
+  combined: { annual: 'combinedAnnual', fiveYear: 'combinedFiveYear' },
+};
+
+export function maintenanceTestCell(
+  type: SystemType,
+  interval: TestInterval,
+): keyof MaintenanceTest {
+  return CELL[type][interval];
+}
+
+/** The system types with any box ticked across them. */
+export function systemTypesTested(m: MaintenanceTest): SystemType[] {
+  return (Object.keys(CELL) as SystemType[])
+    .filter((t) => m[CELL[t].annual] || m[CELL[t].fiveYear]);
+}
+
+/** The intervals with any box ticked down them. */
+export function intervalsTested(m: MaintenanceTest): TestInterval[] {
+  return (['annual', 'fiveYear'] as TestInterval[])
+    .filter((i) => (Object.keys(CELL) as SystemType[]).some((t) => m[CELL[t][i]]));
+}
+
+/**
+ * Tick the grid from the two axes.
+ *
+ * Every combination of the chosen types and intervals is set, which for one
+ * type and one interval is the single cell a technician meant. Anything
+ * previously ticked outside that product is cleared, so the grid always says
+ * what the two controls say.
+ */
+export function maintenanceTestFromAxes(
+  types: SystemType[],
+  intervals: TestInterval[],
+): MaintenanceTest {
+  const m: MaintenanceTest = {
+    hydrantAnnual: false, hydrantFiveYear: false,
+    sprinklerAnnual: false, sprinklerFiveYear: false,
+    combinedAnnual: false, combinedFiveYear: false,
+  };
+  for (const t of types) for (const i of intervals) m[CELL[t][i]] = true;
+  return m;
 }
 
 /**
@@ -453,7 +728,103 @@ export function validateForm72(form: Form72): FormIssue[] {
     });
   }
 
+  /*
+   * A part that failed, and a system that did not.
+   *
+   * The parts are the evidence and Part H is the conclusion drawn from them,
+   * so a failed part under a passing system is the form disagreeing with
+   * itself — and it is the direction of disagreement that matters, because the
+   * document says a system is fit when its own readings say it is not. Marked
+   * blocking against a pass, and a caution against N/A: a form that records a
+   * failure and then declines to say what the system is has at least not
+   * claimed anything false.
+   */
+  const failedParts = failedPartLetters(form);
+  if (failedParts.length) {
+    const list = failedParts.length === 1
+      ? `Part ${failedParts[0]}`
+      : `Parts ${failedParts.slice(0, -1).join(', ')} and ${failedParts[failedParts.length - 1]}`;
+    if (form.systemResult === 'pass') {
+      issues.push({
+        part: 'H',
+        message: `${list} ${failedParts.length === 1 ? 'is' : 'are'} recorded as a fail while the `
+          + 'system is marked as a pass. The parts are the evidence for the system result, so one '
+          + 'of the two is wrong.',
+        blocking: true,
+      });
+    } else if (form.systemResult === 'na') {
+      issues.push({
+        part: 'H',
+        message: `${list} ${failedParts.length === 1 ? 'is' : 'are'} recorded as a fail and the `
+          + 'system result is not applicable. A form that records a failure should say what that '
+          + 'means for the system.',
+        blocking: false,
+      });
+    }
+  }
+
+  /*
+   * A defect nobody carried up to Part H.
+   *
+   * Part H's first question decides whether the owner or occupier is handed a
+   * critical defect notice. A defect flagged critical on the attachment with
+   * that question answered "no" is the one contradiction on this form with a
+   * statutory consequence, so it blocks.
+   */
+  const criticals = form.defects.filter((d) => d.critical).length;
+  if (criticals && form.criticalDefectsIdentified !== true) {
+    issues.push({
+      part: 'H',
+      message: `${criticals} defect${criticals === 1 ? ' is' : 's are'} flagged critical, but Part H `
+        + `${form.criticalDefectsIdentified === false ? 'says no critical defects were identified'
+          : 'does not answer the critical defect question'}. If a defect is critical the owner or `
+        + 'occupier has to be given a notice.',
+      blocking: true,
+    });
+  }
+
+  /*
+   * A defect with no words in it.
+   *
+   * An empty row on the attachment reads as a defect somebody began recording
+   * and did not finish, which is worse than no row: a reader cannot tell
+   * whether something was found.
+   */
+  if (form.defects.some((d) => !d.description.trim())) {
+    issues.push({
+      part: 'H',
+      message: 'A defect has been added with no description. Describe it or take the row off.',
+      blocking: false,
+    });
+  }
+
   return issues;
+}
+
+/**
+ * Which parts recorded a fail.
+ *
+ * Part D's "refer to report" is deliberately not a fail — it is the department's
+ * third box and says the answer is in the licensee's report, not that the test
+ * was failed.
+ */
+export function failedPartLetters(form: Form72): string[] {
+  const parts: [string, PartResult | 'refer-to-report'][] = [
+    ['B', form.hydrostatic.result],
+    ['D', form.flowTest.result],
+    ['E', form.booster.result],
+    ['F', form.sprinklerHydrostatic.result],
+    ['G', form.sprinklerFlow.result],
+  ];
+  const letters = parts.filter(([, r]) => r === 'fail').map(([p]) => p);
+
+  // Part G's two lines carry their own ticks, and a line ticked Fail under a
+  // part the technician left on Pass is the same contradiction one level down.
+  const linesFailed = form.sprinklerFlow.testPoints
+    .some((p) => p.flowResult === 'fail' || p.pressureResult === 'fail');
+  if (linesFailed && !letters.includes('G')) letters.push('G');
+
+  return letters;
 }
 
 /** True when the form can be issued: nothing blocking is outstanding. */
@@ -487,6 +858,7 @@ export function emptyForm72(input: {
     sprinklerHydrostatic: { result: 'na' },
     sprinklerFlow: { result: 'na', testPoints: [] },
     systemResult: 'na',
+    defects: [],
     licenseeName: '',
     licenceNumber: '',
     createdAt: input.now,

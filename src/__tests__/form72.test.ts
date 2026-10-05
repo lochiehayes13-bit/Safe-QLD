@@ -1,13 +1,18 @@
 import {
-  DECLARATION, DEPARTMENT_NOTE, FORM_72_SOURCES, STANDARD_FLOW_RATES_LPS,
+  DECLARATION, DEPARTMENT_NOTE, FORM_72_SOURCES, PART_D_LOCATION_SLOTS, STANDARD_FLOW_RATES_LPS,
   flowTableRows, form72Html, frictionalLossGaps, hydrantLocationsNeeded, occupierCopyDue,
   occupierCopyDueBy, qldCalendarDate, testPointOutcome, testerCopyKeepUntil,
   type Form72DocumentInput,
 } from '@/export/form72';
 import { MIGRATION_V12 } from '@/db/schemaForm72';
 import {
-  deviceCalibration, emptyForm72, overloadCheck, validateForm72, type Form72, type TestDevice,
+  PART_D_NOZZLE_SIZES_MM, PART_D_ROWS, deviceCalibration, emptyForm72, intervalsTested,
+  maintenanceTestCell, maintenanceTestFromAxes, overloadCheck, resolveFrictionalLoss,
+  systemTypesTested, validateForm72,
+  type Form72, type MaintenanceTest, type TestDevice,
 } from '@/domain/form72';
+import { MIGRATIONS, SCHEMA_VERSION } from '@/db/schema';
+import { MIGRATION_V34 } from '@/db/schemaV34';
 
 /**
  * Form 72 as the document that gets handed over.
@@ -378,7 +383,7 @@ describe('Part D — the flow table', () => {
       }),
     }));
     expect(html).toContain('25 L/s');
-    expect(flat(html)).toContain("that the department's table does not print (25 L/s)");
+    expect(flat(html)).toContain("that the department's table does not print (25 L/s device)");
     expect(flat(html)).toContain('rather than dropped to fit the printed layout');
   });
 
@@ -391,7 +396,7 @@ describe('Part D — the flow table', () => {
         { rateLps: 20, devices: 'DG1', hydrant1Kpa: 260 },
       ],
     });
-    expect(rows).toHaveLength(STANDARD_FLOW_RATES_LPS.length + 1);
+    expect(rows).toHaveLength(PART_D_ROWS.length + 1);
     expect(rows.filter((r) => r.row.rateLps === 20)).toHaveLength(2);
     expect(rows[rows.length - 1]!.standard).toBe(false);
   });
@@ -408,7 +413,7 @@ describe('Part D — the flow table', () => {
         },
       }),
     }));
-    const locations = between(twoProved, 'Hydrant 1 Location', 'Static Pressure');
+    const locations = between(twoProved, 'Hydrant 1 Location', 'System requirement');
     expect(locations).toContain('Main entry');
     expect(locations).not.toContain('Not recorded');
     expect(locations).toContain('Not used');
@@ -1007,5 +1012,397 @@ describe('deviceCalibration', () => {
     const fromForm = validateForm72(form).filter((i) => i.part === 'C');
     expect(fromForm).toHaveLength(1);
     expect(fromForm[0]).toEqual(deviceCalibration(form.devices[0]!, form.testDate).issue);
+  });
+});
+
+describe('Part D — the nozzle rows and the fourth hydrant', () => {
+  it('prints the three nozzle bores the department prints, which the table used to drop', () => {
+    const html = form72Html(doc());
+    const partD = between(html, 'Size/flow rate', 'System achieved');
+    for (const mm of PART_D_NOZZLE_SIZES_MM) expect(partD).toContain(`${mm} mm nozzle`);
+    // Eight printed lines, three of them nozzles: a table that showed only the
+    // five metered rates looked complete with three of its rows missing.
+    expect(PART_D_ROWS).toHaveLength(PART_D_NOZZLE_SIZES_MM.length + STANDARD_FLOW_RATES_LPS.length);
+  });
+
+  it('keeps a four-hydrant reading in its own column instead of the three-hydrant one', () => {
+    const html = form72Html(doc({
+      form: issuable({
+        flowTest: {
+          result: 'pass',
+          hydrantLocations: ['Main entry', 'Loading dock', 'Level 3', 'Roof'],
+          rows: [{
+            rateLps: 20, devices: 'DG1', hydrant1Kpa: 320, hydrants12Kpa: 280,
+            hydrants123Kpa: 240, hydrants1234Kpa: 190,
+          }],
+        },
+      }),
+    }));
+    expect(flat(html)).toContain('Hydrants 1, 2, 3 &amp; 4 (kPa)');
+    const row = between(html, '20 L/s device', '30 L/s device');
+    expect(row).toContain('240');
+    expect(row).toContain('190');
+    // Four pressures proved means four locations are wanted, not three.
+    expect(hydrantLocationsNeeded({
+      result: 'pass', hydrantLocations: [], rows: [{ rateLps: 20, devices: '', hydrants1234Kpa: 190 }],
+    })).toBe(4);
+  });
+
+  it('prints a nozzle reading against its bore rather than inventing a flow rate for it', () => {
+    const html = form72Html(doc({
+      form: issuable({
+        flowTest: {
+          result: 'pass', hydrantLocations: ['Main entry'],
+          rows: [{ nozzleMm: 22, devices: 'Pitot 1', hydrant1Kpa: 310 }],
+        },
+      }),
+    }));
+    const row = between(html, '22 mm nozzle', '25 mm nozzle');
+    expect(row).toContain('Pitot 1');
+    expect(row).toContain('310');
+    // Not flagged as a rate the department does not print — it is one of its own.
+    expect(flat(html)).not.toContain('does not print (22 mm nozzle)');
+  });
+
+  it('prints the requirement and the achieved pair, so the table can be judged on the page', () => {
+    const html = form72Html(doc({
+      form: issuable({
+        flowTest: {
+          result: 'pass', hydrantLocations: ['Main entry'], rows: [],
+          requiredLps: 20, requiredKpa: 250, achievedLps: 21, achievedKpa: 260,
+        },
+      }),
+    }));
+    expect(flat(html)).toContain('System requirement — flow rate (L/s)');
+    const partD = between(html, 'System requirement', 'Static Pressure');
+    expect(partD).toContain('20');
+    expect(partD).toContain('250');
+    expect(html).toContain('21 L/s @ 260 kPa');
+  });
+});
+
+describe('Part C — the correction factor the note already promised', () => {
+  it('prints a row for it, which the page used to describe without asking for', () => {
+    const html = form72Html(doc({
+      form: issuable({
+        devices: [{ slot: 'Gauge 1', serialNumber: 'BFS-02', dateCalibrated: '2025-07-20', correctionFactor: '+5 kPa' }],
+      }),
+    }));
+    expect(flat(html)).toContain('The correction factor must be kPa or a percentage');
+    const partC = between(html, 'Correction factor (kPa or %)', '65/100/150 mm face');
+    expect(partC).toContain('+5 kPa');
+  });
+
+  it('reports it as not recorded rather than leaving the box blank', () => {
+    const html = form72Html(doc());
+    const partC = between(html, 'Correction factor (kPa or %)', '65/100/150 mm face');
+    expect(partC).toContain('Not recorded');
+  });
+});
+
+describe('a frictional loss worked out two ways', () => {
+  const measured = {
+    result: 'pass' as const,
+    highestHydrantAboveBoosterM: 12,
+    boostPressureKpa: 1400,
+    hydrantResidualKpa: 900,
+  };
+
+  it('prefers the figure it can show the working for', () => {
+    const loss = resolveFrictionalLoss({ ...measured, statedFrictionalLossKpa: 382.3 });
+    expect(loss).toEqual({ kpa: 382.3, source: 'calculated', disagreesWithKpa: undefined });
+  });
+
+  it('falls back to the typed figure and prints it marked as stated', () => {
+    const loss = resolveFrictionalLoss({ result: 'pass', statedFrictionalLossKpa: 350 });
+    expect(loss).toEqual({ kpa: 350, source: 'stated' });
+    const html = form72Html(doc({
+      form: issuable({ booster: { result: 'pass', statedFrictionalLossKpa: 350 } }),
+    }));
+    expect(flat(html)).toContain('350 kPa <span class="extra">(stated)</span>');
+    expect(flat(html)).toContain('Stated by the technician as 350 kPa');
+  });
+
+  it('says so on the face of the form when the two disagree, rather than picking one quietly', () => {
+    const html = form72Html(doc({
+      form: issuable({ booster: { ...measured, statedFrictionalLossKpa: 300 } }),
+    }));
+    expect(flat(html)).toContain('Frictional loss — two different figures');
+    expect(flat(html)).toContain('The readings give 382.3 kPa; 300 kPa was entered');
+  });
+
+  it('treats a difference inside a kilopascal as rounding and says nothing', () => {
+    const loss = resolveFrictionalLoss({ ...measured, statedFrictionalLossKpa: 382 });
+    expect(loss.disagreesWithKpa).toBeUndefined();
+    const html = form72Html(doc({
+      form: issuable({ booster: { ...measured, statedFrictionalLossKpa: 382 } }),
+    }));
+    expect(flat(html)).not.toContain('two different figures');
+  });
+
+  it('reports neither figure when the form holds neither', () => {
+    expect(resolveFrictionalLoss({ result: 'na' })).toEqual({ source: 'none' });
+  });
+});
+
+describe('Part G — the tick and the subtraction', () => {
+  const point = {
+    location: 'Valve room 1', requiredFlowLpm: 540, requiredPressureKpa: 200,
+    resultFlowLpm: 538, resultPressureKpa: 210,
+  };
+
+  it('prints the technician’s tick rather than the arithmetic, where they disagree', () => {
+    const html = form72Html(doc({
+      form: issuable({
+        sprinklerFlow: {
+          result: 'pass',
+          testPoints: [{ ...point, flowResult: 'pass', pressureResult: 'pass' }],
+        },
+      }),
+    }));
+    const flow = between(html, 'Required flow rate (L/min)', 'Required pressure (kPa)');
+    expect(flow).toContain('<span class="cb on">&#10007;</span>Pass');
+    expect(flow).not.toContain('<span class="cb on">&#10007;</span>Fail');
+  });
+
+  it('writes the disagreement onto the page, because the next reader will do the subtraction', () => {
+    const html = form72Html(doc({
+      form: issuable({
+        sprinklerFlow: {
+          result: 'pass',
+          testPoints: [{ ...point, flowResult: 'pass', pressureResult: 'pass' }],
+        },
+      }),
+    }));
+    expect(flat(html)).toContain('Ticked result against the figures');
+    expect(flat(html)).toContain(
+      'Test Point 1 flow is ticked Pass against 538 of 540 required, which reads Fail on the figures alone',
+    );
+    // The pressure line agrees, so it is not reported.
+    expect(flat(html)).not.toContain('Test Point 1 pressure is ticked');
+  });
+
+  it('marks a box it filled in itself, so a tick is never attributed to the technician', () => {
+    const html = form72Html(doc({
+      form: issuable({ sprinklerFlow: { result: 'pass', testPoints: [point] } }),
+    }));
+    const flow = between(html, 'Required flow rate (L/min)', 'Required pressure (kPa)');
+    expect(flow).toContain('<span class="cb on">&#10007;</span>Fail');
+    expect(flow).toContain('from the figures');
+    expect(flat(html)).not.toContain('Ticked result against the figures');
+  });
+});
+
+describe('the attachment page', () => {
+  it('is left off entirely by a form that holds none of it', () => {
+    const html = form72Html(doc());
+    expect(html).not.toContain('Attachment —');
+  });
+
+  it('prints after Part I, headed so it is never read as part of the department’s form', () => {
+    const html = form72Html(doc({
+      form: issuable({
+        owner: 'Baldwin Living Pty Ltd',
+        ownerContact: '07 3000 0000',
+        buildingClassification: 'Class 3',
+        technician: 'C. Whitmore',
+        qualification: 'FPAS FSA-2',
+      }),
+    }));
+    expect(html.indexOf('Attachment —')).toBeGreaterThan(html.indexOf('Part I — Signature'));
+    expect(flat(html)).toContain("Attachment — not part of the department's form");
+    expect(html).toContain('Baldwin Living Pty Ltd');
+    expect(html).toContain('Class 3');
+    expect(html).toContain('C. Whitmore');
+    expect(html).toContain('FPAS FSA-2');
+  });
+
+  it('prints the defect list Part H sends to a report that does not travel with the form', () => {
+    const html = form72Html(doc({
+      form: issuable({
+        criticalDefectsIdentified: true,
+        systemResult: 'fail',
+        systemNotes: 'Booster isolated pending repair.',
+        defects: [
+          { description: 'Booster inlet valve seized', critical: true },
+          { description: 'Block plan faded', critical: false },
+        ],
+      }),
+    }));
+    expect(html).toContain('Booster inlet valve seized');
+    expect(html).toContain('Block plan faded');
+    expect(flat(html)).toContain('2 defects recorded, 1 of them critical');
+    expect(flat(html)).toContain('critical defect notice');
+  });
+
+  it('says plainly that no defects were found, rather than printing an empty table', () => {
+    const html = form72Html(doc({ form: issuable({ technician: 'C. Whitmore' }) }));
+    expect(flat(html)).toContain('No defects were recorded against this test.');
+  });
+});
+
+describe('a form that contradicts itself about its own defects', () => {
+  it('refuses to be issued while a critical defect is listed and Part H says there are none', () => {
+    const form = issuable({
+      defects: [{ description: 'Booster inlet valve seized', critical: true }],
+      criticalDefectsIdentified: false,
+    });
+    const issue = validateForm72(form).find((i) => i.message.includes('flagged critical'));
+    expect(issue).toBeDefined();
+    expect(issue!.blocking).toBe(true);
+    expect(issue!.message).toContain('says no critical defects were identified');
+  });
+
+  it('says the same thing when nobody answered Part H at all', () => {
+    const form = issuable({
+      defects: [{ description: 'Booster inlet valve seized', critical: true }],
+      criticalDefectsIdentified: undefined,
+    });
+    const issue = validateForm72(form).find((i) => i.message.includes('flagged critical'));
+    expect(issue!.message).toContain('does not answer the critical defect question');
+  });
+
+  it('lets a non-critical defect stand against a No, because that is not a contradiction', () => {
+    const form = issuable({ defects: [{ description: 'Block plan faded', critical: false }] });
+    expect(validateForm72(form).some((i) => i.message.includes('flagged critical'))).toBe(false);
+  });
+
+  it('cautions about a defect row with nothing written in it', () => {
+    const form = issuable({ defects: [{ description: '   ', critical: false }] });
+    const issue = validateForm72(form).find((i) => i.message.includes('no description'));
+    expect(issue).toBeDefined();
+    expect(issue!.blocking).toBe(false);
+  });
+});
+
+describe('a failed part under a passing system', () => {
+  it('blocks the form, naming the part, because the parts are the evidence', () => {
+    const form = issuable({
+      booster: { result: 'fail' },
+      systemResult: 'pass',
+    });
+    const issue = validateForm72(form).find((i) => i.message.includes('while the system is marked'));
+    expect(issue).toBeDefined();
+    expect(issue!.blocking).toBe(true);
+    expect(issue!.message).toContain('Part E is recorded as a fail');
+  });
+
+  it('names every failed part, not the first one', () => {
+    const form = issuable({
+      hydrostatic: { result: 'fail', testPressureKpa: 1700, endPressureKpa: 1700, lossLpm: 0 },
+      booster: { result: 'fail' },
+      systemResult: 'pass',
+    });
+    const issue = validateForm72(form).find((i) => i.message.includes('while the system is marked'));
+    expect(issue!.message).toContain('Parts B and E are recorded as a fail');
+  });
+
+  it('cautions rather than blocks where the system result is not applicable', () => {
+    const form = issuable({ booster: { result: 'fail' }, systemResult: 'na' });
+    const issue = validateForm72(form).find((i) => i.message.includes('system result is not applicable'));
+    expect(issue!.blocking).toBe(false);
+  });
+
+  it('does not treat Part D’s refer-to-report as a fail, because it is the department’s third box', () => {
+    const form = issuable({
+      flowTest: { result: 'refer-to-report', hydrantLocations: [], rows: [] },
+      systemResult: 'pass',
+    });
+    expect(validateForm72(form).some((i) => i.message.includes('while the system is marked'))).toBe(false);
+  });
+});
+
+describe('Part A as the two questions it really is', () => {
+  const grid = (over: Partial<MaintenanceTest> = {}): MaintenanceTest => ({
+    hydrantAnnual: false, hydrantFiveYear: false,
+    sprinklerAnnual: false, sprinklerFiveYear: false,
+    combinedAnnual: false, combinedFiveYear: false,
+    ...over,
+  });
+
+  it('reads the six cells back as a system type and an interval', () => {
+    const m = grid({ combinedAnnual: true });
+    expect(systemTypesTested(m)).toEqual(['combined']);
+    expect(intervalsTested(m)).toEqual(['annual']);
+  });
+
+  it('ticks the cell the two answers point at, and only that one', () => {
+    expect(maintenanceTestFromAxes(['hydrant'], ['fiveYear']))
+      .toEqual(grid({ hydrantFiveYear: true }));
+    expect(maintenanceTestCell('sprinkler', 'annual')).toBe('sprinklerAnnual');
+  });
+
+  it('clears what the two answers no longer cover, so the grid never says more than they do', () => {
+    expect(maintenanceTestFromAxes(['hydrant'], ['annual']))
+      .toEqual(grid({ hydrantAnnual: true }));
+  });
+
+  /*
+   * The reason the six booleans stay the stored shape. This grid is a real
+   * thing a paper form can say and no pair of axes can: picking hydrant and
+   * sprinkler, annual and five-yearly, ticks all four cells, not these two. A
+   * control that rewrote it would change what a signed form says it covered,
+   * so the screen steps aside and the cells are edited directly.
+   */
+  it('cannot express every grid, and the round trip proves which ones', () => {
+    const mixed = grid({ hydrantAnnual: true, sprinklerFiveYear: true });
+    const rebuilt = maintenanceTestFromAxes(systemTypesTested(mixed), intervalsTested(mixed));
+    expect(rebuilt).not.toEqual(mixed);
+    expect(rebuilt.hydrantFiveYear).toBe(true);
+  });
+
+  it('reports nothing ticked as neither axis answered', () => {
+    expect(systemTypesTested(grid())).toEqual([]);
+    expect(intervalsTested(grid())).toEqual([]);
+  });
+});
+
+describe('the columns the department’s form has no box for', () => {
+  it('adds all six, nullable, so a form already on a phone reads back unchanged', () => {
+    for (const column of [
+      'owner', 'ownerContact', 'buildingClassification', 'technician', 'qualification', 'defects',
+    ]) {
+      expect({ column, added: MIGRATION_V34.includes(`ADD COLUMN ${column} TEXT;`) })
+        .toEqual({ column, added: true });
+    }
+    expect(MIGRATION_V34).not.toContain('NOT NULL');
+    expect(MIGRATION_V34).not.toContain('DEFAULT');
+  });
+
+  it('is the next migration in the list rather than a number picked by hand', () => {
+    expect(MIGRATIONS[MIGRATIONS.length - 1]).toBe(MIGRATION_V34);
+    expect(SCHEMA_VERSION).toBe(MIGRATIONS.length);
+  });
+
+  it('starts a blank form with an empty defect list, not an absent one', () => {
+    const form = emptyForm72({ id: 'f', siteId: 's', siteName: 'Site', now: NOW });
+    expect(form.defects).toEqual([]);
+  });
+});
+
+describe('a site with more hydrants than the form has fields', () => {
+  it('lists the ones past the fourth rather than dropping them off the page', () => {
+    const html = form72Html(doc({
+      form: issuable({
+        flowTest: {
+          result: 'pass',
+          hydrantLocations: ['Booster', 'Level 3 east', 'Level 6 east', 'Roof', 'Carpark B2', 'Plant room'],
+          rows: [],
+        },
+      }),
+    }));
+    expect(flat(html)).toContain('2 further hydrant locations are recorded against this test');
+    expect(flat(html)).toContain('Carpark B2; Plant room');
+    expect(flat(html)).toContain('the four fields above are the ones the pressure columns refer to');
+  });
+
+  it('says nothing where the four fields are enough', () => {
+    const html = form72Html(doc({
+      form: issuable({
+        flowTest: { result: 'pass', hydrantLocations: ['Booster', 'Roof'], rows: [] },
+      }),
+    }));
+    expect(flat(html)).not.toContain('further hydrant location');
+    expect(PART_D_LOCATION_SLOTS).toBe(4);
   });
 });

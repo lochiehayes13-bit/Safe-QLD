@@ -1,7 +1,8 @@
 import {
-  canIssue, elevationHeadKpa, frictionalLossKpa, overloadCheck, validateForm72,
-  type BoosterTest, type FlowRow, type FlowTest, type Form72, type FormIssue, type PartResult,
-  type SprinklerTestPoint, type TestDevice,
+  FRICTIONAL_LOSS_TOLERANCE_KPA, PART_D_DEVICE_RATES_LPS, PART_D_ROWS, canIssue, elevationHeadKpa,
+  flowRowKey, flowRowLabel, flowRowUntouched, overloadCheck, resolveFrictionalLoss, validateForm72,
+  type BoosterTest, type FlowRow, type FlowTest, type Form72, type FormDefect, type FormIssue,
+  type PartResult, type SprinklerTestPoint, type TestDevice,
 } from '@/domain/form72';
 import { addQldBusinessDays } from '@/domain/occupierForm';
 import { qldIsoDay } from '@/domain/qldTime';
@@ -269,29 +270,40 @@ export function qldCalendarDate(instant: string | undefined): string | undefined
   return qldIsoDay(instant);
 }
 
-/** The flow rates printed down Part D of the department's form. */
-export const STANDARD_FLOW_RATES_LPS = [5, 10, 15, 20, 30];
+/** The metered flow rates printed down Part D of the department's form. */
+export const STANDARD_FLOW_RATES_LPS: readonly number[] = PART_D_DEVICE_RATES_LPS;
+
+/** Where an unprinted row sorts: nozzles first by bore, then rates. */
+function flowRowSort(row: FlowRow): number {
+  if (row.nozzleMm !== undefined) return row.nozzleMm;
+  if (row.rateLps !== undefined) return 1000 + row.rateLps;
+  return Number.MAX_SAFE_INTEGER;
+}
 
 /**
  * The rows Part D prints.
  *
- * The department's table has five fixed rates, so all five are printed whether
- * or not they were run — a table that shows only the rates achieved reads as
- * though the others passed. Anything measured at a rate the form does not print
- * is kept and appended rather than dropped, because a reading taken on site is
- * never discarded to make a layout fit.
+ * The department's table has eight fixed lines — three nozzle bores and five
+ * metered duties — so all eight are printed whether or not they were run. A
+ * table that shows only the lines with readings on them reads as though the
+ * others passed.
+ *
+ * Anything measured on a line the form does not print is kept and appended
+ * rather than dropped, because a reading taken on site is never discarded to
+ * make a layout fit.
  */
 export function flowTableRows(test: FlowTest): { row: FlowRow; standard: boolean }[] {
   const remaining = [...test.rows];
-  const standard = STANDARD_FLOW_RATES_LPS.map((rateLps) => {
-    const i = remaining.findIndex((r) => r.rateLps === rateLps);
-    if (i < 0) return { row: { rateLps, devices: '' } as FlowRow, standard: true };
+  const standard = PART_D_ROWS.map((printed) => {
+    const key = flowRowKey(printed);
+    const i = remaining.findIndex((r) => flowRowKey(r) === key);
+    if (i < 0) return { row: { ...printed }, standard: true };
     const [row] = remaining.splice(i, 1);
     return { row: row!, standard: true };
   });
   const extra = remaining
     .slice()
-    .sort((a, b) => a.rateLps - b.rateLps)
+    .sort((a, b) => flowRowSort(a) - flowRowSort(b))
     .map((row) => ({ row, standard: false }));
   return [...standard, ...extra];
 }
@@ -520,6 +532,7 @@ function partC(form: Form72, issues: FormIssue[]): string {
     ${row('Serial number', (d) => d.serialNumber)}
     ${row('Date calibrated', (d) => formatAuDate(d.dateCalibrated))}
     ${row('Calibration Certificate', (d) => d.calibrationCertificate)}
+    ${row('Correction factor (kPa or %)', (d) => d.correctionFactor)}
     ${row('65/100/150 mm face', (d) => d.faceSize)}
     ${row('Digital reader', (d) => (d.digitalReader === undefined ? undefined : d.digitalReader ? 'Yes' : 'No'))}
     ${row('Increments (kPa)', (d) => d.incrementsKpa)}
@@ -543,10 +556,14 @@ function partC(form: Form72, issues: FormIssue[]): string {
  * "Hydrants 1, 2 & 3" column with no third hydrant named is a gap somebody has
  * to answer for, and it stays red.
  */
+/** The four hydrant location fields the department prints in Part D. */
+export const PART_D_LOCATION_SLOTS = 4;
+
 export function hydrantLocationsNeeded(test: FlowTest): number {
   let needed = 0;
   for (const row of test.rows) {
-    if (row.hydrants123Kpa !== undefined) needed = Math.max(needed, 3);
+    if (row.hydrants1234Kpa !== undefined) needed = Math.max(needed, 4);
+    else if (row.hydrants123Kpa !== undefined) needed = Math.max(needed, 3);
     else if (row.hydrants12Kpa !== undefined) needed = Math.max(needed, 2);
     else if (row.hydrant1Kpa !== undefined) needed = Math.max(needed, 1);
   }
@@ -567,34 +584,50 @@ function partD(form: Form72): string {
   };
   const rows = flowTableRows(d);
 
+  // The achieved pair, with the free-text line kept for forms signed before
+  // the two numbers existed.
+  const achieved = d.achievedLps !== undefined || d.achievedKpa !== undefined
+    ? `${d.achievedLps !== undefined ? `${d.achievedLps} L/s` : '<span class="missing">flow not recorded</span>'}`
+      + ` @ ${d.achievedKpa !== undefined ? `${d.achievedKpa} kPa` : '<span class="missing">pressure not recorded</span>'}`
+    : cell(d.systemAchieved, r);
+
   const table = `<table class="grid flow">
     <tr>
       <td class="dh">Size/flow rate</td><td class="dh">Device/gauge no.</td>
       <td class="dh">Hydrant 1 only (kPa)</td><td class="dh">Hydrants 1 &amp; 2 (kPa)</td>
-      <td class="dh">Hydrants 1, 2 &amp; 3 (kPa)</td>
+      <td class="dh">Hydrants 1, 2 &amp; 3 (kPa)</td><td class="dh">Hydrants 1, 2, 3 &amp; 4 (kPa)</td>
     </tr>
     ${rows.map(({ row, standard }) => {
-    // A rate with nothing against it was not run, which is not the same thing
+    // A line with nothing against it was not run, which is not the same thing
     // as a reading somebody forgot to write down. The department prints all
-    // five rates whether or not the job needs them, so most forms legitimately
-    // leave three of them alone — flagging those in red would train a reader to
+    // eight lines whether or not the job needs them, so most forms legitimately
+    // leave most of them alone — flagging those in red would train a reader to
     // ignore the flag on the row that matters.
-    const untouched = !row.devices?.trim() && row.hydrant1Kpa === undefined
-      && row.hydrants12Kpa === undefined && row.hydrants123Kpa === undefined;
+    const untouched = flowRowUntouched(row);
     const c = (v: string | number | undefined): string =>
       (untouched ? '<span class="na">Not run</span>' : cell(v, r));
     return `<tr>
-      <td class="k">${esc(row.rateLps)} L/s${standard ? '' : ' <span class="extra">added</span>'}</td>
+      <td class="k">${esc(flowRowLabel(row))}${standard ? '' : ' <span class="extra">added</span>'}</td>
       <td class="v">${c(row.devices)}</td>
       <td class="v">${c(row.hydrant1Kpa)}</td>
       <td class="v">${c(row.hydrants12Kpa)}</td>
       <td class="v">${c(row.hydrants123Kpa)}</td>
+      <td class="v">${c(row.hydrants1234Kpa)}</td>
     </tr>`;
   }).join('')}
-    <tr><td class="k">System achieved</td><td class="v" colspan="4">${cell(d.systemAchieved, r)}</td></tr>
+    <tr><td class="k">System achieved</td><td class="v" colspan="5">${achieved}</td></tr>
   </table>`;
 
   const extras = rows.filter((x) => !x.standard);
+
+  // The register prefills every hydrant on the site and the department prints
+  // four fields. A fifth location that was typed or prefilled is listed here
+  // rather than dropped — the same treatment as a flow rate the table has no
+  // row for, and for the same reason: a reader cannot query what the page does
+  // not mention.
+  const spareLocations = d.hydrantLocations
+    .slice(PART_D_LOCATION_SLOTS)
+    .filter((x) => x.trim());
 
   return `${band('Part D — Hydrant System Flow Test', resultBoxes(r, FLOW_RESULT_OPTIONS))}
   ${note(PART_D_NOTE)}
@@ -607,16 +640,27 @@ function partD(form: Form72): string {
   <table class="grid">
     ${pair(['Hydrant 1 Location', loc(1)], ['Hydrant 2 Location', loc(2)])}
     ${pair(['Hydrant 3 Location', loc(3)], ['Hydrant 4 Location', loc(4)])}
+    ${pair(
+    ['System requirement — flow rate (L/s)', cell(d.requiredLps, r)],
+    ['at pressure (kPa)', cell(d.requiredKpa, r)],
+  )}
     ${pair(['Static Pressure', cell(kpa(d.staticPressureKpa), r)], ['Pressure Zone Number', cell(d.pressureZone, r)])}
     ${wide('On-site pump set installed', `${tick('Yes', d.onSitePumpSet === true)}${tick('No', d.onSitePumpSet === false)}${
   d.onSitePumpSet === undefined ? ' <span class="missing">Not answered</span>' : ''}`)}
     ${wide('Comment', comment(d.comment, r))}
   </table>
   ${table}
+  ${spareLocations.length
+    ? `<div class="stated">${spareLocations.length} further hydrant location${
+      spareLocations.length === 1 ? ' is' : 's are'} recorded against this test than the `
+      + `department's form prints fields for (${esc(spareLocations.join('; '))}). `
+      + `${spareLocations.length === 1 ? 'It is' : 'They are'} listed here rather than dropped; the `
+      + 'four fields above are the ones the pressure columns refer to.</div>'
+    : ''}
   ${extras.length
     ? `<div class="stated">${extras.length} flow rate${extras.length === 1 ? ' was' : 's were'} recorded `
       + `that the department's table does not print `
-      + `(${esc(extras.map((x) => `${x.row.rateLps} L/s`).join(', '))}). `
+      + `(${esc(extras.map((x) => flowRowLabel(x.row)).join(', '))}). `
       + `${extras.length === 1 ? 'It is' : 'They are'} shown above marked "added" rather than `
       + 'dropped to fit the printed layout.</div>'
     : ''}`;
@@ -626,22 +670,41 @@ function partE(form: Form72, input: Form72DocumentInput): string {
   const b = form.booster;
   const r = b.result;
 
-  const loss = frictionalLossKpa(b);
+  const loss = resolveFrictionalLoss(b);
   const gaps = frictionalLossGaps(b);
-  const lossCell = loss !== undefined
-    ? `${loss} kPa`
+  const lossCell = loss.kpa !== undefined
+    ? `${loss.kpa} kPa${loss.source === 'stated' ? ' <span class="extra">(stated)</span>' : ''}`
     : r === 'na' ? '<span class="na">N/A</span>' : '<span class="missing">Not calculated</span>';
 
   const head = b.highestHydrantAboveBoosterM !== undefined
     ? elevationHeadKpa(b.highestHydrantAboveBoosterM)
     : undefined;
 
-  const working = loss !== undefined
+  // The form's own box says "calculated frictional loss", and two things can
+  // fill it: the subtraction this app does from three readings, or a figure the
+  // technician worked out and typed. The calculated one wins where it exists,
+  // because it carries its working onto the page — but the one it beat is
+  // printed too wherever the two disagree. A silent override is the worst of
+  // the three outcomes: the licensee signs a number they did not arrive at and
+  // cannot see was changed.
+  const working = loss.source === 'calculated'
     ? `Calculated: ${b.boostPressureKpa} kPa boost less ${head} kPa of elevation head over `
       + `${b.highestHydrantAboveBoosterM} m less ${b.hydrantResidualKpa} kPa residual at the hydrant.`
-    : `Not calculated — this form does not record ${gaps.join(', ')}. A frictional loss worked out `
-      + 'from an assumed figure is indistinguishable on the page from a measured one, and this form '
-      + 'is signed.';
+    : loss.source === 'stated'
+      ? `Stated by the technician as ${loss.kpa} kPa. It is not calculated here — this form does not `
+        + `record ${gaps.join(', ')} — so the figure stands on whoever typed it rather than on `
+        + 'readings this document holds.'
+      : `Not calculated — this form does not record ${gaps.join(', ')}. A frictional loss worked out `
+        + 'from an assumed figure is indistinguishable on the page from a measured one, and this form '
+        + 'is signed.';
+
+  const lossConflict = loss.disagreesWithKpa !== undefined
+    ? `<div class="stated fail"><b>Frictional loss — two different figures.</b> The readings give `
+      + `${esc(loss.kpa)} kPa; ${esc(loss.disagreesWithKpa)} kPa was entered as the stated loss. `
+      + 'The calculated figure is printed above because the page can show its working. More than '
+      + `${FRICTIONAL_LOSS_TOLERANCE_KPA} kPa apart is not rounding, so one of the two is wrong and `
+      + 'the licensee is the one who can say which.</div>'
+    : '';
 
   const req = b.requiredLps !== undefined && b.requiredKpa !== undefined
     ? `${b.requiredLps} L/s @ ${b.requiredKpa} kPa`
@@ -688,6 +751,7 @@ function partE(form: Form72, input: Form72DocumentInput): string {
     ${wide('Comments', comment(b.comments, r))}
   </table>
   ${r === 'na' ? '' : `<div class="stated">${esc(working)}</div>`}
+  ${lossConflict}
   ${overloadBlock}`;
 }
 
@@ -717,25 +781,51 @@ function partG(form: Form72): string {
     && p.requiredFlowLpm === undefined && p.resultFlowLpm === undefined
     && p.requiredPressureKpa === undefined && p.resultPressureKpa === undefined);
 
+  // Each of the department's two lines carries its own Pass / Fail boxes, and
+  // the technician ticks them on site. The app can also work the comparison out
+  // of the two figures beside the boxes, and the two answers are not the same
+  // claim: 540 L/min required and 538 achieved is a fail by subtraction and may
+  // be a pass inside the standard's tolerance, which only the licensee can say.
+  // So the tick is what prints, the subtraction is the cross-check, and a
+  // disagreement is written out under the table rather than resolved here.
+  const disagreements: string[] = [];
+
   const point = (n: number, p: SprinklerTestPoint | undefined): string => {
     const spare = unused(p);
     const c = (v: string | number | undefined): string =>
       (spare ? '<span class="na">Not used</span>' : cell(v, r));
-    const boxes = (o: 'pass' | 'fail' | undefined): string => (spare
-      ? `${tick('Pass', false)}${tick('Fail', false)}`
-      : outcomeBoxes(o));
+    const line = (
+      what: string,
+      typed: 'pass' | 'fail' | undefined,
+      required: number | undefined,
+      result: number | undefined,
+    ): string => {
+      if (spare) return `${tick('Pass', false)}${tick('Fail', false)}`;
+      const derived = testPointOutcome(required, result);
+      if (typed !== undefined && derived !== undefined && typed !== derived) {
+        disagreements.push(
+          `Test Point ${n} ${what} is ticked ${typed === 'pass' ? 'Pass' : 'Fail'} against `
+          + `${result} of ${required} required, which reads ${derived === 'pass' ? 'Pass' : 'Fail'} `
+          + 'on the figures alone.',
+        );
+      }
+      // The derived answer fills the boxes only where nobody ticked them, so a
+      // reader is never shown a tick the technician did not make.
+      return `${outcomeBoxes(typed ?? derived)}${
+        typed === undefined && derived !== undefined ? ' <span class="extra">from the figures</span>' : ''}`;
+    };
     return `
     <tr><td class="sub" colspan="4">Test Point ${n}</td></tr>
     ${wide('Location', c(p?.location))}
     <tr>
       <td class="k">Required flow rate (L/min)</td><td class="v">${c(p?.requiredFlowLpm)}</td>
       <td class="k">Result: ${c(p?.resultFlowLpm)}</td>
-      <td class="v">${boxes(testPointOutcome(p?.requiredFlowLpm, p?.resultFlowLpm))}</td>
+      <td class="v">${line('flow', p?.flowResult, p?.requiredFlowLpm, p?.resultFlowLpm)}</td>
     </tr>
     <tr>
       <td class="k">Required pressure (kPa)</td><td class="v">${c(p?.requiredPressureKpa)}</td>
       <td class="k">Result: ${c(p?.resultPressureKpa)}</td>
-      <td class="v">${boxes(testPointOutcome(p?.requiredPressureKpa, p?.resultPressureKpa))}</td>
+      <td class="v">${line('pressure', p?.pressureResult, p?.requiredPressureKpa, p?.resultPressureKpa)}</td>
     </tr>`;
   };
 
@@ -750,16 +840,26 @@ function partG(form: Form72): string {
     ? `${first.resultFlowLpm} l/m @ ${first.resultPressureKpa} kPa`
     : undefined;
 
+  // Built before the table string so the rows have run and filled it.
+  const rows = `
+    ${point(1, g.testPoints[0])}
+    ${point(2, g.testPoints[1])}
+    ${extra.map((p, i) => point(3 + i, p)).join('')}`;
+
   return `${band('Part G — Sprinkler System Flow Test', resultBoxes(r, RESULT_OPTIONS))}
   ${note(PART_G_NOTE)}
   <table class="grid">
     ${pair(['System Specs (block plan) l/m@kPa', cell(g.systemSpec, r)], ['Test Results l/m@kPa', cell(achieved, r)])}
-    ${point(1, g.testPoints[0])}
-    ${point(2, g.testPoints[1])}
-    ${extra.map((p, i) => point(3 + i, p)).join('')}
+    ${rows}
     ${wide('Running Test — Installation gauge pressure (kPa)', cell(g.runningTestGaugeKpa, r))}
     ${wide('Comments', comment(g.comments, r))}
   </table>
+  ${disagreements.length
+    ? `<div class="stated fail"><b>Ticked result against the figures.</b> ${
+      esc(disagreements.join(' '))} The tick is what prints — a reading inside the standard's `
+      + 'tolerance is a pass the subtraction cannot see — but the two are shown apart rather than '
+      + 'one being quietly replaced by the other.</div>'
+    : ''}
   ${extra.length
     ? `<div class="stated">${extra.length} further test point${extra.length === 1 ? '' : 's'} recorded. `
       + "The department's form prints two; the rest are added above rather than left off.</div>"
@@ -811,6 +911,78 @@ function partI(form: Form72): string {
     ['Licensee Report No.', form.licenseeReportNumber?.trim()
       ? esc(form.licenseeReportNumber) : '<span class="na">None</span>'])}
   </table>`;
+}
+
+/**
+ * The attachment page, after Part I.
+ *
+ * Everything on it is a fact about the test that the department's form has no
+ * box for, and that is exactly why it prints here rather than inside a part.
+ * A reader has to be able to tell the department's form from what Safe QLD
+ * added to it — a line inserted into Part A would be indistinguishable from the
+ * department's own, and the first person to notice would be whoever is
+ * challenging the document.
+ *
+ * Part H sends repair details to "the Licensee's report", a separate document
+ * that routinely does not travel with the form. The defect list is that
+ * attachment, bound to the form that records the defects.
+ *
+ * The whole section is left off a form that holds none of it, so a test where
+ * nobody typed any of these fields prints as the department's form and nothing
+ * else.
+ */
+function attachment(form: Form72): string {
+  const held: [string, string | undefined][] = [
+    ['Building owner', form.owner],
+    ['Owner contact', form.ownerContact],
+    ['Building classification (BCA class)', form.buildingClassification],
+    ['Technician who carried out the work', form.technician],
+    ['Qualification / licence held', form.qualification],
+  ];
+  const filled = held.filter(([, v]) => v?.trim());
+  const defects = form.defects.filter((d) => d.description.trim() || d.critical);
+
+  if (!filled.length && !defects.length) return '';
+
+  const criticals = defects.filter((d) => d.critical).length;
+
+  const defectRow = (d: FormDefect, n: number): string => `
+    <tr>
+      <td class="k">${n}</td>
+      <td class="v" colspan="2">${d.description.trim()
+    ? esc(d.description)
+    : '<span class="missing">No description recorded</span>'}</td>
+      <td class="v">${tick('Critical', d.critical)}</td>
+    </tr>`;
+
+  // Its own page. The separation between the department's form and what Safe
+  // QLD added to it is the whole point of this section, and a page break is the
+  // one way of saying it that survives being printed and photocopied.
+  return `<div class="attachpage">
+  ${band('Attachment — not part of the department\'s form')}
+  ${note('Facts about this test that Form 72 has no field for, and the defect list Part H refers to '
+    + "the licensee's report. Added to the department's form, not written into it.")}
+  ${filled.length
+    ? `<table class="grid">
+    ${filled.map(([label, value]) => wide(label, esc(value))).join('')}
+  </table>`
+    : ''}
+  ${defects.length
+    ? `<table class="grid">
+    <tr><td class="dh">#</td><td class="dh" colspan="2">Defect</td><td class="dh">Critical</td></tr>
+    ${defects.map((d, i) => defectRow(d, i + 1)).join('')}
+  </table>
+  <div class="stated">${defects.length} defect${defects.length === 1 ? '' : 's'} recorded${
+  criticals
+    ? `, ${criticals} of them critical. A critical defect obliges the owner or occupier to be given `
+      + 'a critical defect notice — Part H above is where that obligation is answered.'
+    : ', none of them critical.'}</div>`
+    : `<div class="stated">No defects were recorded against this test.${
+      form.repairsRequired === true
+        ? ' Part H says repairs or corrective actions are required, so the details are in the '
+          + "licensee's report rather than here."
+        : ''}</div>`}
+  </div>`;
 }
 
 const CSS = `
@@ -884,6 +1056,7 @@ const CSS = `
   .ours { margin-top: 10px; padding-top: 6px; border-top: 1px dashed #8C8C8C;
           font-size: 7.5px; line-height: 1.55; color: #444; }
   .ours b { color: #1b1b1b; }
+  .attachpage { page-break-before: always; break-before: page; }
 `;
 
 /**
@@ -970,6 +1143,7 @@ export function form72Html(input: Form72DocumentInput): string {
   ${partG(form)}
   ${partH(form)}
   ${partI(form)}
+  ${attachment(form)}
 
   <div class="deptnote">${esc(DEPARTMENT_NOTE)}</div>
 

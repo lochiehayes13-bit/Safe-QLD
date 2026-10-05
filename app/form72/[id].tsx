@@ -16,16 +16,18 @@ import { attachmentContentKey } from '@/domain/outboundWork';
 import { describeActionFailure } from '@/domain/loadFailure';
 import { router } from 'expo-router';
 import {
-  CALIBRATION_MONTHS, PART_RESULT_LABEL, deviceCalibration, elevationHeadKpa, frictionalLossKpa,
-  overloadCheck, validateForm72,
-  type BoosterTest, type FlowDeviceKind, type FlowRow, type FormIssue, type HydrostaticTest,
-  type PartResult, type SprinklerFlowTest, type SprinklerHydrostatic, type SprinklerTestPoint,
-  type TestDevice,
+  CALIBRATION_MONTHS, PART_D_ROWS, PART_RESULT_LABEL, SYSTEM_TYPE_LABEL, TEST_INTERVAL_LABEL,
+  deviceCalibration, elevationHeadKpa, flowRowKey, flowRowLabel, flowRowUntouched,
+  intervalsTested, maintenanceTestFromAxes, overloadCheck, resolveFrictionalLoss,
+  systemTypesTested, validateForm72,
+  type BoosterTest, type FlowDeviceKind, type FlowRow, type FormDefect, type FormIssue,
+  type HydrostaticTest, type PartResult, type SprinklerFlowTest, type SprinklerHydrostatic,
+  type SprinklerTestPoint, type SystemType, type TestDevice, type TestInterval,
 } from '@/domain/form72';
 import {
   DECLARATION, FORM_SUBTITLE, FORM_TITLE, FORM_VERSION, OCCUPIER_COPY_BUSINESS_DAYS,
   PART_B_NOTE, PART_C_NOTE, PART_D_NOTE, PART_E_NOTE, PART_F_NOTE, PART_G_NOTE,
-  STANDARD_FLOW_RATES_LPS, TESTER_RETENTION_YEARS, form72Html, frictionalLossGaps,
+  PART_D_LOCATION_SLOTS, TESTER_RETENTION_YEARS, form72Html, frictionalLossGaps,
   occupierCopyDueBy, testPointOutcome, testerCopyKeepUntil,
 } from '@/export/form72';
 import { shareFile, writePdf } from '@/export/files';
@@ -73,18 +75,32 @@ import { showAlert } from '@/components/alert';
  * the occupier's copy is due within.
  */
 
-type PartKey = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I';
+type PartKey = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'Attachment';
 
-const PARTS: { key: PartKey; title: string; blurb: string }[] = [
-  { key: 'A', title: 'Details', blurb: 'Site, contractor, date and which maintenance test this covers' },
-  { key: 'B', title: 'Hydrostatic', blurb: 'Hydrant pipework pressure test' },
-  { key: 'C', title: 'Devices', blurb: 'Gauges and flow devices, and their calibration' },
-  { key: 'D', title: 'Flow test', blurb: 'The flow table — duty proved at each rate' },
-  { key: 'E', title: 'Booster', blurb: 'Pump appliance boost test' },
-  { key: 'F', title: 'Sprinkler hydro', blurb: 'Sprinkler pipework pressure test' },
-  { key: 'G', title: 'Sprinkler flow', blurb: 'Test points, required against achieved' },
-  { key: 'H', title: 'Result', blurb: 'Defects, repairs and the system result' },
-  { key: 'I', title: 'Declaration', blurb: 'Licensee, licence number and signature' },
+/**
+ * The parts, as the strip along the top shows them.
+ *
+ * `tag` is the badge — a letter for the department's nine parts, and a plus for
+ * the one section that is not one of them. The attachment holds facts the
+ * department's form has no box for, and it is labelled so that nobody filling
+ * it in thinks they are filling in Form 72.
+ */
+const PARTS: { key: PartKey; tag: string; title: string; blurb: string }[] = [
+  { key: 'A', tag: 'A', title: 'Details', blurb: 'Site, contractor, date and which maintenance test this covers' },
+  { key: 'B', tag: 'B', title: 'Hydrostatic', blurb: 'Hydrant pipework pressure test' },
+  { key: 'C', tag: 'C', title: 'Devices', blurb: 'Gauges and flow devices, and their calibration' },
+  { key: 'D', tag: 'D', title: 'Flow test', blurb: 'The flow table — duty proved at each rate' },
+  { key: 'E', tag: 'E', title: 'Booster', blurb: 'Pump appliance boost test' },
+  { key: 'F', tag: 'F', title: 'Sprinkler hydro', blurb: 'Sprinkler pipework pressure test' },
+  { key: 'G', tag: 'G', title: 'Sprinkler flow', blurb: 'Test points, required against achieved' },
+  { key: 'H', tag: 'H', title: 'Result', blurb: 'Defects, repairs and the system result' },
+  { key: 'I', tag: 'I', title: 'Declaration', blurb: 'Licensee, licence number and signature' },
+  {
+    key: 'Attachment',
+    tag: '+',
+    title: 'Attachment',
+    blurb: "Owner, technician, building class and the defect list — added to the department's form, not part of it",
+  },
 ];
 
 const RESULT_OPTIONS: { value: PartResult; label: string }[] = [
@@ -566,6 +582,9 @@ function PartStrip({
     G: form.sprinklerFlow.result !== 'na',
     H: form.systemResult !== 'na' || form.criticalDefectsIdentified !== undefined,
     I: !!form.licenceNumber.trim() && !!form.signature,
+    // Not a part of the department's form, so nothing on it can be outstanding
+    // — it reads as answered once anything has been put on it.
+    Attachment: !!form.owner?.trim() || !!form.technician?.trim() || form.defects.length > 0,
   };
 
   return (
@@ -596,7 +615,7 @@ function PartStrip({
               weight="700"
               style={{ color: on ? t.color.onAccent : t.color.text }}
             >
-              {p.key}
+              {p.tag}
             </Txt>
             <Txt size="sm" style={{ color: on ? t.color.onAccent : answered[p.key] ? t.color.text : t.color.textFaint }}>
               {p.title}
@@ -627,7 +646,7 @@ function PartBody({
   return (
     <View style={{ gap: 12 }}>
       <View>
-        <H2>{`Part ${part} — ${meta.title}`}</H2>
+        <H2>{part === 'Attachment' ? meta.title : `Part ${part} — ${meta.title}`}</H2>
         <Txt size="sm" tone="muted">{meta.blurb}</Txt>
       </View>
       {part === 'A' ? <PartA form={form} locked={locked} patch={patch} /> : null}
@@ -639,6 +658,7 @@ function PartBody({
       {part === 'G' ? <PartG form={form} locked={locked} patch={patch} /> : null}
       {part === 'H' ? <PartH form={form} locked={locked} patch={patch} /> : null}
       {part === 'I' ? <PartI form={form} locked={locked} patch={patch} /> : null}
+      {part === 'Attachment' ? <PartAttachment form={form} locked={locked} patch={patch} /> : null}
     </View>
   );
 }
@@ -677,6 +697,112 @@ const TEST_KINDS: { key: keyof StoredForm72['maintenanceTest']; label: string }[
   { key: 'combinedAnnual', label: 'Combined — annual' },
   { key: 'combinedFiveYear', label: 'Combined — 5 yearly' },
 ];
+
+const SYSTEM_TYPES: SystemType[] = ['hydrant', 'sprinkler', 'combined'];
+const INTERVALS: TestInterval[] = ['annual', 'fiveYear'];
+
+/**
+ * Part A's maintenance grid, asked as the two questions it really is.
+ *
+ * The department prints six cells; nobody thinks in six cells. They think
+ * "combined system, annual test", which is one tap on each row here, and the
+ * grid underneath is ticked from the pair.
+ *
+ * The six cells stay reachable, because the two axes cannot express every grid.
+ * A form signed last year may have "hydrant annual" and "sprinkler 5 yearly"
+ * ticked — two cells that no pair of axes picks out without also ticking the
+ * other two — and a control that silently rewrote it would change what a signed
+ * document says it covered. So where the stored grid is one the axes cannot
+ * express, the axes step aside and the cells are edited directly.
+ */
+function MaintenanceGrid({ form, locked, patch }: PartProps) {
+  const m = form.maintenanceTest;
+  const types = systemTypesTested(m);
+  const intervals = intervalsTested(m);
+  const ticked = TEST_KINDS.filter((k) => m[k.key]);
+
+  const fromAxes = maintenanceTestFromAxes(types, intervals);
+  const expressible = TEST_KINDS.every((k) => fromAxes[k.key] === m[k.key]);
+
+  const toggle = (nextTypes: SystemType[], nextIntervals: TestInterval[]) => patch({
+    maintenanceTest: maintenanceTestFromAxes(nextTypes, nextIntervals),
+  });
+
+  if (!expressible) {
+    return (
+      <>
+        <Label>Maintenance test carried out</Label>
+        <Banner
+          tone="info"
+          title="Ticked cell by cell"
+          body={'This form has a combination of boxes the two questions below cannot express, so the '
+            + 'six cells are shown as they were ticked rather than being rewritten.'}
+        />
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {TEST_KINDS.map((k) => (
+            <Chip
+              key={k.key}
+              label={k.label}
+              selected={m[k.key]}
+              tone={m[k.key] ? 'accent' : 'default'}
+              onPress={locked ? undefined : () => patch({
+                maintenanceTest: { ...m, [k.key]: !m[k.key] },
+              })}
+            />
+          ))}
+        </View>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <Label>System tested</Label>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {SYSTEM_TYPES.map((type) => {
+          const on = types.includes(type);
+          return (
+            <Chip
+              key={type}
+              label={SYSTEM_TYPE_LABEL[type]}
+              selected={on}
+              tone={on ? 'accent' : 'default'}
+              onPress={locked ? undefined : () => toggle(
+                on ? types.filter((x) => x !== type) : [...types, type],
+                intervals.length ? intervals : ['annual'],
+              )}
+            />
+          );
+        })}
+      </View>
+
+      <Label>Test interval</Label>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {INTERVALS.map((interval) => {
+          const on = intervals.includes(interval);
+          return (
+            <Chip
+              key={interval}
+              label={TEST_INTERVAL_LABEL[interval]}
+              selected={on}
+              tone={on ? 'accent' : 'default'}
+              onPress={locked ? undefined : () => toggle(
+                types.length ? types : ['hydrant'],
+                on ? intervals.filter((x) => x !== interval) : [...intervals, interval],
+              )}
+            />
+          );
+        })}
+      </View>
+
+      <Txt size="sm" tone="muted">
+        {ticked.length
+          ? `Prints as ${ticked.map((k) => k.label).join(', ')}.`
+          : 'No box is ticked yet. The form does not say which test this was.'}
+      </Txt>
+    </>
+  );
+}
 
 function PartA({ form, locked, patch }: PartProps) {
   return (
@@ -730,20 +856,7 @@ function PartA({ form, locked, patch }: PartProps) {
       </Rowed>
 
       <Divider />
-      <Label>Maintenance test carried out</Label>
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-        {TEST_KINDS.map((k) => (
-          <Chip
-            key={k.key}
-            label={k.label}
-            selected={form.maintenanceTest[k.key]}
-            tone={form.maintenanceTest[k.key] ? 'accent' : 'default'}
-            onPress={locked ? undefined : () => patch({
-              maintenanceTest: { ...form.maintenanceTest, [k.key]: !form.maintenanceTest[k.key] },
-            })}
-          />
-        ))}
-      </View>
+      <MaintenanceGrid form={form} locked={locked} patch={patch} />
     </Card>
   );
 }
@@ -863,6 +976,14 @@ function PartC({ form, locked, patch }: PartProps) {
             />
           ) : null}
           <Field label="Certificate" value={d.calibrationCertificate ?? ''} onChangeText={(v) => setDevice(i, { calibrationCertificate: v })} editable={!locked} />
+          <Field
+            label="Correction factor"
+            value={d.correctionFactor ?? ''}
+            onChangeText={(v) => setDevice(i, { correctionFactor: v })}
+            placeholder="+5 kPa"
+            hint="Part C's note says this must be a kPa figure or a percentage. Every pressure read with this gauge carries it."
+            editable={!locked}
+          />
           <Rowed gap={2}>
             <View style={{ flex: 1 }}>
               <Field label="Face size" value={d.faceSize ?? ''} onChangeText={(v) => setDevice(i, { faceSize: v })} placeholder="100 mm" editable={!locked} />
@@ -893,18 +1014,65 @@ function PartC({ form, locked, patch }: PartProps) {
 }
 
 /**
+ * Writes one numbered hydrant location without disturbing the others.
+ *
+ * The array is positional — index 0 is hydrant 1, and the flow table's columns
+ * refer to those positions — so a cleared middle slot has to stay a hole rather
+ * than closing up and renumbering the hydrants under the readings. Trailing
+ * empties are dropped, because an array of four blanks and an array of none say
+ * the same thing and only one of them is worth storing.
+ */
+function setHydrantLocation(locations: string[], n: number, value: string): string[] {
+  const next = [...locations];
+  while (next.length < n) next.push('');
+  next[n - 1] = value;
+  while (next.length && !next[next.length - 1]?.trim()) next.pop();
+  return next;
+}
+
+/**
  * Part D — the flow table.
  *
- * The department prints rows at 5, 10, 15, 20 and 30 L/s. A row at some other
- * rate is legitimate — it is what the block plan asked for — but it is worth
- * marking, because a rate typed in error reads exactly like a rate chosen on
- * purpose once the form is printed.
+ * The department prints eight lines: three nozzle bores and five metered
+ * duties, each read at one, two, three and four hydrants running. All eight are
+ * always on screen, because the table is the same eight lines on every form and
+ * a technician working down it needs to see the one they have not filled in.
+ * That is the opposite of the old behaviour, which started with no lines and
+ * offered chips to add the five metered rates — a table that looked complete
+ * with three of its eight lines missing.
+ *
+ * A line nobody touched is marked, not hidden. On paper the blank is ambiguous;
+ * here it says plainly that nothing was read at that rate, which is an answer.
+ *
+ * A row at some rate the department does not print is still legitimate — it is
+ * what the block plan asked for — and is kept, marked, below the eight.
  */
 function PartD({ form, locked, patch }: PartProps) {
   const f = form.flowTest;
   const set = (p: Partial<typeof f>) => patch({ flowTest: { ...f, ...p } });
-  const setRow = (i: number, p: Partial<FlowRow>) => set({
-    rows: f.rows.map((r, n) => (n === i ? { ...r, ...p } : r)),
+
+  // The eight printed lines, laid over whatever this form has stored. A line
+  // the form holds keeps its readings and its index; a line it does not is
+  // shown empty and only becomes a stored row once something is typed into it.
+  const stored = new Map(f.rows.map((r, i) => [flowRowKey(r), i]));
+  const lines: { row: FlowRow; index: number | undefined; printed: boolean }[] = [
+    ...PART_D_ROWS.map((template) => {
+      const index = stored.get(flowRowKey(template));
+      const held = index === undefined ? undefined : f.rows[index];
+      return { row: held ?? template, index, printed: true };
+    }),
+    ...f.rows
+      .map((row, index) => ({ row, index, printed: false }))
+      .filter(({ row }) => !PART_D_ROWS.some((t) => flowRowKey(t) === flowRowKey(row))),
+  ];
+
+  const setLine = (
+    line: { row: FlowRow; index: number | undefined },
+    p: Partial<FlowRow>,
+  ) => set({
+    rows: line.index === undefined
+      ? [...f.rows, { ...line.row, ...p }]
+      : f.rows.map((r, n) => (n === line.index ? { ...r, ...p } : r)),
   });
 
   return (
@@ -925,14 +1093,55 @@ function PartD({ form, locked, patch }: PartProps) {
         </View>
         <NumField label="Static pressure" suffix="kPa" value={f.staticPressureKpa} onChange={(v) => set({ staticPressureKpa: v })} locked={locked} />
         <Field label="Pressure zone" value={f.pressureZone ?? ''} onChangeText={(v) => set({ pressureZone: v })} editable={!locked} />
-        <Field
-          label="Hydrants tested"
-          value={f.hydrantLocations.join(', ')}
-          onChangeText={(v) => set({ hydrantLocations: v.split(',').map((s) => s.trim()).filter(Boolean) })}
-          placeholder="Booster, Level 3 east, Roof"
-          hint="Comma separated. Filled from the register where it holds hydrants — take out any not used in this test."
-          editable={!locked}
-        />
+        <Divider />
+        <Label>System requirement</Label>
+        <Txt size="sm" tone="muted">
+          What the system has to deliver. Without it the table below is a column of pressures and
+          whoever reads the form has to know the design to say whether it passed.
+        </Txt>
+        <Rowed gap={2}>
+          <View style={{ flex: 1 }}>
+            <NumField label="Required flow" suffix="L/s" value={f.requiredLps} onChange={(v) => set({ requiredLps: v })} locked={locked} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <NumField label="Required pressure" suffix="kPa" value={f.requiredKpa} onChange={(v) => set({ requiredKpa: v })} locked={locked} />
+          </View>
+        </Rowed>
+        {/*
+          * Four named slots, not a comma-separated list. The printed form has
+          * four location fields and the table's columns refer to them by
+          * number — "Hydrants 1, 2 & 3" means these three — so which hydrant is
+          * which is load-bearing, and a list typed into one box puts that
+          * ordering at the mercy of a stray comma.
+          */}
+        <Label>Hydrants tested</Label>
+        <Txt size="sm" tone="muted">
+          Numbered to match the table below: hydrant 1 is the one the single-hydrant readings were
+          taken at. Filled from the register where it holds hydrants — clear any not used today.
+        </Txt>
+        {/*
+          * Four slots, and more where the form already holds more. The
+          * register prefills every hydrant on the site, which at a large one
+          * is seven or eight — showing only four would make the rest
+          * invisible on the phone while they are still stored, and invisible
+          * is how a location nobody meant to keep ends up on a signed form.
+          */}
+        {Array.from(
+          { length: Math.max(PART_D_LOCATION_SLOTS, f.hydrantLocations.length) },
+          (_, i) => i + 1,
+        ).map((n) => (
+          <Field
+            key={n}
+            label={n <= PART_D_LOCATION_SLOTS ? `Hydrant ${n}` : `Hydrant ${n} — beyond the printed form`}
+            value={f.hydrantLocations[n - 1] ?? ''}
+            onChangeText={(v) => set({ hydrantLocations: setHydrantLocation(f.hydrantLocations, n, v) })}
+            placeholder={n === 1 ? 'Booster' : n === 2 ? 'Level 3 east' : ''}
+            hint={n > PART_D_LOCATION_SLOTS
+              ? "The department prints four. This one is listed under the table instead of being dropped — clear it if it was not used in this test."
+              : undefined}
+            editable={!locked}
+          />
+        ))}
         <Chip
           label={f.onSitePumpSet ? 'On-site pump set' : 'No on-site pump set'}
           tone={f.onSitePumpSet ? 'accent' : 'default'}
@@ -940,40 +1149,72 @@ function PartD({ form, locked, patch }: PartProps) {
         />
       </Card>
 
-      {f.rows.map((r, i) => {
-        const standard = STANDARD_FLOW_RATES_LPS.includes(r.rateLps);
+      {lines.map((line) => {
+        const r = line.row;
+        const untouched = flowRowUntouched(r);
         return (
-          <Card key={i}>
+          <Card key={flowRowKey(r)}>
             <Rowed>
-              <Txt weight="700" style={{ flex: 1 }}>{r.rateLps} L/s</Txt>
-              {!standard ? <Chip label="Non-standard rate" tone="warn" /> : null}
-              {!locked ? (
-                <RemoveButton what="flow row" onRemove={() => set({ rows: f.rows.filter((_, n) => n !== i) })} />
+              <Txt weight="700" style={{ flex: 1 }}>{flowRowLabel(r)}</Txt>
+              {!line.printed ? <Chip label="Not on the printed table" tone="warn" /> : null}
+              {untouched ? <Chip label="Nothing read" tone="muted" /> : null}
+              {!line.printed && !locked && line.index !== undefined ? (
+                <RemoveButton
+                  what="flow row"
+                  onRemove={() => set({ rows: f.rows.filter((_, n) => n !== line.index) })}
+                />
               ) : null}
             </Rowed>
-            <NumField label="Rate" suffix="L/s" value={r.rateLps} onChange={(v) => setRow(i, { rateLps: v ?? 0 })} locked={locked} />
-            <Field label="Devices used" value={r.devices} onChangeText={(v) => setRow(i, { devices: v })} editable={!locked} />
-            <NumField label="Hydrant 1" suffix="kPa" value={r.hydrant1Kpa} onChange={(v) => setRow(i, { hydrant1Kpa: v })} locked={locked} />
-            <NumField label="Hydrants 1+2" suffix="kPa" value={r.hydrants12Kpa} onChange={(v) => setRow(i, { hydrants12Kpa: v })} locked={locked} />
-            <NumField label="Hydrants 1+2+3" suffix="kPa" value={r.hydrants123Kpa} onChange={(v) => setRow(i, { hydrants123Kpa: v })} locked={locked} />
+            <Field label="Devices used" value={r.devices} onChangeText={(v) => setLine(line, { devices: v })} editable={!locked} />
+            <Rowed gap={2}>
+              <View style={{ flex: 1 }}>
+                <NumField label="1 hydrant" suffix="kPa" value={r.hydrant1Kpa} onChange={(v) => setLine(line, { hydrant1Kpa: v })} locked={locked} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <NumField label="1 & 2" suffix="kPa" value={r.hydrants12Kpa} onChange={(v) => setLine(line, { hydrants12Kpa: v })} locked={locked} />
+              </View>
+            </Rowed>
+            <Rowed gap={2}>
+              <View style={{ flex: 1 }}>
+                <NumField label="1, 2 & 3" suffix="kPa" value={r.hydrants123Kpa} onChange={(v) => setLine(line, { hydrants123Kpa: v })} locked={locked} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <NumField label="1, 2, 3 & 4" suffix="kPa" value={r.hydrants1234Kpa} onChange={(v) => setLine(line, { hydrants1234Kpa: v })} locked={locked} />
+              </View>
+            </Rowed>
           </Card>
         );
       })}
 
-      {!locked ? (
-        <Rowed gap={2} wrap>
-          {STANDARD_FLOW_RATES_LPS.filter((r) => !f.rows.some((x) => x.rateLps === r)).map((rate) => (
-            <Chip
-              key={rate}
-              label={`+ ${rate} L/s`}
-              onPress={() => set({ rows: [...f.rows, { rateLps: rate, devices: '' }].sort((a, b) => a.rateLps - b.rateLps) })}
-            />
-          ))}
-        </Rowed>
-      ) : null}
-
       <Card>
-        <Field label="System achieved" value={f.systemAchieved ?? ''} onChangeText={(v) => set({ systemAchieved: v })} editable={!locked} />
+        <Label>System achieved</Label>
+        <Txt size="sm" tone="muted">
+          The pair the form asks for, opposite the requirement above. Two numbers rather than a
+          sentence, because two numbers can be compared with what was required and a sentence
+          cannot.
+        </Txt>
+        <Rowed gap={2}>
+          <View style={{ flex: 1 }}>
+            <NumField label="Achieved flow" suffix="L/s" value={f.achievedLps} onChange={(v) => set({ achievedLps: v })} locked={locked} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <NumField label="Achieved pressure" suffix="kPa" value={f.achievedKpa} onChange={(v) => set({ achievedKpa: v })} locked={locked} />
+          </View>
+        </Rowed>
+        {/*
+          * Kept, and shown only where a form already holds one. Forms signed
+          * before the pair existed said it in a sentence, and their printed
+          * page has to keep saying what it said.
+          */}
+        {f.systemAchieved?.trim() ? (
+          <Field
+            label="System achieved (as written)"
+            value={f.systemAchieved}
+            onChangeText={(v) => set({ systemAchieved: v })}
+            hint="Recorded as a sentence before this form asked for the two figures. It still prints."
+            editable={!locked}
+          />
+        ) : null}
         <Field label="Comment" value={f.comment ?? ''} onChangeText={(v) => set({ comment: v })} multiline editable={!locked} />
       </Card>
     </View>
@@ -994,7 +1235,7 @@ function PartE({ form, locked, patch }: PartProps) {
   const head = b.highestHydrantAboveBoosterM !== undefined
     ? elevationHeadKpa(b.highestHydrantAboveBoosterM)
     : undefined;
-  const friction = frictionalLossKpa(b);
+  const friction = resolveFrictionalLoss(b);
   const gaps = frictionalLossGaps(b);
   const check = b.requiredLps !== undefined && b.requiredKpa !== undefined
     ? overloadCheck(b.requiredLps, b.requiredKpa, form.overload)
@@ -1027,10 +1268,41 @@ function PartE({ form, locked, patch }: PartProps) {
         <NumField label="Pump discharge" suffix="kPa" value={b.pumpDischargeKpa} onChange={(v) => set({ pumpDischargeKpa: v })} locked={locked} />
         <NumField label="Boost pressure" suffix="kPa" value={b.boostPressureKpa} onChange={(v) => set({ boostPressureKpa: v })} locked={locked} />
         <NumField label="Residual at the hydrant" suffix="kPa" value={b.hydrantResidualKpa} onChange={(v) => set({ hydrantResidualKpa: v })} locked={locked} />
-        {friction !== undefined ? (
-          <Banner tone="info" title={`Frictional loss ${friction} kPa`} body="Discharge at the pump less what arrived at the hydrant." />
+        {friction.source === 'calculated' ? (
+          <Banner tone="info" title={`Frictional loss ${friction.kpa} kPa`} body="Discharge at the pump less what arrived at the hydrant." />
         ) : gaps.length ? (
-          <Banner tone="warn" title="Frictional loss cannot be worked out" body={gaps.join('\n')} />
+          <Banner tone="warn" title="Frictional loss cannot be worked out here" body={gaps.join('\n')} />
+        ) : null}
+        {/*
+          * The form's box says "calculated frictional loss", and two things can
+          * fill it: this subtraction, or a figure the technician worked out at
+          * the booster. Both are kept. The calculated one prints where it
+          * exists, because the page can show its working — and where they
+          * disagree by more than rounding the form says so instead of quietly
+          * replacing one with the other.
+          */}
+        <NumField
+          label="Frictional loss, as worked out on site"
+          suffix="kPa"
+          value={b.statedFrictionalLossKpa}
+          onChange={(v) => set({ statedFrictionalLossKpa: v })}
+          locked={locked}
+        />
+        {friction.disagreesWithKpa !== undefined ? (
+          <Banner
+            tone="fail"
+            title={`Two figures: ${friction.kpa} kPa from the readings, ${friction.disagreesWithKpa} kPa entered`}
+            body={'The readings above are what prints, because the form can show the subtraction. More '
+              + 'than a kilopascal apart is not rounding — one of the two is wrong, and you are the '
+              + 'one who can say which.'}
+          />
+        ) : friction.source === 'stated' ? (
+          <Banner
+            tone="warn"
+            title={`Frictional loss ${friction.kpa} kPa, as entered`}
+            body={'Nothing here can check it — the readings it would be worked out from are not on this '
+              + 'form. It prints marked as stated rather than calculated.'}
+          />
         ) : null}
       </Card>
 
@@ -1112,9 +1384,16 @@ function PartF({ form, locked, patch }: PartProps) {
 /**
  * Part G — the sprinkler test points.
  *
- * Required against achieved, point by point. The comparison is done here rather
- * than left to whoever reads the form, because a point that made its flow but
- * not its pressure is easy to miss in a table of four columns.
+ * Required against achieved, point by point. The comparison is worked out here
+ * rather than left to whoever reads the form, because a point that made its
+ * flow but not its pressure is easy to miss in a table of four columns.
+ *
+ * The department prints a Pass and a Fail box on each of the two lines, and the
+ * technician ticks them. That tick is not the same claim as the subtraction:
+ * 540 L/min required and 538 achieved is a fail by arithmetic and may well be a
+ * pass inside the standard's tolerance, and only the licensee can say which. So
+ * the tick is what prints, the arithmetic is shown beside it, and a
+ * disagreement between them is put on the page rather than resolved here.
  */
 function PartG({ form, locked, patch }: PartProps) {
   const g = form.sprinklerFlow;
@@ -1139,8 +1418,6 @@ function PartG({ form, locked, patch }: PartProps) {
           <Card key={i}>
             <Rowed>
               <Txt weight="700" style={{ flex: 1 }}>{p.location || `Test point ${i + 1}`}</Txt>
-              {flow ? <Chip label={`Flow ${flow}`} tone={flow === 'pass' ? 'pass' : 'fail'} /> : null}
-              {press ? <Chip label={`Pressure ${press}`} tone={press === 'pass' ? 'pass' : 'fail'} /> : null}
               {!locked ? (
                 <RemoveButton what="test point" onRemove={() => set({ testPoints: g.testPoints.filter((_, n) => n !== i) })} />
               ) : null}
@@ -1154,6 +1431,13 @@ function PartG({ form, locked, patch }: PartProps) {
                 <NumField label="Achieved" suffix="L/min" value={p.resultFlowLpm} onChange={(v) => setPoint(i, { resultFlowLpm: v })} locked={locked} />
               </View>
             </Rowed>
+            <OutcomePicker
+              label="Flow"
+              value={p.flowResult}
+              derived={flow}
+              onChange={(v) => setPoint(i, { flowResult: v })}
+              locked={locked}
+            />
             <Rowed gap={2}>
               <View style={{ flex: 1 }}>
                 <NumField label="Required pressure" suffix="kPa" value={p.requiredPressureKpa} onChange={(v) => setPoint(i, { requiredPressureKpa: v })} locked={locked} />
@@ -1162,6 +1446,13 @@ function PartG({ form, locked, patch }: PartProps) {
                 <NumField label="Achieved" suffix="kPa" value={p.resultPressureKpa} onChange={(v) => setPoint(i, { resultPressureKpa: v })} locked={locked} />
               </View>
             </Rowed>
+            <OutcomePicker
+              label="Pressure"
+              value={p.pressureResult}
+              derived={press}
+              onChange={(v) => setPoint(i, { pressureResult: v })}
+              locked={locked}
+            />
           </Card>
         );
       })}
@@ -1182,6 +1473,200 @@ function PartG({ form, locked, patch }: PartProps) {
 }
 
 /**
+ * One of Part G's Pass / Fail pairs, with the arithmetic beside it.
+ *
+ * Three states, not two: nobody has ticked yet is the state every new line
+ * starts in, and it is not a pass. Where the two figures above give an answer
+ * it is shown as a suggestion the technician can take or overrule — and once
+ * they overrule it, the disagreement is said out loud here and printed on the
+ * form, because a licensee signing a Pass against a reading that subtracts to a
+ * Fail should be doing it on purpose.
+ */
+function OutcomePicker({
+  label, value, derived, onChange, locked,
+}: {
+  label: string;
+  value: 'pass' | 'fail' | undefined;
+  derived: 'pass' | 'fail' | undefined;
+  onChange: (v: 'pass' | 'fail' | undefined) => void;
+  locked: boolean;
+}) {
+  const shown = value ?? 'unanswered';
+  const conflict = value !== undefined && derived !== undefined && value !== derived;
+
+  return (
+    <View style={{ gap: 6 }}>
+      <Label>{`${label} result`}</Label>
+      {locked ? (
+        <Chip
+          label={value === undefined ? 'Not ticked' : value === 'pass' ? 'Pass' : 'Fail'}
+          tone={value === 'pass' ? 'pass' : value === 'fail' ? 'fail' : 'muted'}
+        />
+      ) : (
+        <Segmented
+          options={[
+            { value: 'unanswered' as const, label: 'Not ticked' },
+            { value: 'pass' as const, label: 'Pass' },
+            { value: 'fail' as const, label: 'Fail' },
+          ]}
+          value={shown}
+          onChange={(v) => onChange(v === 'unanswered' ? undefined : v)}
+        />
+      )}
+      {conflict ? (
+        <Banner
+          tone="warn"
+          title={`Ticked ${value === 'pass' ? 'Pass' : 'Fail'}; the figures read ${derived === 'pass' ? 'Pass' : 'Fail'}`}
+          body={'Your tick is what prints, and the form says both. If the reading is inside the '
+            + "standard's tolerance that is worth a word in the comments, because the next person to "
+            + 'read this will do the same subtraction.'}
+        />
+      ) : value === undefined && derived !== undefined ? (
+        <Txt size="sm" tone="muted">
+          {`The figures above read ${derived === 'pass' ? 'Pass' : 'Fail'}. Nothing is ticked yet, so that is what prints, marked as taken from the figures.`}
+        </Txt>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * The attachment — everything the department's form has no box for.
+ *
+ * Not Part J. Form 72 has nine parts and this is not one of them, which is why
+ * it carries its own heading here and prints on its own page after Part I. The
+ * distinction matters to whoever reads the document: a line added inside Part A
+ * would be indistinguishable from the department's own.
+ *
+ * The defect list is the one piece of it that is load-bearing. Part H asks
+ * whether critical defects were identified and then sends the details to "the
+ * Licensee's report" — a separate document that routinely does not travel with
+ * the form. Kept here, the list is bound to the form that records the defects,
+ * and Part H's answer can be checked against the defects actually found.
+ */
+function PartAttachment({ form, locked, patch }: PartProps) {
+  const defects = form.defects;
+  const setDefect = (i: number, p: Partial<FormDefect>) => patch({
+    defects: defects.map((d, n) => (n === i ? { ...d, ...p } : d)),
+  });
+  const criticals = defects.filter((d) => d.critical).length;
+
+  return (
+    <View style={{ gap: 12 }}>
+      <Card>
+        <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+          None of this is on Form 72. It prints on its own page after Part I, headed so that nobody
+          mistakes it for the department&rsquo;s form.
+        </Txt>
+        <Field
+          label="Building owner"
+          value={form.owner ?? ''}
+          onChangeText={(v) => patch({ owner: v })}
+          hint="A critical defect notice has to go to somebody. The form never says who."
+          editable={!locked}
+        />
+        <Field
+          label="Owner contact"
+          value={form.ownerContact ?? ''}
+          onChangeText={(v) => patch({ ownerContact: v })}
+          placeholder="Phone or email"
+          editable={!locked}
+        />
+        <Field
+          label="Building classification"
+          value={form.buildingClassification ?? ''}
+          onChangeText={(v) => patch({ buildingClassification: v })}
+          placeholder="Class 5"
+          hint="Which parts of AS 2419.1 and AS 2118.1 the system was ever meant to meet — so what a pass means."
+          editable={!locked}
+        />
+      </Card>
+
+      <Card>
+        <Field
+          label="Technician who did the work"
+          value={form.technician ?? ''}
+          onChangeText={(v) => patch({ technician: v })}
+          hint="The licensee signs Part I. That says who takes responsibility, not who climbed the roof."
+          editable={!locked}
+        />
+        <Field
+          label="Qualification held"
+          value={form.qualification ?? ''}
+          onChangeText={(v) => patch({ qualification: v })}
+          editable={!locked}
+        />
+      </Card>
+
+      {defects.map((d, i) => (
+        <Card key={i}>
+          <Rowed>
+            <Txt weight="700" style={{ flex: 1 }}>{`Defect ${i + 1}`}</Txt>
+            {d.critical ? <Chip label="Critical" tone="fail" /> : null}
+            {!locked ? (
+              <RemoveButton
+                what="defect"
+                onRemove={() => patch({ defects: defects.filter((_, n) => n !== i) })}
+              />
+            ) : null}
+          </Rowed>
+          <Field
+            label="What was found"
+            value={d.description}
+            onChangeText={(v) => setDefect(i, { description: v })}
+            multiline
+            editable={!locked}
+          />
+          <Chip
+            label={d.critical ? 'Critical defect' : 'Not critical'}
+            selected={d.critical}
+            tone={d.critical ? 'fail' : 'default'}
+            onPress={locked ? undefined : () => setDefect(i, { critical: !d.critical })}
+          />
+        </Card>
+      ))}
+
+      {!locked ? (
+        <Button
+          title="Add a defect"
+          variant="secondary"
+          onPress={() => patch({ defects: [...defects, { description: '', critical: false }] })}
+        />
+      ) : null}
+
+      {/*
+        * The same stored value as Part H's System Notes, reachable from here.
+        *
+        * A second notes column was the obvious thing and the wrong one: two
+        * free-text boxes invite one thought to be split across both, and
+        * neither then reads complete. So this is the department's own box, put
+        * where somebody working down a defect list will want it, and it prints
+        * once — in Part H, where the department put it.
+        */}
+      <Card>
+        <Field
+          label="Notes — defects, notifications, rectification"
+          value={form.systemNotes ?? ''}
+          onChangeText={(v) => patch({ systemNotes: v })}
+          multiline
+          hint="The same notes as Part H. Prints there, inside the department's form, rather than on this page."
+          editable={!locked}
+        />
+      </Card>
+
+      {criticals && form.criticalDefectsIdentified !== true ? (
+        <Banner
+          tone="fail"
+          title={`${criticals} critical defect${criticals === 1 ? '' : 's'} listed, and Part H does not say so`}
+          body={'Part H is the question an inspector reads. Answer it Yes there, or take the critical '
+            + 'flag off here — the form cannot be issued while the two contradict each other.'}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+/**
  * Part H — the result.
  *
  * The two questions have three states on the printed form: Yes, No, and nobody
@@ -1197,6 +1682,8 @@ function PartH({ form, locked, patch }: PartProps) {
         value={form.criticalDefectsIdentified}
         onChange={(v) => patch({ criticalDefectsIdentified: v })}
         locked={locked}
+        yes="Give the owner or occupier a critical defect notice"
+        no="No action required in relation to critical defects at this time"
       />
       {form.criticalDefectsIdentified ? (
         <Banner
@@ -1210,6 +1697,8 @@ function PartH({ form, locked, patch }: PartProps) {
         value={form.repairsRequired}
         onChange={(v) => patch({ repairsRequired: v })}
         locked={locked}
+        yes="Attach the details, including the action taken and the date, to the licensee's report"
+        no="No action required in relation to repairs or corrective actions at this time"
       />
       <Divider />
       <ResultPicker value={form.systemResult} onChange={(v) => patch({ systemResult: v })} locked={locked} />
@@ -1259,15 +1748,26 @@ function PartI({ form, locked, patch }: PartProps) {
   );
 }
 
+/**
+ * One of Part H's two questions, with the sentence each answer commits to.
+ *
+ * The department prints those sentences beside the boxes, and they are the
+ * reason the question is on the form: ticking Yes to a critical defect is
+ * undertaking to give somebody a notice. A bare Yes/No on a phone hides that,
+ * and the person tapping it is the one the undertaking falls on.
+ */
 function TriState({
-  label, value, onChange, locked,
+  label, value, onChange, locked, yes, no,
 }: {
   label: string;
   value: boolean | undefined;
   onChange: (v: boolean | undefined) => void;
   locked: boolean;
+  yes?: string;
+  no?: string;
 }) {
   const shown = value === undefined ? 'unanswered' : value ? 'yes' : 'no';
+  const consequence = value === true ? yes : value === false ? no : undefined;
   return (
     <View style={{ gap: 6 }}>
       <Label>{label}</Label>
@@ -1287,6 +1787,7 @@ function TriState({
           onChange={(v) => onChange(v === 'unanswered' ? undefined : v === 'yes')}
         />
       )}
+      {consequence ? <Txt size="sm" tone="muted">{consequence}</Txt> : null}
     </View>
   );
 }
