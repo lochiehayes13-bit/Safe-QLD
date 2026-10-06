@@ -1610,6 +1610,40 @@ const CSS = `
      the signature box on the next. A form whose signature is on a sheet of its
      own is the argument an occupier's solicitor makes in a year's time. */
   table.grid.sig { page-break-inside: avoid; }
+  /*
+   * Where the paper is allowed to end.
+   *
+   * Only two rules existed — the signature grid stays whole, and the
+   * attachment starts a page — and everything else fell where the renderer
+   * happened to put it. Three things went wrong on a real form and all three
+   * read as a fault in the test rather than in the printing:
+   *
+   * A part's blue heading could be the last thing on a sheet, with its table
+   * overleaf. "Part E — Booster test" alone at the foot of page two reads as a
+   * part with nothing in it, which is exactly what a part marked N/A looks
+   * like. So a band, and the grey note the department prints under one, keep
+   * whatever follows them.
+   *
+   * A table row could split down the middle of its cells, putting a pressure
+   * in one page's footer and its units in the next page's header.
+   *
+   * And a boxed warning — the DRAFT stamp, a caution, the issues list, a
+   * stated figure — could break across the fold, so half of why the form is
+   * not to be relied on appears on each side. Those are the boxes a reader is
+   * meant to stop at.
+   *
+   * break-inside is the current spelling and page-break-inside the one
+   * Chromium's print path still honours in places, so both are written.
+   * Nothing here forces a break; every rule only says where one must not
+   * fall.
+   */
+  .band { break-after: avoid; page-break-after: avoid; }
+  .note, .intro { break-after: avoid; page-break-after: avoid; }
+  table.grid tr { break-inside: avoid; page-break-inside: avoid; }
+  .stamp, .caution, .issues, .stated, .deptnote, .deptfine {
+    break-inside: avoid; page-break-inside: avoid;
+  }
+  .decl { break-inside: avoid; page-break-inside: avoid; }
   .issues { border: 1px solid #D5D8E4; background: #FAFAFC; padding: 6px 9px; margin-top: 5px;
             font-size: 8px; line-height: 1.5; }
   .issues ul { margin: 3px 0 0; padding-left: 16px; }
