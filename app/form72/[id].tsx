@@ -1246,7 +1246,7 @@ function PartA({ form, locked, patch }: PartProps) {
         value={form.systemLabel}
         onChangeText={(v) => patch({ systemLabel: v })}
         placeholder="Towns Main System"
-        hint="The descriptor in the form's top right corner. Without it, two forms for this site on the same day are indistinguishable."
+        hint="Printed across the top of the form, beside the company name. Without it, two forms for this site on the same day are indistinguishable."
         editable={!locked}
       />
       <Field

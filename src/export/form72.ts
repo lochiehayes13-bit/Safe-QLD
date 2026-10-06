@@ -1659,11 +1659,23 @@ export function form72Html(input: Form72DocumentInput): string {
      * document also prints there — here it is for finding the right form, not
      * for reproducing the published one.
      */''}
-  ${input.systemLabel?.trim() ? `<div class="ourstrip">
+  ${/*
+     * The strip prints for the company, not for the descriptor.
+     *
+     * It used to be gated on the descriptor alone, so a form nobody had typed
+     * a system into printed no strip at all — and with it went the name of the
+     * company that produced the document and the version of the form it was
+     * produced on. The descriptor is the reason the strip is worth having and
+     * it is still the thing in the middle; it is not a condition of saying
+     * whose document this is. `company` always resolves to a name, so the
+     * strip is unconditional; the descriptor is the only part of it that can
+     * be missing.
+     */''}
+  <div class="ourstrip">
     <span class="who">${esc(company)}</span>
     ${input.systemLabel?.trim() ? `<span class="what">${esc(input.systemLabel)}</span>` : ''}
     <span class="ver">${esc(FORM_VERSION)}</span>
-  </div>` : ''}
+  </div>
   <div class="head">
     <div>
       <h1>${esc(FORM_TITLE)}</h1>

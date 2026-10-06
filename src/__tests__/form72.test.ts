@@ -2263,12 +2263,35 @@ describe('the department’s footer, as two paragraphs and an imprint', () => {
     expect(head).not.toContain('Version 1');
   });
 
-  it('leaves the strip off a form with nothing of ours to put on it', () => {
+  it('still says whose document it is on a form with no descriptor', () => {
+    /*
+     * The strip used to be gated on the descriptor, so a form nobody had
+     * typed a system into printed no strip at all — and with it went the name
+     * of the company that produced the document and the version of the
+     * department's form it was produced on. The descriptor is the reason the
+     * strip is worth having; it is not a condition of saying whose this is.
+     */
     const plain = form72Html({
       form: issuable(), generatedAt: '2026-07-06T02:00:00.000Z',
     });
-    // The stylesheet always carries the class; the strip itself must not print.
-    expect(plain).not.toContain('<div class="ourstrip">');
+    const strip = between(plain, '<div class="ourstrip">', '</div>');
+    expect(strip).toContain('Safe QLD Fire Protection');
+    expect(strip).toContain('Version 1');
+  });
+
+  it('leaves the descriptor out of the strip rather than printing an empty slot', () => {
+    const plain = form72Html({
+      form: issuable(), systemLabel: '   ', generatedAt: '2026-07-06T02:00:00.000Z',
+    });
+    expect(between(plain, '<div class="ourstrip">', '</div>')).not.toContain('class="what"');
+  });
+
+  it('names the company the document was produced by, where one is given', () => {
+    const own = form72Html({
+      form: issuable(), systemLabel: 'Towns Main System', companyName: 'Safe QLD Pty Ltd',
+      generatedAt: '2026-07-06T02:00:00.000Z',
+    });
+    expect(between(own, '<div class="ourstrip">', '</div>')).toContain('Safe QLD Pty Ltd');
   });
 });
 
