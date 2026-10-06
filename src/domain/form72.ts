@@ -59,6 +59,22 @@ export interface MaintenanceTest {
  */
 export type CalibrationBasis = 'interval' | 'service-life';
 
+/**
+ * What the thing in a Part C column is.
+ *
+ * The department's six rows describe a pressure gauge: a dial of 65, 100 or
+ * 150 mm, graduated in kPa. A flow meter has neither, and printing "Not
+ * recorded" in red against those two rows said a measurement was missing when
+ * the measurement does not exist. That is the same red-where-nothing-is-wrong
+ * mistake as flagging the Part D rates nobody ran, and it teaches a reader to
+ * skip the red that matters.
+ *
+ * Absent means gauge, because that is what every device already stored is: the
+ * columns were built for gauges and a form on a phone cannot be asked about a
+ * distinction that did not exist when it was signed.
+ */
+export type DeviceKind = 'gauge' | 'flow-meter';
+
 export interface TestDevice {
   /** "Device/gauge 1" — the column it occupies on the form. */
   slot: string;
@@ -73,6 +89,8 @@ export interface TestDevice {
   incrementsKpa?: number;
   /** Defaults to 'interval' where absent, which is every form already stored. */
   calibrationBasis?: CalibrationBasis;
+  /** Defaults to 'gauge' where absent, which is every form already stored. */
+  kind?: DeviceKind;
   /**
    * What the device is, in the manufacturer's words.
    *
@@ -246,6 +264,61 @@ export function flowRowUntouched(row: FlowRow): boolean {
     && row.hydrants12Kpa === undefined
     && row.hydrants123Kpa === undefined
     && row.hydrants1234Kpa === undefined;
+}
+
+/** The four pressure columns of a Part D row, left to right. */
+export const FLOW_ROW_COLUMNS = [
+  'hydrant1Kpa', 'hydrants12Kpa', 'hydrants123Kpa', 'hydrants1234Kpa',
+] as const;
+
+export type FlowRowColumn = (typeof FLOW_ROW_COLUMNS)[number];
+
+/**
+ * How many hydrants a row was actually run on.
+ *
+ * The number of the rightmost column that carries a reading. A nozzle proved at
+ * one hydrant is 1; a row nobody touched is 0.
+ */
+export function flowRowColumnsRun(row: FlowRow): number {
+  let run = 0;
+  FLOW_ROW_COLUMNS.forEach((col, i) => {
+    if (row[col] !== undefined) run = i + 1;
+  });
+  return run;
+}
+
+/**
+ * What an empty cell in a row somebody did use actually means.
+ *
+ * The row-level answer was too coarse. A 19 mm nozzle proved at one hydrant is
+ * a complete, ordinary test: the row has a reading in the first column and
+ * nothing in the other three, and those three printed in red as "Not recorded".
+ * That is the same mistake as flagging the five flow rates nobody ran, one
+ * level down — red on the page where nothing is wrong, which teaches a reader
+ * to skip the red that matters.
+ *
+ * So a cell to the right of the last reading in its row was not run. A cell
+ * with readings on both sides of it is a gap: the technician ran two hydrants
+ * and then four, and the three-hydrant figure is genuinely missing. On paper
+ * those two blanks look identical and nobody can tell them apart afterwards;
+ * here they do not.
+ */
+export type FlowCellState = 'read' | 'not-run' | 'missing';
+
+export function flowCellState(row: FlowRow, column: FlowRowColumn): FlowCellState {
+  if (row[column] !== undefined) return 'read';
+  if (flowRowUntouched(row)) return 'not-run';
+
+  /*
+   * A row with a device named against it and no reading anywhere is a row
+   * somebody started and did not finish, so its first column is the gap. The
+   * alternative reading — that naming the gauge means nothing was attempted —
+   * would let a half-filled row print as eight words of "Not run" and no red
+   * at all, which is the state this table exists to make visible.
+   */
+  const run = Math.max(flowRowColumnsRun(row), 1);
+  const at = FLOW_ROW_COLUMNS.indexOf(column) + 1;
+  return at > run ? 'not-run' : 'missing';
 }
 
 /** Part E — the pump appliance booster test. */

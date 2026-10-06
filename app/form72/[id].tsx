@@ -1161,7 +1161,7 @@ function PartC({ form, locked, patch }: PartProps) {
             title="Add a device by hand"
             variant="secondary"
             onPress={() => patch({
-              devices: [...devices, { slot: deviceSlotName(devices.length), serialNumber: '' }],
+              devices: [...devices, { slot: deviceSlotName(devices.length), serialNumber: '', kind: 'gauge' }],
             })}
           />
         </Card>

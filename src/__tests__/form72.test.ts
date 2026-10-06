@@ -1,4 +1,5 @@
 import {
+  ADDED_BOX_NOTE,
   DECLARATION, DEPARTMENT_DEVICE_SLOTS, DEPARTMENT_NOTE, DEPARTMENT_PRIVACY, DEPARTMENT_RTI,
   FORM_72_SOURCES, FORM_SUBTITLE, FORM_TITLE, PART_D_LOCATION_SLOTS, STANDARD_FLOW_RATES_LPS,
   flowTableRows, form72Html, frictionalLossGaps, hydrantLocationsNeeded, occupierCopyDue,
@@ -8,11 +9,11 @@ import {
 import { MIGRATION_V12 } from '@/db/schemaForm72';
 import { DEVICE_PRESETS, DEVICE_PRESET_SOURCE, unusedDevicePresets } from '@/domain/form72Devices';
 import {
-  CALIBRATION_MONTHS,
+  CALIBRATION_MONTHS, FLOW_ROW_COLUMNS, flowCellState, flowRowColumnsRun,
   PART_D_NOZZLE_SIZES_MM, PART_D_ROWS, deviceCalibration, emptyForm72, intervalsTested,
   maintenanceTestCell, maintenanceTestFromAxes, overloadCheck, resolveFrictionalLoss,
   systemTypesTested, validateForm72,
-  type Form72, type MaintenanceTest, type TestDevice,
+  type FlowRow, type Form72, type MaintenanceTest, type TestDevice,
 } from '@/domain/form72';
 import { MIGRATIONS, SCHEMA_VERSION } from '@/db/schema';
 import { MIGRATION_V34 } from '@/db/schemaV34';
@@ -151,7 +152,8 @@ describe('N/A is a real answer and a blank is not', () => {
   it('ticks the N/A box of a part the job did not use', () => {
     const html = form72Html(doc());
     const partF = between(html, 'Part F — Sprinkler hydrostatic test', 'Part G —');
-    expect(partF).toContain('<span class="rl">N/A</span><span class="rb on">');
+    // The N/A box carries a + because the department prints only PASS and FAIL.
+    expect(partF).toContain('<span class="rl">N/A<sup>+</sup></span><span class="rb on">');
     expect(partF).not.toContain('<span class="rl">PASS</span><span class="rb on">');
   });
 
@@ -357,23 +359,76 @@ describe('Part D — the flow table', () => {
   });
 
   it('separates a rate that was never run from a reading that was never written down', () => {
-    // Both are blanks on paper and they mean opposite things: three untouched
-    // rates are normal, a half-filled row is a gap somebody has to answer for.
+    /*
+     * Both are blanks on paper and they mean opposite things, and the
+     * distinction is per cell rather than per row.
+     *
+     * A row proved at two hydrants and nothing further is an ordinary complete
+     * test: its third and fourth columns were not run. A row with readings at
+     * one and at three hydrants and nothing at two is a gap somebody has to
+     * answer for — the technician ran it and the figure is missing — and that
+     * is the only blank on this table that should be red.
+     */
     const html = form72Html(doc({
       form: issuable({
         flowTest: {
-          result: 'pass', hydrantLocations: [],
-          rows: [{ rateLps: 20, devices: 'DG1, DG2', hydrant1Kpa: 320 }],
+          result: 'pass', hydrantLocations: ['Booster', 'Roof', 'Level 3'],
+          rows: [
+            { rateLps: 20, devices: 'DG1, DG2', hydrant1Kpa: 320, hydrants12Kpa: 280 },
+            { rateLps: 30, devices: 'DG1', hydrant1Kpa: 240, hydrants123Kpa: 180 },
+          ],
         },
       }),
     }));
     const partD = between(html, 'Size/flow rate', 'System achieved');
+
     const twenty = between(partD, '>20 L/s<', '>30 L/s<');
-    expect(twenty).toContain('Not recorded');
-    expect(twenty).not.toContain('Not run');
+    expect(twenty).toContain('Not run');
+    expect(twenty).not.toContain('Not recorded');
+
     const thirty = between(partD, '>30 L/s<', 'System achieved');
+    expect(thirty).toContain('Not recorded');
     expect(thirty).toContain('Not run');
-    expect(thirty).not.toContain('Not recorded');
+
+    // And a row nobody touched at all is not run, start to finish.
+    const fifteen = between(partD, '>15 L/s<', '>20 L/s<');
+    expect(fifteen).not.toContain('Not recorded');
+  });
+
+  it('prints the unit with the reading, not with the words standing in for one', () => {
+    // Printing it unconditionally produced "Not recorded kPa".
+    const html = form72Html(doc({
+      form: issuable({
+        flowTest: {
+          result: 'pass', hydrantLocations: ['Booster'],
+          rows: [{ nozzleMm: 19, devices: 'Pitot 1', hydrant1Kpa: 540 }],
+        },
+      }),
+    }));
+    const partD = between(html, 'Size/flow rate', 'System achieved');
+    expect(flat(partD)).toContain('540 <span class="u">kPa</span>');
+    expect(flat(partD)).not.toContain('Not run</span> <span class="u">kPa');
+    expect(flat(partD)).not.toContain('Not recorded</span> <span class="u">kPa');
+  });
+
+  it('does not flag the three columns a one-hydrant nozzle test never ran', () => {
+    // A 19 mm nozzle proved at one hydrant is an ordinary complete test. Red in
+    // its other three columns is the same mistake as flagging the five rates
+    // nobody ran, one level down — and red where nothing is wrong teaches a
+    // reader to skip the red that matters.
+    const html = form72Html(doc({
+      form: issuable({
+        flowTest: {
+          result: 'pass', hydrantLocations: ['Booster'],
+          rows: [{ nozzleMm: 19, devices: 'Pitot 1', hydrant1Kpa: 540 }],
+        },
+      }),
+    }));
+    const partD = between(html, 'Size/flow rate', 'System achieved');
+    const nozzle = between(partD, '>19 mm<', '>22 mm<');
+    expect(nozzle).toContain('540');
+    expect(nozzle).not.toContain('Not recorded');
+    expect((nozzle.match(/Not run/g) ?? [])).toHaveLength(3);
   });
 
   it('keeps a reading taken at a rate the printed form has no row for', () => {
@@ -1647,5 +1702,188 @@ describe('the department’s own words, label for label', () => {
     expect(flat(inParts)).toContain('Calibration basis <span class="extra">added</span>');
     // Part H prints the System Pass/Fail pair and no note field.
     expect(flat(inParts)).toContain('System notes <span class="extra">added</span>');
+  });
+});
+
+describe('a box the department does not print says so', () => {
+  const html = form72Html(doc());
+
+  it('marks the N/A box on every part the department bands PASS and FAIL', () => {
+    // The band is the first place a reader's eye lands, and an extra box there
+    // reads as the department's. The box is kept — three empty boxes are
+    // indistinguishable from a part nobody filled in, which is the ambiguity
+    // this document exists to remove — and marked.
+    for (const part of [
+      'Part B — Hydrant hydrostatic test',
+      'Part E — Pump appliance booster test',
+      'Part F — Sprinkler hydrostatic test',
+    ]) {
+      const band = between(html, part, '</div>');
+      expect({ part, marked: band.includes('N/A<sup>+</sup>') }).toEqual({ part, marked: true });
+      expect({ part, pass: band.includes('<span class="rl">PASS</span>') })
+        .toEqual({ part, pass: true });
+    }
+  });
+
+  it('marks Part D’s "Refer to Report", which is not a box the department prints either', () => {
+    const band = between(html, 'Part D — Hydrant system flow test', '</div>');
+    expect(band).toContain('Refer to Report<sup>+</sup>');
+    expect(band).toContain('<span class="rl">PASS</span>');
+  });
+
+  it('marks all three of Part G’s, because the department bands it with none', () => {
+    const band = between(html, 'Part G — Sprinkler system flow test', '</div>');
+    expect(band).toContain('N/A<sup>+</sup>');
+    expect(band).toContain('PASS<sup>+</sup>');
+    expect(band).toContain('FAIL<sup>+</sup>');
+  });
+
+  it('says once what the marker means, rather than leaving a reader to guess', () => {
+    expect(flat(html)).toContain(flat(ADDED_BOX_NOTE));
+    expect(ADDED_BOX_NOTE).toContain("not on the department's form");
+  });
+});
+
+describe('the one field on the form that cannot be a string', () => {
+  it('prints the signature as an image', () => {
+    // It is stored as a data URI and was going through the ordinary cell
+    // renderer, which escapes it: a signed form came out with
+    // "data:image/png;base64,iVBORw0KG…" in the signature box.
+    const png = 'data:image/png;base64,iVBORw0KGgo=';
+    const html = form72Html(doc({ form: issuable({ signature: png }) }));
+    expect(html).toContain(`<img class="sig" src="${png}"`);
+    expect(html).not.toContain(`>${png}<`);
+  });
+
+  it('says a form is not signed rather than leaving the box ambiguous', () => {
+    const html = form72Html(doc({ form: issuable({ signature: undefined }) }));
+    const partI = between(html, 'Licensee signature', '</tr>');
+    expect(partI).toContain('Not signed');
+  });
+
+  it('prints a typed name in the signature box as written, rather than dropping it', () => {
+    // Not an image, but it is a fact about the document.
+    const html = form72Html(doc({ form: issuable({ signature: 'D. McKee (typed)' }) }));
+    expect(html).toContain('D. McKee (typed)');
+  });
+});
+
+describe('what an empty cell in a Part D row means', () => {
+  const row = (over: Partial<FlowRow> = {}): FlowRow => ({ rateLps: 20, devices: '', ...over });
+
+  it('counts how many hydrants the row was actually run on', () => {
+    expect(flowRowColumnsRun(row())).toBe(0);
+    expect(flowRowColumnsRun(row({ hydrant1Kpa: 300 }))).toBe(1);
+    expect(flowRowColumnsRun(row({ hydrant1Kpa: 300, hydrants12Kpa: 260 }))).toBe(2);
+    // The rightmost reading wins, gaps and all.
+    expect(flowRowColumnsRun(row({ hydrant1Kpa: 300, hydrants1234Kpa: 200 }))).toBe(4);
+  });
+
+  it('calls a cell to the right of the last reading not run', () => {
+    const proved = row({ devices: 'DG1', hydrant1Kpa: 300, hydrants12Kpa: 260 });
+    expect(flowCellState(proved, 'hydrant1Kpa')).toBe('read');
+    expect(flowCellState(proved, 'hydrants12Kpa')).toBe('read');
+    expect(flowCellState(proved, 'hydrants123Kpa')).toBe('not-run');
+    expect(flowCellState(proved, 'hydrants1234Kpa')).toBe('not-run');
+  });
+
+  it('calls a cell with readings on both sides of it missing', () => {
+    // The technician ran one hydrant and then three. The two-hydrant figure is
+    // genuinely absent, and on paper that blank is indistinguishable from the
+    // two above it.
+    const gap = row({ devices: 'DG1', hydrant1Kpa: 300, hydrants123Kpa: 200 });
+    expect(flowCellState(gap, 'hydrants12Kpa')).toBe('missing');
+    expect(flowCellState(gap, 'hydrants1234Kpa')).toBe('not-run');
+  });
+
+  it('calls every cell of an untouched row not run, including a row with only a device on it', () => {
+    for (const col of FLOW_ROW_COLUMNS) {
+      expect({ col, state: flowCellState(row(), col) }).toEqual({ col, state: 'not-run' });
+    }
+    // A device typed with no reading against it is a row somebody started, so
+    // its first column is the gap.
+    const started = row({ devices: 'DG1' });
+    expect(flowCellState(started, 'hydrant1Kpa')).toBe('missing');
+  });
+
+  it('keeps the four columns in the order the department prints them', () => {
+    expect(FLOW_ROW_COLUMNS).toEqual([
+      'hydrant1Kpa', 'hydrants12Kpa', 'hydrants123Kpa', 'hydrants1234Kpa',
+    ]);
+  });
+});
+
+describe('a Part C row that describes a dial, on a device that has none', () => {
+  const meter = { slot: 'Device/gauge 1', serialNumber: 'SQF-001', kind: 'flow-meter' as const };
+
+  it('answers the two gauge rows rather than printing them as missing readings', () => {
+    const html = form72Html(doc({ form: issuable({ devices: [meter] }) }));
+    const face = between(html, '65/100/150 mm face', '</tr>');
+    expect(face).toContain('N/A for a flow meter');
+    const increments = between(html, 'Increments (kPa)', '</tr>');
+    expect(increments).toContain('N/A for a flow meter');
+    // And nothing on the row reads as a reading somebody failed to record.
+    expect(face).not.toContain('Not recorded');
+    expect(increments).not.toContain('Not recorded');
+  });
+
+  it('still flags them on a gauge, which is what the rows are for', () => {
+    const html = form72Html(doc({
+      form: issuable({ devices: [{ slot: 'Device/gauge 1', serialNumber: 'PG-1' }] }),
+    }));
+    const face = between(html, '65/100/150 mm face', '</tr>');
+    expect(face).toContain('Not recorded');
+    expect(face).not.toContain('flow meter');
+    // The three columns nobody used say so rather than joining in.
+    expect((face.match(/Not used/g) ?? [])).toHaveLength(3);
+  });
+
+  it('treats a device with no kind as a gauge, because that is every form already stored', () => {
+    const html = form72Html(doc({
+      form: issuable({ devices: [{ slot: 'Device/gauge 1', serialNumber: 'PG-1', faceSize: '100 mm' }] }),
+    }));
+    expect(between(html, '65/100/150 mm face', '</tr>')).toContain('100 mm');
+  });
+
+  it('leaves an empty column alone, so an unused slot is not answered about a meter', () => {
+    const html = form72Html(doc({ form: issuable({ devices: [] }) }));
+    expect(html).not.toContain('N/A for a flow meter');
+  });
+
+  it('records our own meters as meters', () => {
+    for (const preset of DEVICE_PRESETS) expect(preset.device.kind).toBe('flow-meter');
+  });
+});
+
+describe('the three Part C columns most tests do not use', () => {
+  it('says they were not used, rather than filling them with missing readings', () => {
+    // The department prints four and a hydrant test uses one or two, so three
+    // columns of red was the usual state of this part — red on every row of
+    // every form is red a reader learns to ignore.
+    const html = form72Html(doc({
+      form: issuable({
+        devices: [{ slot: 'Device/gauge 1', serialNumber: 'SQF-001', dateCalibrated: '2026-07-20' }],
+      }),
+    }));
+    const partC = between(html, 'Device/gauge 1', 'Part D —');
+    expect(partC).toContain('Not used');
+    // The one live column still answers every row.
+    expect(partC).toContain('SQF-001');
+  });
+
+  it('is red about the one blank that is the point: a column started with no serial', () => {
+    const html = form72Html(doc({
+      form: issuable({ devices: [{ slot: 'Device/gauge 1', serialNumber: '  ' }] }),
+    }));
+    const serial = between(html, 'Serial number', '</tr>');
+    expect(serial).toContain('Not recorded');
+    expect((serial.match(/Not used/g) ?? [])).toHaveLength(3);
+  });
+
+  it('says every column is unused on a form with no equipment on it at all', () => {
+    const html = form72Html(doc({ form: issuable({ devices: [] }) }));
+    const serial = between(html, 'Serial number', '</tr>');
+    expect((serial.match(/Not used/g) ?? [])).toHaveLength(4);
+    expect(serial).not.toContain('Not recorded');
   });
 });

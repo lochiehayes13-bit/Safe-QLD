@@ -83,6 +83,7 @@ const flowtech = (serial: string, report: string): DevicePreset => ({
     + 'Mechanical / Electro magnetic tick is yours to make.',
   device: {
     serialNumber: serial,
+    kind: 'flow-meter',
     model: FLOWTECH_MODEL,
     dateCalibrated: '2026-07-18',
     calibrationCertificate: report,
@@ -92,9 +93,9 @@ const flowtech = (serial: string, report: string): DevicePreset => ({
     /*
      * Face size and increments are deliberately absent. They describe a
      * pressure gauge's dial, and this is a flow meter — there is no 100 mm face
-     * and no kPa increment on it. Left absent they print as not recorded, which
-     * on a flow meter row is the honest answer; filled with anything they would
-     * read as a gauge specification somebody measured.
+     * and no kPa increment on it. `kind` is what lets the page answer those two
+     * rows "N/A for a flow meter" rather than printing them in red as readings
+     * somebody failed to record.
      */
   },
 });

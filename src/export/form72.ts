@@ -1,10 +1,11 @@
 import {
   CALIBRATION_MONTHS,
   FLOW_ROW_GROUP_LABEL, FRICTIONAL_LOSS_TOLERANCE_KPA, PART_D_DEVICE_RATES_LPS, PART_D_ROWS,
-  canIssue, elevationHeadKpa, flowRowGroup, flowRowKey, flowRowLabel, flowRowLongLabel,
-  flowRowUntouched, overloadCheck, resolveFrictionalLoss, validateForm72,
-  type BoosterTest, type FlowRow, type FlowRowGroup, type FlowTest, type Form72, type FormDefect,
-  type FormIssue, type PartResult, type SprinklerTestPoint, type TestDevice,
+  canIssue, elevationHeadKpa, flowCellState, flowRowGroup, flowRowKey, flowRowLabel,
+  flowRowLongLabel, flowRowUntouched, overloadCheck, resolveFrictionalLoss, validateForm72,
+  type BoosterTest, type FlowRow, type FlowRowColumn, type FlowRowGroup, type FlowTest,
+  type Form72, type FormDefect, type FormIssue, type PartResult, type SprinklerTestPoint,
+  type TestDevice,
 } from '@/domain/form72';
 import { addQldBusinessDays } from '@/domain/occupierForm';
 import { qldIsoDay } from '@/domain/qldTime';
@@ -462,25 +463,53 @@ function tick(label: string, on: boolean): string {
   return `<span class="tick"><span class="cb${on ? ' on' : ''}">${on ? '&#10007;' : ''}</span>${esc(label)}</span>`;
 }
 
-/** The N/A / PASS / FAIL boxes that sit on the right of a part's dark band. */
-function resultBoxes(result: string, options: { value: string; label: string }[]): string {
+/**
+ * The result boxes on the right of a part's dark band.
+ *
+ * The department prints PASS and FAIL and nothing else on Parts B, D, E and F.
+ * Every other box in that band is Safe QLD's, and each one is marked, because
+ * the band is the first place a reader's eye lands and an extra box there reads
+ * as the department's.
+ *
+ * They are kept rather than dropped. N/A is the answer a technician actually
+ * has for a part the job did not cover, and the alternative — three unticked
+ * boxes — is indistinguishable from a part nobody filled in, which is the
+ * ambiguity this whole document exists to remove.
+ */
+function resultBoxes(result: string, options: ResultOption[]): string {
   return `<span class="results">${options
-    .map((o) => `<span class="rl">${esc(o.label)}</span><span class="rb${o.value === result ? ' on' : ''}">${
-      o.value === result ? '&#10007;' : ''}</span>`)
+    .map((o) => `<span class="rl">${esc(o.label)}${o.added ? '<sup>+</sup>' : ''}</span><span class="rb${
+      o.value === result ? ' on' : ''}">${o.value === result ? '&#10007;' : ''}</span>`)
     .join('')}</span>`;
 }
 
-const RESULT_OPTIONS = [
-  { value: 'na', label: 'N/A' },
+interface ResultOption {
+  value: string;
+  label: string;
+  /** True for a box the department's form does not print. */
+  added?: boolean;
+}
+
+const RESULT_OPTIONS: ResultOption[] = [
+  { value: 'na', label: 'N/A', added: true },
   { value: 'pass', label: 'PASS' },
   { value: 'fail', label: 'FAIL' },
 ];
 
-const FLOW_RESULT_OPTIONS = [
-  { value: 'refer-to-report', label: 'Refer to Report' },
+const FLOW_RESULT_OPTIONS: ResultOption[] = [
+  { value: 'refer-to-report', label: 'Refer to Report', added: true },
   { value: 'pass', label: 'PASS' },
   { value: 'fail', label: 'FAIL' },
 ];
+
+/** Part G is banded with no result boxes at all, so every one of ours is added. */
+const PART_G_RESULT_OPTIONS: ResultOption[] = RESULT_OPTIONS.map((o) => ({ ...o, added: true }));
+
+/** What the <sup>+</sup> on a band box means, said once at the foot of the page. */
+export const ADDED_BOX_NOTE = 'A result box marked + is not on the department\'s form. '
+  + 'The department prints PASS and FAIL; N/A is recorded here because a part the job did '
+  + 'not cover is an answer, and three empty boxes are indistinguishable from a part nobody '
+  + 'filled in. Part D\'s \u201cRefer to Report\u201d is recorded for the same reason.';
 
 function band(title: string, boxes?: string): string {
   return `<div class="band"><span class="bandtitle">${esc(title)}</span>${boxes ?? ''}</div>`;
@@ -588,9 +617,31 @@ function partC(form: Form72, issues: FormIssue[]): string {
   const c: PartResult = 'pass';
   // The label is markup rather than text, because one row carries an "added"
   // marker. Every label here is written in this file, none comes from a form.
-  const row = (label: string, get: (d: TestDevice) => string | number | undefined): string =>
+  /*
+   * A column nobody used is unused, not a column of missing readings.
+   *
+   * The department prints four and most hydrant tests use one or two, so three
+   * columns of red "Not recorded" was the usual state of this part — red on
+   * every row of every form, which is red a reader learns to ignore. The same
+   * judgement deviceCalibration already makes: no serial number means an empty
+   * slot on the form rather than a device somebody failed to describe.
+   */
+  const unused = (d: TestDevice): boolean => !d.serialNumber.trim();
+
+  const row = (
+    label: string,
+    get: (d: TestDevice) => string | number | undefined,
+    skip?: (d: TestDevice) => string | undefined,
+  ): string =>
     `<tr><td class="k">${label}</td>${devices
-      .map((d) => `<td class="v">${cell(get(d), c)}</td>`).join('')}</tr>`;
+      .map((d) => `<td class="v">${
+        unused(d) ? '<span class="na">Not used</span>' : skip?.(d) ?? cell(get(d), c)
+      }</td>`).join('')}</tr>`;
+
+  /** A row that describes a gauge dial, answered on a device that has none. */
+  const gaugeOnly = (d: TestDevice): string | undefined => (
+    d.kind === 'flow-meter' ? '<span class="na">N/A for a flow meter</span>' : undefined
+  );
 
   const kinds = form.flowDeviceKinds;
   const partCIssues = issues.filter((i) => i.part === 'C');
@@ -609,7 +660,18 @@ function partC(form: Form72, issues: FormIssue[]): string {
     <tr><td class="k"></td>${columns.map((col, i) => `<td class="dh">${esc(col.head)}${
   i >= DEPARTMENT_DEVICE_SLOTS.length ? ' <span class="extra">added</span>' : ''}${
   col.named ? `<br /><span class="extra">${esc(col.named)}</span>` : ''}</td>`).join('')}</tr>
-    ${row('Serial number', (d) => d.serialNumber)}
+    ${/*
+       * The one row where a blank is the point. A column with a device on it
+       * and no serial number is a column somebody started, and that is the
+       * cell to be red about — so this row is not softened by `unused`.
+       */''}
+    <tr><td class="k">Serial number</td>${columns.map((col, i) => `<td class="v">${
+  col.device.serialNumber.trim()
+    ? esc(col.device.serialNumber)
+    : i < held.length
+      ? '<span class="missing">Not recorded</span>'
+      : '<span class="na">Not used</span>'
+}</td>`).join('')}</tr>
     ${row('Date calibrated', (d) => formatAuDate(d.dateCalibrated))}
     ${row('Correction certificate', (d) => d.calibrationCertificate)}
     ${/*
@@ -623,9 +685,18 @@ function partC(form: Form72, issues: FormIssue[]): string {
        * reader is never shown an added row as the department's.
        */
   row('Correction factor (kPa or %) <span class="extra">added</span>', (d) => d.correctionFactor)}
-    ${row('65/100/150 mm face', (d) => d.faceSize)}
+    ${/*
+       * Two rows that describe a dial.
+       *
+       * A flow meter has no 100 mm face and no kPa increment, and printing
+       * "Not recorded" in red against them says a measurement is missing when
+       * the measurement does not exist. A device recorded as a meter answers
+       * them "N/A for a flow meter" instead, which is an answer rather than an
+       * omission — the same distinction the rest of this page is built on.
+       */''}
+    ${row('65/100/150 mm face', (d) => d.faceSize, gaugeOnly)}
     ${row('Digital reader', (d) => (d.digitalReader === undefined ? undefined : d.digitalReader ? 'Yes' : 'No'))}
-    ${row('Increments (kPa)', (d) => d.incrementsKpa)}
+    ${row('Increments (kPa)', (d) => d.incrementsKpa, gaugeOnly)}
     ${/*
        * Also ours. The department's grid prints a calibration date and leaves
        * the reader to know the interval; one of Safe QLD's two flow meters is
@@ -736,17 +807,39 @@ function partD(form: Form72): string {
     // leave most of them alone — flagging those in red would train a reader to
     // ignore the flag on the row that matters.
     const untouched = flowRowUntouched(row);
-    const c = (v: string | number | undefined): string =>
-      (untouched ? '<span class="na">Not run</span>' : cell(v, r));
+    const devicesCell = untouched ? '<span class="na">Not run</span>' : cell(row.devices, r);
+
+    /*
+     * Three states per cell, not two.
+     *
+     * A reading prints with its unit. A cell to the right of the last reading
+     * in its row was not run — a 19 mm nozzle proved at one hydrant is an
+     * ordinary complete test, and red in its other three columns is the same
+     * mistake as flagging the rates nobody ran. A cell with readings on both
+     * sides of it is a genuine gap and stays red.
+     *
+     * The unit goes with the number. "Not recorded kPa" was what printing it
+     * unconditionally produced.
+     */
+    const pressure = (column: FlowRowColumn): string => {
+      switch (flowCellState(row, column)) {
+        case 'read': return `${esc(row[column])} <span class="u">kPa</span>`;
+        case 'not-run': return r === 'na'
+          ? '<span class="na">N/A</span>'
+          : '<span class="na">Not run</span>';
+        default: return '<span class="missing">Not recorded</span>';
+      }
+    };
+
     const sp = spanAt.get(i);
     return `<tr>
       ${sp ? `<td class="grp" rowspan="${sp.count}">${esc(FLOW_ROW_GROUP_LABEL[sp.group])}</td>` : ''}
       <td class="k">${esc(flowRowLabel(row))}${standard ? '' : ' <span class="extra">added</span>'}</td>
-      <td class="v">${c(row.devices)}</td>
-      <td class="v">${c(row.hydrant1Kpa)} ${untouched ? '' : '<span class="u">kPa</span>'}</td>
-      <td class="v">${c(row.hydrants12Kpa)} ${untouched ? '' : '<span class="u">kPa</span>'}</td>
-      <td class="v">${c(row.hydrants123Kpa)} ${untouched ? '' : '<span class="u">kPa</span>'}</td>
-      <td class="v">${c(row.hydrants1234Kpa)} ${untouched ? '' : '<span class="u">kPa</span>'}</td>
+      <td class="v">${devicesCell}</td>
+      <td class="v">${pressure('hydrant1Kpa')}</td>
+      <td class="v">${pressure('hydrants12Kpa')}</td>
+      <td class="v">${pressure('hydrants123Kpa')}</td>
+      <td class="v">${pressure('hydrants1234Kpa')}</td>
     </tr>`;
   }).join('')}
     <tr><td class="k" colspan="2">System achieved (L/s at kPa)</td><td class="v" colspan="5">${achieved}</td></tr>
@@ -989,7 +1082,12 @@ function partG(form: Form72): string {
     ${point(2, g.testPoints[1])}
     ${extra.map((p, i) => point(3 + i, p)).join('')}`;
 
-  return `${band('Part G — Sprinkler system flow test', resultBoxes(r, RESULT_OPTIONS))}
+  /*
+   * Part G is the one part the department bands with no result boxes at all.
+   * Its Pass and Fail boxes are on each test point's two lines, not on the
+   * part. So all three boxes here are Safe QLD's, and all three say so.
+   */
+  return `${band('Part G — Sprinkler system flow test', resultBoxes(r, PART_G_RESULT_OPTIONS))}
   ${note(PART_G_NOTE)}
   <table class="grid">
     ${pair(['System specifications (block plan)', cell(g.systemSpec, r)], ['Test results', cell(achieved, r)])}
@@ -1049,11 +1147,30 @@ function partH(form: Form72): string {
     : ''}`;
 }
 
+/**
+ * The signature, as a signature.
+ *
+ * It is stored as a data URI, and the page printed it through the ordinary
+ * cell renderer — which escapes it and lays it out as text. A signed form came
+ * out with "data:image/png;base64,iVBORw0KG..." in the box where the signature
+ * belongs, which is the one field on the document that cannot be a string.
+ */
+function signatureCell(signature: string | undefined): string {
+  const v = signature?.trim();
+  if (!v) return '<span class="missing">Not signed</span>';
+  if (!/^data:image\//.test(v)) {
+    // Something else was stored there. Printed as written rather than dropped
+    // — a typed name in the signature box is a fact about the document.
+    return esc(v);
+  }
+  return `<img class="sig" src="${esc(v)}" alt="Licensee signature" />`;
+}
+
 function partI(form: Form72): string {
   return `${band('Part I — Signature')}
   <div class="decl">${esc(DECLARATION)}</div>
   <table class="grid sig">
-    ${pair(['Licensee name', cell(form.licenseeName, 'pass')], ['Licensee signature', cell(form.signature, 'pass')])}
+    ${pair(['Licensee name', cell(form.licenseeName, 'pass')], ['Licensee signature', signatureCell(form.signature)])}
     ${pair(['Licence no. (QBCC/PIC)', cell(form.licenceNumber, 'pass')],
     // Not every job has one, so its absence is answered rather than flagged.
     ['Licensee report no.', form.licenseeReportNumber?.trim()
@@ -1205,6 +1322,8 @@ const CSS = `
           font-size: 7.5px; line-height: 1.55; color: #444; }
   .ours b { color: #1b1b1b; }
   .attachpage { page-break-before: always; break-before: page; }
+  img.sig { max-height: 42px; max-width: 100%; display: block; }
+  .results sup { font-size: 7px; vertical-align: super; opacity: 0.85; }
   td.grp { background: #F2F2F2; font-weight: 700; width: 11%; vertical-align: middle; }
   .u { color: #666; font-size: 7px; }
   .deptfine { border: 1px solid #D5D8E4; background: #FAFAFC; padding: 5px 9px; margin-top: 5px;
@@ -1298,6 +1417,7 @@ export function form72Html(input: Form72DocumentInput): string {
   ${partI(form)}
   ${attachment(form)}
 
+  <div class="subnote">${esc(ADDED_BOX_NOTE)}</div>
   <div class="deptnote">${esc(DEPARTMENT_NOTE)}</div>
   <div class="deptfine">${esc(DEPARTMENT_PRIVACY)}</div>
   <div class="deptfine">${esc(DEPARTMENT_RTI)}</div>
