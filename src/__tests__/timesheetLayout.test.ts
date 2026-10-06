@@ -138,7 +138,23 @@ describe('the timesheet at whatever width it is given', () => {
   it('puts the workbook on the email itself, not only on Export', () => {
     // The whole point of the button: accounts should not have to ask for the
     // spreadsheet after reading the summary.
-    expect(timesheet).toMatch(/sendMail\([\s\S]{0,400}\[file\]/);
+    expect(timesheet).toMatch(/sendMail\([\s\S]{0,400}\[file, page\]/);
+  });
+
+  it('sends the readable page beside the workbook, and second', () => {
+    /*
+     * Fifteen columns is right for payroll and unreadable on the handset the
+     * email arrives on, so both go. The workbook stays the FIRST attachment:
+     * that is the one the office opens, and an email whose first attachment
+     * changed would retrain everybody who handles it.
+     */
+    expect(timesheet).toContain('timesheetDocumentHtml(sheet)');
+    expect(timesheet).toMatch(/sendMail\([\s\S]{0,400}\[file, page\]/);
+  });
+
+  it('offers the page on its own as well, for somebody who wants only that', () => {
+    expect(timesheet).toContain('title="Readable copy"');
+    expect(timesheet).toContain('const sharePage');
   });
 
   it('gives the summary card the week, so it stands beside the paperwork', () => {

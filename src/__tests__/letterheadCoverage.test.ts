@@ -12,6 +12,7 @@ import { effectivenessReportHtml, type EffectivenessReportInput } from '@/export
 import { DEPARTMENT_NOTE, form72Html } from '@/export/form72';
 import { impairmentNoticeHtml } from '@/export/impairmentNotice';
 import { occupierStatementHtml, type OccupierStatementInput } from '@/export/occupierStatement';
+import { timesheetDocumentHtml } from '@/export/timesheetDocument';
 import { causeEffectHtml, serviceReportHtml } from '@/export/pdf';
 import { quoteDocumentHtml } from '@/export/quoteDocument';
 import { routineServiceReportHtml } from '@/export/routineServiceReport';
@@ -326,6 +327,30 @@ const DOCUMENTS: DocumentRow[] = [
     name: 'annual occupier statement',
     file: 'occupierStatement.ts',
     html: () => occupierStatementHtml(occupierInput),
+    furniture: 'full',
+    page: LETTERHEAD_PAGE,
+    pageRules: 1,
+  },
+  {
+    name: 'timesheet reading copy',
+    file: 'timesheetDocument.ts',
+    html: () => timesheetDocumentHtml({
+      id: 't1',
+      employeeName: 'L. Hayes',
+      vehicleRego: 'ABC123',
+      kilometerReading: '120450',
+      weekStarting: '2026-08-10',
+      entries: [{
+        id: 'a', date: '2026-08-10', jobNumber: '43747', siteName: 'Kingaroy Fire Station',
+        serviceReportNumber: '', startTime: '06:30', finishTime: '14:30', hourKind: 'ord',
+        sick: '', rdo: '', annual: '', lwop: '', publicHoliday: '', comments: '',
+      }],
+      managerName: '',
+      checkedBy: '',
+      status: 'draft',
+      createdAt: '2026-08-10T00:00:00.000Z',
+      updatedAt: '2026-08-10T00:00:00.000Z',
+    }),
     furniture: 'full',
     page: LETTERHEAD_PAGE,
     pageRules: 1,

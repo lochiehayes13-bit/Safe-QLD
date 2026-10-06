@@ -24,8 +24,9 @@ import {
   type TimesheetRouteId,
 } from '@/domain/timesheetEmail';
 import { timesheetSheet, timesheetSummarySheet } from '@/export/safeqldForms';
+import { timesheetDocumentHtml } from '@/export/timesheetDocument';
 import { formatAuDate } from '@/export/sheets';
-import { shareFile, writeXlsx } from '@/export/files';
+import { shareFile, writePdf, writeXlsx } from '@/export/files';
 import { sendMail } from '@/export/mail';
 import { notSharedNotice } from '@/export/shareOutcome';
 import { newId, nowIso } from '@/db';
@@ -311,6 +312,26 @@ export default function TimesheetScreen() {
     [timesheetSheet(sheet), timesheetSummarySheet(sheet)],
   );
 
+  /**
+   * The same week as a page, for reading on a phone.
+   *
+   * The workbook is fifteen columns because that is what payroll works from.
+   * It is also what the week is read on — it arrives by email and the person
+   * who filled it in has no desk — and fifteen columns on a handset is a grid
+   * of cells too small to read, scrolled sideways with the headings off the
+   * edge. Every other document this app produces has a page form; the
+   * timesheet was the only one that did not, so the document everybody checks
+   * every week was the one nobody could read.
+   *
+   * It goes with the workbook rather than instead of it. Both carry the same
+   * figures, from the same domain functions, and the page says on its face
+   * which of the two payroll acts on.
+   */
+  const readingCopy = () => writePdf(
+    `Timesheet ${sheet.employeeName || ''} ${formatAuDate(sheet.weekStarting)}`.trim(),
+    timesheetDocumentHtml(sheet),
+  );
+
   /*
    * The chosen route, resolved once.
    *
@@ -325,12 +346,20 @@ export default function TimesheetScreen() {
     if (blocked) { showAlert('Not ready to send', blocked); return; }
     setBusy(true);
     try {
-      // The workbook is built and handed over whichever way the email goes:
-      // payroll works from the attachment, and the body is only the glance.
+      /*
+       * Both files. Payroll works from the workbook; the page is what the
+       * person who filled it in, and anybody approving it, can actually read
+       * on the phone the email arrives on.
+       *
+       * The page is attached second so the workbook stays the first attachment
+       * — that is the one the office opens, and an email whose first
+       * attachment changed would retrain everybody who handles it.
+       */
       const file = workbook();
+      const page = await readingCopy();
       const outcome = await sendMail(
         { to: route.to, subject: timesheetSubject(sheet), body: timesheetBody(sheet) },
-        [file],
+        [file, page],
       );
 
       if (outcome === 'no-mail-app') {
@@ -358,6 +387,22 @@ export default function TimesheetScreen() {
       showAlert('Not sent', 'The email was not sent, so this sheet is still a draft. Nothing has gone to the office.');
     } catch (e) {
       showAlert('Could not send', describeActionFailure(e, 'email this timesheet'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sharePage = async () => {
+    setBusy(true);
+    try {
+      const file = await readingCopy();
+      const shared = await shareFile(file, 'Timesheet');
+      if (!shared) {
+        const notice = notSharedNotice(file.name, 'timesheet');
+        showAlert(notice.title, notice.body);
+      }
+    } catch (e) {
+      showAlert('Could not produce it', describeActionFailure(e, 'produce this timesheet'));
     } finally {
       setBusy(false);
     }
@@ -513,13 +558,19 @@ export default function TimesheetScreen() {
       <Button title={route.action} onPress={() => { void emailSheet(); }} loading={busy} icon={<MaterialCommunityIcons name="send-outline" size={20} color={t.color.onAccent} />} />
       <Rowed gap={2}>
         <Button title="Export" variant="secondary" onPress={() => { void exportSheet(); }} loading={busy} style={{ flex: 1 }} />
-        <Button
-          title={sheet.status === 'submitted' ? 'Back to draft' : 'Mark submitted'}
-          variant="ghost"
-          onPress={() => void persist({ status: sheet.status === 'submitted' ? 'draft' : 'submitted' })}
-          style={{ flex: 1 }}
-        />
+        {/*
+          * The week as a page, on its own, for somebody who wants to read or
+          * send it without the spreadsheet. Labelled for what it is good for
+          * rather than for its file type: "PDF" says nothing about why you
+          * would want this one.
+          */}
+        <Button title="Readable copy" variant="secondary" onPress={() => { void sharePage(); }} loading={busy} style={{ flex: 1 }} />
       </Rowed>
+      <Button
+        title={sheet.status === 'submitted' ? 'Back to draft' : 'Mark submitted'}
+        variant="ghost"
+        onPress={() => void persist({ status: sheet.status === 'submitted' ? 'draft' : 'submitted' })}
+      />
       {/*
         * The addresses in full rather than the names, because "Matt" is a
         * person and matt@safeqld.com.au is where the week actually lands, and
