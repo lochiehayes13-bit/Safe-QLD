@@ -88,3 +88,37 @@ describe('raising a defect from a job with no site', () => {
     expect(defectScreen).toContain("showAlert('Which site?'");
   });
 });
+
+describe('controls that used to do nothing', () => {
+  /*
+   * Three presses in this app were swallowed on a site with nothing attached:
+   * a bare `return` on an export, a form that rendered nothing when there was
+   * no panel to attach it to, and a "pick a site" alert on a screen that had
+   * the whole site list in hand. A control that does nothing and says nothing
+   * is read as the app being broken, which is a worse conclusion than the
+   * true one — and the third is the owner's ask in miniature: the site was
+   * right there and the module would not give it to you.
+   */
+  const read = (...parts: string[]): string =>
+    readFileSync(join(__dirname, '..', '..', ...parts), 'utf8');
+
+  it('the zone export says why rather than returning', () => {
+    const zones = read('app', 'site', 'zones.tsx');
+    expect(zones).not.toContain('if (!panel || !zones.length) return;');
+    expect(zones).toContain("showAlert(\n        'No panel selected',");
+    expect(zones).toContain("'This panel has no zones',");
+  });
+
+  it('cause and effect says a site with no panel has nothing to attach a rule to', () => {
+    const ce = read('app', 'site', 'cause-effect.tsx');
+    expect(ce).toContain('{adding && !panelId ? (');
+    expect(ce).toContain('This site has no panel on the phone yet');
+  });
+
+  it('baseline data offers the site list it already holds', () => {
+    const b = read('app', 'work', 'baselines.tsx');
+    expect(b).not.toContain("showAlert('Pick a site'");
+    expect(b).toContain('setPicking(all)');
+    expect(b).toContain('<SitePicker');
+  });
+});

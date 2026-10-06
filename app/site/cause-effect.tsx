@@ -153,6 +153,22 @@ export default function CauseEffectScreen() {
           </Rowed>
         ) : null}
 
+        {/*
+          * A site with no panel has nothing to write a rule against, and the
+          * button said nothing about it: tapping "Add a cause" set `adding`
+          * and then this rendered nothing, so the press was swallowed. A
+          * control that does nothing and says nothing is read as the app
+          * being broken, which is a worse conclusion than the true one.
+          */}
+        {adding && !panelId ? (
+          <Banner
+            tone="info"
+            title="This site has no panel on the phone yet"
+            body="A cause and effect rule is written against a panel's zones, so there is nothing to
+              attach one to. Import the panel's configuration, or sync the site, and this opens up."
+          />
+        ) : null}
+
         {adding && panelId ? (
           <AddRule
             zones={zones}

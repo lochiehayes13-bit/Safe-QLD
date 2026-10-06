@@ -61,7 +61,28 @@ export default function ZonesScreen() {
 
   const exportZones = async () => {
     const panel = panels.find((p) => p.id === activePanel);
-    if (!panel || !zones.length) return;
+    /*
+     * Said, not swallowed. This was a bare return on a button press, so on a
+     * site with no panel or a panel with no zones the press did nothing at
+     * all — and a control that does nothing silently is read as the app being
+     * broken rather than as there being nothing to export.
+     */
+    if (!panel) {
+      showAlert(
+        'No panel selected',
+        'A zone list belongs to a panel. Pick one above, or import the panel\u2019s configuration '
+        + 'if this site has none on the phone yet.',
+      );
+      return;
+    }
+    if (!zones.length) {
+      showAlert(
+        'This panel has no zones',
+        'There is nothing to put in a zone list yet. Zones arrive with the panel\u2019s '
+        + 'configuration, or can be added on this screen.',
+      );
+      return;
+    }
     setExporting(true);
     try {
       const file = writeXlsx(`${site?.name ?? 'Site'} zones`, [zoneSheet(panel, zones)]);
