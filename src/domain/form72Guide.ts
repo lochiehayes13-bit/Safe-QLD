@@ -121,7 +121,27 @@ export const GUIDE_ORDER: readonly GuidePart[] = [
 export function partAnswered(form: Form72, part: GuidePart): boolean {
   if (form.answeredParts?.includes(part)) return true;
   switch (part) {
-    case 'A': return !!form.testDate && !!form.contractor.trim();
+    /*
+     * The maintenance grid, not the date and the contractor.
+     *
+     * Those two are prefill: form72FromJob always supplies a test date, and
+     * the contractor is the company name out of this phone's own settings. So
+     * a Form 72 started from a job read as having Part A answered before
+     * anybody had opened it — the guide skipped straight to Part C, and
+     * outstandingParts never named A, while every other part's own reason said
+     * "Part A does not say yet which system was tested, so nothing is ruled
+     * out". The guide contradicted itself in the same breath, and walked the
+     * technician past the part that decides whether any of the others apply.
+     *
+     * The grid is the one thing on Part A that only a person can supply: the
+     * job rarely names the test unambiguously, and nothing infers it. A form
+     * started from a site had no test date, so Part A stayed outstanding there
+     * and the two entry points disagreed; now they do not.
+     *
+     * Once somebody opens Part A and answers anything, recordAnswered writes
+     * it to answeredParts and this is not consulted at all.
+     */
+    case 'A': return Object.values(form.maintenanceTest).some(Boolean) && !!form.testDate;
     case 'B': return form.hydrostatic.result !== 'na';
     case 'C': return form.devices.length > 0;
     case 'D': return form.flowTest.result !== 'na';

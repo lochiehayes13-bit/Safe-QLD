@@ -281,61 +281,88 @@ describe('every screen that offers a site offers a way to search for it', () => 
   });
 
   const all = screens(join(__dirname, '..', '..', 'app'));
+  const named = (f: string) => f.slice(f.indexOf('/app/') + 1);
 
   it('finds the app’s screens, so this test is not passing on an empty list', () => {
     expect(all.length).toBeGreaterThan(60);
   });
 
-  it.each(all.map((f) => [f.slice(f.indexOf('/app/') + 1), f] as const))(
-    '%s renders no site list of its own',
-    (_name, path) => {
-      const source = readFileSync(path, 'utf8');
-      /*
-       * The shape that goes wrong is a screen that holds every site and then
-       * RENDERS them. Two other uses of the same expression are fine and have
-       * to stay fine: `new Map(sites.map(…))` builds an id-to-name lookup, and
-       * `sites.map(…)` feeding a domain function is a data transform — the
-       * portfolio screen reshapes all three thousand into buildPortfolio's
-       * input and never draws one. So the test is whether the mapped body
-       * opens a component.
-       */
-      const listsEverySite = /\bconst \[sites[\s\S]*?(listSites\(\)|listSitePicks\(\))/.test(source);
-      if (!listsEverySite) return;
+  /**
+   * The screens that read every site and are right to.
+   *
+   * Each is here with its reason, because an allow-list without one is a
+   * list of screens somebody could not be bothered to check. None of them
+   * offers a site to pick: they build an id-to-name lookup to label rows
+   * they already have, or hand the whole list to a domain function that
+   * draws none of it.
+   */
+  const ALLOWED: Record<string, string> = {
+    'app/customer/[id].tsx': 'maps the office’s site numbers onto this phone’s ids, to open this customer’s own sites',
+    'app/occupier/index.tsx': 'an id-to-site lookup, to put a name under each statement',
+    'app/work/defects.tsx': 'an id-to-name lookup, to put a site under each defect',
+    'app/work/outbound.tsx': 'an id-to-site lookup, for the rows already on screen',
+    'app/work/portfolio.tsx': 'hands every site to buildPortfolio, which draws none of them',
+    'app/work/reports.tsx': 'an id-to-site lookup, to put a name under each report',
+  };
 
-      /*
-       * Two shapes, because the first version of this guard looked only for
-       * `sites.map(` and missed the one screen that mattered: app/work/labels
-       * .tsx drew all three thousand through `<FlatList data={sites}>`. A
-       * guard narrower than its own claim is worse than no guard, so it now
-       * covers both ways of rendering a list.
-       */
-      const renders = [
-        ...source.matchAll(/\bsites\.map\(/g),
-        ...source.matchAll(/\bdata=\{\s*sites\b/g),
-      ];
-      for (const hit of renders) {
-        const before = source.slice(Math.max(0, hit.index - 40), hit.index);
-        if (before.includes('new Map(')) continue;
-        /*
-         * A rendered row opens a capitalised element in the arrow body. A
-         * FlatList's `data=` needs no such check — handing it the list IS
-         * rendering the list.
-         */
-        const body = source.slice(hit.index, hit.index + 240);
-        const isList = /^\bdata=/.test(source.slice(hit.index, hit.index + 5));
-        if (!isList && !/=>\s*\(?\s*<[A-Z]/.test(body)) continue;
-        expect({
-          screen: path.slice(path.indexOf('/app/') + 1),
-          rendersWholeList: true,
-          note: 'use SitePicker, which searches name, suburb, client, reference and address',
-        }).toEqual({
-          screen: path.slice(path.indexOf('/app/') + 1),
-          rendersWholeList: false,
-          note: 'use SitePicker, which searches name, suburb, client, reference and address',
-        });
-      }
+  /*
+   * Anchored on where the rows come from, not on what the variable is called.
+   *
+   * The first version of this looked for `const [sites` and then for
+   * `sites.map(` with a JSX arrow body. A screen holding
+   * `const [allSites] = useState(…)` from listSitePicks() and rendering
+   * `allSites.map((s) => { return <Chip … /> })` walked straight through it,
+   * and so did every other spelling — while the test's name claimed a third
+   * raw site list could not be written. A guard narrower than the claim made
+   * for it is worse than no guard, which is the lesson this file already
+   * carries one paragraph up about `<FlatList data={sites}>`.
+   *
+   * So: a screen that reads the whole site list must go through the picker,
+   * and the handful that legitimately do not are named above with why.
+   */
+  it.each(all.map((f) => [named(f), f] as const))(
+    '%s reads the whole site list only through the picker',
+    (name, path) => {
+      const source = readFileSync(path, 'utf8');
+      const readsEverySite = /\blistSites\s*\(|\blistSitePicks\s*\(/.test(source);
+      if (!readsEverySite || ALLOWED[name]) return;
+      expect({
+        screen: name,
+        goesThroughThePicker: source.includes('SitePicker'),
+        note: 'use SitePicker, which searches name, suburb, client, reference and address',
+      }).toEqual({
+        screen: name,
+        goesThroughThePicker: true,
+        note: 'use SitePicker, which searches name, suburb, client, reference and address',
+      });
     },
   );
+
+  it('every screen on the allow-list still reads every site, so the list cannot go stale', () => {
+    // A name left here after the screen stopped reading the list is a hole
+    // nobody would notice: the next screen to take that path is exempt.
+    for (const name of Object.keys(ALLOWED)) {
+      const path = all.find((f) => named(f) === name);
+      expect({ name, present: !!path }).toEqual({ name, present: true });
+      const source = readFileSync(path!, 'utf8');
+      expect({ name, reads: /\blistSites\s*\(|\blistSitePicks\s*\(/.test(source) })
+        .toEqual({ name, reads: true });
+    }
+  });
+
+  it('and none of them draws a site list to pick from', () => {
+    /*
+     * The reason each one is allowed, checked rather than taken on trust: a
+     * lookup is built with `new Map(`, and the portfolio hands its list to a
+     * domain function. A screen on this list that started rendering sites
+     * would be the fourth raw site list, exempted by its own entry.
+     */
+    for (const name of Object.keys(ALLOWED)) {
+      const source = readFileSync(all.find((f) => named(f) === name)!, 'utf8');
+      const lookupOrDomain = source.includes('new Map(') || source.includes('buildPortfolio');
+      expect({ name, lookupOrDomain }).toEqual({ name, lookupOrDomain: true });
+    }
+  });
 
   it('searches what a person standing on site actually has', () => {
     /*

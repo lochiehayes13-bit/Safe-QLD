@@ -384,3 +384,65 @@ describe('what this module must never do', () => {
     expect(validateForm72(f).filter((i) => i.blocking)).toEqual([]);
   });
 });
+
+describe('a Form 72 started from a job, before anybody opens it', () => {
+  /*
+   * The guide skipped Part A on every job-started form.
+   *
+   * Part A's fallback read "has a test date and a contractor", and both are
+   * prefill: form72FromJob always supplies a date, and the contractor is the
+   * company name out of this phone's own settings. So the part that decides
+   * whether any of the others apply was marked answered before anybody had
+   * seen it — outstandingParts never named it, WhatIsLeft never named it, and
+   * the first guide step was Part C, while every other part's own reason said
+   * "Part A does not say yet which system was tested".
+   *
+   * A form started from a site had no test date, so Part A stayed outstanding
+   * there: two entry points, two answers, on the statutory form.
+   */
+  const prefilled = () => {
+    const form = emptyForm72({ id: 'f', siteId: 's', siteName: 'Harbourline', now: '2026-10-06T00:00:00.000Z' });
+    form.testDate = '2026-10-06';
+    form.contractor = 'Safe QLD Pty Ltd';
+    return form;
+  };
+
+  it('is not answered by a date and a company name nobody typed', () => {
+    expect(partAnswered(prefilled(), 'A')).toBe(false);
+  });
+
+  it('still names Part A as outstanding', () => {
+    expect(outstandingParts(prefilled()).map((p) => p.part)).toContain('A');
+  });
+
+  it('starts the technician on Part A, which is where the guide says to start', () => {
+    expect(nextGuideStep(prefilled())?.part).toBe('A');
+  });
+
+  it('is answered once the maintenance grid says what the test was', () => {
+    const form = prefilled();
+    form.maintenanceTest = { ...form.maintenanceTest, hydrantAnnual: true };
+    expect(partAnswered(form, 'A')).toBe(true);
+  });
+
+  it('goes back to outstanding if the test date is taken off', () => {
+    const form = prefilled();
+    form.maintenanceTest = { ...form.maintenanceTest, hydrantAnnual: true };
+    form.testDate = undefined;
+    expect(partAnswered(form, 'A')).toBe(false);
+  });
+
+  it('is answered outright once somebody has opened it and said so', () => {
+    // recordAnswered writes the part down the moment a technician answers it,
+    // including when the answer is "not applicable", and then none of the
+    // above is consulted.
+    const form = prefilled();
+    form.answeredParts = ['A'];
+    expect(partAnswered(form, 'A')).toBe(true);
+  });
+
+  it('agrees with a form started from a site, which has no date at all', () => {
+    const fromSite = emptyForm72({ id: 'g', siteId: 's', siteName: 'Harbourline', now: '2026-10-06T00:00:00.000Z' });
+    expect(partAnswered(fromSite, 'A')).toBe(partAnswered(prefilled(), 'A'));
+  });
+});
