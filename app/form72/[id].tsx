@@ -136,6 +136,16 @@ export default function Form72Screen() {
   // And a read that threw is neither. See RecordGate.
   const [failed, setFailed] = useState<string | null>(null);
   const [part, setPart] = useState<PartKey>('A');
+  /*
+   * One part at a time, or the lot.
+   *
+   * A part at a time is the default and the reason is in this file's own
+   * comment: a nine-part form scrolled as one column is how somebody ends up in
+   * Part G having silently skipped Part D. But a technician working down a
+   * finished test wants to work down it, not tap between nine screens, and the
+   * strip above still marks which parts are answered either way.
+   */
+  const [whole, setWhole] = useState(false);
   const [companyName, setCompanyName] = useState('');
   const [busy, setBusy] = useState(false);
   const [attaching, setAttaching] = useState(false);
@@ -513,9 +523,23 @@ export default function Form72Screen() {
         />
       ) : null}
 
-      <PartStrip form={form} issues={issues} value={part} onChange={setPart} />
+      <Segmented
+        value={whole ? 'whole' : 'part'}
+        onChange={(v) => setWhole(v === 'whole')}
+        options={[
+          { value: 'part' as const, label: 'One part' },
+          { value: 'whole' as const, label: 'Whole form' },
+        ]}
+      />
 
-      {!locked && part === 'A' ? (
+      <PartStrip
+        form={form}
+        issues={issues}
+        value={part}
+        onChange={(p) => { setPart(p); setWhole(false); }}
+      />
+
+      {!locked && (whole || part === 'A') ? (
         <Button
           title="Fill the lists from the site's register"
           variant="secondary"
@@ -525,12 +549,14 @@ export default function Form72Screen() {
         />
       ) : null}
 
-      <PartBody
-        part={part}
-        form={form}
-        locked={!!locked}
-        patch={patch}
-      />
+      {whole
+        ? PARTS.map((p) => (
+          <View key={p.key} style={{ gap: t.space(3) }}>
+            <Divider />
+            <PartBody part={p.key} form={form} locked={!!locked} patch={patch} />
+          </View>
+        ))
+        : <PartBody part={part} form={form} locked={!!locked} patch={patch} />}
 
       <Divider />
 
