@@ -1366,6 +1366,22 @@ function PartC({ form, locked, patch }: PartProps) {
                       label={`+ ${preset.label}`}
                       onPress={() => patch({
                         devices: [...devices, { slot: deviceSlotName(devices.length), ...preset.device }],
+                        /*
+                         * A measuring element the certificate names goes on with
+                         * the device. One it does not name stays the
+                         * technician's, which is what the note under these chips
+                         * says — and the field was declared, documented as doing
+                         * exactly this, and read by nothing.
+                         *
+                         * Both keys in one patch rather than two calls: patch is
+                         * built from this render's form, so a second call would
+                         * be computed off the form as it was before the device
+                         * went on and would drop it.
+                         */
+                        ...(preset.flowDeviceKind
+                          && !form.flowDeviceKinds.includes(preset.flowDeviceKind)
+                          ? { flowDeviceKinds: [...form.flowDeviceKinds, preset.flowDeviceKind] }
+                          : {}),
                       })}
                     />
                     <Txt size="xs" tone="faint">{preset.detail}</Txt>

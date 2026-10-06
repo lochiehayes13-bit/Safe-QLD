@@ -10,14 +10,14 @@ import {
 import { MIGRATION_V12 } from '@/db/schemaForm72';
 import { DEVICE_PRESETS, DEVICE_PRESET_SOURCE, unusedDevicePresets } from '@/domain/form72Devices';
 import {
-  CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, FLOW_ROW_COLUMNS,
+  CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, FLOW_DEVICE_LABEL, FLOW_ROW_COLUMNS,
   PART_G_PRINTED_TEST_POINTS, flowCellState, flowDeviceCalibrationFrom,
   flowRowColumnsRun, flowRowDevices, flowRowLabel,
   sprinklerTestPointLines, sprinklerTestPointUntouched,
   PART_D_NOZZLE_SIZES_MM, PART_D_ROWS, deviceCalibration, emptyForm72, intervalsTested,
   maintenanceTestCell, maintenanceTestFromAxes, overloadCheck, resolveFrictionalLoss,
   systemTypesTested, validateForm72,
-  type FlowRow, type Form72, type MaintenanceTest, type TestDevice,
+  type FlowDeviceKind, type FlowRow, type Form72, type MaintenanceTest, type TestDevice,
 } from '@/domain/form72';
 import { MIGRATIONS, SCHEMA_VERSION } from '@/db/schema';
 import { MIGRATION_V34 } from '@/db/schemaV34';
@@ -2529,5 +2529,51 @@ describe('Part D’s reference to a Part C device', () => {
     });
     const issue = validateForm72(form).find((i) => i.message.includes('Part C does not list'))!;
     expect((issue.message.match(/DG1/g) ?? [])).toHaveLength(1);
+  });
+});
+
+describe('a preset that names its measuring element', () => {
+  /*
+   * DevicePreset.flowDeviceKind was declared, documented as "the Part C
+   * flow-measuring-device tick this one belongs under", and read by nothing in
+   * the app. A doc comment that makes an active claim about behaviour nothing
+   * implements is worse than no field: the next person to set it would have
+   * believed it worked.
+   *
+   * These hold the contract at the data level, since the wiring itself is one
+   * patch in a screen this suite cannot mount.
+   */
+  it('leaves the kind unset where the certificate does not name one', () => {
+    for (const preset of DEVICE_PRESETS) {
+      expect({ id: preset.id, kind: preset.flowDeviceKind })
+        .toEqual({ id: preset.id, kind: undefined });
+      expect(preset.flowDeviceKindNote).toBeTruthy();
+    }
+  });
+
+  it('pairs an unset kind with a note, and a set kind with none', () => {
+    // One or the other, never neither: a preset that names no element has to
+    // say so on the screen, because the tick is then the technician's.
+    for (const preset of DEVICE_PRESETS) {
+      const named = preset.flowDeviceKind !== undefined;
+      expect({ id: preset.id, ok: named !== (preset.flowDeviceKindNote !== undefined) })
+        .toEqual({ id: preset.id, ok: true });
+    }
+  });
+
+  it('would tick a kind the page already renders, if one were set', () => {
+    // The three ticks are driven off form.flowDeviceKinds, so a preset's kind
+    // has to be one of those three values to reach the box at all.
+    const kinds: FlowDeviceKind[] = ['orifice', 'mechanical', 'electromagnetic'];
+    for (const preset of DEVICE_PRESETS) {
+      if (preset.flowDeviceKind) expect(kinds).toContain(preset.flowDeviceKind);
+    }
+    // And the page does render each of them from that array.
+    for (const kind of kinds) {
+      const html = form72Html(doc({ form: issuable({ flowDeviceKinds: [kind] }) }));
+      const row = between(html, 'Flow measuring device', '</tr>');
+      expect({ kind, ticked: row.includes(`<span class="cb on">&#10007;</span>${FLOW_DEVICE_LABEL[kind]}`) })
+        .toEqual({ kind, ticked: true });
+    }
   });
 });
