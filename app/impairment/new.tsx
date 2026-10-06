@@ -30,11 +30,25 @@ export default function NewImpairmentScreen() {
   const [technician, setTechnician] = useState('');
   const [saving, setSaving] = useState(false);
 
+  /*
+   * The site list, and what happens when it cannot be read.
+   *
+   * This had no catch, so a read that rejected — a database locked by a sync
+   * is the realistic case — left `sites` empty for ever with nothing on screen
+   * saying so. Paired with the gate below it, that was a dead end on a
+   * time-critical document: the technician filled in the scope, tapped
+   * Declare impairment, and got "Which site? Pick the site the system belongs
+   * to" pointing at a picker that was not on the page. impairment.siteId is
+   * NOT NULL REFERENCES site(id), so there is no saving it without one.
+   */
+  const [sitesFailed, setSitesFailed] = useState(false);
   useEffect(() => {
-    void listSitePicks().then((s) => {
-      setSites(s);
-      if (s.length === 1) setSiteId(s[0]!.id);
-    });
+    void (async () => {
+      const rows = await listSitePicks().catch(() => null);
+      if (rows === null) { setSitesFailed(true); return; }
+      setSites(rows);
+      if (rows.length === 1) setSiteId(rows[0]!.id);
+    })();
     void loadPrefs().then((p) => setTechnician(p.technicianName));
   }, []);
 
@@ -75,9 +89,26 @@ export default function NewImpairmentScreen() {
           body="From the moment you declare it, the app tracks how long the system has been down and shows it on your home screen until it is restored. Notifications and fire watch are tracked on the next screen."
         />
 
-        {sites.length > 1 ? (
+        {/*
+          * Shown whenever there is a site to pick, and whenever there is not.
+          *
+          * It rendered only above one site, so a phone holding exactly one
+          * site never showed which one had been chosen, and a phone holding
+          * none showed nothing at all — while the button still demanded a
+          * site. SitePicker already has the right words for an empty list
+          * ("No sites on this phone yet — sync first"); the gate stopped them
+          * ever being read.
+          */}
+        {sitesFailed ? (
+          <Banner
+            tone="fail"
+            title="The site list could not be read"
+            body={'Nothing is wrong with your sites — this phone could not read them just now. Go back and '
+              + 'open this screen again. An impairment is filed against a site and cannot be saved without one.'}
+          />
+        ) : (
           <SitePicker sites={sites} value={siteId} onChange={setSiteId} />
-        ) : null}
+        )}
 
         <H2>System affected</H2>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.space(2) }}>

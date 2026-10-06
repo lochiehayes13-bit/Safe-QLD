@@ -59,6 +59,20 @@ export default function NoticeScreen() {
       if (d) setSite(await getSite(d.siteId));
     } catch (e) {
       setFailed(describeLoadFailure(e, 'this defect'));
+      /*
+       * The site has to be unknown rather than stale when the read threw.
+       *
+       * `failed` is only rendered on the no-defect path, and the defect is set
+       * before the site is read — so a site read that threw left the whole
+       * screen rendered, with no error anywhere on it and site null. The
+       * button is disabled only on "not critical", so it stayed live, and
+       * pressing it returned at `if (!site) return;` before even the spinner.
+       * No PDF, no alert, nothing at all — on the one document in this app
+       * with a twenty-four hour statutory clock that this very screen counts
+       * down. The technician concludes the button is broken and the clock
+       * keeps running.
+       */
+      setSite(null);
     }
   }, [id]);
 
@@ -344,11 +358,27 @@ export default function NoticeScreen() {
           <Txt size="xs" tone="pass">Recorded {formatAuDate(defect.verbalNotifiedAt)}</Txt>
         ) : null}
 
+        {/*
+          * Said where the site could not be read, rather than leaving a live
+          * button that silently does nothing. The notice prints the site's
+          * name and address: without them there is no document to hand over.
+          */}
+        {isCritical && !site ? (
+          <Banner
+            tone="fail"
+            title={failed ? 'The site could not be read' : 'This defect has no site on this phone'}
+            body={'A critical defect notice prints the building it is about — its name and its address — so it '
+              + 'cannot be made without one. '
+              + (failed
+                ? 'Nothing is wrong with your sites; this phone could not read them just now. Pull down to try again.'
+                : 'Sync, or open the defect from the site it belongs to.')}
+          />
+        ) : null}
         <Button
           title={defect.noticeIssuedAt ? 'Reissue notice' : 'Create and hand over notice'}
           onPress={issue}
           loading={busy}
-          disabled={!isCritical}
+          disabled={!isCritical || !site}
         />
         {report ? <Banner tone={report.tone} title={report.title} body={report.body} /> : null}
 
