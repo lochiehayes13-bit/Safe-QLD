@@ -489,6 +489,51 @@ function cell(value: string | number | undefined | null, part: PartResult | 'ref
   return esc(value);
 }
 
+/**
+ * A value cell for a row Safe QLD added to a department part.
+ *
+ * Red on this page means an omission: a box the department asks for, left
+ * empty by the person who signed it. An added row is not that. The department
+ * never asked, so a blank in one cannot be an omission against anything, and
+ * printing it red tells a reader — an occupier, a certifier, a solicitor —
+ * that a compliant form is deficient.
+ *
+ * Worse, these rows were added to the app after forms had already been issued.
+ * A form signed last year, correctly, with every department box filled, grew
+ * four red "Not recorded" lines the day the app learned to ask for something
+ * the department does not. Nothing about that document changed. The rule here
+ * is the one the Device/gauge model row has had all along: our rows answer in
+ * grey.
+ *
+ * Still answered rather than blank, because "nothing prints blank" is the
+ * whole shape of this page — a gap nobody notices is the thing it exists to
+ * remove. Grey is an answer; red is an accusation.
+ */
+function addedCell(value: string | number | undefined | null, part: PartResult | 'refer-to-report'): string {
+  if (value === undefined || value === null || value === '') {
+    return part === 'na'
+      ? '<span class="na">N/A</span>'
+      : '<span class="na">Not recorded</span>';
+  }
+  return esc(value);
+}
+
+/** The free-text form of the above, for an added Comments box. */
+function addedComment(text: string | undefined, part: PartResult | 'refer-to-report'): string {
+  if (!text?.trim()) return addedCell(undefined, part);
+  return esc(text).replace(/\n/g, '<br />');
+}
+
+/** The numbered form of the above, which keeps its unit where there is a figure. */
+function addedReading(
+  value: number | string | undefined,
+  unit: string,
+  part: PartResult | 'refer-to-report',
+): string {
+  const has = value !== undefined && value !== null && value !== '';
+  return `${addedCell(value, part)}${has ? ` <span class="u">${esc(unit)}</span>` : ''}`;
+}
+
 /** One tick box with its label beside it, as the form prints them. */
 function tick(label: string, on: boolean): string {
   return `<span class="tick"><span class="cb${on ? ' on' : ''}">${on ? '&#10007;' : ''}</span>${esc(label)}</span>`;
@@ -614,12 +659,28 @@ function wide(label: string, value: string, span = 3): string {
 
 function partA(form: Form72): string {
   const m = form.maintenanceTest;
+  /*
+   * Six tick boxes, and what it means when none of them is ticked.
+   *
+   * Every other field on this page answers: a blank reading prints "Not
+   * recorded" in red, a part marked not applicable prints N/A in grey, and
+   * the difference between the two is the whole point of the document. This
+   * grid alone printed six empty boxes and said nothing — so "nobody has
+   * answered which test this is" and "we looked and none applies" came out
+   * identical, on the one field that says what the form is *for*.
+   *
+   * It is red rather than grey because this is the department's own box and
+   * an unanswered one is a real omission. It can only ever appear on a draft:
+   * validateForm72 blocks issuing a form with nothing ticked, with those
+   * words, so no form that has been signed can reach this branch.
+   */
+  const nothingTicked = !Object.values(m).some(Boolean);
   const grid = `<table class="mt">
     <tr><td></td><td class="mth">Annual</td><td class="mth">5 year</td></tr>
     <tr><td class="mtl">fire hydrant</td><td>${tick('', m.hydrantAnnual)}</td><td>${tick('', m.hydrantFiveYear)}</td></tr>
     <tr><td class="mtl">fire sprinkler</td><td>${tick('', m.sprinklerAnnual)}</td><td>${tick('', m.sprinklerFiveYear)}</td></tr>
     <tr><td class="mtl">combined</td><td>${tick('', m.combinedAnnual)}</td><td>${tick('', m.combinedFiveYear)}</td></tr>
-  </table>`;
+  </table>${nothingTicked ? '<span class="missing">Not answered — the form does not say what was done</span>' : ''}`;
 
   /*
    * The department's own shape for the bottom of Part A.
@@ -740,10 +801,12 @@ function partC(form: Form72, issues: FormIssue[]): string {
     label: string,
     get: (d: TestDevice) => string | number | undefined,
     skip?: (d: TestDevice) => string | undefined,
+    /** A row Safe QLD added, which answers in grey rather than red. See addedCell. */
+    ours = false,
   ): string =>
     `<tr><td class="k">${label}</td>${devices
       .map((d) => `<td class="v">${
-        unused(d) ? '<span class="na">Not used</span>' : skip?.(d) ?? cell(get(d), c)
+        unused(d) ? '<span class="na">Not used</span>' : skip?.(d) ?? (ours ? addedCell(get(d), c) : cell(get(d), c))
       }</td>`).join('')}</tr>`;
 
   /** A row that describes a gauge dial, answered on a device that has none. */
@@ -843,7 +906,7 @@ function partC(form: Form72, issues: FormIssue[]): string {
        * by that factor until it is applied, and it is marked as ours so a
        * reader is never shown an added row as the department's.
        */
-  row('Correction factor (kPa or %) <span class="extra">added</span>', (d) => d.correctionFactor)}
+  row('Correction factor (kPa or %) <span class="extra">added</span>', (d) => d.correctionFactor, undefined, true)}
     ${/*
        * Two rows that describe a dial.
        *
@@ -872,7 +935,7 @@ function partC(form: Form72, issues: FormIssue[]): string {
         // things only the person holding the meter can answer.
         ? "Manufacturer certifies for the device's service life, absent fault or damage, "
           + 'unless an authority stipulates recertification'
-        : `${CALIBRATION_MONTHS} month interval`))}
+        : `${CALIBRATION_MONTHS} month interval`), undefined, true)}
   </table>
   ${partCIssues.length
     ? `<div class="issues"><b>Test equipment</b><ul>${partCIssues
@@ -1068,7 +1131,7 @@ function partD(form: Form72): string {
        * because a flow test that did not make its duty needs a sentence
        * somewhere, and marked because it is not one of their boxes.
        */''}
-    ${wide('Comment <span class="extra">added</span>', comment(d.comment, r))}
+    ${wide('Comment <span class="extra">added</span>', addedComment(d.comment, r))}
   </table>
   ${table}
   ${spareLocations.length
@@ -1199,7 +1262,7 @@ function partE(form: Form72, input: Form72DocumentInput): string {
        * nowhere else on the page, so a reader could not check the subtraction
        * they were being shown. Now they can.
        */''}
-    ${wide('Residual at the hydrant <span class="extra">added</span>', reading(b.hydrantResidualKpa, 'kPa', r))}
+    ${wide('Residual at the hydrant <span class="extra">added</span>', addedReading(b.hydrantResidualKpa, 'kPa', r))}
     ${wide('Comments:', comment(b.comments, r))}
   </table>
   ${/*
@@ -1354,8 +1417,17 @@ function partG(form: Form72): string {
   // than typed again, and left unanswered unless both halves were measured —
   // half a pair against a block plan figure invites the wrong comparison.
   const first = g.testPoints[0];
+  /*
+   * The units are set the way every other unit in a value cell on this page is
+   * set — small and grey, so the figure is what the eye lands on. These two
+   * were at body size, which is right inside a sentence (the frictional-loss
+   * working below reads as prose and keeps them) and wrong in a box of
+   * numbers: a reader scanning Part G for the achieved pair had "L/min" and
+   * "kPa" competing with the figures they qualify, in the one cell on this
+   * part that is a summary of the two lines under it.
+   */
   const achievedFrom = first?.resultFlowLpm !== undefined && first.resultPressureKpa !== undefined
-    ? `${first.resultFlowLpm} L/min at ${first.resultPressureKpa} kPa`
+    ? `${first.resultFlowLpm}<span class="u"> L/min</span> at ${first.resultPressureKpa}<span class="u"> kPa</span>`
     : undefined;
   /*
    * The department's box has no field of its own behind it: this pair is test
@@ -1365,7 +1437,9 @@ function partG(form: Form72): string {
    * that the licensee did not write.
    */
   const achieved = achievedFrom !== undefined
-    ? `${esc(achievedFrom)} <span class="extra">from test point 1</span>`
+    // Built from two numbers and this file's own markup, so it is not escaped
+    // — nothing a technician typed reaches it.
+    ? `${achievedFrom} <span class="extra">from test point 1</span>`
     : cell(undefined, r);
 
   // Built before the table string so the rows have run and filled it.
@@ -1432,7 +1506,7 @@ function partH(form: Form72): string {
        * pair and nothing else; the note is where the app keeps what the
        * technician wrote about the result, so it says it is ours.
        */''}
-    ${wide('System notes: <span class="extra">added</span>', comment(form.systemNotes, form.systemResult))}
+    ${wide('System notes: <span class="extra">added</span>', addedComment(form.systemNotes, form.systemResult))}
   </table>
   ${form.systemResult === 'na'
     // The department's System row carries Pass and Fail and nothing else. An

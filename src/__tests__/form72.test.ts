@@ -768,8 +768,9 @@ describe('Part G — the sprinkler test points', () => {
 
   it('prints the achieved pair opposite the block plan figure only when both halves were measured', () => {
     const html = form72Html(doc({ form: issuable({ sprinklerFlow }) }));
-    // The department writes litres per minute as L/min, not l/m.
-    expect(html).toContain('950 L/min at 180 kPa');
+    // The department writes litres per minute as L/min, not l/m. The units are
+    // in their own small grey span, like every other unit in a value cell.
+    expect(flat(html)).toContain('950<span class="u"> L/min</span> at 180<span class="u"> kPa</span>');
 
     const halfMeasured = form72Html(doc({
       form: issuable({
@@ -779,7 +780,7 @@ describe('Part G — the sprinkler test points', () => {
         },
       }),
     }));
-    expect(halfMeasured).not.toContain('950 L/min at');
+    expect(flat(halfMeasured)).not.toContain('950<span class="u"> L/min</span> at');
   });
 
   it('says a second test point was not used, rather than flagging four missing readings', () => {
@@ -2762,7 +2763,23 @@ describe('Part G’s three rows per test point', () => {
     // The department's box has nothing behind it — the pair is read off the
     // line below rather than typed — and a reader must never be shown a figure
     // in one of their boxes that the licensee did not write.
-    expect(flat(withPoint)).toContain('560 L/min at 210 kPa <span class="extra">from test point 1</span>');
+    expect(flat(withPoint)).toContain(
+      '560<span class="u"> L/min</span> at 210<span class="u"> kPa</span> '
+      + '<span class="extra">from test point 1</span>',
+    );
+  });
+
+  it('sets that pair’s units the way every other value cell sets them', () => {
+    /*
+     * Small and grey, so the figure is what the eye lands on. These two were
+     * at body size — right inside a sentence, which is why the frictional-loss
+     * working keeps them there, and wrong in a box of numbers: a reader
+     * scanning Part G for the achieved pair had "L/min" and "kPa" competing
+     * with the figures they qualify.
+     */
+    const row = between(withPoint, 'Test results:', '</tr>');
+    expect(row).toContain('<span class="u"> L/min</span>');
+    expect(row).toContain('<span class="u"> kPa</span>');
   });
 
   it('reports the "Test results" box as not recorded where point 1 was not measured', () => {
