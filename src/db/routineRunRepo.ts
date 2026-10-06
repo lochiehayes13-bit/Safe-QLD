@@ -110,7 +110,31 @@ export interface SiteDue extends RoutineDue {
  * genuinely lapsed. Those still show on the site's own list, where they mean
  * something.
  */
-export async function lapsedEverywhere(todayIso: string, limit = 200): Promise<SiteDue[]> {
+/** The lapsed list, and the truth about how long it really is. */
+export interface LapsedPage {
+  rows: SiteDue[];
+  /** Everything overdue or due across the book, however many were drawn. */
+  overdue: number;
+  due: number;
+  /** Whether rows were cut off the end. */
+  capped: boolean;
+}
+
+/**
+ * Everything overdue or due, across every site.
+ *
+ * The cap was two hundred and silent, and the banner above the list counted
+ * off the already-cut array — so a book with two hundred and ten lapsed
+ * routines read "200 routines past their tolerance window" as a statement of
+ * fact. Worse, the sort is stable only between differing urgencies, so which
+ * ten fell off was arbitrary among equally overdue rows rather than the ten
+ * least urgent. This screen has no search box, so a site past the cap could
+ * not be reached from it at all.
+ *
+ * The counts are now taken before the cut, so the banner states the book and
+ * the list says it is a page of it.
+ */
+export async function lapsedEverywhere(todayIso: string, limit = 200): Promise<LapsedPage> {
   const db = await getDb();
   const rows = await db.getAllAsync<HistoryRow & { siteId: string; siteName: string }>(
     `SELECT r.siteId                AS siteId,
@@ -141,5 +165,11 @@ export async function lapsedEverywhere(todayIso: string, limit = 200): Promise<S
     out.push({ ...due, siteId: row.siteId, siteName: row.siteName });
   }
 
-  return sortByUrgency(out).slice(0, limit) as SiteDue[];
+  const ranked = sortByUrgency(out) as SiteDue[];
+  return {
+    rows: ranked.slice(0, limit),
+    overdue: ranked.filter((r) => r.state === 'overdue').length,
+    due: ranked.filter((r) => r.state === 'due').length,
+    capped: ranked.length > limit,
+  };
 }

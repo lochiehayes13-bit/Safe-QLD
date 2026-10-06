@@ -247,7 +247,23 @@ export interface PlanCandidate {
  * site the technician has in mind is one box away. Every row carries the
  * open job where there is one, because that is what a block is booked on.
  */
-export async function planCandidates(today: string, query = '', limit = 60): Promise<PlanCandidate[]> {
+/** What a day's candidate list holds, and whether it is all of it. */
+export interface PlanCandidatePage {
+  rows: PlanCandidate[];
+  /** How many sites the search matches, which is not how many were drawn. */
+  matching: number;
+  capped: boolean;
+}
+
+/**
+ * The cap, which the screen now says out loud.
+ *
+ * Sixty, and silent: searching a suburb or a client with more than sixty
+ * sites showed an arbitrary sixty, the planner was given no signal at all,
+ * and the empty state's "try fewer letters" was the opposite of the advice
+ * needed. A site past it could not be put on a day by any route.
+ */
+export async function planCandidates(today: string, query = '', limit = 60): Promise<PlanCandidatePage> {
   const db = await getDb();
   const term = query.trim();
 
@@ -274,11 +290,16 @@ export async function planCandidates(today: string, query = '', limit = 60): Pro
   );
 
   const out: PlanCandidate[] = [];
-  if (term) {
+  if (term && clause) {
     for (const s of sites) {
       out.push({ siteId: s.id, siteName: s.name, suburb: s.suburb ?? undefined, reason: 'search', job: jobBySite.get(s.id) });
     }
-    return out;
+    // Counted rather than measured off the page, so "first 60 of 184" is true.
+    const total = await db.getFirstAsync<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM site WHERE ${clause.where}`, ...clause.args,
+    );
+    const matching = total?.n ?? out.length;
+    return { rows: out, matching, capped: matching > out.length };
   }
 
   // No search: what is due, then what the office has raised.
@@ -308,5 +329,8 @@ export async function planCandidates(today: string, query = '', limit = 60): Pro
     out.push({ siteId, siteName: s.name, suburb: s.suburb ?? undefined, reason: 'open-job', job });
   }
   const order = { overdue: 0, due: 1, 'open-job': 2, search: 3 };
-  return out.sort((a, b) => order[a.reason] - order[b.reason] || (a.daysUntilDue ?? 0) - (b.daysUntilDue ?? 0) || a.siteName.localeCompare(b.siteName)).slice(0, limit);
+  const ranked = out.sort((a, b) => order[a.reason] - order[b.reason]
+    || (a.daysUntilDue ?? 0) - (b.daysUntilDue ?? 0)
+    || a.siteName.localeCompare(b.siteName));
+  return { rows: ranked.slice(0, limit), matching: ranked.length, capped: ranked.length > limit };
 }

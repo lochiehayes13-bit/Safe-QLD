@@ -105,7 +105,7 @@ describe('planCandidates', () => {
     const quiet = await createSite({ name: 'Quiet Place' });
     await recordRoutineRun({ siteId: quiet.id, routineId: 'det-annual', completedAt: '2026-08-01T00:00:00.000Z', ...RUN });
 
-    const out = await planCandidates(TODAY);
+    const { rows: out } = await planCandidates(TODAY);
     expect(out.map((c) => [c.siteName, c.reason])).toEqual([
       ['Zed Overdue', 'overdue'],
       ['Alpha Open Job', 'open-job'],
@@ -119,10 +119,49 @@ describe('planCandidates', () => {
     await createSite({ name: 'Fictional Tower', suburb: 'Maroochydore' });
     await createSite({ name: 'Other Place', address: 'Unit 100% St' });
     await createSite({ name: 'Third' });
-    expect((await planCandidates(TODAY, 'maroo')).map((c) => c.siteName)).toEqual(['Fictional Tower']);
-    expect((await planCandidates(TODAY, '%')).map((c) => c.siteName)).toEqual(['Other Place']);
-    expect((await planCandidates(TODAY, 'zzz'))).toEqual([]);
-    expect((await planCandidates(TODAY, 'th'))[0]?.reason).toBe('search');
+    expect((await planCandidates(TODAY, 'maroo')).rows.map((c) => c.siteName)).toEqual(['Fictional Tower']);
+    expect((await planCandidates(TODAY, '%')).rows.map((c) => c.siteName)).toEqual(['Other Place']);
+    expect((await planCandidates(TODAY, 'zzz')).rows).toEqual([]);
+    expect((await planCandidates(TODAY, 'th')).rows[0]?.reason).toBe('search');
+  });
+
+  /*
+   * The cap, which was sixty and silent.
+   *
+   * Searching a suburb or a client with more than sixty sites showed an
+   * arbitrary sixty, gave the planner no signal at all, and the empty state's
+   * "try fewer letters" was the opposite of the advice needed. A site past it
+   * could not be put on a day by any route.
+   */
+  it('says how many matched when it cut the list', async () => {
+    for (let i = 0; i < 8; i += 1) await createSite({ name: `Wynnum Site ${i}`, suburb: 'Wynnum' });
+    const page = await planCandidates(TODAY, 'Wynnum', 5);
+    expect(page.rows).toHaveLength(5);
+    expect(page.matching).toBe(8);
+    expect(page.capped).toBe(true);
+  });
+
+  it('counts the matches rather than the rows it drew', async () => {
+    for (let i = 0; i < 8; i += 1) await createSite({ name: `Wynnum Site ${i}`, suburb: 'Wynnum' });
+    // The number has to be the truth about the book, not about the page.
+    expect((await planCandidates(TODAY, 'Wynnum', 5)).matching).toBe(8);
+  });
+
+  it('says nothing was cut when everything fits', async () => {
+    await createSite({ name: 'Only One', suburb: 'Wynnum' });
+    const page = await planCandidates(TODAY, 'Wynnum', 5);
+    expect({ rows: page.rows.length, capped: page.capped, matching: page.matching })
+      .toEqual({ rows: 1, capped: false, matching: 1 });
+  });
+
+  it('reports the cap on the unsearched list too', async () => {
+    for (let i = 0; i < 4; i += 1) {
+      const s = await createSite({ name: `Open ${i}` });
+      await upsertJob({ externalId: `40${i}`, siteId: s.id, siteName: s.name, title: 'Callout', status: 'scheduled' });
+    }
+    const page = await planCandidates(TODAY, '', 2);
+    expect({ rows: page.rows.length, capped: page.capped, matching: page.matching })
+      .toEqual({ rows: 2, capped: true, matching: 4 });
   });
 });
 

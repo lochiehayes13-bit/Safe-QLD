@@ -93,6 +93,8 @@ function DayBuilder() {
   const [date, setDate] = useState<string>(today);
   const [query, setQuery] = useState('');
   const [candidates, setCandidates] = useState<PlanCandidate[]>([]);
+  /** How many sites the typed words match, which is not how many are drawn. */
+  const [matching, setMatching] = useState(0);
   const [facts, setFacts] = useState<Record<string, SiteFacts | null>>({});
   const [open, setOpen] = useState<string | null>(null);
   const [stops, setStops] = useState<Stop[]>([]);
@@ -116,7 +118,9 @@ function DayBuilder() {
     try {
       const p = await loadPrefs();
       setPrefs(p);
-      setCandidates(await planCandidates(today, query));
+      const page = await planCandidates(today, query);
+      setCandidates(page.rows);
+      setMatching(page.capped ? page.matching : 0);
 
       // The half-built day comes back. See @/day-draft: it is written to the
       // handset as it is edited, because a day is built between other things.
@@ -128,6 +132,7 @@ function DayBuilder() {
       setDraftLoaded(true);
     } catch (e) {
       setCandidates([]);
+      setMatching(0);
       setDraftLoaded(true);
       setFailed(describeLoadFailure(e, 'the sites'));
     }
@@ -405,12 +410,25 @@ function DayBuilder() {
       ) : null}
 
       <H2>Sites</H2>
-      <SearchBox value={query} onChange={setQuery} placeholder="A site, a suburb, an address" />
+      <SearchBox value={query} onChange={setQuery} placeholder="A site, a suburb, an address, a postcode, the client or the office's reference" />
+      {/*
+        * Said when it bites. Sixty matches were drawn out of however many
+        * there were, in silence, so a planner searching a big client saw an
+        * arbitrary sixty of their sites and the empty state's "try fewer
+        * letters" was the opposite of the advice they needed.
+        */}
+      {matching ? (
+        <Txt size="xs" tone="faint">
+          {`First ${candidates.length} of ${matching.toLocaleString()} matches. Add the suburb or the client to narrow it.`}
+        </Txt>
+      ) : null}
       {candidates.length === 0 ? (
         <EmptyState
           icon="clipboard-list-outline"
           title={query ? 'Nothing matched' : 'Nothing due and no open jobs'}
-          body={query ? 'Try fewer letters.' : 'Sites appear here when a routine is due or overdue, or the office has an open job at them. Search for any other site.'}
+          body={query
+            ? 'Nothing on this phone matches those words — the name, the address, the suburb, the postcode, the client or the office\'s reference. Try fewer letters, or the suburb.'
+            : 'Sites appear here when a routine is due or overdue, or the office has an open job at them. Search for any other site.'}
         />
       ) : (
         candidates.map((c) => {

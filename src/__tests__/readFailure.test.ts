@@ -57,7 +57,10 @@ describe('a repository read with its table gone', () => {
   it('answers normally while the table is there, so the check above means something', async () => {
     await db.runAsync("INSERT INTO site (id,name,createdAt,updatedAt) VALUES ('site-1','Harbourline','','')");
     await expect(listDefects()).resolves.toEqual([]);
-    await expect(lapsedEverywhere('2026-09-03T00:00:00.000Z')).resolves.toEqual([]);
+    // It answers a page now, with the counts taken before the cap rather than
+    // off the already-cut list — see LapsedPage.
+    await expect(lapsedEverywhere('2026-09-03T00:00:00.000Z'))
+      .resolves.toEqual({ rows: [], overdue: 0, due: 0, capped: false });
     // Every routine the build defines, none of them ever run here.
     expect((await dueAtSite('site-1', '2026-09-03T00:00:00.000Z')).length).toBeGreaterThan(0);
   });

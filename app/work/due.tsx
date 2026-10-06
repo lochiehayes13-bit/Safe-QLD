@@ -33,14 +33,26 @@ export default function LapsedScreen() {
    * now, and the empty state is withheld until there is an answer to give.
    */
   const [failed, setFailed] = useState<string | null>(null);
+  /*
+   * The counts off the whole book, not off the page.
+   *
+   * The banner used to count the already-cut array, so a book with two
+   * hundred and ten lapsed routines announced "200 routines past their
+   * tolerance window" as a fact. The number a person acts on has to be the
+   * truth about the work, not about the list.
+   */
+  const [counts, setCounts] = useState<{ overdue: number; due: number; capped: boolean } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setFailed(null);
     try {
-      setItems(await lapsedEverywhere(nowIso()));
+      const page = await lapsedEverywhere(nowIso());
+      setItems(page.rows);
+      setCounts(page);
     } catch (e) {
       setItems([]);
+      setCounts(null);
       setFailed(describeLoadFailure(e, 'what has lapsed'));
     } finally {
       setLoading(false);
@@ -49,7 +61,8 @@ export default function LapsedScreen() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const overdue = items.filter((i) => i.state === 'overdue').length;
+  const overdue = counts?.overdue ?? 0;
+  const due = counts?.due ?? 0;
 
   return (
     <>
@@ -63,9 +76,13 @@ export default function LapsedScreen() {
               title={
                 overdue
                   ? `${overdue} routine${overdue === 1 ? '' : 's'} past their tolerance window`
-                  : `${items.length} routine${items.length === 1 ? '' : 's'} due now`
+                  : `${due} routine${due === 1 ? '' : 's'} due now`
               }
-              body="Counted from the first service recorded at each site, so a service carried out late does not push the next one back with it."
+              body={'Counted from the first service recorded at each site, so a service carried out late does not '
+                + 'push the next one back with it.'
+                + (counts?.capped
+                  ? ` The ${(overdue + due).toLocaleString()} are counted in full; the ${items.length} most urgent are listed.`
+                  : '')}
             />
           ) : null}
         </View>
