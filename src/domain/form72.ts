@@ -199,8 +199,15 @@ export const PART_D_NOZZLE_SIZES_MM = [19, 22, 25] as const;
 /** The metered duties printed down Part D, in litres per second. */
 export const PART_D_DEVICE_RATES_LPS = [5, 10, 15, 20, 30] as const;
 
-/** Part D's eight printed rows, in the order the department prints them. */
-export const PART_D_ROWS: FlowRow[] = [
+/**
+ * Part D's eight printed rows, in the order the department prints them.
+ *
+ * `readonly`, and handed out as copies by the two functions that lay a form
+ * over it, because one write through a returned reference would put a reading
+ * on the department's template for the rest of the session — and then on every
+ * form opened afterwards.
+ */
+export const PART_D_ROWS: readonly FlowRow[] = [
   ...PART_D_NOZZLE_SIZES_MM.map((nozzleMm) => ({ nozzleMm, devices: '' })),
   ...PART_D_DEVICE_RATES_LPS.map((rateLps) => ({ rateLps, devices: '' })),
 ];
@@ -399,7 +406,7 @@ export interface ProvedDuty {
  * Offered, never written. The screen puts it on a chip with its working on it;
  * nothing here fills a box.
  */
-export function provedDuty(flow: Pick<FlowTest, 'rows'>): ProvedDuty | undefined {
+export function provedDuty(flow: { rows: readonly FlowRow[] }): ProvedDuty | undefined {
   let best: ProvedDuty | undefined;
   let bestRun = 0;
   for (const row of flow.rows) {
@@ -427,7 +434,7 @@ export function provedDuty(flow: Pick<FlowTest, 'rows'>): ProvedDuty | undefined
  * rather than reaching a signature unmentioned.
  */
 export function provedDutyDisagrees(
-  flow: Pick<FlowTest, 'rows' | 'achievedLps' | 'achievedKpa'>,
+  flow: { rows: readonly FlowRow[] } & Pick<FlowTest, 'achievedLps' | 'achievedKpa'>,
 ): ProvedDuty | undefined {
   const proved = provedDuty(flow);
   if (!proved) return undefined;
@@ -774,6 +781,57 @@ export function unTickedAnsweredKinds(
   return [...new Set(known)].filter((k) => !ticked.includes(k));
 }
 
+/**
+ * The four hydrant location fields the department prints in Part D.
+ *
+ * Here rather than beside the renderer because the rules below are about it:
+ * which box is which, how many to draw, and what happens to a cleared one.
+ */
+export const PART_D_LOCATION_SLOTS = 4;
+
+/**
+ * Writes one numbered hydrant location without disturbing the others.
+ *
+ * The array is positional — index 0 is hydrant 1, and the flow table's columns
+ * refer to those positions — so a cleared middle slot has to stay a hole rather
+ * than closing up and renumbering the hydrants under the readings. Trailing
+ * empties are dropped, because an array of four blanks and an array of none say
+ * the same thing and only one of them is worth storing.
+ *
+ * In the domain rather than in the screen because of what it does with a
+ * cleared last slot, which is right here and was wrong on screen: see
+ * hydrantSlotCount.
+ */
+export function setHydrantLocation(locations: readonly string[], n: number, value: string): string[] {
+  const next = [...locations];
+  while (next.length < n) next.push('');
+  next[n - 1] = value;
+  while (next.length && !next[next.length - 1]?.trim()) next.pop();
+  return next;
+}
+
+/**
+ * How many hydrant boxes Part D draws.
+ *
+ * Storing and drawing are different questions and the screen asked only one of
+ * them. It drew `max(the four the department prints, however many the form
+ * holds)`, and setHydrantLocation drops trailing empties — so clearing the
+ * last box deleted the box. A technician retyping hydrant 6 at a large site
+ * cleared it and watched it vanish mid-keystroke with nowhere to put the new
+ * name; where hydrant 5 was already blank, clearing 6 popped both and two
+ * boxes went at once.
+ *
+ * So the count only ever goes up while the form is open. `shown` is the most
+ * that have been drawn so far — which also carries the ones a technician added
+ * by hand, for the site the register does not cover where five hydrants were
+ * run: the printed page already lists anything past the fourth under the table
+ * rather than dropping it, so there was a place for the fifth on the document
+ * and no way to get it there.
+ */
+export function hydrantSlotCount(input: { held: number; shown?: number }): number {
+  return Math.max(PART_D_LOCATION_SLOTS, input.held, input.shown ?? 0);
+}
+
 /** One line of Part D as the screen lays it out: what to draw, and where it is stored. */
 export interface PartDLine {
   row: FlowRow;
@@ -808,7 +866,10 @@ export function partDLines(rows: readonly FlowRow[]): PartDLine[] {
   const printed = PART_D_ROWS.map((template) => {
     const key = flowRowKey(template);
     const index = rows.findIndex((r, i) => !claimed.has(i) && flowRowKey(r) === key);
-    if (index < 0) return { row: template, printed: true };
+    // Copied, the same way flowTableRows copies it. Handing out the template
+    // itself is one stray write away from a reading on the department's own
+    // row, on this form and every form opened after it.
+    if (index < 0) return { row: { ...template }, printed: true };
     claimed.add(index);
     return { row: rows[index]!, index, printed: true };
   });

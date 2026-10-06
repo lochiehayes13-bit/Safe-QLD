@@ -15,7 +15,7 @@ import {
   flowRowColumnsRun, flowRowDevices, flowRowLabel, form72DefectForRegister, unraisedDefects,
   sprinklerTestPointLines, sprinklerTestPointUntouched,
   PART_D_NOZZLE_SIZES_MM, PART_D_ROWS, canIssue, deviceCalibration, emptyForm72, intervalsTested,
-  flowRowRead, flowRowUntouched,
+  flowRowKey, flowRowRead, flowRowUntouched, hydrantSlotCount, partDLines, setHydrantLocation,
   maintenanceTestCell, maintenanceTestFromAxes, overloadCheck, resolveFrictionalLoss,
   systemTypesTested, validateForm72,
   type FlowDeviceKind, type FlowRow, type Form72, type MaintenanceTest, type TestDevice,
@@ -3234,5 +3234,133 @@ describe('what the instrument is, where a tick depends on it', () => {
       expect(preset.device.model).toContain('Flowtech');
       expect(preset.device.model).toContain('Omega');
     }
+  });
+});
+
+/**
+ * Part D's hydrant boxes, which could delete themselves.
+ *
+ * The screen drew `max(the four the department prints, however many the form
+ * holds)` and the writer drops trailing empties — because four stored blanks
+ * and no stored blanks say the same thing. Put together, clearing the last box
+ * deleted the box: a technician retyping hydrant 6 at a large site cleared it
+ * and watched it vanish mid-keystroke with nowhere to put the new name, and
+ * where hydrant 5 was already blank, clearing 6 popped both and two boxes went
+ * at once.
+ *
+ * Storing and drawing are different questions and the screen asked only one.
+ */
+describe('writing one hydrant location', () => {
+  it('keeps a cleared middle slot as a hole rather than renumbering under the readings', () => {
+    // The flow table's columns refer to these positions, so closing the gap
+    // would move the readings onto different hydrants.
+    const four = ['Booster', 'Level 3 east', 'Level 7', 'Roof'];
+    expect(setHydrantLocation(four, 2, '')).toEqual(['Booster', '', 'Level 7', 'Roof']);
+  });
+
+  it('drops the trailing blanks, because four blanks and none say the same thing', () => {
+    expect(setHydrantLocation(['Booster', 'Level 3', ''], 2, '')).toEqual(['Booster']);
+    expect(setHydrantLocation(['Booster'], 1, '')).toEqual([]);
+  });
+
+  it('grows to reach a slot the form has never held', () => {
+    expect(setHydrantLocation(['Booster'], 4, 'Roof')).toEqual(['Booster', '', '', 'Roof']);
+  });
+
+  it('treats a box holding only spaces as blank, as the printed form does', () => {
+    expect(setHydrantLocation(['Booster', 'Level 3'], 2, '   ')).toEqual(['Booster']);
+  });
+
+  it('does not disturb the other slots', () => {
+    const four = ['Booster', 'Level 3 east', 'Level 7', 'Roof'];
+    expect(setHydrantLocation(four, 3, 'Level 8')).toEqual(['Booster', 'Level 3 east', 'Level 8', 'Roof']);
+    expect(four).toEqual(['Booster', 'Level 3 east', 'Level 7', 'Roof']);
+  });
+});
+
+describe('how many hydrant boxes Part D draws', () => {
+  it('draws the department’s four on a form that holds none', () => {
+    expect(hydrantSlotCount({ held: 0 })).toBe(PART_D_LOCATION_SLOTS);
+  });
+
+  it('draws every one the form holds, so a prefilled seventh is not invisible', () => {
+    // The register prefills every hydrant on the site. Showing four while
+    // storing seven is how a location nobody meant to keep reaches a signed
+    // form unseen.
+    expect(hydrantSlotCount({ held: 7 })).toBe(7);
+  });
+
+  it('does not take a box away when its own contents are cleared', () => {
+    /*
+     * The fault. Six held, the sixth cleared: the writer stores five, and a
+     * count read off storage alone would draw five boxes — removing the one
+     * being typed in.
+     */
+    const held = setHydrantLocation(['1', '2', '3', '4', '5', '6'], 6, '').length;
+    expect(held).toBe(5);
+    expect(hydrantSlotCount({ held, shown: 6 })).toBe(6);
+  });
+
+  it('and does not take two away when the one before it was already blank', () => {
+    const held = setHydrantLocation(['1', '2', '3', '4', '', '6'], 6, '').length;
+    expect(held).toBe(4);
+    expect(hydrantSlotCount({ held, shown: 6 })).toBe(6);
+  });
+
+  it('lets a technician ask for a fifth the register never prefilled', () => {
+    // Five hydrants run at a site the register does not cover. The printed
+    // page already lists anything past the fourth under the table rather than
+    // dropping it, so there was a place for it and no way to get it there.
+    expect(hydrantSlotCount({ held: 0, shown: 5 })).toBe(5);
+    expect(hydrantSlotCount({ held: 2, shown: 6 })).toBe(6);
+  });
+
+  it('never goes below the four the department prints', () => {
+    expect(hydrantSlotCount({ held: 1, shown: 1 })).toBe(PART_D_LOCATION_SLOTS);
+  });
+});
+
+/**
+ * And Part D's own template cannot be written on.
+ *
+ * partDLines hands back one object per printed line. It used to hand back the
+ * module-level template itself for a line nobody had filled in, while the
+ * renderer beside it copied — so a single write through a returned row would
+ * have put a reading on the department's own line for the rest of the session,
+ * and then on every form opened after it. Nothing did that today; the
+ * asymmetry between the two functions whose job is to agree is the fault.
+ */
+describe('the department’s eight printed rows', () => {
+  it('are handed out as copies, by both the screen’s layout and the renderer’s', () => {
+    const fromScreen = partDLines([]).filter((l) => l.printed).map((l) => l.row);
+    const fromPage = flowTableRows({ ...emptyForm72({ id: 'x', siteId: 's', siteName: 'S', now: NOW }).flowTest, rows: [] })
+      .filter((r) => r.standard).map((r) => r.row);
+    for (const row of [...fromScreen, ...fromPage]) {
+      expect(PART_D_ROWS.includes(row)).toBe(false);
+    }
+  });
+
+  it('survive a write through a row the layout handed back', () => {
+    const line = partDLines([]).find((l) => flowRowKey(l.row) === 'nozzle-19')!;
+    (line.row as { devices: string }).devices = 'SQF-001';
+    expect(PART_D_ROWS.find((r) => flowRowKey(r) === 'nozzle-19')).toEqual({ nozzleMm: 19, devices: '' });
+    // And the next form drawn is clean.
+    expect(partDLines([]).find((l) => flowRowKey(l.row) === 'nozzle-19')!.row)
+      .toEqual({ nozzleMm: 19, devices: '' });
+  });
+
+  it('still claim the same stored row as the printed page does', () => {
+    // The property the copy must not break: both functions take the FIRST
+    // stored row at a duty, so the one the technician edits is the one printed.
+    const rows = [
+      { rateLps: 10, devices: 'first', p1Kpa: 300 },
+      { rateLps: 10, devices: 'second', p1Kpa: 400 },
+    ];
+    const mine = partDLines(rows).find((l) => flowRowKey(l.row) === 'device-10')!;
+    expect(mine.row.devices).toBe('first');
+    expect(mine.index).toBe(0);
+    const printed = flowTableRows({ result: 'na', rows, hydrantLocations: [] } as never)
+      .find((r) => flowRowKey(r.row) === 'device-10')!;
+    expect(printed.row.devices).toBe('first');
   });
 });

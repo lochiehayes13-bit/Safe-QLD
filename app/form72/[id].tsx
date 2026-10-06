@@ -24,7 +24,7 @@ import {
   PART_G_PRINTED_TEST_POINTS,
   deviceCalibration, dutyToCarry, elevationHeadKpa, flowRowDevices, flowRowKey, flowRowLongLabel,
   flowKindsAfterAnswer, flowRowRead, flowRowUntouched, form72DefectForRegister,
-  partDLines,
+  hydrantSlotCount, partDLines, setHydrantLocation,
   provedDuty, provedDutyDisagrees,
   intervalsTested, maintenanceTestFromAxes, overloadCheck, overloadRun, resolveFrictionalLoss,
   toggleMaintenanceAxes,
@@ -2262,23 +2262,6 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
 }
 
 /**
- * Writes one numbered hydrant location without disturbing the others.
- *
- * The array is positional — index 0 is hydrant 1, and the flow table's columns
- * refer to those positions — so a cleared middle slot has to stay a hole rather
- * than closing up and renumbering the hydrants under the readings. Trailing
- * empties are dropped, because an array of four blanks and an array of none say
- * the same thing and only one of them is worth storing.
- */
-function setHydrantLocation(locations: string[], n: number, value: string): string[] {
-  const next = [...locations];
-  while (next.length < n) next.push('');
-  next[n - 1] = value;
-  while (next.length && !next[next.length - 1]?.trim()) next.pop();
-  return next;
-}
-
-/**
  * What is outstanding, and a way straight to it.
  *
  * These were two banners of text. Each line named the part it was about and
@@ -2384,6 +2367,25 @@ function PartD({ form, locked, patch }: PartProps) {
   const [opened, setOpened] = useState<Set<string>>(new Set());
   const inUseCount = lines.filter((l) => l.printed && !flowRowUntouched(l.row)).length;
 
+  /*
+   * How many hydrant boxes are on screen, which only ever goes up.
+   *
+   * The count was `max(four printed, however many the form holds)`, and
+   * setHydrantLocation drops trailing empties — because four stored blanks and
+   * no stored blanks say the same thing. Put together, clearing the last box
+   * deleted the box. A technician retyping hydrant 6 at a large site cleared
+   * it and watched it vanish mid-keystroke, with nowhere to type the new name;
+   * and where hydrant 5 was already blank, clearing 6 popped both and two
+   * boxes went at once.
+   *
+   * Seeded from the form, because this part is only drawn once the form is
+   * loaded, and never lowered while the screen is open. Storage still drops
+   * the trailing blanks — that is right, and it is not the same question as
+   * how many boxes to draw.
+   */
+  const [slots, setSlots] = useState(() => hydrantSlotCount({ held: f.hydrantLocations.length }));
+  const hydrantSlots = hydrantSlotCount({ held: f.hydrantLocations.length, shown: slots });
+
   const setLine = (
     line: { row: FlowRow; index?: number },
     p: Partial<FlowRow>,
@@ -2444,10 +2446,7 @@ function PartD({ form, locked, patch }: PartProps) {
           * invisible on the phone while they are still stored, and invisible
           * is how a location nobody meant to keep ends up on a signed form.
           */}
-        {Array.from(
-          { length: Math.max(PART_D_LOCATION_SLOTS, f.hydrantLocations.length) },
-          (_, i) => i + 1,
-        ).map((n) => (
+        {Array.from({ length: hydrantSlots }, (_, i) => i + 1).map((n) => (
           <Field
             key={n}
             label={n <= PART_D_LOCATION_SLOTS ? `Hydrant ${n}` : `Hydrant ${n} — beyond the printed form`}
@@ -2460,6 +2459,26 @@ function PartD({ form, locked, patch }: PartProps) {
             editable={!locked}
           />
         ))}
+        {/*
+          * And a way to record a fifth.
+          *
+          * The department prints four, and the only hydrants that could ever
+          * be typed in were the four printed plus however many the register
+          * happened to prefill — so a technician at a site the register does
+          * not cover, who ran five, had nowhere to put the fifth. The page
+          * already lists anything past the fourth under the table rather than
+          * dropping it, so there was a place for it on the document and no way
+          * to get it there.
+          */}
+        {!locked ? (
+          <Button
+            title={hydrantSlots < PART_D_LOCATION_SLOTS + 1 ? 'Another hydrant' : `Hydrant ${hydrantSlots + 1}`}
+            variant="ghost"
+            compact
+            onPress={() => setSlots(hydrantSlots + 1)}
+            icon={<MaterialCommunityIcons name="plus" size={16} color={t.color.accentText} />}
+          />
+        ) : null}
         {/*
           * Three states, as the form has.
           *

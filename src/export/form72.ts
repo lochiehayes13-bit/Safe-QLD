@@ -1,6 +1,7 @@
 import {
   CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, FLOW_DEVICE_LABEL,
-  FLOW_ROW_GROUP_LABEL, FRICTIONAL_LOSS_TOLERANCE_KPA, PART_D_DEVICE_RATES_LPS, PART_D_ROWS,
+  FLOW_ROW_GROUP_LABEL, FRICTIONAL_LOSS_TOLERANCE_KPA, PART_D_DEVICE_RATES_LPS,
+  PART_D_LOCATION_SLOTS, PART_D_ROWS,
   canIssue, elevationHeadKpa, flowCellState, flowDeviceCalibrationFrom, flowRowGroup,
   flowRowKey, flowRowLabel,
   flowRowLongLabel, flowRowUntouched, overloadCheck, overloadRun, resolveFrictionalLoss,
@@ -943,8 +944,13 @@ function partC(form: Form72, issues: FormIssue[]): string {
     : ''}`;
 }
 
-/** The four hydrant location fields the department prints in Part D. */
-export const PART_D_LOCATION_SLOTS = 4;
+/*
+ * The four hydrant location fields the department prints in Part D moved to
+ * the domain, where the rules about them live (setHydrantLocation and
+ * hydrantSlotCount), and is re-exported here so this module stays the one
+ * place the printed form's facts are imported from.
+ */
+export { PART_D_LOCATION_SLOTS };
 
 /**
  * How many hydrant locations the readings actually depend on.
