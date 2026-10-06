@@ -1,6 +1,6 @@
 import { getDb } from './index';
 import {
-  SITE_SEARCH_PREFIX_COLUMNS, SITE_SEARCH_TEXT_COLUMNS,
+  SITE_SEARCH_PREFIX_COLUMNS, SITE_SEARCH_TEXT_COLUMNS, STAMPED_REF_SQL,
 } from '@/domain/siteSearch';
 import type { Site } from '@/domain/types';
 import { jobStatusWord } from '@/domain/jobPresentation';
@@ -36,12 +36,24 @@ const bare = (col: string): string =>
 interface Clause { where: string; args: Arg[] }
 
 /** Every word somewhere in the columns: one AND group per word, LIKE across the columns. */
-function wordsClause(words: readonly string[], cols: readonly string[]): Clause {
+function wordsClause(words: readonly string[], cols: readonly string[], stamped?: string): Clause {
   const parts: string[] = [];
   const args: Arg[] = [];
   for (const word of words) {
-    parts.push(`(${cols.map((c) => `${c} LIKE ?`).join(' OR ')})`);
+    /*
+     * `stamped` is a column that has to be read before it can be matched —
+     * the site's reference, which the sync writes as "SIMPRO:8812" and a
+     * technician writes as "SB-014". Its own clause rather than another entry
+     * in `cols`, because the two halves are matched differently and the
+     * difference is the point: see src/domain/siteSearch.ts.
+     */
+    const ors = cols.map((c) => `${c} LIKE ?`);
+    parts.push(`(${[...ors, ...(stamped ? [stamped] : [])].join(' OR ')})`);
     for (let i = 0; i < cols.length; i++) args.push(`%${word}%`);
+    if (stamped) {
+      // Two binds: the prefix after the colon, then the free-text form.
+      args.push(word, `%${word}%`);
+    }
   }
   return { where: parts.length ? parts.join(' AND ') : '1', args };
 }
@@ -71,6 +83,13 @@ interface KindColumns {
    * a column, and "1001" has to find the invoice that bills job 1001.
    */
   alsoByNumber?: string;
+  /**
+   * A column that has to be read before it matches, as a ready-made SQL
+   * fragment taking two binds. The site's reference is the only one: the sync
+   * stamps it "SIMPRO:8812" and a technician types "SB-014", and matching the
+   * first as plain text made every digit a hunt through three thousand ids.
+   */
+  stamped?: string;
   order: string;
 }
 
@@ -88,6 +107,7 @@ const COLUMNS: Record<SearchKind, KindColumns> = {
     // fastest thing to type on a phone.
     table: 'site', ids: [...SITE_SEARCH_PREFIX_COLUMNS],
     text: [...SITE_SEARCH_TEXT_COLUMNS],
+    stamped: STAMPED_REF_SQL,
     phones: ['contactWorkPhone', 'contactMobile'], emails: ['contactEmail'],
     order: 'name COLLATE NOCASE',
   },
@@ -171,10 +191,10 @@ function clauseFor(kind: SearchKind, q: ParsedQuery): Clause | undefined {
       // A part number is looked for in the catalogue's part number as well
       // as the text everything else carries; exact, then starts-with, then
       // anywhere — see the ORDER BY in searchKind.
-      return wordsClause(q.words, cols.text);
+      return wordsClause(q.words, cols.text, cols.stamped);
     }
     case 'words':
-      return wordsClause(q.words, cols.text);
+      return wordsClause(q.words, cols.text, cols.stamped);
   }
 }
 

@@ -24,7 +24,8 @@ import {
 } from '@/db/repo';
 import { getSiteByExternalId, searchEverything, searchKind } from '@/db/searchRepo';
 import {
-  SITE_SEARCH_PREFIX_COLUMNS, SITE_SEARCH_TEXT_COLUMNS, siteMatches,
+  SITE_SEARCH_COLUMNS, SITE_SEARCH_PREFIX_COLUMNS, SITE_SEARCH_STAMPED_COLUMN,
+  SITE_SEARCH_TEXT_COLUMNS, siteMatches,
 } from '@/domain/siteSearch';
 import { parseQuery } from '@/domain/search';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -35,7 +36,13 @@ jest.mock('@/db/index', () => jest.requireActual('./support/nodeSqlite'));
 
 let db: NodeSqliteDb;
 
-/** The site nobody has booked anything against. */
+/**
+ * The site nobody has booked anything against.
+ *
+ * Typed in on the phone, so its reference is the technician's own free text
+ * and it has no Simpro id — which is what makes it the site most likely to be
+ * hunted for, and the one a job-shaped query loses.
+ */
 const BARE = {
   id: 'bare',
   name: 'Kingaroy Fire Station',
@@ -47,15 +54,25 @@ const BARE = {
   siteRef: 'SB-014',
 };
 
-/** The control: a site the office has booked work against. */
+/**
+ * The control: a site the office has booked work against.
+ *
+ * `siteRef: 'SIMPRO:8812'` is the shape the sync actually writes
+ * (src/simpro/sync.ts stamps it on every synced site), and the fixture used
+ * to carry 'BL-003' instead — a shape the sync never writes. That made the
+ * prefix test below pass for the wrong reason: 'siteRef LIKE "%81%"' finds
+ * 'SIMPRO:8812' and does not find 'BL-003', so the assertion that "81" misses
+ * was true of the fixture and false of every real phone.
+ */
 const BUSY = {
   id: 'busy',
   name: 'Baldwin Living Emsworth',
   address: '3 Emsworth Street',
   suburb: 'Wynnum',
   state: 'QLD',
+  postcode: '4178',
   clientName: 'Baldwin Living',
-  siteRef: 'BL-003',
+  siteRef: 'SIMPRO:8812',
   externalId: '8812',
   externalSource: 'simpro',
 };
@@ -327,13 +344,25 @@ describe('every screen that offers a site offers a way to search for it', () => 
      * one place now — this used to assert the literals in SitePicker's own
      * filter, which went stale the moment the filter was shared.
      */
-    for (const column of ['name', 'address', 'suburb', 'postcode', 'clientName', 'siteRef']) {
+    for (const column of ['name', 'address', 'suburb', 'clientName']) {
       expect({ column, searched: SITE_SEARCH_TEXT_COLUMNS.includes(column as never) })
         .toEqual({ column, searched: true });
     }
-    // The office's own number is matched from the start, not anywhere inside:
-    // a substring match on a bare number turns every digit into a hunt.
-    expect([...SITE_SEARCH_PREFIX_COLUMNS]).toEqual(['externalId']);
+    /*
+     * The numbers are matched from the start, not anywhere inside: a substring
+     * match on a bare number turns every digit into a hunt, and two digits of
+     * a postcode mean the area rather than any number containing them.
+     */
+    expect([...SITE_SEARCH_PREFIX_COLUMNS]).toEqual(['externalId', 'postcode']);
+    /*
+     * And the reference is its own thing, because it is two things: free text
+     * where a technician typed it, and a stamped number where the sync wrote
+     * it. Matching the stamped form as text is what made "81" find site 8812.
+     */
+    expect(SITE_SEARCH_STAMPED_COLUMN).toBe('siteRef');
+    expect([...SITE_SEARCH_COLUMNS].sort()).toEqual(
+      ['address', 'clientName', 'externalId', 'name', 'postcode', 'siteRef', 'suburb'],
+    );
   });
 
   it('is the same definition in every search, which is the whole point', () => {
@@ -370,6 +399,38 @@ describe('every screen that offers a site offers a way to search for it', () => 
     expect((await listSiteSummaries({ query: '81' })).rows.map((r) => r.id)).not.toContain(BUSY.id);
   });
 
+  it('reads a stamped reference as the number it is, not as text', async () => {
+    /*
+     * The sync writes siteRef = 'SIMPRO:8812' on every synced site, so nearly
+     * every reference on a real phone is a stamped number. Matched as a
+     * substring it made every digit a hunt — "81" found 8812 and "34" found
+     * 3349 — which defeated the prefix rule externalId exists for. The number
+     * after the colon is matched from the start, like the number it is.
+     */
+    const finds = async (q: string) => (await listSiteSummaries({ query: q })).rows.map((r) => r.id);
+    expect(await finds('88')).toContain(BUSY.id);
+    expect(await finds('8812')).toContain(BUSY.id);
+    expect(await finds('81')).not.toContain(BUSY.id);
+    expect(await finds('12')).not.toContain(BUSY.id);
+    // And the stamp's own word is not a search term for every synced site.
+    expect(await finds('SIMPRO')).not.toContain(BUSY.id);
+  });
+
+  it('still matches a reference somebody typed themselves, as text', async () => {
+    // A site entered on the phone carries whatever the technician wrote.
+    expect((await listSiteSummaries({ query: 'SB-014' })).rows.map((r) => r.id)).toContain(BARE.id);
+    expect((await listSiteSummaries({ query: 'B-01' })).rows.map((r) => r.id)).toContain(BARE.id);
+  });
+
+  it('matches a postcode from the start, so two digits mean the area', async () => {
+    // "46" is 46xx, not every number containing 46 — BARE is 4610, BUSY 4178.
+    const finds = async (q: string) => (await listSiteSummaries({ query: q })).rows.map((r) => r.id);
+    expect(await finds('4610')).toContain(BARE.id);
+    expect(await finds('46')).toContain(BARE.id);
+    expect(await finds('46')).not.toContain(BUSY.id);
+    expect(await finds('17')).not.toContain(BUSY.id);
+  });
+
   it('matches in memory exactly as it matches in SQL', () => {
     // A picker filtering rows it already holds must not disagree with the
     // screen that fetched them.
@@ -377,11 +438,16 @@ describe('every screen that offers a site offers a way to search for it', () => 
       name: 'Kingaroy Fire Station', suburb: 'Kingaroy', postcode: '4610',
       clientName: 'South Burnett Regional Council', siteRef: 'SB-014', externalId: '8812',
     };
-    for (const term of ['kingaroy', '4610', 'South Burnett', 'SB-014', '88']) {
+    for (const term of ['kingaroy', '4610', '46', 'South Burnett', 'SB-014', '88']) {
       expect({ term, matched: siteMatches(site, term) }).toEqual({ term, matched: true });
     }
     for (const term of ['Toowoomba', '81', 'XX-999']) {
       expect({ term, matched: siteMatches(site, term) }).toEqual({ term, matched: false });
     }
+    // And the colon rule, on the shape the sync writes.
+    const synced = { name: 'Baldwin Living', siteRef: 'SIMPRO:8812', externalId: '8812' };
+    expect(siteMatches(synced, '88')).toBe(true);
+    expect(siteMatches(synced, '81')).toBe(false);
+    expect(siteMatches(synced, 'SIMPRO')).toBe(false);
   });
 });
