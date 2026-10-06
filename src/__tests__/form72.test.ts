@@ -1679,8 +1679,10 @@ describe('the department’s own words, label for label', () => {
 
   it('prints Part H’s two sentences in the department’s words', () => {
     expect(flat(html)).toContain('Give owner/occupier a critical defect notice');
+    // The department's own apostrophe: U+2019, as in its intro quotes and its
+    // privacy notice. Typed straight it came out as an escaped entity.
     expect(flat(html)).toContain(
-      "Attach details (including action and date taken) as part of Licensee's report",
+      'Attach details (including action and date taken) as part of Licensee\u2019s report',
     );
     expect(flat(html)).toContain('No action required in relation to critical defects at this time');
     expect(flat(html)).toContain(
@@ -1706,10 +1708,13 @@ describe('the department’s own words, label for label', () => {
   });
 
   it('marks every row Safe QLD added inside the department’s parts, and adds no others', () => {
-    // Everything else the app adds goes on the attachment page after Part I.
-    // These three sit inside a department part because each belongs beside the
-    // figure it qualifies, so each has to say it is ours. A fourth appearing
-    // here without a reason recorded in this test is a row that slipped in.
+    /*
+     * Everything else the app adds goes on the attachment page after Part I.
+     * These sit inside a department part because each belongs beside the figure
+     * it qualifies, so each has to say it is ours. One appearing here without a
+     * reason recorded below is a row that slipped in — which is the whole point
+     * of counting them.
+     */
     const inParts = between(html, 'Part A—Test details', 'Part I—Signature');
     const marked = inParts.match(/<span class="extra">added<\/span>/g) ?? [];
     expect(marked.length).toBe(5);
@@ -1726,6 +1731,24 @@ describe('the department’s own words, label for label', () => {
     // The department asks for a calculated frictional loss and gives no box for
     // the residual it is calculated from, which the working beside it cites.
     expect(flat(inParts)).toContain('Residual at the hydrant <span class="extra">added</span>');
+  });
+
+  it('adds a sixth only on a form that needs it, and still marks it', () => {
+    /*
+     * The device model row is conditional: it prints only where something holds
+     * a model, so the census above is five on a form with none. A conditional
+     * added row is the easiest kind to let through unmarked, because the test
+     * that counts them never sees it.
+     */
+    const withModel = form72Html(doc({
+      form: issuable({
+        devices: [{ slot: 'Device/gauge 1', serialNumber: 'SQF-001', model: 'Flowtech Omega' }],
+      }),
+    }));
+    const inParts = between(withModel, 'Part A—Test details', 'Part I—Signature');
+    const marked = inParts.match(/<span class="extra">added<\/span>/g) ?? [];
+    expect(marked.length).toBe(6);
+    expect(flat(inParts)).toContain('Device/gauge model <span class="extra">added</span>');
   });
 });
 
@@ -2728,5 +2751,71 @@ describe('an issued form reprints as the document that was issued', () => {
     const after = form72Html(doc({ form, status: 'issued', issuedAt: '2026-10-03T01:00:00.000Z' }));
     const parts = (html: string) => html.slice(html.indexOf('Part A—Test details'), html.indexOf('Part I—Signature'));
     expect(parts(after)).toBe(parts(draft));
+  });
+});
+
+describe('what the instrument is, where a tick depends on it', () => {
+  /*
+   * The department's six Part C rows give a reader a serial number, a
+   * calibration date and a certificate reference, and nothing naming the
+   * device. That was tolerable while the three "Flow measuring device" ticks
+   * were always the technician's. It stops being tolerable the moment the app
+   * puts one on from a preset: a reader sees a box ticked and has nothing on
+   * the page to check it against.
+   */
+  const withModel = form72Html(doc({
+    form: issuable({
+      devices: [{
+        slot: 'Device/gauge 1', serialNumber: 'SQF-001', kind: 'flow-meter',
+        model: 'Flowtech Omega Series inline meter, DN80',
+      }],
+    }),
+  }));
+
+  it('prints the model beside the serial number that identifies it', () => {
+    const partC = between(withModel, 'Serial number', 'Date calibrated');
+    expect(partC).toContain('SQF-001');
+    expect(partC).toContain('Flowtech Omega Series inline meter, DN80');
+  });
+
+  it('marks the row, because the department has no model row', () => {
+    expect(flat(withModel)).toContain('Device/gauge model <span class="extra">added</span>');
+  });
+
+  it('leaves the row off a form where nothing holds a model', () => {
+    // A form filled with hand-added gauges should not grow a row of blanks.
+    const html = form72Html(doc({
+      form: issuable({ devices: [{ slot: 'Device/gauge 1', serialNumber: 'PG-1' }] }),
+    }));
+    expect(html).not.toContain('Device/gauge model');
+  });
+
+  it('answers a device with no model in grey, not in red', () => {
+    // Our row, not theirs: red would be an omission against a field the
+    // department never asked for.
+    const mixed = form72Html(doc({
+      form: issuable({
+        devices: [
+          { slot: 'Device/gauge 1', serialNumber: 'SQF-001', model: 'Flowtech Omega' },
+          { slot: 'Device/gauge 2', serialNumber: 'PG-1' },
+        ],
+      }),
+    }));
+    const row = between(mixed, 'Device/gauge model', '</tr>');
+    expect(row).toContain('Flowtech Omega');
+    expect(row).toContain('<span class="na">Not recorded</span>');
+    expect(row).not.toContain('<span class="missing">');
+  });
+
+  it('says an unused column is unused on that row too', () => {
+    const row = between(withModel, 'Device/gauge model', '</tr>');
+    expect((row.match(/Not used/g) ?? [])).toHaveLength(3);
+  });
+
+  it('carries a model on both of our meters, so the tick can always be checked', () => {
+    for (const preset of DEVICE_PRESETS) {
+      expect(preset.device.model).toContain('Flowtech');
+      expect(preset.device.model).toContain('Omega');
+    }
   });
 });

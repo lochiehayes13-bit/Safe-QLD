@@ -794,6 +794,32 @@ function partC(form: Form72, issues: FormIssue[]): string {
       ? '<span class="missing">Not recorded</span>'
       : '<span class="na">Not used</span>'
 }</td>`).join('')}</tr>
+    ${/*
+       * What the instrument is, beside the serial number that identifies it.
+       *
+       * The department's six rows give a reader a serial number, a calibration
+       * date and a certificate reference, and nothing naming the device. That
+       * was tolerable while the three "Flow measuring device" ticks were always
+       * the technician's. It stops being tolerable the moment the app puts one
+       * of them on by itself from a preset: a reader sees "Electro magnetic"
+       * ticked and has nothing on the page to check it against.
+       *
+       * Printed only where something holds a model, so a form filled with
+       * hand-added gauges does not grow a row of blanks. A column with a device
+       * and no model answers in grey, because this is our row and the
+       * department never asked — red would be an omission against a field that
+       * does not exist.
+       */''}
+    ${held.some((d) => d.model?.trim()) ? `<tr>
+      <td class="k">Device/gauge model <span class="extra">added</span></td>${
+  columns.map((col) => `<td class="v">${
+    !col.device.serialNumber.trim()
+      ? '<span class="na">Not used</span>'
+      : col.device.model?.trim()
+        ? esc(col.device.model)
+        : '<span class="na">Not recorded</span>'
+  }</td>`).join('')}
+    </tr>` : ''}
     ${row('Date calibrated', (d) => formatAuDate(d.dateCalibrated))}
     ${row('Correction certificate', (d) => d.calibrationCertificate)}
     ${/*
@@ -1335,7 +1361,9 @@ function partH(form: Form72): string {
   yesNo(critical, 'Give owner/occupier a critical defect notice',
     'No action required in relation to critical defects at this time')}</td></tr>
     <tr><td class="k">Repairs/corrective actions taken</td><td class="v" colspan="3">${
-  yesNo(repairs, "Attach details (including action and date taken) as part of Licensee's report",
+  // The department's own apostrophe here, U+2019, as in its intro quotes and
+  // its privacy notice. Typed straight it escaped to an entity on the page.
+  yesNo(repairs, 'Attach details (including action and date taken) as part of Licensee\u2019s report',
     'No action required in relation to repairs/corrective actions at this time')}</td></tr>
     <tr><td class="k">System</td><td class="v" colspan="3">${
   tick('Pass', form.systemResult === 'pass')}${tick('Fail', form.systemResult === 'fail')}</td></tr>
