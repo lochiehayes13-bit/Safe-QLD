@@ -1,4 +1,5 @@
 import {
+  allowanceTally,
   LEAVE_LABEL, entryHours, groupByDate, leaveOf, timesheetTotals, weekSummary,
   type Timesheet, type TimesheetEntry,
 } from '@/domain/timesheet';
@@ -107,6 +108,18 @@ function jobLine(entry: TimesheetEntry): string {
     detail.push(`${esc(entry.startTime.trim())}–${esc(entry.finishTime.trim())}`);
   }
   if (entry.serviceReportNumber.trim()) detail.push(`Report ${esc(entry.serviceReportNumber.trim())}`);
+  /*
+   * Said, because otherwise the line contradicts itself.
+   *
+   * Where somebody has typed the hours by hand the figure is theirs, and the
+   * start and finish times beside it still say what the span was — so a row
+   * reads "6 h · 06:30–14:30", which is eight hours of clock against six hours
+   * of pay, and the reader cannot tell a correction from a mistake. The
+   * workbook has the same two cells and so does the email, so this is not a
+   * disagreement between documents; it is a line that needs one word, on the
+   * document meant to be read.
+   */
+  if (entry.hoursOverride?.trim()) detail.push('hours entered by hand');
   for (const extra of entry.extras ?? []) if (extra.trim()) detail.push(esc(extra.trim()));
 
   const kind = KIND_LABEL[entry.hourKind];
@@ -161,12 +174,26 @@ function totalsBlock(sheet: Timesheet): string {
     ['Public holiday', t.publicHoliday],
     ['Unpaid leave', t.lwop],
   ];
+  /*
+   * And the allowances, which the workbook gives a table of its own and this
+   * page listed nowhere.
+   *
+   * "An allowance that is missed is not paid." They appeared only inline on
+   * each job line, so the person checking their own pay had to scan seven days
+   * for "Meal allowance" to work out whether it was claimed three times or
+   * four — on the document they were sent precisely because it is the readable
+   * one. Counted by the same domain function the workbook uses.
+   */
+  const extras = allowanceTally(sheet);
   return `<div class="totals">
     <div class="grand">${hrs(t.grand)} hours for the week</div>
     <ul>${parts
     .filter(([, v]) => v > 0)
     .map(([label, v]) => `<li><span>${esc(label)}</span> <b>${hrs(v)}</b></li>`)
     .join('')}</ul>
+    ${extras.length ? `<ul class="extras">${extras
+    .map(([label, days]) => `<li><span>${esc(label)}</span> <b>${days} ${days === 1 ? 'day' : 'days'}</b></li>`)
+    .join('')}</ul>` : ''}
   </div>`;
 }
 

@@ -9,6 +9,7 @@ import {
   dayName,
   entryDescription,
   entryHours,
+  allowanceTally,
   groupByDate,
   leaveOf,
   parseTime,
@@ -534,17 +535,13 @@ export function timesheetSummarySheet(sheet: Timesheet): Sheet {
   ]);
   rowHeights[grand] = 20;
 
-  const extras = new Map<string, number>();
-  for (const e of sheet.entries) {
-    for (const label of e.extras ?? []) {
-      const clean = label.trim();
-      if (clean) extras.set(clean, (extras.get(clean) ?? 0) + 1);
-    }
-  }
-  if (extras.size) {
+  // Counted in the domain, because the page prints the same tally and two
+  // counts of one thing are how they come to disagree.
+  const extras = allowanceTally(sheet);
+  if (extras.length) {
     section('ALLOWANCES AND EXTRAS');
     push([{ v: 'What', style: 'header' }, { v: 'Days', style: 'header' }, { v: '', style: 'header' }]);
-    for (const [label, count] of [...extras].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))) {
+    for (const [label, count] of extras) {
       push([{ v: label, style: 'cell' }, { v: count, style: 'cell' }, { v: '', style: 'cell' }]);
     }
   }

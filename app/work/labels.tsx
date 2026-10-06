@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FlatList, TextInput, View } from 'react-native';
+import { FlatList, RefreshControl, TextInput, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { nextAssetCode, queryAssets, updateAsset, type AssetRecord } from '@/db/assetRepo';
@@ -97,7 +97,19 @@ export default function LabelsScreen() {
    * and the FlatList keeps its virtualisation.
    */
   const [search, setSearch] = useState('');
-  const [page, setPage] = useState<SiteSummaryPage | null>(null);
+  /*
+   * Three states, and until now two of them were the same value.
+   *
+   * null meant "the read failed" and it was also what this started as, so
+   * every open of the screen drew "Could not read the site list — pull down to
+   * try again" until the query came back. On this owner's phone that is three
+   * thousand sites with three counted subqueries apiece, which is long enough
+   * to read. The advice was unfollowable too: the list has no pull-to-refresh.
+   *
+   * undefined is "nobody has asked yet", the same shape the rest of this app
+   * uses for it.
+   */
+  const [page, setPage] = useState<SiteSummaryPage | null | undefined>(undefined);
   const [site, setSite] = useState<Site | null>(null);
   const [assets, setAssets] = useState<AssetRecord[]>([]);
   const [filter, setFilter] = useState<Filter>('needs');
@@ -110,20 +122,25 @@ export default function LabelsScreen() {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
+  const readSites = useCallback(async () => {
+    try {
+      const found = await listSiteSummaries({ query: search, limit: SITE_PAGE });
+      setPage(found);
+    } catch {
+      // A read that failed is not an empty book. Saying "no sites yet" to
+      // somebody whose phone has three thousand of them sends them off to add
+      // one.
+      setPage(null);
+    }
+  }, [search]);
+
   useEffect(() => {
     let live = true;
-    const run = async () => {
-      try {
-        const found = await listSiteSummaries({ query: search, limit: SITE_PAGE });
-        if (live) setPage(found);
-      } catch {
-        // A read that failed is not an empty book. Saying "no sites yet" to
-        // somebody whose phone has three thousand of them sends them off to
-        // add one.
-        if (live) setPage(null);
-      }
-    };
-    void run();
+    void (async () => {
+      const found = await listSiteSummaries({ query: search, limit: SITE_PAGE })
+        .catch(() => null);
+      if (live) setPage(found);
+    })();
     return () => { live = false; };
   }, [search]);
 
@@ -308,6 +325,13 @@ export default function LabelsScreen() {
             data={page?.rows ?? []}
             keyExtractor={(s) => s.id}
             keyboardShouldPersistTaps="handled"
+            refreshControl={(
+              <RefreshControl
+                refreshing={page === undefined}
+                onRefresh={() => { setPage(undefined); void readSites(); }}
+                tintColor={t.color.accent}
+              />
+            )}
             contentContainerStyle={{ padding: t.space(4), gap: t.space(3), paddingBottom: t.space(20) }}
             ListHeaderComponent={
               <View style={{ gap: t.space(2), marginBottom: t.space(1) }}>
@@ -353,7 +377,11 @@ export default function LabelsScreen() {
                * a site" because a query threw sends them off to make a
                * duplicate.
                */
-              page === null ? (
+              page === undefined ? (
+                // Nobody has asked yet. An empty state here is a fault report
+                // about a query that is still running.
+                null
+              ) : page === null ? (
                 <EmptyState
                   icon="database-off-outline"
                   title="Could not read the site list"

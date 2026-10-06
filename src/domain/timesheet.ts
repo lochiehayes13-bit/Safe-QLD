@@ -66,6 +66,34 @@ export interface Timesheet {
   updatedAt: string;
 }
 
+/**
+ * The allowances and extras on a week, counted by how many days carry each.
+ *
+ * "An allowance that is missed is not paid" — the workbook has a whole table
+ * for these, and the page this app makes for reading the week on a phone had
+ * them only inline on each job line. So the person checking their own pay had
+ * to scan seven days for "Meal allowance" to work out whether it was claimed
+ * three times or four, on the document they were sent precisely because it is
+ * the readable one.
+ *
+ * One function, because the workbook and the page counting the same thing two
+ * ways is how they come to disagree — which is the fault this app keeps
+ * finding in itself.
+ *
+ * Ordered by how often each appears, then by name, so the list reads the same
+ * every week rather than in whatever order the entries happen to sit.
+ */
+export function allowanceTally(sheet: Pick<Timesheet, 'entries'>): [string, number][] {
+  const extras = new Map<string, number>();
+  for (const e of sheet.entries) {
+    for (const label of e.extras ?? []) {
+      const clean = label.trim();
+      if (clean) extras.set(clean, (extras.get(clean) ?? 0) + 1);
+    }
+  }
+  return [...extras].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
 const HHMM = /^(\d{1,2}):(\d{2})$/;
 
 /** Parses "HH:MM" to minutes since midnight, or null when unparseable. */

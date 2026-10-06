@@ -14,6 +14,7 @@
  * `timesheetTotals`, `weekSummary` and `entryHours` rather than against
  * numbers typed into this file.
  */
+import { allowanceTally } from '@/domain/timesheet';
 import { timesheetDocumentHtml } from '@/export/timesheetDocument';
 import { timesheetGeometry, timesheetSheet } from '@/export/safeqldForms';
 import type { FormulaCell } from '@/export/xlsx';
@@ -252,5 +253,64 @@ describe('a sheet with nothing on it', () => {
 
   it('leaves the signature lines blank rather than omitting them', () => {
     expect((html.match(/class="rule"/g) ?? []).length).toBe(3);
+  });
+});
+
+describe('the allowances, which the page did not list anywhere', () => {
+  /*
+   * "An allowance that is missed is not paid." The workbook gives these a
+   * table of its own; the page had them only inline on each job line, so
+   * somebody checking their own pay had to scan seven days for "Meal
+   * allowance" to work out whether it was claimed three times or four — on the
+   * document they were sent precisely because it is the readable one.
+   */
+  const withExtras = () => sheet([
+    { ...entry(), id: 'a', date: '2026-08-12', extras: ['Meal allowance', 'On call'] },
+    { ...entry(), id: 'b', date: '2026-08-13', extras: ['Meal allowance'] },
+    { ...entry(), id: 'c', date: '2026-08-14', extras: ['Meal allowance', 'Travel'] },
+  ]);
+
+  it('tallies them by how many days carry each', () => {
+    const out = text(timesheetDocumentHtml(withExtras()));
+    expect(out).toContain('Meal allowance');
+    expect(out).toMatch(/Meal allowance\s*3 days/);
+  });
+
+  it('says "day" for one of them, because one is the common case', () => {
+    expect(text(timesheetDocumentHtml(withExtras()))).toMatch(/Travel\s*1 day\b/);
+  });
+
+  it('counts the same way the workbook does, from the one function', () => {
+    // Two counts of one thing are how two documents come to disagree.
+    expect(allowanceTally(withExtras())).toEqual([
+      ['Meal allowance', 3], ['On call', 1], ['Travel', 1],
+    ]);
+  });
+
+  it('prints nothing where the week carries none', () => {
+    expect(timesheetDocumentHtml(sheet([entry()]))).not.toContain('class="extras"');
+  });
+
+  it('keeps them apart from the hour buckets, which are not days', () => {
+    // A reader must not add "3 days" to the hours above it.
+    expect(timesheetDocumentHtml(withExtras())).toContain('ul class="extras"');
+  });
+});
+
+describe('hours somebody typed by hand', () => {
+  it('says so, because the times beside them say otherwise', () => {
+    /*
+     * "6 h · 06:30–14:30" is eight hours of clock against six hours of pay,
+     * and nothing on the line told a reader which was the correction.
+     */
+    const out = text(timesheetDocumentHtml(sheet([
+      { ...entry(), startTime: '06:30', finishTime: '14:30', hoursOverride: '6' },
+    ])));
+    expect(out).toContain('hours entered by hand');
+    expect(out).toContain('06:30–14:30');
+  });
+
+  it('says nothing on a row whose hours come from its own times', () => {
+    expect(text(timesheetDocumentHtml(sheet([entry()])))).not.toContain('hours entered by hand');
   });
 });
