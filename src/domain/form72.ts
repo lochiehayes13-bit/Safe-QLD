@@ -25,7 +25,7 @@
  * calculator, and duplicating it would give two answers to one question.
  */
 
-import { qldIsoDay } from '@/domain/qldTime';
+import { qldIsoDay, typedDay } from '@/domain/qldTime';
 
 export type PartResult = 'na' | 'pass' | 'fail';
 
@@ -992,7 +992,23 @@ export interface FormIssue {
  */
 const isoDate = (s?: string): number | undefined => {
   const day = qldIsoDay(s);
-  return day ? Date.parse(`${day}T00:00:00Z`) : undefined;
+  if (day) return Date.parse(`${day}T00:00:00Z`);
+  /*
+   * A date somebody typed the way they write it, read rather than excused.
+   *
+   * This accepted only an ISO day or a full instant, and "unreadable" is a
+   * CAUTION while "out of calibration" is a BLOCKER. So a gauge whose
+   * certificate date was typed 15/01/2025 — two years before the test — came
+   * back unreadable, and the form could be issued with every pressure on it
+   * read by a gauge two years stale. The box now takes digits and stores ISO,
+   * but forms already on phones hold whatever was typed into them, and a date
+   * this can read is a date it should judge.
+   *
+   * Still undefined for anything that is not a date: "next week", "n/a", a
+   * half-typed one. Those are genuinely unreadable and the form says so.
+   */
+  const typed = typedDay(s ?? '');
+  return typed ? Date.parse(`${typed}T00:00:00Z`) : undefined;
 };
 
 /** Twelve months is the usual calibration interval for a test gauge. */

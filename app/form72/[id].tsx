@@ -1698,15 +1698,18 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
           * hole of a known size and has nothing to calibrate.
           */}
         {CALIBRATED_FLOW_DEVICE_KINDS.filter((k) => form.flowDeviceKinds.includes(k)).map((k) => (
-          <Field
+          <TypedField
             key={k}
             label={`${FLOW_DEVICE_LABEL[k]} calibrated`}
-            value={form.flowDeviceCalibrated?.[k] ?? ''}
-            onChangeText={(v) => patch({
+            value={form.flowDeviceCalibrated?.[k]}
+            read={typedDay}
+            show={formatAuDate}
+            placeholder="18/7/2026"
+            hint="Type the digits — 18072026"
+            locked={locked}
+            onChange={(v) => patch({
               flowDeviceCalibrated: { ...form.flowDeviceCalibrated, [k]: v },
             })}
-            placeholder="2026-07-18"
-            editable={!locked}
           />
         ))}
       </Card>
@@ -1770,12 +1773,27 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
               The dial size and kPa increment rows print as not applicable — a meter has neither.
             </Txt>
           ) : null}
-          <Field
+          {/*
+            * The same digits-and-echo box Part A's test date uses.
+            *
+            * This was a plain text field with an ISO placeholder: eleven
+            * characters, two symbol-layer hyphens, in a format nobody here
+            * writes — on the one device that is never a preset, so it is typed
+            * by hand on every hydrant form. And the consequence was worse than
+            * the typing: an AU-typed date read as UNREADABLE, which is a
+            * caution, where the same date read properly is OUT OF
+            * CALIBRATION, which is a blocker. A form could be issued with
+            * every pressure on it read by a gauge two years stale.
+            */}
+          <TypedField
             label="Calibrated"
-            value={d.dateCalibrated ?? ''}
-            onChangeText={(v) => setDevice(i, { dateCalibrated: v })}
-            placeholder="2026-01-15"
-            editable={!locked}
+            value={d.dateCalibrated}
+            read={typedDay}
+            show={formatAuDate}
+            placeholder="15/1/2026"
+            hint="Type the digits — 15012026"
+            locked={locked}
+            onChange={(v) => setDevice(i, { dateCalibrated: v })}
           />
           {cal.issue ? (
             <Banner

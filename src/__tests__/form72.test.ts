@@ -22,6 +22,7 @@ import {
 } from '@/domain/form72';
 import { MIGRATIONS, SCHEMA_VERSION } from '@/db/schema';
 import { MIGRATION_V34 } from '@/db/schemaV34';
+import { typedDay } from '@/domain/qldTime';
 import { MIGRATION_V35 } from '@/db/schemaV35';
 import { MIGRATION_V37 } from '@/db/schemaV37';
 
@@ -261,29 +262,56 @@ describe('the gauge nobody reading the paper can check', () => {
 });
 
 describe('dates written the Australian way', () => {
-  it('refuses to read 1/9/2025 as a January calibration', () => {
-    /*
-     * Date.parse reads a slashed date month-first, so a gauge calibrated on
-     * 1 September 2025 was dated 9 January and judged from there. The date is
-     * unreadable to this form, and saying so is the only answer that does not
-     * put a calibration finding on a date nobody wrote.
-     */
+  /*
+   * This block used to assert the opposite, and the change is deliberate.
+   *
+   * The original reasoning was sound about its own mechanism: Date.parse reads
+   * a slashed date MONTH-first, so 1/9/2025 came back as 9 January and a
+   * calibration finding landed on a date nobody wrote. Refusing the format was
+   * the only safe answer available, because nothing in the app could read it.
+   *
+   * typedDay can. It parses the parts explicitly in the order Australians
+   * write them and validates against the calendar — typedDay('1/9/2025') is
+   * 2025-09-01 where Date.parse gives 2025-01-09 — so the hazard is handled by
+   * reading the date correctly rather than by refusing to read it.
+   *
+   * That matters beyond tidiness, because "unreadable" is a CAUTION and "out
+   * of calibration" is a BLOCKER. Refusing the format meant a gauge whose
+   * certificate was typed 15/01/2025, two years before the test, produced a
+   * caution — and the form could be issued with every pressure on it read by
+   * a gauge two years stale.
+   */
+  it('reads 1/9/2025 as the first of September, which is what it says', () => {
     const out = deviceCalibration(
       { slot: 'Gauge 1', serialNumber: 'BFS-02', dateCalibrated: '1/9/2025' },
       '2026-07-03',
     );
-    expect(out.state).not.toBe('in-calibration');
-    expect(out.state).toBe('unreadable-date');
-    expect(out.issue?.message).toMatch(/unreadable calibration date/);
+    // Ten months before the test: in calibration, and not a finding.
+    expect(out.state).toBe('in-calibration');
+    expect(out.issue).toBeUndefined();
   });
 
-  it('blocks a form whose test date it cannot read, rather than dating it by guesswork', () => {
-    // 3/7/2026 read month-first is 7 March, and every calibration on the form
-    // is judged against it.
+  it('never reads a slashed date month-first, which is the fault that was here', () => {
+    // 1/9/2025 month-first is 9 January 2025, which is eighteen months before
+    // the test and would have been reported as out of calibration.
+    expect(typedDay('1/9/2025')).toBe('2025-09-01');
+    expect(typedDay('3/7/2026')).toBe('2026-07-03');
+  });
+
+  it('reads a test date written the same way, so the form is not blocked over it', () => {
     const issues = validateForm72(issuable({ testDate: '3/7/2026' }));
-    const partA = issues.filter((i) => i.part === 'A' && i.blocking);
-    expect(partA.length).toBeGreaterThan(0);
-    expect(partA.map((i) => i.message).join(' ')).toMatch(/test date/i);
+    expect(issues.filter((i) => i.part === 'A' && i.blocking).map((i) => i.message))
+      .not.toContain(expect.stringMatching(/test date/i));
+  });
+
+  it('still blocks a test date that is not a date at all', () => {
+    // The original intent — never date a form by guesswork — holds for
+    // anything typedDay cannot read.
+    for (const junk of ['next Tuesday', '3/7', 'n/a']) {
+      const partA = validateForm72(issuable({ testDate: junk }))
+        .filter((i) => i.part === 'A' && i.blocking);
+      expect({ junk, blocked: partA.length > 0 }).toEqual({ junk, blocked: true });
+    }
   });
 });
 
@@ -1630,6 +1658,65 @@ describe('a Part D row with a meter named and nothing read', () => {
     }));
     const row = between(html, '19 mm', '22 mm');
     expect(row).not.toContain('<span class="missing">');
+  });
+});
+
+describe('a calibration date typed the way people write it', () => {
+  /*
+   * "Unreadable" is a caution; "out of calibration" is a blocker. So a gauge
+   * whose certificate date was typed 15/01/2025 — two years before the test —
+   * came back unreadable, and the form could be ISSUED with every pressure on
+   * it read by a gauge two years stale. The box took only ISO, in a format
+   * nobody in Australia writes, on the one device that is never a preset.
+   */
+  const gauge = (dateCalibrated: string) => ({
+    slot: 'Device/gauge 1', serialNumber: 'PG-1', dateCalibrated,
+  });
+
+  it('judges an AU-typed date rather than calling it unreadable', () => {
+    const cal = deviceCalibration(gauge('15/01/2025'), '2026-10-02');
+    expect(cal.state).toBe('out-of-calibration');
+    expect(cal.issue?.blocking).toBe(true);
+  });
+
+  it('judges one typed as bare digits too', () => {
+    expect(deviceCalibration(gauge('15012025'), '2026-10-02').state).toBe('out-of-calibration');
+  });
+
+  it('still reads an ISO date, which is what everything stores', () => {
+    expect(deviceCalibration(gauge('2026-09-01'), '2026-10-02').state).toBe('in-calibration');
+  });
+
+  it('calls a recent AU-typed date in calibration, not out of it', () => {
+    // The fix must not turn every readable date into a blocker.
+    const cal = deviceCalibration(gauge('1/9/2026'), '2026-10-02');
+    expect(cal.state).toBe('in-calibration');
+    expect(cal.issue).toBeUndefined();
+  });
+
+  it('keeps calling a date that is not a date unreadable', () => {
+    for (const junk of ['next week', 'n/a', '15/01', '--']) {
+      expect({ junk, state: deviceCalibration(gauge(junk), '2026-10-02').state })
+        .toEqual({ junk, state: 'unreadable-date' });
+    }
+  });
+
+  it('still catches a date after the test, whichever way it was typed', () => {
+    expect(deviceCalibration(gauge('2/11/2026'), '2026-10-02').state).toBe('calibrated-after-test');
+  });
+
+  it('blocks the form rather than cautioning it', () => {
+    /*
+     * The whole point. An out-of-calibration gauge stops the form being
+     * issued; an unreadable date does not, and that is the gap an AU-typed
+     * date used to fall into.
+     */
+    const form = issuable({
+      testDate: '2026-10-02',
+      devices: [{ slot: 'Device/gauge 1', serialNumber: 'PG-1', dateCalibrated: '15/01/2025' }],
+    });
+    expect(validateForm72(form).filter((i) => i.blocking).map((i) => i.part)).toContain('C');
+    expect(canIssue(form)).toBe(false);
   });
 });
 
