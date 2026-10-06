@@ -89,13 +89,18 @@ describe('every screen that needs a record', () => {
      * lists every site in a picker and refuses to save until one is chosen,
      * which is a better answer here than sending somebody away.
      *
+     * `/site/form72` sends somebody straight to the job picker, which is a
+     * better answer still: the form is nearly always raised against a job, and
+     * the job knows the site. Telling a technician who tapped "Form 72" to go
+     * and find a site first was the dead end, not the gate's wording.
+     *
      * `/site/assets` is the one screen still without an answer: opened with no
      * site it says "No assets recorded", which is a statement about a site
      * nobody named. It is left out here because it is being changed elsewhere
      * at the time of writing, and it is written down rather than quietly
      * skipped so that the gap is visible.
      */
-    const answersItsOwnWay = new Set(['app/assets/new.tsx']);
+    const answersItsOwnWay = new Set(['app/assets/new.tsx', 'app/site/form72.tsx']);
     const missing = needsParam
       .filter((d) => !answersItsOwnWay.has(d.file))
       .filter((d) => !readFileSync(join(REPO, d.file), 'utf8').includes('<ContextGate'))

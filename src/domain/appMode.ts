@@ -752,12 +752,19 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/site/form72', file: 'app/site/form72.tsx', tab: 'sites', section: 'Paperwork',
     label: 'Form 72s', needsContext: true, modes: BOTH, openedFrom: ['/site/[id]'],
-    blurb: "The Form 72s held for this site, and the start of a new one.",
+    blurb: 'The Form 72s held for this site. Opened without one it goes to the job picker, '
+      + 'because the form is nearly always raised against a job.',
     terms: ['form 72', 'certificate', 'occupier', 'qfes'],
   },
   {
+    route: '/form72/new', file: 'app/form72/new.tsx', tab: 'sites', section: 'Paperwork',
+    label: 'Start a Form 72', modes: BOTH, openedFrom: ['/site/form72', '/work/job/[id]'],
+    blurb: 'Pick the job the test was done under, and Part A fills itself in from it.',
+    terms: ['form 72', 'new', 'hydrant test', 'start', 'raise'],
+  },
+  {
     route: '/form72/[id]', file: 'app/form72/[id].tsx', tab: 'sites', section: 'Paperwork',
-    label: 'Form 72', needsContext: true, modes: BOTH, openedFrom: ['/site/form72'],
+    label: 'Form 72', needsContext: true, modes: BOTH, openedFrom: ['/site/form72', '/form72/new'],
     blurb: "One Form 72, laid out part for part in the department's own order and signed on site.",
     terms: ['form 72', 'sign', 'declaration', 'booster', 'hydrant test'],
   },

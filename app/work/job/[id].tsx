@@ -976,6 +976,21 @@ export default function JobScreen() {
           ) : null}
         </Rowed>
 
+        {/*
+          * Straight to a Form 72 for this job.
+          *
+          * The job already knows the site, the address, the date and often
+          * which maintenance test this is, and Part A was the slowest part of
+          * the form for no good reason. Searching the site list from a job the
+          * technician already has open is the detour this removes.
+          */}
+        <Button
+          title="Form 72 for this job"
+          variant="secondary"
+          icon={<MaterialCommunityIcons name="clipboard-check-outline" size={18} color={t.color.text} />}
+          onPress={() => router.push({ pathname: '/form72/new', params: { siteId: job.siteId ?? '' } })}
+        />
+
         {job.notes ? (
           <>
             <H2>Your notes</H2>

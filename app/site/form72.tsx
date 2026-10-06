@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { View } from 'react-native';
-import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { Redirect, Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { createForm72, deleteForm72, listForm72, type StoredForm72 } from '@/db/form72Repo';
 import { listJobPage } from '@/db/opsRepo';
@@ -21,7 +21,6 @@ import { useTheme } from '@/theme';
 import {
   Banner, Button, Card, Chip, EmptyState, H2, Rowed, Screen, Txt,
 } from '@/components/ui';
-import { ContextGate } from '@/components/ContextGate';
 import { contextId } from '@/domain/screenContext';
 import { showAlert } from '@/components/alert';
 
@@ -136,7 +135,15 @@ export default function SiteForm72ListScreen() {
 
   const owing = forms.filter((f) => f.status === 'issued' && !f.copyGivenAt);
 
-  if (!siteId) return <ContextGate kind="site" what="the Form 72s raised" title="Form 72" />;
+  /*
+   * Opened with no site — from the home screen, or from a pinned tile.
+   *
+   * It used to show the context gate, which told somebody who had tapped
+   * "Form 72" to go and find a site first. The form is nearly always raised
+   * against a job, and the job knows the site, so that is where this goes
+   * instead. The route stays the same so a pinned tile keeps working.
+   */
+  if (!siteId) return <Redirect href="/form72/new" />;
 
   return (
     <Screen>
