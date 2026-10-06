@@ -469,9 +469,23 @@ export default function TimesheetScreen() {
           <Txt size="display" weight="800" style={{ letterSpacing: -1.4 }}>{totals.grand}<Txt size="lg" tone="muted" weight="700"> h</Txt></Txt>
           <Txt size="xs" tone="faint">{`of a ${STANDARD_WEEK_HOURS} hour week`}</Txt>
         </View>
-        <Chip label={sheet.status === 'submitted' ? 'Submitted' : 'Draft'} tone={sheet.status === 'submitted' ? 'pass' : 'warn'} />
       </Rowed>
+      {/*
+        * The status sits with the week's other facts rather than beside the
+        * headline number.
+        *
+        * Up there it took 82dp out of the 256 a 320dp phone has inside this
+        * card, which with the 72dp ring left 78 for a line reading "of a 40
+        * hour week" — 101dp at this size. So on a narrow phone the one line
+        * explaining what the big number is a proportion of wrapped, on every
+        * week, as soon as the sheet was submitted. Measured off the bundled
+        * Manrope rather than guessed at.
+        *
+        * It belongs here anyway: "38.5 worked · 2 O/T · Submitted" is the row
+        * of facts about the week, and this row already wraps.
+        */}
       <Rowed gap={2} wrap>
+        <Chip label={sheet.status === 'submitted' ? 'Submitted' : 'Draft'} tone={sheet.status === 'submitted' ? 'pass' : 'warn'} />
         <Txt size="sm" tone="muted">{totals.worked} worked</Txt>
         {totals.ot ? <Txt size="sm" tone="warn">· {totals.ot} O/T</Txt> : null}
         {totals.dt ? <Txt size="sm" tone="warn">· {totals.dt} D/T</Txt> : null}
@@ -582,8 +596,13 @@ export default function TimesheetScreen() {
           * send it without the spreadsheet. Labelled for what it is good for
           * rather than for its file type: "PDF" says nothing about why you
           * would want this one.
+          *
+          * "Readable copy" measured 126dp in the 120 this button has at 360
+          * and the 100 it has at 320, so it broke to "Readable" over "copy"
+          * inside a sixty-point button beside a one-line "Export". This says
+          * the same thing in 82 and is the comment's own words for it.
           */}
-        <Button title="Readable copy" variant="secondary" onPress={() => { void sharePage(); }} loading={busy} style={{ flex: 1 }} />
+        <Button title="As a page" variant="secondary" onPress={() => { void sharePage(); }} loading={busy} style={{ flex: 1 }} />
       </Rowed>
       <Button
         title={sheet.status === 'submitted' ? 'Back to draft' : 'Mark submitted'}
@@ -688,7 +707,18 @@ function DayBar({ day, peak, theme: t }: { day: DaySummary; peak: number; theme:
         mono={!day.leave && !empty}
         tone={empty ? 'faint' : day.leave ? 'warn' : 'muted'}
         numberOfLines={1}
-        style={{ width: 96, textAlign: 'right' }}
+        /*
+         * Wide enough for the longest thing it says.
+         *
+         * Ninety-six clipped "12h public holiday" (103dp at this weight and
+         * size) and "7.6h annual leave" (101dp), which is every public holiday
+         * and most leave — and this is the only place the week's summary names
+         * what kind of day off it was, so the one that got cut is the one a
+         * payroll query is usually about. Measured off the bundled Manrope at
+         * 12px, and the row it sits in has the space: the bar beside it is
+         * elastic.
+         */
+        style={{ width: 116, textAlign: 'right' }}
       >
         {tail}
       </Txt>
@@ -765,7 +795,16 @@ function DayCard({
       {leave ? (
         <View style={{ marginTop: t.space(2.5), gap: t.space(2) }}>
           <LeavePicker date={date} selected={leave.kind} hours={leave.hours} onLeave={onLeave} theme={t} />
-          <Pressable onPress={() => onLeave(leave.kind, 0)} hitSlop={6}>
+          {/*
+            * A real height, not more hitSlop. Android clips hitSlop to the
+            * parent's bounds, so six points around a 17dp line is a 29dp
+            * target on a screen whose own theme calls 48 the floor and says
+            * gloves want more.
+            */}
+          <Pressable
+            onPress={() => onLeave(leave.kind, 0)}
+            style={{ minHeight: 44, justifyContent: 'center' }}
+          >
             <Txt size="sm" tone="accent" weight="700">Actually, I worked — clear this</Txt>
           </Pressable>
         </View>
@@ -816,13 +855,22 @@ function JobEntry({
             placeholderTextColor={t.color.textFaint}
             style={{
               color: t.color.text, fontSize: t.font.size.md, fontWeight: '700',
-              paddingVertical: 2, paddingHorizontal: 0, minHeight: 28,
+              // The tap that starts editing a row's title, so it is a target
+              // like any other rather than a 28dp line.
+              paddingVertical: 2, paddingHorizontal: 0, minHeight: 44,
             }}
           />
           {entry.jobNumber ? <Txt size="xs" tone="faint">Job {entry.jobNumber}</Txt> : null}
         </View>
         <Txt weight="800" tone={hours ? 'accent' : 'faint'} style={{ fontFamily: t.font.mono }}>{hours || '—'} h</Txt>
-        <Pressable onPress={onRemove} hitSlop={10}><MaterialCommunityIcons name="close-circle-outline" size={22} color={t.color.textFaint} /></Pressable>
+        <Pressable
+          onPress={onRemove}
+          accessibilityRole="button"
+          accessibilityLabel="Remove this job"
+          style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}
+        >
+          <MaterialCommunityIcons name="close-circle-outline" size={22} color={t.color.textFaint} />
+        </Pressable>
       </Rowed>
 
       <Rowed gap={2}>
@@ -832,7 +880,7 @@ function JobEntry({
         {entry.hourKind !== 'ord' ? <Chip label={entry.hourKind === 'ot' ? 'O/T' : 'D/T'} tone="warn" /> : null}
       </Rowed>
 
-      <Pressable onPress={() => setOpen((v) => !v)} hitSlop={6}>
+      <Pressable onPress={() => setOpen((v) => !v)} style={{ minHeight: 44, justifyContent: 'center' }}>
         <Rowed gap={1}>
           <Txt size="sm" tone="accent" weight="700">{open ? 'Fewer options' : 'Overtime, allowances, notes'}</Txt>
           <MaterialCommunityIcons name={open ? 'chevron-up' : 'chevron-down'} size={16} color={t.color.accentText} />

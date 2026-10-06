@@ -149,11 +149,20 @@ describe('the timesheet at whatever width it is given', () => {
      * changed would retrain everybody who handles it.
      */
     expect(timesheet).toContain('timesheetDocumentHtml(sheet)');
-    expect(timesheet).toMatch(/sendMail\([\s\S]{0,400}\[file, page\]/);
+    /*
+     * The page is allowed to fail without taking the workbook with it: it is
+     * rendered through the phone's print engine, which can refuse, and it used
+     * to be awaited inside the same try as the send — so a convenience copy
+     * that could not be made answered "Could not send" and payroll got
+     * nothing. The workbook goes either way.
+     */
+    expect(timesheet).toMatch(/sendMail\([\s\S]{0,400}page \? \[file, page\] : \[file\]/);
   });
 
   it('offers the page on its own as well, for somebody who wants only that', () => {
-    expect(timesheet).toContain('title="Readable copy"');
+    // "Readable copy" measured 126dp in the 100 this button has at 320, so it
+    // broke to two lines beside a one-line "Export".
+    expect(timesheet).toContain('title="As a page"');
     expect(timesheet).toContain('const sharePage');
   });
 
@@ -173,5 +182,57 @@ describe('the timesheet at whatever width it is given', () => {
     expect(wide).not.toContain('align="flex-start"');
     // And the card fills what it is given rather than floating at the top of it.
     expect(timesheet).toMatch(/spread \? \{ flex: 1 \}/);
+  });
+});
+
+/**
+ * What fits on the phone the week is filled in on.
+ *
+ * Measured against the bundled Manrope rather than eyeballed: every number
+ * below came off the TTF at the size and weight the screen actually uses, in
+ * the space the layout actually leaves.
+ */
+describe('the controls a gloved hand has to hit', () => {
+  /*
+   * The theme calls 48dp the Android floor and says gloves want more; Chip,
+   * Segmented and Button all assert 44. Four controls on the day card did not,
+   * and three of them were a bare line of text with hitSlop around it — which
+   * Android clips to the parent's own bounds, so the slop bought nothing.
+   */
+  it.each([
+    ['clearing a day marked as leave', /onPress=\{\(\) => onLeave\(leave\.kind, 0\)\}\s*\n\s*style=\{\{ minHeight: 44/],
+    ['the overtime and notes toggle', /setOpen\(\(v\) => !v\)\} style=\{\{ minHeight: 44/],
+    ['removing a job from a day', /accessibilityLabel="Remove this job"[\s\S]{0,160}minHeight: 44, minWidth: 44/],
+    ['tapping a job title to edit it', /paddingVertical: 2, paddingHorizontal: 0, minHeight: 44/],
+  ])('%s is at least 44dp', (_what, shape) => {
+    expect(timesheet).toMatch(shape);
+  });
+
+  it('none of them leans on hitSlop for its height', () => {
+    // Six points around a 17dp line is a 29dp target, and Android will not
+    // honour slop that leaves the parent anyway.
+    expect(timesheet).not.toMatch(/hitSlop=\{6\}/);
+  });
+});
+
+describe('the lines that were being cut off', () => {
+  it('gives the day summary room for the longest thing it says', () => {
+    /*
+     * 96dp clipped "12h public holiday" (103dp) and "7.6h annual leave"
+     * (101dp) — every public holiday and most leave — and this is the only
+     * place the summary names what kind of day off it was.
+     */
+    expect(timesheet).toContain('style={{ width: 116, textAlign: \'right\' }}');
+  });
+
+  it('keeps the status chip out of the headline row', () => {
+    /*
+     * 82dp of chip plus a 72dp ring left 78dp of a 320dp phone's card for a
+     * line reading "of a 40 hour week", which is 101dp. So the one line saying
+     * what the big number is a proportion of wrapped on every submitted week.
+     * It sits with the week's other facts now, on a row that already wraps.
+     */
+    const head = timesheet.slice(timesheet.indexOf('<ProgressRing'), timesheet.indexOf('of a ${STANDARD_WEEK_HOURS} hour week'));
+    expect(head).not.toContain('<Chip');
   });
 });
