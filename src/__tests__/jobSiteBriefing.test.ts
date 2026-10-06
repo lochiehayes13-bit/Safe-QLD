@@ -122,3 +122,40 @@ describe('controls that used to do nothing', () => {
     expect(b).toContain('<SitePicker');
   });
 });
+
+describe('a site the map cannot place', () => {
+  /*
+   * buildPins skips a site with no position and counts it as `unlocated`,
+   * which is right — there is nothing to draw. But the map then judged its
+   * search by the pins, so searching for a building that is on the phone and
+   * has no position answered "Nothing found for 'Kingaroy'". That is the one
+   * thing this app must not say about a site it holds, and it is the owner's
+   * complaint word for word.
+   */
+  const map = readFileSync(
+    join(__dirname, '..', '..', 'app', '(tabs)', 'map.tsx'), 'utf8',
+  );
+
+  it('does not call it nothing found when a site matched and has no position', () => {
+    expect(map).not.toContain('else if (!shown.length) setPlaceError');
+    expect(map).toContain('!shown.length && !unplaced.length');
+  });
+
+  it('offers the matched sites rather than only reporting them', () => {
+    // "We have it and cannot show you" is useful only with the way through.
+    expect(map).toContain('On this phone, but nothing knows where it is yet');
+    expect(map).toContain("router.push({ pathname: '/site/[id]', params: { id: site.id } })");
+  });
+
+  it('matches them by the same definition every other site search uses', () => {
+    // The map was also the one place that could not match a site reference or
+    // the office's own number.
+    expect(map).toContain("import { siteMatches } from '@/domain/siteSearch';");
+    expect(map).toContain('siteMatches(site, q)');
+  });
+
+  it('excludes the sites that do have a pin, so nothing is listed twice', () => {
+    expect(map).toContain('const placed = new Set(pins.map((p) => p.siteId));');
+    expect(map).toContain('!placed.has(site.id)');
+  });
+});

@@ -26,6 +26,7 @@ import { formatCents } from '@/domain/rates';
 import { formatAuDate } from '@/export/sheets';
 import { company } from '@/theme/brand';
 import { useTheme } from '@/theme';
+import { siteMatches } from '@/domain/siteSearch';
 import { Button, Rowed, Screen, StatusPill, Txt } from '@/components/ui';
 import { MapCanvas, type MapCanvasHandle, type MapCanvasMessage } from '@/components/MapCanvas';
 
@@ -66,6 +67,16 @@ import { MapCanvas, type MapCanvasHandle, type MapCanvasMessage } from '@/compon
 const BRISBANE: LatLng = { latitude: -27.47, longitude: 153.02 };
 const DEFAULT_ZOOM = 9;
 /** The floating tab bar's height plus the gap the card keeps above it. See components/TabBar. */
+
+/**
+ * How many unplaced matches the map offers under the search.
+ *
+ * Few, because they sit over the map and a long list would bury it. Somebody
+ * searching for a particular building types enough to narrow it; somebody
+ * typing one letter does not want a list of sites with no position.
+ */
+const UNPLACED_SHOWN = 4;
+
 const TAB_BAR_CLEARANCE = 80;
 /**
  * How old a remembered fix can be and still be drawn as "you are here". The
@@ -217,6 +228,28 @@ export default function MapScreen() {
     }),
     [data],
   );
+  /*
+   * The sites that match what was typed and have nowhere to be drawn.
+   *
+   * A site with no position gets no pin — buildPins counts it as `unlocated`
+   * and moves on, which is right, there is nothing to put on a map. But the
+   * search then answered "Nothing found for 'Kingaroy'" about a building that
+   * is on the phone, because it judged the search by the pins. That is the
+   * one thing this app must not say: the site is right there.
+   *
+   * So they are offered as rows under the search instead. The same columns as
+   * every other site search, so the map stops being the one place that cannot
+   * match a site reference or the office's own number.
+   */
+  const unplaced = useMemo(() => {
+    const q = query.trim();
+    if (!q) return [];
+    const placed = new Set(pins.map((p) => p.siteId));
+    return (data?.sites ?? [])
+      .filter((site) => !placed.has(site.id) && siteMatches(site, q))
+      .slice(0, UNPLACED_SHOWN);
+  }, [query, pins, data]);
+
   // The tab bar floats over the bottom of the map; the attribution has to
   // sit above it, and on a phone with a home indicator the bar sits higher.
   const bottomClearance = Math.max(insets.bottom, t.space(2)) + TAB_BAR_CLEARANCE;
@@ -375,7 +408,9 @@ export default function MapScreen() {
       });
       setPlaces(results);
       if (results.length) setCard({ type: 'place', index: 0 });
-      else if (!shown.length) setPlaceError(`Nothing found for “${q}”`);
+      // Not "nothing found" where a site matched and simply has no position:
+      // the rows below say so and offer it.
+      else if (!shown.length && !unplaced.length) setPlaceError(`Nothing found for “${q}”`);
     } catch (e) {
       setPlaceError(e instanceof Error ? e.message : 'The place search did not answer');
     } finally {
@@ -585,6 +620,44 @@ export default function MapScreen() {
               <Txt size="xs" tone={placeError ? 'warn' : 'muted'} numberOfLines={2}>{placeError ?? status}</Txt>
             </View>
           </View>
+
+          {/*
+            * Matched, but not on the map — because nothing knows where it is.
+            *
+            * Offered rather than reported, because "we have it and cannot show
+            * you" is only useful if it comes with the way through. Tapping one
+            * opens the site, where its address can be fixed or a position
+            * taken.
+            */}
+          {unplaced.length ? (
+            <View style={{ ...floating, padding: t.space(2.5), gap: t.space(2) }}>
+              <Txt size="xs" tone="muted">
+                {unplaced.length === 1
+                  ? 'On this phone, but nothing knows where it is yet:'
+                  : `${unplaced.length} on this phone, but nothing knows where they are yet:`}
+              </Txt>
+              {unplaced.map((site) => (
+                <Pressable
+                  key={site.id}
+                  onPress={() => router.push({ pathname: '/site/[id]', params: { id: site.id } })}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${site.name}`}
+                  style={{ minHeight: 44, justifyContent: 'center' }}
+                >
+                  <Rowed gap={2}>
+                    <MaterialCommunityIcons name="map-marker-question-outline" size={18} color={t.color.textFaint} />
+                    <View style={{ flex: 1 }}>
+                      <Txt size="sm" weight="700" numberOfLines={1}>{site.name}</Txt>
+                      <Txt size="xs" tone="faint" numberOfLines={1}>
+                        {[site.suburb, site.clientName].filter(Boolean).join(' · ') || 'No address recorded'}
+                      </Txt>
+                    </View>
+                    <MaterialCommunityIcons name="chevron-right" size={18} color={t.color.textFaint} />
+                  </Rowed>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
 
           {note ? (
             <View
