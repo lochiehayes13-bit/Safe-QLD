@@ -117,7 +117,7 @@ export const FORM_72_SOURCES = [
 
 export const FORM_VERSION = 'Version 1 – July 2014';
 
-export const FORM_TITLE = 'Form 72 — fire hydrant and sprinkler system';
+export const FORM_TITLE = 'Form 72—fire hydrant and sprinkler system';
 export const FORM_SUBTITLE = 'periodic testing and maintenance';
 
 export const FORM_INTRO = 'This form is to be used for the purposes of maintenance to water based '
@@ -354,11 +354,29 @@ export function flowTableRows(test: FlowTest): { row: FlowRow; standard: boolean
     const [row] = remaining.splice(i, 1);
     return { row: row!, standard: true };
   });
+
   const extra = remaining
     .slice()
     .sort((a, b) => flowRowSort(a) - flowRowSort(b))
     .map((row) => ({ row, standard: false }));
-  return [...standard, ...extra];
+
+  /*
+   * An added row belongs at the end of its own group, not after all eight.
+   *
+   * Collected at the bottom, a 22 mm nozzle reading sat under "Other portable
+   * testing devices" — below the five metered rates — which is a different
+   * claim about what the technician measured. So each added row goes after the
+   * printed rows of its own kind, where the group heading above it is the right
+   * one. A row the model cannot identify still goes last, because there is no
+   * group it belongs to.
+   */
+  const out: { row: FlowRow; standard: boolean }[] = [];
+  for (const group of ['nozzle', 'device'] as const) {
+    out.push(...standard.filter((x) => flowRowGroup(x.row) === group));
+    out.push(...extra.filter((x) => flowRowGroup(x.row) === group));
+  }
+  out.push(...extra.filter((x) => flowRowGroup(x.row) === 'unidentified'));
+  return out;
 }
 
 /**
@@ -546,6 +564,46 @@ function pair(a: [string, string], b?: [string, string]): string {
  * carry its "added" marker. Every label passed here is written in this file;
  * none of them comes off a form.
  */
+/**
+ * A reading in its own cell with its unit in the next one.
+ *
+ * How the department prints every pressure: "Boost pressure | ___ | kPa". The
+ * app put the unit in the label — "Boost pressure (kPa)" — which reads fine and
+ * is not what the form says, and more to the point it attached a unit to
+ * "Not recorded" and to "N/A", so a box nobody filled carried a kPa. The unit
+ * goes with the number and nothing else.
+ */
+function reading(
+  value: number | string | undefined,
+  unit: string,
+  part: PartResult | 'refer-to-report',
+): string {
+  const has = value !== undefined && value !== null && value !== '';
+  return `${cell(value, part)}${has ? ` <span class="u">${esc(unit)}</span>` : ''}`;
+}
+
+/**
+ * The department's "___ L/s at ___ kPa" field, which is one field of two boxes.
+ *
+ * Half of it filled in has to print as half of it filled in — collapsing the
+ * pair to "Not recorded" threw away a flow somebody had recorded — and the
+ * half that is missing uses the page's own word for a missing reading rather
+ * than a sentence of its own.
+ */
+function atPair(
+  lps: number | undefined,
+  kpa: number | undefined,
+  part: PartResult | 'refer-to-report',
+): string {
+  if (lps === undefined && kpa === undefined) {
+    return part === 'na' ? '<span class="na">N/A</span>' : '<span class="missing">Not recorded</span>';
+  }
+  const half = (v: number | undefined, unit: string): string => (v === undefined
+    ? '<span class="missing">Not recorded</span>'
+    : `${v} <span class="u">${unit}</span>`);
+  return `${half(lps, 'L/s')} at ${half(kpa, 'kPa')}`;
+}
+
 function wide(label: string, value: string): string {
   return `<tr><td class="k">${label}</td><td class="v" colspan="3">${value}</td></tr>`;
 }
@@ -561,26 +619,53 @@ function partA(form: Form72): string {
     <tr><td class="mtl">combined</td><td>${tick('', m.combinedAnnual)}</td><td>${tick('', m.combinedFiveYear)}</td></tr>
   </table>`;
 
-  return `${band('Part A — Test details')}
+  /*
+   * The department's own shape for the bottom of Part A.
+   *
+   * A "Test details" cell down the left spanning three rows — the test date,
+   * the maintenance test grid and the time — with the date and the grid on one
+   * line and the time below. The app printed no such cell, labelled the grid
+   * row "Maintenance test" where the department labels the group, and put Time
+   * beside the date instead of under it.
+   */
+  return `${band('Part A—Test details')}
   <table class="grid">
     ${wide('Site name', cell(form.siteName, 'pass'))}
     ${wide('Site address', cell(form.siteAddress, 'pass'))}
     ${wide('Contractor', cell(form.contractor, 'pass'))}
-    ${pair(['Test date', cell(formatAuDate(form.testDate), 'pass')], ['Time', cell(form.testTime, 'pass')])}
-    ${wide('Maintenance test', grid)}
+    <tr>
+      <td class="grp" rowspan="2">Test details</td>
+      <td class="k">Test date:</td><td class="v">${cell(formatAuDate(form.testDate), 'pass')}</td>
+      <td class="k">Maintenance test:</td><td class="v">${grid}</td>
+    </tr>
+    <tr>
+      <td class="k">Time:</td><td class="v" colspan="3">${cell(form.testTime, 'pass')}</td>
+    </tr>
   </table>`;
 }
 
 function partB(form: Form72): string {
   const h = form.hydrostatic;
   const r = h.result;
-  return `${band('Part B — Hydrant hydrostatic test', resultBoxes(r, RESULT_OPTIONS))}
+  return `${band('Part B—Hydrant hydrostatic test', resultBoxes(r, RESULT_OPTIONS))}
   ${note(PART_B_NOTE)}
-  <table class="grid">
-    ${pair(['Boost pressure (kPa)', cell(h.boostPressureKpa, r)], ['Test pressure (kPa)', cell(h.testPressureKpa, r)])}
-    ${pair(['Duration of test (mins)', cell(h.durationMinutes, r)], ['End of test pressure (kPa)', cell(h.endPressureKpa, r)])}
-    ${wide('Loss (if any) (L/min)', cell(h.lossLpm, r))}
-    ${wide('Comments', comment(h.comments, r))}
+  ${/*
+     * The department's Part B is two data rows, not three: boost and test
+     * pressure on the first, then duration, end-of-test pressure and the loss
+     * together on the second. The app put the loss on a row of its own, which
+     * reads as a row the form does not have.
+     */''}
+  <table class="grid b">
+    <tr>
+      <td class="k">Boost pressure</td><td class="v">${reading(h.boostPressureKpa, 'kPa', r)}</td>
+      <td class="k" colspan="2">Test pressure</td><td class="v" colspan="2">${reading(h.testPressureKpa, 'kPa', r)}</td>
+    </tr>
+    <tr>
+      <td class="k">Duration of test</td><td class="v">${reading(h.durationMinutes, 'mins', r)}</td>
+      <td class="k">End of test pressure</td><td class="v">${reading(h.endPressureKpa, 'kPa', r)}</td>
+      <td class="k">Loss (if any):</td><td class="v">${reading(h.lossLpm, 'L/min', r)}</td>
+    </tr>
+    <tr><td class="k">Comments:</td><td class="v" colspan="5">${comment(h.comments, r)}</td></tr>
   </table>`;
 }
 
@@ -657,7 +742,7 @@ function partC(form: Form72, issues: FormIssue[]): string {
   const kinds = form.flowDeviceKinds;
   const partCIssues = issues.filter((i) => i.part === 'C');
 
-  return `${band('Part C — Hydrant test equipment/pressure gauges')}
+  return `${band('Part C—Hydrant test equipment/pressure gauges')}
   ${note(PART_C_NOTE)}
   <table class="grid">
     <tr><td class="k">Flow measuring device</td><td class="v" colspan="3">
@@ -754,15 +839,16 @@ function partC(form: Form72, issues: FormIssue[]): string {
 /**
  * How many hydrant locations the readings actually depend on.
  *
- * The department prints four location fields and the flow table proves one, two
- * or three hydrants at a time. A test run on two hydrants has no third location
- * to give, and calling that a missing reading is the same mistake as flagging
- * the three flow rates nobody ran: it puts red on the page where nothing is
- * wrong, and a reader who learns to skip red will skip the row that matters.
+ * The department prints four location fields and its flow table proves one,
+ * two, three or four hydrants at a time. A test run on two hydrants has no
+ * third location to give, and calling that a missing reading is the same
+ * mistake as flagging the flow rates nobody ran: it puts red on the page where
+ * nothing is wrong, and a reader who learns to skip red will skip the row that
+ * matters.
  *
  * A location the readings *do* depend on is a different thing. Pressures in the
- * "Hydrants 1, 2 & 3" column with no third hydrant named is a gap somebody has
- * to answer for, and it stays red.
+ * "Hydrants 1, 2 and 3" column with no third hydrant named is a gap somebody
+ * has to answer for, and it stays red.
  */
 /** The four hydrant location fields the department prints in Part D. */
 export const PART_D_LOCATION_SLOTS = 4;
@@ -797,16 +883,12 @@ function partD(form: Form72): string {
    * form, so it prints as one — and half of it filled in prints as half of it
    * filled in, rather than as a pair somebody could read as complete.
    */
-  const requirement = d.requiredLps !== undefined || d.requiredKpa !== undefined
-    ? `${d.requiredLps !== undefined ? `${d.requiredLps} L/s` : '<span class="missing">flow not recorded</span>'}`
-      + ` at ${d.requiredKpa !== undefined ? `${d.requiredKpa} kPa` : '<span class="missing">pressure not recorded</span>'}`
-    : r === 'na' ? '<span class="na">N/A</span>' : '<span class="missing">Not recorded</span>';
+  const requirement = atPair(d.requiredLps, d.requiredKpa, r);
 
   // The achieved pair, with the free-text line kept for forms signed before
   // the two numbers existed.
   const achieved = d.achievedLps !== undefined || d.achievedKpa !== undefined
-    ? `${d.achievedLps !== undefined ? `${d.achievedLps} L/s` : '<span class="missing">flow not recorded</span>'}`
-      + ` at ${d.achievedKpa !== undefined ? `${d.achievedKpa} kPa` : '<span class="missing">pressure not recorded</span>'}`
+    ? atPair(d.achievedLps, d.achievedKpa, r)
     : cell(d.systemAchieved, r);
 
   /*
@@ -891,7 +973,7 @@ function partD(form: Form72): string {
       <td class="v">${pressure('hydrants1234Kpa')}</td>
     </tr>`;
   }).join('')}
-    <tr><td class="k" colspan="2">System achieved (L/s at kPa)</td><td class="v" colspan="5">${achieved}</td></tr>
+    <tr><td class="k" colspan="2">System achieved:</td><td class="v" colspan="5">${achieved}</td></tr>
   </table>`;
 
   const extras = rows.filter((x) => !x.standard);
@@ -905,7 +987,7 @@ function partD(form: Form72): string {
     .slice(PART_D_LOCATION_SLOTS)
     .filter((x) => x.trim());
 
-  return `${band('Part D — Hydrant system flow test', resultBoxes(r, FLOW_RESULT_OPTIONS))}
+  return `${band('Part D—Hydrant system flow test', resultBoxes(r, FLOW_RESULT_OPTIONS))}
   ${note(PART_D_NOTE)}
   ${r === 'na'
     // The department's Part D has no N/A box. Leaving all three unticked would
@@ -924,13 +1006,17 @@ function partD(form: Form72): string {
     ${pair(['Hydrant 1 location', loc(1)], ['Hydrant 3 location', loc(3)])}
     ${pair(['Hydrant 2 location', loc(2)], ['Hydrant 4 location', loc(4)])}
     ${pair(
-    ['System requirements (L/s at kPa)', requirement],
-    ['Static pressure (kPa)', cell(d.staticPressureKpa, r)],
+    ['System requirements', requirement],
+    ['Static pressure', reading(d.staticPressureKpa, 'kPa', r)],
   )}
     ${pair(
     ['On-site pump set installed', `${tick('Yes', d.onSitePumpSet === true)}${tick('No', d.onSitePumpSet === false)}${
-      d.onSitePumpSet === undefined ? ' <span class="missing">Not answered</span>' : ''}`],
-    ['Pressure zone number', cell(d.pressureZone, r)],
+      d.onSitePumpSet === undefined
+        // An N/A part answers its boxes N/A, like every other box on it; only a
+        // live part with the question skipped is an omission.
+        ? r === 'na' ? ' <span class="na">N/A</span>' : ' <span class="missing">Not answered</span>'
+        : ''}`],
+    ['Pressure zone number:', cell(d.pressureZone, r)],
   )}
     ${/*
        * Ours. Parts B, E, F and G carry a Comments field and Part D does not —
@@ -1004,10 +1090,7 @@ function partE(form: Form72, input: Form72DocumentInput): string {
    * mistake Part D's requirement had, in the part the overload check is worked
    * out from.
    */
-  const req = b.requiredLps !== undefined || b.requiredKpa !== undefined
-    ? `${b.requiredLps !== undefined ? `${b.requiredLps} L/s` : '<span class="missing">flow not recorded</span>'}`
-      + ` at ${b.requiredKpa !== undefined ? `${b.requiredKpa} kPa` : '<span class="missing">pressure not recorded</span>'}`
-    : undefined;
+  const req = atPair(b.requiredLps, b.requiredKpa, r);
 
   const check = b.requiredLps !== undefined && b.requiredKpa !== undefined
     ? overloadCheck(b.requiredLps, b.requiredKpa, input.overload)
@@ -1039,18 +1122,14 @@ function partE(form: Form72, input: Form72DocumentInput): string {
     }
   }
 
-  return `${band('Part E — Pump appliance booster test', resultBoxes(r, RESULT_OPTIONS))}
+  return `${band('Part E—Pump appliance booster test', resultBoxes(r, RESULT_OPTIONS))}
   ${note(PART_E_NOTE)}
   <table class="grid">
     ${pair(['Hydrant locations', cell(b.hydrantLocations, r)],
-    ['Height of highest hydrant above booster (m)', cell(b.highestHydrantAboveBoosterM, r)])}
-    ${pair(
-    ['System requirements (L/s at kPa)',
-      req ?? (r === 'na' ? '<span class="na">N/A</span>' : '<span class="missing">Not recorded</span>')],
-    ['Static pressure (kPa)', cell(b.staticPressureKpa, r)],
-  )}
-    ${pair(['Pump inlet pressure (kPa)', cell(b.pumpInletKpa, r)], ['Pump discharge pressure (kPa)', cell(b.pumpDischargeKpa, r)])}
-    ${pair(['Boost pressure (kPa)', cell(b.boostPressureKpa, r)], ['Calculated frictional loss (kPa)', lossCell])}
+    ['Height of highest hydrant above booster', reading(b.highestHydrantAboveBoosterM, 'm', r)])}
+    ${pair(['System requirements', req], ['Static pressure', reading(b.staticPressureKpa, 'kPa', r)])}
+    ${pair(['Pump inlet pressure', reading(b.pumpInletKpa, 'kPa', r)], ['Pump discharge pressure', reading(b.pumpDischargeKpa, 'kPa', r)])}
+    ${pair(['Boost pressure', reading(b.boostPressureKpa, 'kPa', r)], ['Calculated frictional loss', lossCell])}
     ${/*
        * Ours, and it had to be printed.
        *
@@ -1060,8 +1139,8 @@ function partE(form: Form72, input: Form72DocumentInput): string {
        * nowhere else on the page, so a reader could not check the subtraction
        * they were being shown. Now they can.
        */''}
-    ${wide('Residual at the hydrant (kPa) <span class="extra">added</span>', cell(b.hydrantResidualKpa, r))}
-    ${wide('Comments', comment(b.comments, r))}
+    ${wide('Residual at the hydrant <span class="extra">added</span>', reading(b.hydrantResidualKpa, 'kPa', r))}
+    ${wide('Comments:', comment(b.comments, r))}
   </table>
   ${r === 'na' ? '' : `<div class="stated">${esc(working)}</div>`}
   ${lossConflict}
@@ -1079,11 +1158,11 @@ function partE(form: Form72, input: Form72DocumentInput): string {
 function partF(form: Form72): string {
   const f = form.sprinklerHydrostatic;
   const r = f.result;
-  return `${band('Part F — Sprinkler hydrostatic test', resultBoxes(r, RESULT_OPTIONS))}
+  return `${band('Part F—Sprinkler hydrostatic test', resultBoxes(r, RESULT_OPTIONS))}
   ${note(PART_F_NOTE)}
   <table class="grid">
-    ${pair(['Pressure (kPa)', cell(f.pressureKpa, r)], ['Time held (mins)', cell(f.timeHeldMinutes, r)])}
-    ${wide('Comments', comment(f.comments, r))}
+    ${pair(['Pressure', reading(f.pressureKpa, 'kPa', r)], ['Time held', reading(f.timeHeldMinutes, 'mins', r)])}
+    ${wide('Comments:', comment(f.comments, r))}
   </table>`;
 }
 
@@ -1145,12 +1224,12 @@ function partG(form: Form72): string {
        * figure to its left rather than about the one to its right.
        */''}
     <tr>
-      <td class="k">Required flow rate (L/min)</td><td class="v">${c(p?.requiredFlowLpm)}</td>
+      <td class="k">Required flow rate</td><td class="v">${spare ? c(undefined) : reading(p?.requiredFlowLpm, 'L/min', r)}</td>
       <td class="v">${line('flow', p?.flowResult, p?.requiredFlowLpm, p?.resultFlowLpm)}</td>
       <td class="v">${c(p?.resultFlowLpm)}${p?.resultFlowLpm !== undefined ? ' <span class="u">L/min</span>' : ''}</td>
     </tr>
     <tr>
-      <td class="k">Required pressure (kPa)</td><td class="v">${c(p?.requiredPressureKpa)}</td>
+      <td class="k">Required pressure</td><td class="v">${spare ? c(undefined) : reading(p?.requiredPressureKpa, 'kPa', r)}</td>
       <td class="v">${line('pressure', p?.pressureResult, p?.requiredPressureKpa, p?.resultPressureKpa)}</td>
       <td class="v">${c(p?.resultPressureKpa)}${p?.resultPressureKpa !== undefined ? ' <span class="u">kPa</span>' : ''}</td>
     </tr>`;
@@ -1178,13 +1257,17 @@ function partG(form: Form72): string {
    * Its Pass and Fail boxes are on each test point's two lines, not on the
    * part. So all three boxes here are Safe QLD's, and all three say so.
    */
-  return `${band('Part G — Sprinkler system flow test', resultBoxes(r, PART_G_RESULT_OPTIONS))}
+  return `${band('Part G—Sprinkler system flow test', resultBoxes(r, PART_G_RESULT_OPTIONS))}
   ${note(PART_G_NOTE)}
   <table class="grid">
-    ${pair(['System specifications (block plan)', cell(g.systemSpec, r)], ['Test results', cell(achieved, r)])}
+    ${pair(['System specifications (block plan):', cell(g.systemSpec, r)], ['Test results:', cell(achieved, r)])}
     ${rows}
-    ${wide('Running test — installation gauge pressure (kPa)', cell(g.runningTestGaugeKpa, r))}
-    ${wide('Comments', comment(g.comments, r))}
+    <tr>
+      <td class="k">Running test</td>
+      <td class="k" colspan="2">Installation gauge pressure:</td>
+      <td class="v">${reading(g.runningTestGaugeKpa, 'kPa', r)}</td>
+    </tr>
+    ${wide('Comments:', comment(g.comments, r))}
   </table>
   ${disagreements.length
     ? `<div class="stated fail"><b>Ticked result against the figures.</b> ${
@@ -1210,7 +1293,7 @@ function partH(form: Form72): string {
     + `<div class="yn">${tick('No', value === false)}<span class="ynt">${esc(no)}</span></div>`
     + (value === undefined ? '<div class="missing">Not answered</div>' : '');
 
-  return `${band('Part H — Compliance')}
+  return `${band('Part H—Compliance')}
   <table class="grid">
     <tr><td class="k">Critical defects identified</td><td class="v" colspan="3">${
   yesNo(critical, 'Give owner/occupier a critical defect notice',
@@ -1225,7 +1308,7 @@ function partH(form: Form72): string {
        * pair and nothing else; the note is where the app keeps what the
        * technician wrote about the result, so it says it is ours.
        */''}
-    ${wide('System notes <span class="extra">added</span>', comment(form.systemNotes, form.systemResult))}
+    ${wide('System notes: <span class="extra">added</span>', comment(form.systemNotes, form.systemResult))}
   </table>
   ${form.systemResult === 'na'
     // The department's System row carries Pass and Fail and nothing else. An
@@ -1258,7 +1341,7 @@ function signatureCell(signature: string | undefined): string {
 }
 
 function partI(form: Form72): string {
-  return `${band('Part I — Signature')}
+  return `${band('Part I—Signature')}
   <div class="decl">${esc(DECLARATION)}</div>
   <table class="grid sig">
     ${pair(['Licensee name', cell(form.licenseeName, 'pass')], ['Licensee signature', signatureCell(form.signature)])}
@@ -1416,6 +1499,8 @@ const CSS = `
   img.sig { max-height: 42px; max-width: 100%; display: block; }
   .results sup { font-size: 7px; vertical-align: super; opacity: 0.85; }
   td.grp { background: #F2F2F2; font-weight: 700; width: 11%; vertical-align: middle; }
+  table.b td.k { width: auto; }
+  table.b td.v { width: auto; }
   .u { color: #666; font-size: 7px; }
   .deptfine { border: 1px solid #D5D8E4; background: #FAFAFC; padding: 5px 9px; margin-top: 5px;
               font-size: 6.5px; line-height: 1.5; color: #333; }
