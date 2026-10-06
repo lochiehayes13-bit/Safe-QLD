@@ -520,7 +520,11 @@ describe('Part E — the arithmetic the form asks for', () => {
   it('calculates the frictional loss and shows the working, so it can be checked', () => {
     const html = form72Html(doc({ form: issuable({ booster }) }));
     // 1400 kPa boost, less 12 m of head at 9.81 kPa/m, less 900 kPa residual.
-    expect(html).toContain('382.3 kPa');
+    // The unit in its own span, as every other reading on the page has it. This
+    // was the one cell that printed kPa as body text, and asserting the bare
+    // string here is what let that stand — loosening it to '382.3' would lose
+    // the branch instead, since the working line beside it reads in kPa too.
+    expect(html).toContain('382.3 <span class="u">kPa</span>');
     expect(flat(html)).toContain('less 117.7 kPa of elevation head over 12 m');
   });
 
@@ -584,6 +588,41 @@ describe('Part E — the arithmetic the form asks for', () => {
     }));
     expect(flat(html)).toContain('an overload run is recorded against this form (24 L/s at 470 kPa)');
     expect(flat(html)).toContain('One of the two is wrong');
+  });
+
+  it('never prints a boxed block of ours without the line saying it is ours', () => {
+    /*
+     * The attribution line used to be gated by a condition restating when the
+     * boxed blocks should appear, and it had drifted from them: it was
+     * suppressed whenever Part E was N/A with no overload run, while the
+     * frictional-loss conflict notice is not gated on the part result at all.
+     * So a form where somebody marked Part E not applicable after typing a
+     * stated loss that disagreed with the readings printed one of our boxes
+     * with nothing on the page saying it was not the department's — which is
+     * the one thing every added block on this document has to say.
+     */
+    const html = form72Html(doc({
+      form: issuable({
+        booster: {
+          result: 'na',
+          boostPressureKpa: 1400,
+          highestHydrantAboveBoosterM: 12,
+          hydrantResidualKpa: 900,
+          statedFrictionalLossKpa: 300,
+        },
+      }),
+    }));
+    const partE = between(html, 'Part E—Pump', 'Part F—Sprinkler');
+    expect(partE).toContain('two different figures');
+    expect(partE).toContain('are not part of the department');
+  });
+
+  it('prints no attribution line on a part with no boxed block at all', () => {
+    // The other half: a line about boxes that are not there would be its own
+    // kind of noise.
+    const html = form72Html(doc({ form: issuable({ booster: { result: 'na' } }) }));
+    const partE = between(html, 'Part E—Pump', 'Part F—Sprinkler');
+    expect(partE).not.toContain('are not part of the department');
   });
 
   it('says the check cannot be stated at all when Part E has no duty on it', () => {
@@ -654,11 +693,41 @@ describe('Part G — the sprinkler test points', () => {
   };
 
   it('decides each line from the figures rather than asking for the subtraction again', () => {
+    /*
+     * The verdict prints; the department's box stays empty.
+     *
+     * This used to assert the derived answer as a tick in the department's own
+     * box, which made "the licensee ticked Pass" and "nobody ticked anything
+     * and the arithmetic says pass" the same mark on the page, separated only
+     * by 7.5px grey italic. The subtraction is still shown — two figures that
+     * answer the question should not print as "Not decided" — but it is shown
+     * as our words, beside boxes nobody ticked.
+     */
     const html = form72Html(doc({ form: issuable({ sprinklerFlow }) }));
     const flow = between(html, 'Required flow rate', 'Required pressure');
-    expect(flow).toContain('<span class="cb on">&#10007;</span>Pass');
+    expect(flow).toContain('Pass on the figures — not ticked');
+    expect(flow).not.toContain('<span class="cb on">&#10007;</span>Pass');
     const pressure = between(html, 'Required pressure', 'Test point 2');
-    expect(pressure).toContain('<span class="cb on">&#10007;</span>Fail');
+    expect(pressure).toContain('Fail on the figures — not ticked');
+    expect(pressure).not.toContain('<span class="cb on">&#10007;</span>Fail');
+  });
+
+  it('ticks the box where the licensee ticked it, which is the only way it ticks', () => {
+    const html = form72Html(doc({
+      form: issuable({
+        sprinklerFlow: {
+          result: 'pass',
+          testPoints: [{
+            location: 'Valve 1', requiredFlowLpm: 540, resultFlowLpm: 560,
+            requiredPressureKpa: 200, resultPressureKpa: 220,
+            flowResult: 'pass', pressureResult: 'pass',
+          }],
+        },
+      }),
+    }));
+    const flow = between(html, 'Required flow rate', 'Required pressure');
+    expect(flow).toContain('<span class="cb on">&#10007;</span>Pass');
+    expect(flow).not.toContain('on the figures');
   });
 
   it('leaves a line undecided when there is nothing to compare the result against', () => {
@@ -1233,7 +1302,10 @@ describe('a frictional loss worked out two ways', () => {
     const html = form72Html(doc({
       form: issuable({ booster: { result: 'pass', statedFrictionalLossKpa: 350 } }),
     }));
-    expect(flat(html)).toContain('350 kPa <span class="extra">(stated)</span>');
+    // The only assertion covering the stated branch — the parity fixture's
+    // filled form has no stated loss — so it keeps the span rather than the
+    // bare string it used to accept.
+    expect(flat(html)).toContain('350 <span class="u">kPa</span> <span class="extra">(stated)</span>');
     expect(flat(html)).toContain('Stated by the technician as 350 kPa');
   });
 
@@ -1296,13 +1368,21 @@ describe('Part G — the tick and the subtraction', () => {
     expect(flat(html)).not.toContain('Test point 1 pressure is ticked');
   });
 
-  it('marks a box it filled in itself, so a tick is never attributed to the technician', () => {
+  it('never attributes a tick to the technician, which it used to do in 7.5px', () => {
+    /*
+     * The name of this test was already the rule; the code it asserted broke
+     * it. It ticked the department's box from the derivation and appended
+     * " from the figures" — 7.5px grey italic against 9.5px body — so the
+     * guarantee rested on a mark smaller than the text around it, in one of
+     * the two places on this form whose Pass and Fail boxes are the
+     * department's own rather than ours.
+     */
     const html = form72Html(doc({
       form: issuable({ sprinklerFlow: { result: 'pass', testPoints: [point] } }),
     }));
     const flow = between(html, 'Required flow rate', 'Required pressure');
-    expect(flow).toContain('<span class="cb on">&#10007;</span>Fail');
-    expect(flow).toContain('from the figures');
+    expect(flow).not.toContain('<span class="cb on">&#10007;</span>');
+    expect(flow).toContain('Fail on the figures — not ticked');
     expect(flat(html)).not.toContain('Ticked result against the figures');
   });
 });

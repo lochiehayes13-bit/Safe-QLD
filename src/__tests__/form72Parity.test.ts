@@ -228,8 +228,22 @@ describe('every string the department prints is on our page', () => {
 describe('every unit annotation prints beside the reading it belongs to', () => {
   it.each(OFFICIAL_FORM_72_UNITS.map((u) => [u.id, u] as const))('%s', (_id, u) => {
     const section = FILLED_SECTIONS[u.section];
+    /*
+     * The window is measured, not guessed, and it is the whole point of this
+     * assertion.
+     *
+     * At 160 characters this test passed on the wrong element: Part E's
+     * "Calculated frictional loss" printed its kPa as body text rather than a
+     * unit span, and the nearest real unit span — in the next row — sat 156
+     * characters away, inside the window. So the one entry whose unit was
+     * missing was the one the test reported as present.
+     *
+     * Across all 31 entries on a filled render the largest legitimate gap is
+     * 68 (D.achieved.kPa, which has a second reading between the label and its
+     * unit). 100 clears that with room and is nowhere near a neighbouring row.
+     */
     const pattern = new RegExp(
-      `${escapeRe(u.field)}[\\s\\S]{0,160}?<span class="u">${escapeRe(u.unit)}</span>`,
+      `${escapeRe(u.field)}[\\s\\S]{0,100}?<span class="u">${escapeRe(u.unit)}</span>`,
     );
     const found = pattern.test(section);
     expect({ id: u.id, field: u.field, unit: u.unit, found })

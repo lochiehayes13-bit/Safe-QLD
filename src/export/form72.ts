@@ -1095,7 +1095,12 @@ function partE(form: Form72, input: Form72DocumentInput): string {
   const loss = resolveFrictionalLoss(b);
   const gaps = frictionalLossGaps(b);
   const lossCell = loss.kpa !== undefined
-    ? `${loss.kpa} kPa${loss.source === 'stated' ? ' <span class="extra">(stated)</span>' : ''}`
+    // The unit in its own span, as every other reading on the page does it —
+    // this one hard-coded it as body text, so the department's own kPa
+    // annotation printed at reading size in reading colour beside a figure
+    // the app calculated.
+    ? `${loss.kpa} <span class="u">kPa</span>${
+      loss.source === 'stated' ? ' <span class="extra">(stated)</span>' : ''}`
     : r === 'na' ? '<span class="na">N/A</span>' : '<span class="missing">Not calculated</span>';
 
   const head = b.highestHydrantAboveBoosterM !== undefined
@@ -1187,17 +1192,30 @@ function partE(form: Form72, input: Form72DocumentInput): string {
     ${wide('Residual at the hydrant <span class="extra">added</span>', reading(b.hydrantResidualKpa, 'kPa', r))}
     ${wide('Comments:', comment(b.comments, r))}
   </table>
-  ${r === 'na' ? '' : `<div class="stated">${esc(working)}</div>`}
-  ${lossConflict}
-  ${overloadBlock}
   ${/*
-     * One line, where the added blocks are, saying whose they are. The boxed
-     * notes down this page carry working and checks the department's form has
-     * no room for, and a reader has to be able to tell them from its text.
+     * The boxed blocks, and the one line saying whose they are.
+     *
+     * Built as a list and joined, so the attribution is decided by whether any
+     * of them actually printed rather than by a condition restating when they
+     * should have. The condition had already drifted: it suppressed the
+     * attribution whenever Part E was N/A with no overload run, and the
+     * frictional-loss conflict notice is not gated on the part result at all —
+     * so a form where somebody marked Part E not applicable after typing a
+     * stated loss that disagreed with the readings printed one of our boxed
+     * blocks with nothing on the page saying it was not the department's.
      */''}
-  ${r === 'na' && !run ? '' : '<div class="subnote">The boxed notes above are not part of '
-    + "the department's form: they are the working behind the frictional loss and the 150% overload "
-    + 'check, which Form 72 has no field for.</div>'}`;
+  ${(() => {
+    const blocks = [
+      r === 'na' ? '' : `<div class="stated">${esc(working)}</div>`,
+      lossConflict,
+      overloadBlock,
+    ].filter((block) => block !== '');
+    if (!blocks.length) return '';
+    return `${blocks.join('\n  ')}
+  <div class="subnote">The boxed notes above are not part of the department's form: they are the `
+      + 'working behind the frictional loss and the 150% overload check, which Form 72 has no field '
+      + 'for.</div>';
+  })()}`;
 }
 
 function partF(form: Form72): string {
@@ -1266,10 +1284,30 @@ function partG(form: Form72): string {
           + 'on the figures alone.',
         );
       }
-      // The derived answer fills the boxes only where nobody ticked them, so a
-      // reader is never shown a tick the technician did not make.
-      return `${outcomeBoxes(typed ?? derived)}${
-        typed === undefined && derived !== undefined ? ' <span class="extra">from the figures</span>' : ''}`;
+      /*
+       * A tick is the licensee's. A subtraction is ours.
+       *
+       * This used to fill the department's box from the derivation wherever
+       * nobody had ticked it, with " from the figures" appended — and that
+       * mark is 7.5px grey italic against 9.5px body, so "the licensee ticked
+       * Pass" and "nobody ticked anything and the arithmetic says pass"
+       * printed as the same ticked box in one of the two places on this form
+       * whose Pass and Fail boxes are the department's own. The comment here
+       * claimed a reader is never shown a tick the technician did not make,
+       * which is exactly what it was doing.
+       *
+       * So the boxes carry the tick only when there is one. The derived
+       * verdict still prints — it is worth having, and leaving the cell to say
+       * "Not decided" beside two figures that answer the question would be its
+       * own kind of wrong — but it prints as our words beside the department's
+       * empty boxes rather than inside them.
+       */
+      if (typed !== undefined) return outcomeBoxes(typed);
+      if (derived !== undefined) {
+        return `${tick('Pass', false)}${tick('Fail', false)} <span class="extra">${
+          derived === 'pass' ? 'Pass' : 'Fail'} on the figures — not ticked</span>`;
+      }
+      return outcomeBoxes(undefined);
     };
     return `
     ${/*
