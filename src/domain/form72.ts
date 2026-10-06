@@ -513,6 +513,45 @@ export interface FormDefect {
  */
 export const CALIBRATED_FLOW_DEVICE_KINDS: readonly FlowDeviceKind[] = ['mechanical', 'electromagnetic'];
 
+/**
+ * The flow device's calibration date, where the equipment list already says it.
+ *
+ * The department asks for it twice: once on the flow-measuring-device line and
+ * again in whichever Device/gauge column that device occupies. On paper the
+ * technician writes the same date twice. Here the columns are filled first —
+ * one tap adds a meter with its certificate date — and then the line above
+ * asked again, in red, for a date already on the form two rows down.
+ *
+ * So it is read off the columns where the columns can only mean one thing:
+ * every device recorded as a flow meter and carrying a date agrees on that
+ * date. Two meters with different dates cannot answer which one the tick
+ * refers to, and that is a field the technician has to fill — the whole point
+ * of the date is which instrument measured the flow.
+ *
+ * It is returned as a derivation rather than written into the form, so the
+ * page can say where the figure came from. A date appearing in one of the
+ * department's boxes that nobody typed has to say so.
+ */
+export function flowDeviceCalibrationFrom(
+  form: Pick<Form72, 'devices'>,
+): { date: string; from: string } | undefined {
+  const meters = form.devices.filter(
+    (d) => d.kind === 'flow-meter' && d.serialNumber.trim() && d.dateCalibrated?.trim(),
+  );
+  if (!meters.length) return undefined;
+
+  const dates = new Set(meters.map((d) => d.dateCalibrated!.trim()));
+  if (dates.size !== 1) return undefined;
+
+  const [date] = [...dates];
+  return {
+    date: date!,
+    from: meters.length === 1
+      ? meters[0]!.slot.trim() || 'the equipment list'
+      : `${meters.length} meters in the equipment list`,
+  };
+}
+
 export const FLOW_DEVICE_LABEL: Record<FlowDeviceKind, string> = {
   orifice: 'Orifice',
   mechanical: 'Mechanical',

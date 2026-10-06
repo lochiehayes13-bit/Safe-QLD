@@ -1,7 +1,8 @@
 import {
   CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, FLOW_DEVICE_LABEL,
   FLOW_ROW_GROUP_LABEL, FRICTIONAL_LOSS_TOLERANCE_KPA, PART_D_DEVICE_RATES_LPS, PART_D_ROWS,
-  canIssue, elevationHeadKpa, flowCellState, flowRowGroup, flowRowKey, flowRowLabel,
+  canIssue, elevationHeadKpa, flowCellState, flowDeviceCalibrationFrom, flowRowGroup,
+  flowRowKey, flowRowLabel,
   flowRowLongLabel, flowRowUntouched, overloadCheck, resolveFrictionalLoss, validateForm72,
   type BoosterTest, type FlowRow, type FlowRowColumn, type FlowRowGroup, type FlowTest,
   type Form72, type FormDefect, type FormIssue, type PartResult, type SprinklerTestPoint,
@@ -740,6 +741,7 @@ function partC(form: Form72, issues: FormIssue[]): string {
   );
 
   const kinds = form.flowDeviceKinds;
+  const fromColumns = flowDeviceCalibrationFrom(form);
   const partCIssues = issues.filter((i) => i.part === 'C');
 
   return `${band('Part C—Hydrant test equipment/pressure gauges')}
@@ -765,9 +767,14 @@ function partC(form: Form72, issues: FormIssue[]): string {
   esc(FLOW_DEVICE_LABEL[kind])} calibrated: ${
   form.flowDeviceCalibrated?.[kind]?.trim()
     ? esc(formatAuDate(form.flowDeviceCalibrated[kind]))
-    : kinds.includes(kind)
-      ? '<span class="missing">Not recorded</span>'
-      : '<span class="na">Not used</span>'
+    : !kinds.includes(kind)
+      ? '<span class="na">Not used</span>'
+      : fromColumns
+        // Read off the equipment list below, which asks for the same date. It
+        // says so: a figure in one of the department's boxes that nobody typed
+        // has to carry where it came from.
+        ? `${esc(formatAuDate(fromColumns.date))} <span class="extra">from ${esc(fromColumns.from)}</span>`
+        : '<span class="missing">Not recorded</span>'
 }</td>`).join('')}
     </tr>
   </table>

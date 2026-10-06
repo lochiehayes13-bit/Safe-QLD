@@ -11,7 +11,8 @@ import { MIGRATION_V12 } from '@/db/schemaForm72';
 import { DEVICE_PRESETS, DEVICE_PRESET_SOURCE, unusedDevicePresets } from '@/domain/form72Devices';
 import {
   CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, FLOW_ROW_COLUMNS,
-  PART_G_PRINTED_TEST_POINTS, flowCellState, flowRowColumnsRun, flowRowLabel,
+  PART_G_PRINTED_TEST_POINTS, flowCellState, flowDeviceCalibrationFrom,
+  flowRowColumnsRun, flowRowLabel,
   sprinklerTestPointLines, sprinklerTestPointUntouched,
   PART_D_NOZZLE_SIZES_MM, PART_D_ROWS, deviceCalibration, emptyForm72, intervalsTested,
   maintenanceTestCell, maintenanceTestFromAxes, overloadCheck, resolveFrictionalLoss,
@@ -2363,5 +2364,72 @@ describe('Part G’s three rows per test point', () => {
     }));
     const row = between(live, 'Required flow rate', '</tr>');
     expect(row).toContain('Not decided');
+  });
+});
+
+describe('the flow device’s calibration date, where the columns already say it', () => {
+  const meter = (over: Partial<TestDevice> = {}): TestDevice => ({
+    slot: 'Device/gauge 1', serialNumber: 'SQF-001', kind: 'flow-meter',
+    dateCalibrated: '2026-07-18', ...over,
+  });
+
+  it('reads it off a single meter, naming the column', () => {
+    // The department asks twice — once on this line and again in the column.
+    // The columns are filled first, by one tap, and then this line asked again
+    // in red for a date already on the form two rows down.
+    expect(flowDeviceCalibrationFrom({ devices: [meter()] }))
+      .toEqual({ date: '2026-07-18', from: 'Device/gauge 1' });
+  });
+
+  it('reads it off several meters that agree', () => {
+    const out = flowDeviceCalibrationFrom({
+      devices: [meter(), meter({ slot: 'Device/gauge 2', serialNumber: 'SQF-002' })],
+    });
+    expect(out).toEqual({ date: '2026-07-18', from: '2 meters in the equipment list' });
+  });
+
+  it('refuses where two meters disagree, because that is the question the date answers', () => {
+    // Which instrument measured the flow is the whole point of the field.
+    expect(flowDeviceCalibrationFrom({
+      devices: [meter(), meter({ slot: 'Device/gauge 2', serialNumber: 'SQF-002', dateCalibrated: '2025-01-05' })],
+    })).toBeUndefined();
+  });
+
+  it('ignores a gauge, an empty slot and a meter with no date', () => {
+    expect(flowDeviceCalibrationFrom({
+      devices: [{ slot: 'Device/gauge 1', serialNumber: 'PG-1', dateCalibrated: '2026-07-18' }],
+    })).toBeUndefined();
+    expect(flowDeviceCalibrationFrom({ devices: [meter({ serialNumber: '  ' })] })).toBeUndefined();
+    expect(flowDeviceCalibrationFrom({ devices: [meter({ dateCalibrated: undefined })] })).toBeUndefined();
+    expect(flowDeviceCalibrationFrom({ devices: [] })).toBeUndefined();
+  });
+
+  it('prints it marked, because nobody typed it into that box', () => {
+    const html = form72Html(doc({
+      form: issuable({ flowDeviceKinds: ['electromagnetic'], devices: [meter()] }),
+    }));
+    const line = between(html, 'Part C not required for orifice testing', '</tr>');
+    expect(flat(line)).toContain('18/07/2026 <span class="extra">from Device/gauge 1</span>');
+  });
+
+  it('prefers a date somebody actually typed on that line', () => {
+    const html = form72Html(doc({
+      form: issuable({
+        flowDeviceKinds: ['electromagnetic'],
+        flowDeviceCalibrated: { electromagnetic: '2026-02-01' },
+        devices: [meter()],
+      }),
+    }));
+    const line = between(html, 'Part C not required for orifice testing', '</tr>');
+    expect(line).toContain('01/02/2026');
+    expect(line).not.toContain('from Device/gauge 1');
+  });
+
+  it('still asks for a ticked kind it cannot derive', () => {
+    const html = form72Html(doc({
+      form: issuable({ flowDeviceKinds: ['mechanical'], devices: [] }),
+    }));
+    const line = between(html, 'Part C not required for orifice testing', '</tr>');
+    expect(line).toContain('Not recorded');
   });
 });
