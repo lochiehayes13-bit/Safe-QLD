@@ -870,6 +870,9 @@ function partC(form: Form72, issues: FormIssue[]): string {
     : ''}`;
 }
 
+/** The four hydrant location fields the department prints in Part D. */
+export const PART_D_LOCATION_SLOTS = 4;
+
 /**
  * How many hydrant locations the readings actually depend on.
  *
@@ -884,9 +887,6 @@ function partC(form: Form72, issues: FormIssue[]): string {
  * "Hydrants 1, 2 and 3" column with no third hydrant named is a gap somebody
  * has to answer for, and it stays red.
  */
-/** The four hydrant location fields the department prints in Part D. */
-export const PART_D_LOCATION_SLOTS = 4;
-
 export function hydrantLocationsNeeded(test: FlowTest): number {
   let needed = 0;
   for (const row of test.rows) {
