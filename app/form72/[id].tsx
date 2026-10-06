@@ -23,7 +23,7 @@ import {
   PART_RESULT_LABEL, SYSTEM_TYPE_LABEL, TEST_INTERVAL_LABEL,
   PART_G_PRINTED_TEST_POINTS,
   deviceCalibration, dutyToCarry, elevationHeadKpa, flowRowDevices, flowRowKey, flowRowLongLabel,
-  flowRowRead, flowRowUntouched, form72DefectForRegister,
+  flowKindsAfterAnswer, flowRowRead, flowRowUntouched, form72DefectForRegister,
   provedDuty, provedDutyDisagrees,
   intervalsTested, maintenanceTestFromAxes, overloadCheck, overloadRun, resolveFrictionalLoss,
   toggleMaintenanceAxes,
@@ -265,15 +265,24 @@ export default function Form72Screen() {
        *
        * The carry-forward only ever adds, and only on a draft: ticking a box
        * on a form already issued would change a signed document.
+       *
+       * And only on a form that has none of these boxes ticked yet. It ran on
+       * every open, so a technician who unticked a carried-forward kind —
+       * because the meter was swapped, or the remembered answer is wrong —
+       * found it ticked again the next time they opened the form, with nothing
+       * on screen saying why. A tick nobody tapped appearing on the
+       * department's own form is the fault taken out of Part A's two
+       * questions; it has no more business here.
        */
       if (f) {
         try {
           const answers = await getDeviceKinds(f.devices.map((d) => d.serialNumber));
           setDeviceKinds({ answers, failed: false });
-          const add = f.status === 'issued' ? [] : unTickedAnsweredKinds(
+          const untouched = f.status !== 'issued' && f.flowDeviceKinds.length === 0;
+          const add = untouched ? unTickedAnsweredKinds(
             f.devices, f.flowDeviceKinds,
             new Map([...answers].map(([serial, a]) => [serial, a.kind])),
-          );
+          ) : [];
           if (add.length) {
             const flowDeviceKinds = [...f.flowDeviceKinds, ...add];
             await updateForm72(f.id, { flowDeviceKinds });
@@ -1652,6 +1661,19 @@ function FlowDeviceKindQuestion({ form, locked, patch, kinds }: PartProps & {
   const meters = form.devices.filter((d) => d.kind === 'flow-meter' && d.serialNumber.trim());
 
   const answer = async (serialNumber: string, kind: FlowDeviceKind) => {
+    /*
+     * What this meter was answered before, read before anything is written.
+     *
+     * `kinds.remember` below replaces it in state, and reading it afterwards
+     * would depend on this closure holding the stale map — true today and the
+     * kind of thing that quietly stops being true.
+     */
+    const key = deviceKindKey(serialNumber);
+    const was = kinds.answers.get(key)?.kind;
+    const others = meters
+      .filter((m) => deviceKindKey(m.serialNumber) !== key)
+      .map((m) => kinds.answers.get(deviceKindKey(m.serialNumber))?.kind)
+      .filter((k): k is FlowDeviceKind => !!k);
     try {
       const stored = await setDeviceKind({
         serialNumber,
@@ -1666,12 +1688,22 @@ function FlowDeviceKindQuestion({ form, locked, patch, kinds }: PartProps & {
       showAlert('Not remembered', e instanceof Error ? e.message
         : 'The tick is on this form, but the next form will ask again.');
     }
-    // The tick goes on the form either way. Failing to remember the answer for
-    // next time is a nuisance; failing to record it on the form in front of
-    // the technician would lose the answer they just gave.
-    if (!form.flowDeviceKinds.includes(kind)) {
-      patch({ flowDeviceKinds: [...form.flowDeviceKinds, kind] });
-    }
+    /*
+     * The tick goes on the form either way. Failing to remember the answer for
+     * next time is a nuisance; failing to record it on the form in front of
+     * the technician would lose the answer they just gave.
+     *
+     * And the old one comes off, which it did not before: this only ever
+     * added, so tapping Mechanical, seeing it was wrong and tapping Electro
+     * magnetic left both boxes ticked against one meter — on a page the
+     * licensee signs, under a caption promising the opposite. flowKindsAfterAnswer
+     * holds the rule, including what it must not take off.
+     */
+    patch({
+      flowDeviceKinds: flowKindsAfterAnswer({
+        ticked: form.flowDeviceKinds, was, now: kind, others,
+      }),
+    });
   };
 
   if (!meters.length) return null;

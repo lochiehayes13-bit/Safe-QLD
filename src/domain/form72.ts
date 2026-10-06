@@ -775,6 +775,41 @@ export function unTickedAnsweredKinds(
 }
 
 /**
+ * Part C's ticks after a technician corrects what kind a meter is.
+ *
+ * The chips under each meter say "a different answer replaces this one rather
+ * than sitting beside it". That was true of the remembered answer and false of
+ * the document: the form only ever had kinds added to it, so tapping
+ * Mechanical, seeing it was wrong and tapping Electro magnetic left both boxes
+ * ticked against one meter on a page the licensee signs.
+ *
+ * The old kind comes off only when nothing else on the form accounts for it.
+ * Another meter answered the same way keeps it, and so does a tick the
+ * technician put on by hand for a device that is not in Part C's four
+ * columns — the department's note says to put extra devices in the Notes
+ * section, and erasing that tick would erase an answer somebody gave. Those
+ * two are indistinguishable from here, so both are kept: a tick that stays is
+ * a box the technician can untick, and a tick that vanishes is an answer
+ * nobody can get back.
+ */
+export function flowKindsAfterAnswer(input: {
+  /** What Part C has ticked now. */
+  ticked: readonly FlowDeviceKind[];
+  /** What this meter was answered before, where it was answered at all. */
+  was?: FlowDeviceKind;
+  /** What it has just been answered. */
+  now: FlowDeviceKind;
+  /** What the other meters on this form are answered. */
+  others: readonly FlowDeviceKind[];
+}): FlowDeviceKind[] {
+  const dropped = input.was && input.was !== input.now && !input.others.includes(input.was)
+    ? input.was
+    : undefined;
+  const kept = input.ticked.filter((k) => k !== dropped);
+  return kept.includes(input.now) ? kept : [...kept, input.now];
+}
+
+/**
  * A Form 72 defect, as the defect register wants it.
  *
  * The register carries the Queensland statutory apparatus — the two limbs, the
