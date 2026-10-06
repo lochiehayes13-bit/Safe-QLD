@@ -7,7 +7,7 @@ import { attachmentsForDefect } from '@/domain/outboundWork';
 import { defectMove, describeDefectReport, type DefectReportNotice, type DefectReportOccasion } from '@/domain/defectReport';
 import { photosWithSizes } from '@/simpro/attachmentFiles';
 import { queueJobAttachment } from '@/simpro/sync';
-import { listJobPage, queueDefectNote, type JobSummary } from '@/db/opsRepo';
+import { listJobPage, queueDefectNote, type JobPick } from '@/db/opsRepo';
 import { keepPhoto, photoUri } from '@/export/photoFiles';
 import { shrinkForStorage } from '@/export/photoResize';
 import { SEVERITY_LABEL, searchDefects, type Severity } from '@/seed/defectLibrary';
@@ -15,6 +15,7 @@ import { qldIsoDay } from '@/domain/qldTime';
 import { newId, nowIso } from '@/db';
 import { formatAuDate } from '@/export/sheets';
 import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
+import { JobPicker } from '@/components/JobPicker';
 import { showAlert } from '@/components/alert';
 import { RecordGate } from '@/components/RecordGate';
 import { useTheme } from '@/theme';
@@ -63,7 +64,7 @@ export default function DefectScreen() {
   const [failed, setFailed] = useState<string | null>(null);
   const [site, setSite] = useState<Site | null>(null);
   const [busy, setBusy] = useState(false);
-  const [jobs, setJobs] = useState<JobSummary[]>([]);
+  const [jobs, setJobs] = useState<JobPick[]>([]);
   /*
    * Which picker is open, because there are now two things a job is picked for
    * on this screen and they are not the same act. 'photos' puts the attachments
@@ -73,7 +74,6 @@ export default function DefectScreen() {
    * be open at once over the same list of jobs.
    */
   const [picking, setPicking] = useState<'photos' | 'job' | null>(null);
-  const [jobQuery, setJobQuery] = useState('');
   /** What happened the last time this screen tried to tell the office something. */
   const [report, setReport] = useState<DefectReportNotice | null>(null);
   const [wordingQuery, setWordingQuery] = useState('');
@@ -150,12 +150,24 @@ export default function DefectScreen() {
     ]);
   };
 
+  /**
+   * The jobs at this defect's site, as the list the picker starts from.
+   *
+   * Opened only once the read came back. It used to open first, so a read that
+   * threw left an empty picker under "No jobs for this site on this phone" —
+   * an answer, and the wrong one, to a question nothing had answered.
+   */
   const openJobPicker = async (mode: 'photos' | 'job') => {
     if (!defect) return;
-    setPicking(mode);
     try {
       const page = await listJobPage({ filter: 'all', today: qldIsoDay(nowIso()) ?? '', siteId: defect.siteId, limit: 50 });
-      setJobs(page.rows);
+      setJobs(page.rows
+        .filter((j) => j.externalId)
+        .map((j) => ({
+          externalId: j.externalId, siteName: j.siteName, siteId: j.siteId,
+          status: j.status, customerName: j.customerName, title: j.title,
+        })));
+      setPicking(mode);
     } catch (e) {
       showAlert('Could not read the jobs', describeActionFailure(e, 'reading the jobs'));
     }
@@ -168,7 +180,7 @@ export default function DefectScreen() {
    * open, and only if there were photos at the time. The office asking for one
    * a week later is the normal case.
    */
-  const attachPhotos = async (job: JobSummary) => {
+  const attachPhotos = async (job: JobPick) => {
     if (!defect || !job.externalId) return;
     setPicking(null);
     setBusy(true);
@@ -308,7 +320,7 @@ export default function DefectScreen() {
    * stands rather than waiting for its next status change -- which for a defect
    * that was fixed last month is a change that is never coming.
    */
-  const linkJob = async (job: JobSummary) => {
+  const linkJob = async (job: JobPick) => {
     if (!defect) return;
     setPicking(null);
     if (!job.externalId) {
@@ -386,32 +398,32 @@ export default function DefectScreen() {
     [wordingQuery],
   );
 
-  const jobMatches = jobQuery.trim()
-    ? jobs.filter((j) => `${j.externalId ?? ''} ${j.title}`.toLowerCase().includes(jobQuery.trim().toLowerCase()))
-    : jobs;
-
   /*
-   * The same list of jobs, for whichever of the two questions is being asked.
-   * Written once because a second copy of it would be the one that drifts: the
-   * search box, the cap at twenty and the way a job with no Simpro number reads
-   * all have to match, or picking a job for photographs and picking a job for the
-   * defect become two subtly different screens doing the same thing.
+   * The same picker for whichever of the two questions is being asked, and the
+   * shared one rather than this screen's own.
+   *
+   * The note it replaces claimed it was "written once because a second copy of
+   * it would be the one that drifts" — while being the second copy itself: the
+   * SWMS record screen and the Form 72 screen each had one too, all four of
+   * them reading fifty rows at a site and filtering those in JavaScript. So a
+   * job past the fiftieth at a busy building could not be picked at all, the
+   * box matched only the number and the title, and "No jobs for this site on
+   * this phone" was said about a site whose jobs were simply further down the
+   * list. The shared picker searches every job the phone holds, in the
+   * database, by number, site, customer, order number or title.
    */
-  const jobPicker = (onPick: (job: JobSummary) => void) => (
+  const jobPicker = (onPick: (job: JobPick) => void, heading: string) => (
     <View style={{ marginTop: t.space(2) }}>
-      <SearchBox value={jobQuery} onChange={setJobQuery} placeholder="Job number or title" />
-      {jobMatches.slice(0, 20).map((j) => (
-        <Card key={j.id} onPress={() => onPick(j)}>
-          <Txt weight="600">{j.externalId ? `Job ${j.externalId}` : j.title}</Txt>
-          <Txt size="sm" tone="muted">{j.title}</Txt>
-        </Card>
-      ))}
-      {!jobMatches.length ? (
-        <Txt size="sm" tone="muted" style={{ marginTop: t.space(1), lineHeight: 19 }}>
-          No jobs for this site on this phone. Sync, or ask the office to raise one.
-        </Txt>
-      ) : null}
-      <Button title="Close" variant="ghost" onPress={() => setPicking(null)} />
+      <JobPicker
+        heading={heading}
+        suggested={jobs}
+        suggestedLabel="Jobs at this site"
+        emptyWhenNoneSuggested="No job on this phone is filed under this site. Search for it by number, or sync."
+        emptyWhenNothingOnDevice="No jobs on this phone yet. Connect Simpro in Settings and sync, and every job on the books is here."
+        busy={busy}
+        onPick={onPick}
+        onClose={() => setPicking(null)}
+      />
     </View>
   );
 
@@ -547,7 +559,7 @@ export default function DefectScreen() {
           {!defect.photos.length ? (
             <Txt size="sm" tone="muted" style={{ marginTop: t.space(1) }}>Nothing to send yet.</Txt>
           ) : null}
-          {picking === 'photos' ? jobPicker((j) => { void attachPhotos(j); }) : null}
+          {picking === 'photos' ? jobPicker((j) => { void attachPhotos(j); }, 'Which job do the photos go on?') : null}
         </Card>
 
         <H2>The job it belongs to</H2>
@@ -572,7 +584,7 @@ export default function DefectScreen() {
             onPress={() => { void openJobPicker('job'); }}
             style={{ marginTop: t.space(2) }}
           />
-          {picking === 'job' ? jobPicker((j) => { void linkJob(j); }) : null}
+          {picking === 'job' ? jobPicker((j) => { void linkJob(j); }, 'Which job is this defect under?') : null}
         </Card>
 
         <H2>Where it stands</H2>

@@ -568,6 +568,46 @@ describe('the job list as a query', () => {
     expect(byTitle.map((p) => p.externalId)).toContain('44432');
   });
 
+  it('reaches a job past the fifty rows a site picker starts from', async () => {
+    /*
+     * The fault the shared picker replaced, in one assertion.
+     *
+     * Five screens read the first fifty jobs at a site and filtered those
+     * fifty in JavaScript — the SWMS record, the Form 72, the defect screen
+     * twice, and JobFileCard with the six screens that file a document on a
+     * job. At a building the office raises weekly, the job a technician wants
+     * is often not in the first fifty, and the screen said there were none.
+     *
+     * Sixty at one site, and the one wanted is the sixtieth. A site-scoped
+     * read capped at fifty cannot hand it back; the search the shared picker
+     * uses finds it by name, by number and by title.
+     */
+    await db.runAsync("INSERT INTO site (id,name,createdAt,updatedAt) VALUES ('busy','Barren Heights Tower','','')");
+    for (let i = 0; i < 59; i++) {
+      await upsertJob({
+        id: `j-busy-${i}`, externalId: `5${String(i).padStart(4, '0')}`, siteId: 'busy',
+        siteName: 'Barren Heights Tower', title: 'Weekly walk', status: 'scheduled',
+      });
+    }
+    await upsertJob({
+      id: 'j-busy-last', externalId: '59999', siteId: 'busy', siteName: 'Barren Heights Tower',
+      title: 'Hydrant flow test', status: 'scheduled',
+    });
+
+    // The window the pickers start from: fifty of the sixty, and the one
+    // wanted is not among them. This is the fault, asserted rather than
+    // described — a picker with nothing behind this list said there were none.
+    const window = await listJobPage({ filter: 'all', today: TODAY, siteId: 'busy', limit: 50 });
+    expect({ drawn: window.rows.length, held: window.total, hasIt: window.rows.some((j) => j.externalId === '59999') })
+      .toEqual({ drawn: 50, held: 60, hasIt: false });
+
+    // And the search behind it, which is over every job the phone holds.
+    for (const q of ['59999', 'hydrant flow']) {
+      expect({ q, found: (await searchJobPicks(q, 40)).map((p) => p.externalId) })
+        .toEqual({ q, found: ['59999'] });
+    }
+  });
+
   it('still finds a job that is finished, because Friday is filled in on Monday', async () => {
     await upsertJob({ id: 'j-done', externalId: '40999', title: 'Last visit', siteName: 'Closed Site', status: 'complete' });
     const found = await searchJobPicks('closed site');

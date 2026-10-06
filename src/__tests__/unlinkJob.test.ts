@@ -153,13 +153,34 @@ describe('changing the job a document was filed on', () => {
 
   it('is the card that decides it, not each screen remembering', () => {
     /*
-     * Five screens carry this card. Five handlers each remembering to clear
-     * the stamp is five chances to forget, and the sixth screen will. The rule
+     * Six screens carry this card. Six handlers each remembering to clear the
+     * stamp is six chances to forget, and the seventh screen will. The rule
      * lives in the card, and this is the check that it stays there.
      */
     const card = readFileSync(join(__dirname, '..', 'components', 'JobFileCard.tsx'), 'utf8');
     expect(card).toMatch(/onAttached\(undefined\)/);
-    // And on both routes out of the picker: choosing a different job, and Unlink.
-    expect([...card.matchAll(/onAttached\(undefined\)/g)]).toHaveLength(2);
+  });
+
+  it('and both routes out of the picker go through the one place that holds it', () => {
+    /*
+     * This used to count two `onAttached(undefined)` calls, one per route, and
+     * passed because the rule was written twice. Converting the card to the
+     * shared job picker collapsed them onto one `take`, and a test counting
+     * copies called that a regression — so it asserts the property instead:
+     * choosing a different job and Unlink both go through the single function,
+     * and that function is the one carrying the rule.
+     */
+    const card = readFileSync(join(__dirname, '..', 'components', 'JobFileCard.tsx'), 'utf8');
+    const take = /const take = \([\s\S]*?\n  \};/.exec(card)?.[0] ?? '';
+    expect(take).toContain('onPickJob(picked)');
+    expect(take).toContain('onAttached(undefined)');
+    expect(take).toContain('setPicking(false)');
+
+    // Choosing a job, and Unlink. Both hand their answer to `take` and neither
+    // writes the job or the stamp itself.
+    expect(card).toMatch(/onPick=\{\(job\) => take\(/);
+    expect(card).toMatch(/title="Unlink"[\s\S]{0,160}onPress=\{\(\) => take\(null\)\}/);
+    expect([...card.matchAll(/onAttached\(undefined\)/g)]).toHaveLength(1);
+    expect([...card.matchAll(/onPickJob\(/g)]).toHaveLength(1);
   });
 });

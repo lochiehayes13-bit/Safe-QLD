@@ -7,7 +7,7 @@ import {
   updateSwms,
 } from '@/db/swmsRepo';
 import { SWMS_TEMPLATES } from '@/seed/swms';
-import { listJobPage, type JobSummary } from '@/db/opsRepo';
+import { listJobPage, type JobPick } from '@/db/opsRepo';
 import { queueJobAttachment } from '@/simpro/sync';
 import {
   CONTROL_LEVEL_LABEL, RISK_LABEL, SWMS_REVIEW_TRIGGERS, mergeSwms, orderedControls, validateSwms,
@@ -27,6 +27,7 @@ import { formatAuDate } from '@/export/sheets';
 import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { loadPrefs, patchPrefs } from '@/app-prefs';
 import { nowIso } from '@/db';
+import { JobPicker } from '@/components/JobPicker';
 import { showAlert } from '@/components/alert';
 import { RecordGate } from '@/components/RecordGate';
 import { SignaturePad } from '@/components/SignaturePad';
@@ -106,7 +107,7 @@ export default function SwmsRecordScreen() {
   const [tab, setTab] = useState<Tab>('work');
   const [openStep, setOpenStep] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [jobs, setJobs] = useState<JobSummary[]>([]);
+  const [jobs, setJobs] = useState<JobPick[]>([]);
   const [pickingJob, setPickingJob] = useState(false);
   const [newWorker, setNewWorker] = useState('');
   const [signingFor, setSigningFor] = useState<number | null>(null);
@@ -353,19 +354,32 @@ export default function SwmsRecordScreen() {
     }
   };
 
+  /**
+   * The jobs this site has, as the list the picker starts from.
+   *
+   * Opened only once the read came back. It used to open first, so a read that
+   * threw left an empty picker on screen under the words "No jobs on this
+   * phone for that site" — which is a different and wrong answer to a question
+   * that was never answered at all.
+   */
   const openJobPicker = async () => {
     if (!record) return;
-    setPickingJob(true);
     try {
       const today = qldIsoDay(nowIso()) ?? record.date;
       const page = await listJobPage({ filter: 'all', today, siteId: record.siteId, limit: 50 });
-      setJobs(page.rows);
+      setJobs(page.rows
+        .filter((j) => j.externalId)
+        .map((j) => ({
+          externalId: j.externalId, siteName: j.siteName, siteId: j.siteId,
+          status: j.status, customerName: j.customerName, title: j.title,
+        })));
+      setPickingJob(true);
     } catch (e) {
       showAlert('Could not read the jobs', describeActionFailure(e, 'reading the jobs'));
     }
   };
 
-  const linkJob = async (job: JobSummary) => {
+  const linkJob = async (job: JobPick) => {
     if (!record || !job.externalId) return;
     try {
       await linkSwmsJob(record.id, { externalId: job.externalId, title: job.title });
@@ -543,16 +557,29 @@ export default function SwmsRecordScreen() {
                   <Button title="Pick the job" variant="secondary" onPress={() => void openJobPicker()} style={{ marginTop: t.space(2) }} />
                 </>
               )}
+              {/*
+                * The shared picker, not a fourth list of its own.
+                *
+                * This read the first fifty jobs at the site, drew twenty-five
+                * of them, offered no search, and said "No jobs on this phone
+                * for that site" — a sentence that was false whenever the
+                * statement had no site, because then it had read the first
+                * fifty of every job the company has ever raised. The shared
+                * one keeps the site's jobs as the list to start from and puts
+                * a search over every job on the phone behind it.
+                */}
               {pickingJob ? (
                 <View style={{ marginTop: t.space(2) }}>
-                  {jobs.length === 0 ? <Txt size="sm" tone="muted">No jobs on this phone for that site.</Txt> : null}
-                  {jobs.slice(0, 25).map((j) => (
-                    <Card key={j.id} onPress={() => void linkJob(j)}>
-                      <Txt weight="600">{j.externalId ? `Job ${j.externalId}` : j.title}</Txt>
-                      <Txt size="sm" tone="muted">{j.title}{j.siteName ? ` · ${j.siteName}` : ''}</Txt>
-                    </Card>
-                  ))}
-                  <Button title="Close" variant="ghost" onPress={() => setPickingJob(false)} />
+                  <JobPicker
+                    heading="Which job does this statement go on?"
+                    suggested={jobs}
+                    suggestedLabel="Jobs at this site"
+                    emptyWhenNoneSuggested="No job on this phone is filed under this site. Search for it by number, or sync."
+                    emptyWhenNothingOnDevice="No jobs on this phone yet. Connect Simpro in Settings and sync, and every job on the books is here."
+                    busy={busy}
+                    onPick={(job) => { void linkJob(job); }}
+                    onClose={() => setPickingJob(false)}
+                  />
                 </View>
               ) : null}
             </Card>

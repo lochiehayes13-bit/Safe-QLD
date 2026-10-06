@@ -7,7 +7,7 @@ import {
   recordForm72DefectIds, recordOccupierCopy, updateForm72,
   type Form72Patch, type RememberedDevice, type StoredForm72,
 } from '@/db/form72Repo';
-import { listJobPage, type JobSummary } from '@/db/opsRepo';
+import { listJobPage, type JobPick } from '@/db/opsRepo';
 import { queueJobAttachment } from '@/simpro/sync';
 import {
   FORM72_INBOX, form72AttachmentName, form72AttachmentSubject, form72EmailBody,
@@ -65,6 +65,7 @@ import {
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
 import { describeLoadFailure } from '@/domain/loadFailure';
+import { JobPicker } from '@/components/JobPicker';
 import { showAlert } from '@/components/alert';
 
 /**
@@ -209,7 +210,7 @@ export default function Form72Screen() {
   const [busy, setBusy] = useState(false);
   const [attaching, setAttaching] = useState(false);
   const [pickingJob, setPickingJob] = useState(false);
-  const [siteJobs, setSiteJobs] = useState<JobSummary[]>([]);
+  const [siteJobs, setSiteJobs] = useState<JobPick[]>([]);
   const [typedJob, setTypedJob] = useState('');
 
   /*
@@ -500,12 +501,41 @@ export default function Form72Screen() {
     );
   }, [form, site, companyName]);
 
+  /**
+   * The site's jobs, ranked, as the list the picker starts from.
+   *
+   * The ranking is the useful part and it stays: open work first and newest
+   * first, which is the job a Form 72 belongs to nearly every time. What it
+   * lacked was anything behind it — fifty rows read, eight drawn, no search,
+   * and "No Simpro jobs for this site on the phone" said about a building
+   * whose jobs were simply further down the list.
+   *
+   * Opened once the read has come back, so a read that threw does not leave an
+   * empty picker on screen stating something it never established.
+   */
   const openJobPicker = useCallback(async () => {
     if (!form) return;
-    setPickingJob(true);
     try {
       const page = await listJobPage({ filter: 'all', today: qldIsoDay(nowIso()) ?? '', siteId: form.siteId, limit: 50 });
-      setSiteJobs(page.rows.filter((j) => j.externalId));
+      const ranked = rankJobsForForm(page.rows
+        .filter((j) => j.externalId)
+        .map((j) => ({
+          externalId: j.externalId!, title: j.title, status: j.status, statusName: j.statusName,
+          scheduledFor: j.scheduledFor, completedAt: j.completedAt,
+        })));
+      // The ranking decides the order; the row the search read decides the
+      // fields, so the picker draws a job the same way wherever it came from.
+      const byId = new Map(page.rows.map((j) => [j.externalId, j]));
+      setSiteJobs(ranked.flatMap((j) => {
+        const row = byId.get(j.externalId);
+        return row
+          ? [{
+            externalId: row.externalId, siteName: row.siteName, siteId: row.siteId,
+            status: row.status, customerName: row.customerName, title: row.title,
+          }]
+          : [];
+      }));
+      setPickingJob(true);
     } catch (e) {
       setSiteJobs([]);
       showAlert('Could not list the jobs', describeActionFailure(e, 'reading the site\'s jobs'));
@@ -681,23 +711,41 @@ export default function Form72Screen() {
 
         {pickingJob ? (
           <View style={{ marginTop: t.space(3), gap: t.space(2) }}>
-            {rankJobsForForm(siteJobs.map((j) => ({
-              externalId: j.externalId!, title: j.title, status: j.status, statusName: j.statusName, scheduledFor: j.scheduledFor, completedAt: j.completedAt,
-            }))).slice(0, 8).map((j) => (
-              <Pressable key={j.externalId} onPress={() => { void linkJob({ externalId: j.externalId, title: j.title }); }} accessibilityRole="button">
-                <Txt weight="700">Job {j.externalId} — {j.title}</Txt>
-                <Txt size="sm" tone="muted">{j.statusName ?? j.status}{j.scheduledFor ? ` · ${formatAuDate(j.scheduledFor)}` : ''}</Txt>
-              </Pressable>
-            ))}
-            {siteJobs.length === 0 ? <Txt size="sm" tone="muted">No Simpro jobs for this site on the phone. Type the number.</Txt> : null}
+            {/*
+              * The shared picker, which this screen was the fourth copy of.
+              * The site's ranked jobs are what it starts from and its own
+              * search runs over every job the phone holds.
+              */}
+            <JobPicker
+              heading="Which job is this test under?"
+              suggested={siteJobs}
+              suggestedLabel="This site’s jobs, the likeliest first"
+              emptyWhenNoneSuggested="No job on this phone is filed under this site. Search for it by number, or type the number below."
+              emptyWhenNothingOnDevice="No jobs on this phone yet. Type the number below, or connect Simpro in Settings and sync."
+              onPick={(job) => { void linkJob({ externalId: job.externalId!, title: job.title }); }}
+              onClose={() => setPickingJob(false)}
+            />
+            {/*
+              * And the number typed in, which the search cannot replace. The
+              * office raises a job while a technician is on the roof and reads
+              * the number down the phone; it is not on this device and will
+              * not be until the next sync, and the form still has to say which
+              * job it was done under.
+              */}
             <Rowed gap={2} align="flex-start">
               <View style={{ flex: 1 }}>
-                <Field label="Or the job number" value={typedJob} onChangeText={setTypedJob} keyboardType="numeric" placeholder="41900" />
+                <Field
+                  label="Or a job number this phone does not hold yet"
+                  value={typedJob}
+                  onChangeText={setTypedJob}
+                  keyboardType="numeric"
+                  placeholder="41900"
+                  hint="For a job the office raised just now. It links by number and the title arrives with the next sync."
+                />
               </View>
             </Rowed>
             <Rowed gap={2}>
               <Chip label="Link this number" onPress={() => { if (/^\d+$/.test(typedJob.trim())) void linkJob({ externalId: typedJob.trim() }); }} />
-              <Chip label="Cancel" onPress={() => setPickingJob(false)} />
             </Rowed>
           </View>
         ) : (

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View } from 'react-native';
-import { listJobPage, type JobSummary } from '@/db/opsRepo';
+import { listJobPage, type JobPick } from '@/db/opsRepo';
 import { queueJobAttachment } from '@/simpro/sync';
 import { attachmentContentKey } from '@/domain/outboundWork';
 import { qldIsoDay } from '@/domain/qldTime';
@@ -9,7 +9,8 @@ import { describeActionFailure } from '@/domain/loadFailure';
 import { formatAuDate } from '@/export/sheets';
 import { showAlert } from '@/components/alert';
 import { useTheme } from '@/theme';
-import { Button, Card, Chip, Label, Rowed, SearchBox, Txt } from '@/components/ui';
+import { JobPicker } from '@/components/JobPicker';
+import { Button, Card, Chip, Label, Rowed, Txt } from '@/components/ui';
 import type { WrittenFile } from '@/export/files';
 
 /**
@@ -75,15 +76,27 @@ export function JobFileCard({
 }) {
   const t = useTheme();
   const [picking, setPicking] = useState(false);
-  const [jobs, setJobs] = useState<JobSummary[]>([]);
-  const [query, setQuery] = useState('');
+  const [jobs, setJobs] = useState<JobPick[]>([]);
   const [busy, setBusy] = useState(false);
 
+  /**
+   * The jobs at this record's site, as the list to start from.
+   *
+   * Opened once the read has come back. It used to open first, so a read that
+   * threw left an empty picker on screen saying "No jobs on this phone for
+   * that site" — which is an answer, and the wrong one, to a question nothing
+   * had answered.
+   */
   const openPicker = async () => {
-    setPicking(true);
     try {
       const page = await listJobPage({ filter: 'all', today: qldIsoDay(nowIso()) ?? '', siteId, limit: 50 });
-      setJobs(page.rows);
+      setJobs(page.rows
+        .filter((j) => j.externalId)
+        .map((j) => ({
+          externalId: j.externalId, siteName: j.siteName, siteId: j.siteId,
+          status: j.status, customerName: j.customerName, title: j.title,
+        })));
+      setPicking(true);
     } catch (e) {
       showAlert('Could not read the jobs', describeActionFailure(e, 'reading the jobs'));
     }
@@ -123,9 +136,19 @@ export function JobFileCard({
     }
   };
 
-  const matches = query.trim()
-    ? jobs.filter((j) => `${j.externalId ?? ''} ${j.title} ${j.siteName}`.toLowerCase().includes(query.trim().toLowerCase()))
-    : jobs;
+  /**
+   * Taking a pick, with the stamp that belongs to the job it was sent to.
+   *
+   * Changing the job makes "Sent on the 3rd" a statement about a job this file
+   * never reached, so it goes with the job it described. Done here rather than
+   * in each screen's handler because six screens remembering the same rule is
+   * six chances to forget it, and the seventh will.
+   */
+  const take = (picked: { externalId: string; title?: string } | null) => {
+    void onPickJob(picked);
+    if (attachedAt && picked?.externalId !== jobExternalId) void onAttached(undefined);
+    setPicking(false);
+  };
 
   return (
     <Card>
@@ -165,50 +188,34 @@ export function JobFileCard({
         </>
       )}
 
+      {/*
+        * The shared picker, which this card was one of five copies of.
+        *
+        * It read the first fifty jobs at the site, filtered those in
+        * JavaScript and drew twenty-five — so a job past the fiftieth at a
+        * busy building could not be picked at all, and the empty line told the
+        * technician to "search all of them above" when the box above searched
+        * only those fifty. The instruction on screen could not work, which is
+        * the worst way for a screen to be wrong. The site's jobs are still the
+        * list it starts from; the search behind them is now over every job the
+        * phone holds, run in the database.
+        */}
       {picking ? (
         <View style={{ marginTop: t.space(3) }}>
-          <SearchBox value={query} onChange={setQuery} placeholder="Job number, title or site" />
-          {matches.length === 0 ? (
-            <Txt size="sm" tone="muted" style={{ marginTop: t.space(2) }}>
-              {jobs.length ? 'Nothing matched.' : 'No jobs on this phone for that site. Sync, or search all of them above.'}
-            </Txt>
+          <JobPicker
+            heading={`Which job does the ${what} go on?`}
+            suggested={jobs}
+            suggestedLabel={siteId ? 'Jobs at this site' : 'Jobs on this phone'}
+            emptyWhenNoneSuggested="No job on this phone is filed under this site. Search for it by number above."
+            emptyWhenNothingOnDevice="No jobs on this phone yet. Connect Simpro in Settings and sync, and every job on the books is here."
+            onPick={(job) => take(job.externalId ? { externalId: job.externalId, title: job.title } : null)}
+            onClose={() => setPicking(false)}
+          />
+          {jobExternalId ? (
+            <Rowed gap={2}>
+              <Button title="Unlink" variant="ghost" onPress={() => take(null)} />
+            </Rowed>
           ) : null}
-          {matches.slice(0, 25).map((j) => (
-            <Card
-              key={j.id}
-              onPress={() => {
-                const picked = j.externalId ? { externalId: j.externalId, title: j.title } : null;
-                void onPickJob(picked);
-                /*
-                 * The stamp belongs to the job it was sent to. Changing the
-                 * job makes "Sent on the 3rd" a statement about a job this
-                 * file never reached, so it goes with the job it described.
-                 * Done here rather than in each screen's handler because five
-                 * screens remembering the same rule is five chances to forget
-                 * it, and the sixth will.
-                 */
-                if (attachedAt && picked?.externalId !== jobExternalId) void onAttached(undefined);
-                setPicking(false);
-              }}
-            >
-              <Txt weight="600">{j.externalId ? `Job ${j.externalId}` : j.title}</Txt>
-              <Txt size="sm" tone="muted">{j.title}{j.siteName ? ` · ${j.siteName}` : ''}</Txt>
-            </Card>
-          ))}
-          <Rowed gap={2}>
-            <Button title="Close" variant="ghost" onPress={() => setPicking(false)} />
-            {jobExternalId ? (
-              <Button
-                title="Unlink"
-                variant="ghost"
-                onPress={() => {
-                  void onPickJob(null);
-                  if (attachedAt) void onAttached(undefined);
-                  setPicking(false);
-                }}
-              />
-            ) : null}
-          </Rowed>
         </View>
       ) : null}
     </Card>
