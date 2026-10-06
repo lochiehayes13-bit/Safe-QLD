@@ -33,6 +33,7 @@ import { MIGRATION_V31 } from './schemaV31';
 import { MIGRATION_V32 } from './schemaV32';
 import { MIGRATION_V33 } from './schemaV33';
 import { MIGRATION_V34 } from './schemaV34';
+import { MIGRATION_V35 } from './schemaV35';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -384,6 +385,10 @@ export const MIGRATIONS: string[] = [
   // defects found: the six facts a Form 72 needs and the department's form has
   // no box for
   MIGRATION_V34,
+
+  // v35 — Part C's two "Calibrated:" dates, which the screen collected and the
+  // renderer printed and nothing ever stored
+  MIGRATION_V35,
 ];
 
 /**

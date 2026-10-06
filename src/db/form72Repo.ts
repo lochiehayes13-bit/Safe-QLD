@@ -1,6 +1,6 @@
 import { getDb, newId, nowIso } from '@/db';
 import {
-  canIssue, emptyForm72, validateForm72,
+  canIssue, emptyForm72, overloadRun, validateForm72,
   type BoosterTest, type FlowDeviceKind, type FlowTest, type Form72, type HydrostaticTest,
   type FormDefect, type MaintenanceTest, type PartResult, type SprinklerFlowTest,
   type SprinklerHydrostatic, type TestDevice,
@@ -59,6 +59,7 @@ interface Form72Row {
   maintenanceTest: string;
   hydrostatic: string;
   flowDeviceKinds: string;
+  flowDeviceCalibrated: string | null;
   devices: string;
   flowTest: string;
   booster: string;
@@ -165,6 +166,11 @@ function toForm(r: Form72Row): StoredForm72 {
     maintenanceTest: readJson<MaintenanceTest>(r.maintenanceTest, EMPTY_MAINTENANCE, 'Part A'),
     hydrostatic: readJson<HydrostaticTest>(r.hydrostatic, { result: 'na' }, 'Part B'),
     flowDeviceKinds: readJsonArray<FlowDeviceKind>(r.flowDeviceKinds, 'Part C flow devices'),
+    // Part C's two "Calibrated:" dates. Absent on every form written before
+    // v35, which reads back as nobody having typed one.
+    flowDeviceCalibrated: readJson<Partial<Record<FlowDeviceKind, string>>>(
+      r.flowDeviceCalibrated ?? '', {}, 'Part C calibration dates',
+    ),
     devices: readJsonArray<TestDevice>(r.devices, 'Part C equipment'),
     // The arrays inside a part are replaced wholesale rather than merged with
     // the empty shape's, which would leave a stale row behind after a deletion.
@@ -245,19 +251,21 @@ export async function createForm72(input: {
   await db.runAsync(
     `INSERT INTO form_72
        (id, siteId, siteName, siteAddress, contractor, systemLabel, testDate, testTime,
-        maintenanceTest, hydrostatic, flowDeviceKinds, devices, flowTest, booster,
+        maintenanceTest, hydrostatic, flowDeviceKinds, flowDeviceCalibrated, devices,
+        flowTest, booster,
         sprinklerHydrostatic, sprinklerFlow, overloadFlowLps, overloadPressureKpa,
         criticalDefectsIdentified, repairsRequired, systemResult, systemNotes,
         licenseeName, licenceNumber, licenseeReportNumber, signature,
         owner, ownerContact, buildingClassification, technician, qualification, defects,
         status, issuedAt, copyGivenAt, jobExternalId, jobTitle, createdAt, updatedAt)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       record.id, record.siteId, record.siteName, record.siteAddress ?? '', record.contractor,
       record.systemLabel, record.testDate ?? null, record.testTime ?? null,
       JSON.stringify(record.maintenanceTest), JSON.stringify(record.hydrostatic),
-      JSON.stringify(record.flowDeviceKinds), JSON.stringify(record.devices),
+      JSON.stringify(record.flowDeviceKinds),
+      JSON.stringify(record.flowDeviceCalibrated ?? {}), JSON.stringify(record.devices),
       JSON.stringify(record.flowTest), JSON.stringify(record.booster),
       JSON.stringify(record.sprinklerHydrostatic), JSON.stringify(record.sprinklerFlow),
       record.overload?.flowLps ?? null, record.overload?.pressureKpa ?? null,
@@ -403,6 +411,9 @@ export async function updateForm72(id: string, patch: Form72Patch): Promise<void
   if (patch.maintenanceTest !== undefined) put('maintenanceTest', JSON.stringify(patch.maintenanceTest));
   if (patch.hydrostatic !== undefined) put('hydrostatic', JSON.stringify(patch.hydrostatic));
   if (patch.flowDeviceKinds !== undefined) put('flowDeviceKinds', JSON.stringify(patch.flowDeviceKinds));
+  if (patch.flowDeviceCalibrated !== undefined) {
+    put('flowDeviceCalibrated', JSON.stringify(patch.flowDeviceCalibrated));
+  }
   if (patch.devices !== undefined) put('devices', JSON.stringify(patch.devices));
   if (patch.flowTest !== undefined) put('flowTest', JSON.stringify(patch.flowTest));
   if (patch.booster !== undefined) put('booster', JSON.stringify(patch.booster));
@@ -414,18 +425,12 @@ export async function updateForm72(id: string, patch: Form72Patch): Promise<void
   // undefined, a mistyped run would stay in the database and keep printing on
   // the form after the screen had shown it cleared.
   if ('overload' in patch) {
-    const run = patch.overload;
-    // Half a run is not a run. A screen that fills the other half with zero to
-    // keep its own types happy would store a pump making 0 kPa at overload,
-    // which reads as catastrophic failure rather than as a test not done, so
-    // anything but two positive figures is stored as no run at all. A pump that
-    // genuinely made nothing is a Part E comment and a fail — not a zero in a
-    // box that nobody can tell apart from a box nobody filled in.
-    const made = run !== undefined
-      && Number.isFinite(run.flowLps) && run.flowLps > 0
-      && Number.isFinite(run.pressureKpa) && run.pressureKpa > 0;
-    put('overloadFlowLps', made ? run.flowLps : null);
-    put('overloadPressureKpa', made ? run.pressureKpa : null);
+    // Half a run is not a run — overloadRun holds that rule, and holds it for
+    // the screen and the printed page as well, so the three cannot disagree
+    // about whether a run was made.
+    const run = overloadRun(patch.overload);
+    put('overloadFlowLps', run?.flowLps ?? null);
+    put('overloadPressureKpa', run?.pressureKpa ?? null);
   }
   // Tested with `in` rather than against undefined, because undefined is the
   // stored value that means "nobody answered Part H" — a patch that sets it

@@ -21,6 +21,7 @@ import {
 } from '@/domain/form72';
 import { MIGRATIONS, SCHEMA_VERSION } from '@/db/schema';
 import { MIGRATION_V34 } from '@/db/schemaV34';
+import { MIGRATION_V35 } from '@/db/schemaV35';
 
 /**
  * Form 72 as the document that gets handed over.
@@ -589,6 +590,52 @@ describe('Part E — the arithmetic the form asks for', () => {
       form: issuable({ booster: { result: 'pass', boostPressureKpa: 1400 } }),
     }));
     expect(flat(html)).toContain('150% overload check</b> — cannot be stated');
+  });
+
+  /*
+   * Half a run is not a run, and this is where that mattered most.
+   *
+   * The screen keeps the pair in one shape by filling the box the technician
+   * has not reached with a zero. A pressure of zero is a real figure to the
+   * check, so a flow typed before its pressure printed "not achieved, short by
+   * 455 kPa" — a catastrophic pump failure nobody entered, on a document a
+   * licensee signs. The database had always refused to store it, so the page
+   * and the database disagreed, and a reprint after a reload said something
+   * else again.
+   */
+  it('does not print a pump failure from a flow typed before its pressure', () => {
+    const html = form72Html(doc({
+      form: issuable({ booster }), overload: { flowLps: 24, pressureKpa: 0 },
+    }));
+    expect(html).not.toContain('150% overload check — not achieved.');
+    expect(flat(html)).toContain('No overload run is recorded on this form');
+  });
+
+  it('does not print one from a pressure typed before its flow either', () => {
+    const html = form72Html(doc({
+      form: issuable({ booster }), overload: { flowLps: 0, pressureKpa: 470 },
+    }));
+    expect(html).not.toContain('150% overload check — achieved.');
+    expect(html).not.toContain('150% overload check — not achieved.');
+    expect(flat(html)).toContain('No overload run is recorded on this form');
+  });
+
+  it('does not report a half-typed run against an N/A Part E as a reading taken', () => {
+    const html = form72Html(doc({
+      form: issuable({ booster: { result: 'na' } }), overload: { flowLps: 24, pressureKpa: 0 },
+    }));
+    expect(flat(html)).not.toContain('an overload run is recorded against this form');
+  });
+
+  it('prints what the database will keep, so a reprint after a reload says the same thing', () => {
+    // The page and the repository apply one rule now. These are the two
+    // documents that used to differ: before a reload, and after it.
+    const typed = form72Html(doc({
+      form: issuable({ booster }), overload: { flowLps: 24, pressureKpa: 0 },
+    }));
+    const reloaded = form72Html(doc({ form: issuable({ booster }), overload: undefined }));
+    const partE = (html: string): string => between(html, 'Part E—Pump', 'Part F—Sprinkler');
+    expect(partE(typed)).toBe(partE(reloaded));
   });
 });
 
@@ -1435,14 +1482,30 @@ describe('the columns the department’s form has no box for', () => {
     expect(MIGRATION_V34).not.toContain('DEFAULT');
   });
 
-  it('is the next migration in the list rather than a number picked by hand', () => {
-    expect(MIGRATIONS[MIGRATIONS.length - 1]).toBe(MIGRATION_V34);
+  it('is in the list in its own place rather than at a number picked by hand', () => {
+    expect(MIGRATIONS).toContain(MIGRATION_V34);
     expect(SCHEMA_VERSION).toBe(MIGRATIONS.length);
   });
 
   it('starts a blank form with an empty defect list, not an absent one', () => {
     const form = emptyForm72({ id: 'f', siteId: 's', siteName: 'Site', now: NOW });
     expect(form.defects).toEqual([]);
+  });
+
+  /*
+   * Part C's two "Calibrated:" dates.
+   *
+   * The screen collected them, the renderer printed them, and nothing stored
+   * them — so a form reprinted after it was closed came out saying the device
+   * had no calibration date, which is the worst shape this kind of defect can
+   * take. A field that never works gets reported; one that works until you
+   * look away does not.
+   */
+  it('adds the Part C calibration dates, nullable, so older forms read back unchanged', () => {
+    expect(MIGRATION_V35).toContain('ADD COLUMN flowDeviceCalibrated TEXT;');
+    expect(MIGRATION_V35).not.toContain('NOT NULL');
+    expect(MIGRATION_V35).not.toContain('DEFAULT');
+    expect(MIGRATIONS[MIGRATIONS.length - 1]).toBe(MIGRATION_V35);
   });
 });
 

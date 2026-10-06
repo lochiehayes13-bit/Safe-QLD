@@ -24,7 +24,7 @@ import {
   PART_G_PRINTED_TEST_POINTS,
   deviceCalibration, elevationHeadKpa, flowRowDevices, flowRowKey, flowRowLongLabel,
   flowRowUntouched, form72DefectForRegister,
-  intervalsTested, maintenanceTestFromAxes, overloadCheck, resolveFrictionalLoss,
+  intervalsTested, maintenanceTestFromAxes, overloadCheck, overloadRun, resolveFrictionalLoss,
   sprinklerTestPointLines, sprinklerTestPointUntouched, systemTypesTested, unraisedDefects,
   validateForm72,
   type BoosterTest, type FlowDeviceKind, type FlowRow, type FormDefect, type FormIssue,
@@ -1636,7 +1636,25 @@ function PartD({ form, locked, patch }: PartProps) {
         const r = line.row;
         const untouched = flowRowUntouched(r);
         return (
-          <Card key={line.index !== undefined ? `row-${line.index}` : flowRowKey(r)}>
+          /*
+           * Keyed by which row of the department's table it is, not by whether
+           * it has been stored yet.
+           *
+           * The key used to flip from flowRowKey(r) to `row-${index}` the
+           * moment the row was appended to f.rows — which is what the first
+           * keystroke in any of its four pressure boxes does. React saw a key
+           * that had not existed, unmounted the whole card and mounted a new
+           * one: new TextInputs, the keyboard dropped, focus gone, and the one
+           * digit that had been typed replaced by NumField's reset from the
+           * stored value. On the hottest control on the document, every form.
+           *
+           * flowRowKey is the same before and after storage for all eight
+           * printed rows, because `stored` is keyed by it. An extra row — one
+           * on a form from outside this screen, which the filter above has
+           * already excluded from colliding with the eight — is keyed by its
+           * position, and always has one.
+           */
+          <Card key={line.printed ? flowRowKey(r) : `extra-${line.index}`}>
             <Rowed>
               <Txt weight="700" style={{ flex: 1 }}>{flowRowLongLabel(r)}</Txt>
               {!line.printed ? <Chip label="Not on the printed table" tone="warn" /> : null}
@@ -1763,8 +1781,17 @@ function PartE({ form, locked, patch }: PartProps) {
     : undefined;
   const friction = resolveFrictionalLoss(b);
   const gaps = frictionalLossGaps(b);
+  /*
+   * Half a run is not a run, here as in the database and on the printed page.
+   * The two boxes below fill each other with a zero so the pair always has one
+   * shape, which meant a flow typed before its pressure answered the check as
+   * 0 kPa — "not achieved, short by 455 kPa", a pump failure nobody entered.
+   */
+  const run = overloadRun(form.overload);
+  const halfRun = form.overload !== undefined && run === undefined
+    && (!!form.overload.flowLps || !!form.overload.pressureKpa);
   const check = b.requiredLps !== undefined && b.requiredKpa !== undefined
-    ? overloadCheck(b.requiredLps, b.requiredKpa, form.overload)
+    ? overloadCheck(b.requiredLps, b.requiredKpa, run)
     : undefined;
 
   return (
@@ -1908,6 +1935,15 @@ function PartE({ form, locked, patch }: PartProps) {
             />
           </View>
         </Rowed>
+        {halfRun ? (
+          <Banner
+            tone="warn"
+            title="Both boxes, or neither"
+            body="A run needs the flow and the residual together. One on its own is not kept and
+              does not print — a pump that made nothing is a Part E comment and a fail, not a zero
+              in a box nobody can tell from an empty one."
+          />
+        ) : null}
         {check ? (
           <Banner
             tone={check.achieved === true ? 'pass' : check.achieved === false ? 'fail' : 'info'}

@@ -855,6 +855,30 @@ export interface OverloadCheck {
   note: string;
 }
 
+/**
+ * The overload run as it will be recorded, or nothing, from whatever is in the
+ * two boxes.
+ *
+ * Half a run is not a run. The screen fills the box the technician has not
+ * reached with a zero to keep one shape for both — so a form where somebody
+ * typed the flow and had not yet typed the pressure holds a pump making 0 kPa,
+ * and 0 kPa at overload reads as catastrophic failure rather than as a test
+ * half entered. The database already refuses to store that. This is the same
+ * rule, in one place, so the screen, the database and the printed page cannot
+ * disagree about whether a run was made.
+ *
+ * A pump that genuinely made nothing is a Part E comment and a fail, not a
+ * zero in a box nobody can tell apart from a box nobody filled in.
+ */
+export function overloadRun(
+  run?: { flowLps: number; pressureKpa: number },
+): { flowLps: number; pressureKpa: number } | undefined {
+  if (!run) return undefined;
+  const made = Number.isFinite(run.flowLps) && run.flowLps > 0
+    && Number.isFinite(run.pressureKpa) && run.pressureKpa > 0;
+  return made ? run : undefined;
+}
+
 export function overloadCheck(
   dutyFlowLps: number,
   dutyPressureKpa: number,

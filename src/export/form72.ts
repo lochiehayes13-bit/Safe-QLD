@@ -3,7 +3,8 @@ import {
   FLOW_ROW_GROUP_LABEL, FRICTIONAL_LOSS_TOLERANCE_KPA, PART_D_DEVICE_RATES_LPS, PART_D_ROWS,
   canIssue, elevationHeadKpa, flowCellState, flowDeviceCalibrationFrom, flowRowGroup,
   flowRowKey, flowRowLabel,
-  flowRowLongLabel, flowRowUntouched, overloadCheck, resolveFrictionalLoss, validateForm72,
+  flowRowLongLabel, flowRowUntouched, overloadCheck, overloadRun, resolveFrictionalLoss,
+  validateForm72,
   type BoosterTest, type FlowRow, type FlowRowColumn, type FlowRowGroup, type FlowTest,
   type Form72, type FormDefect, type FormIssue, type PartResult, type SprinklerTestPoint,
   type TestDevice,
@@ -1077,6 +1078,17 @@ function partD(form: Form72): string {
 }
 
 function partE(form: Form72, input: Form72DocumentInput): string {
+  /*
+   * The two overload boxes as a run, or as nothing.
+   *
+   * Narrowed once here rather than read raw below, because the screen fills the
+   * box the technician has not reached yet with a zero — and 0 kPa at overload
+   * printed "not achieved, short by 455 kPa", a pump failure nobody entered, on
+   * a form somebody signs. overloadRun is the same rule the database applies,
+   * so the page now says what the database will keep.
+   */
+  const run = overloadRun(input.overload);
+
   const b = form.booster;
   const r = b.result;
 
@@ -1126,15 +1138,15 @@ function partE(form: Form72, input: Form72DocumentInput): string {
   const req = atPair(b.requiredLps, b.requiredKpa, r);
 
   const check = b.requiredLps !== undefined && b.requiredKpa !== undefined
-    ? overloadCheck(b.requiredLps, b.requiredKpa, input.overload)
+    ? overloadCheck(b.requiredLps, b.requiredKpa, run)
     : undefined;
 
   let overloadBlock = '';
-  if (r === 'na' && input.overload) {
+  if (r === 'na' && run) {
     // The run is stored beside the parts, so an N/A booster part would
     // otherwise drop a reading somebody took on site off the page entirely.
     overloadBlock = '<div class="stated"><b>150% overload check</b> — an overload run is recorded '
-      + `against this form (${esc(input.overload.flowLps)} L/s at ${esc(input.overload.pressureKpa)} `
+      + `against this form (${esc(run.flowLps)} L/s at ${esc(run.pressureKpa)} `
       + 'kPa) while Part E is marked not applicable. One of the two is wrong, and the reading is '
       + 'shown rather than discarded.</div>';
   } else if (r !== 'na') {
@@ -1147,11 +1159,11 @@ function partE(form: Form72, input: Form72DocumentInput): string {
         + 'run is recorded on this form, so the requirement is stated rather than answered.</div>';
     } else if (check.achieved) {
       overloadBlock = `<div class="stated pass"><b>150% overload check — achieved.</b> ${esc(check.note)} `
-        + `Measured ${esc(input.overload?.flowLps)} L/s at ${esc(input.overload?.pressureKpa)} kPa.</div>`;
+        + `Measured ${esc(run?.flowLps)} L/s at ${esc(run?.pressureKpa)} kPa.</div>`;
     } else {
       overloadBlock = `<div class="stated fail"><b>150% overload check — not achieved.</b> ${esc(check.note)}`
         + `${check.shortfallKpa !== undefined
-          ? ` Measured ${esc(input.overload?.pressureKpa)} kPa, short by ${check.shortfallKpa} kPa.` : ''}</div>`;
+          ? ` Measured ${esc(run?.pressureKpa)} kPa, short by ${check.shortfallKpa} kPa.` : ''}</div>`;
     }
   }
 
@@ -1183,7 +1195,7 @@ function partE(form: Form72, input: Form72DocumentInput): string {
      * notes down this page carry working and checks the department's form has
      * no room for, and a reader has to be able to tell them from its text.
      */''}
-  ${r === 'na' && !input.overload ? '' : '<div class="subnote">The boxed notes above are not part of '
+  ${r === 'na' && !run ? '' : '<div class="subnote">The boxed notes above are not part of '
     + "the department's form: they are the working behind the frictional loss and the 150% overload "
     + 'check, which Form 72 has no field for.</div>'}`;
 }

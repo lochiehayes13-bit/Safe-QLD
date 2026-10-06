@@ -138,6 +138,51 @@ describe('the attachment columns v34 added', () => {
 });
 
 describe('the fields that ride inside the JSON parts', () => {
+  /*
+   * Part C's two "Calibrated:" dates had no column at all.
+   *
+   * The screen offered both boxes, the renderer printed both, and the write
+   * path dropped them on the floor — so the date was there while the form was
+   * open and gone the next time it was opened, and a reprint of a form already
+   * issued to an occupier said the device had no calibration date. Only
+   * running the SQL proves this one: the types were right the whole time.
+   */
+  it('keeps Part C’s mechanical and electromagnetic calibration dates', async () => {
+    const rec = await start();
+    await updateForm72(rec.id, {
+      flowDeviceKinds: ['mechanical', 'electromagnetic'],
+      flowDeviceCalibrated: { mechanical: '2026-01-05', electromagnetic: '2026-07-18' },
+    });
+
+    const back = await getForm72(rec.id);
+    expect(back!.flowDeviceCalibrated).toEqual({
+      mechanical: '2026-01-05', electromagnetic: '2026-07-18',
+    });
+  });
+
+  it('keeps one of the two on its own, because they are answered separately', async () => {
+    const rec = await start();
+    await updateForm72(rec.id, { flowDeviceCalibrated: { electromagnetic: '2026-07-18' } });
+
+    const back = await getForm72(rec.id);
+    expect(back!.flowDeviceCalibrated).toEqual({ electromagnetic: '2026-07-18' });
+  });
+
+  it('reads a form that never had the column as nobody having typed a date', async () => {
+    const rec = await start();
+    const back = await getForm72(rec.id);
+    expect(back!.flowDeviceCalibrated).toEqual({});
+  });
+
+  it('clears a date that was typed by mistake', async () => {
+    const rec = await start();
+    await updateForm72(rec.id, { flowDeviceCalibrated: { mechanical: '2026-01-05' } });
+    await updateForm72(rec.id, { flowDeviceCalibrated: {} });
+
+    const back = await getForm72(rec.id);
+    expect(back!.flowDeviceCalibrated).toEqual({});
+  });
+
   it('keeps a device’s correction factor, calibration basis, kind and model', async () => {
     const rec = await start();
     const devices: TestDevice[] = DEVICE_PRESETS.map((p, i) => ({
