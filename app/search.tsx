@@ -53,6 +53,8 @@ export default function SearchScreen() {
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [screens, setScreens] = useState<DestinationHit[]>([]);
   const [failed, setFailed] = useState<string | null>(null);
+  /** Whether a kind guessed out of the words found nothing and every kind was asked instead. */
+  const [widened, setWidened] = useState(false);
   // A phrase read by the model, kept beside the typed text: the box still
   // holds what the person wrote, and one line says how it was read.
   const [asked, setAsked] = useState<{ phrase: string; terms: string; kind?: SearchHit['kind']; note: string } | null>(null);
@@ -96,12 +98,36 @@ export default function SearchScreen() {
         searchEverything(parsed.text, { limitPerKind: PER_KIND, kinds: onlyKind ? [onlyKind] : undefined }),
         searchableCount(),
       ]);
-      setHits(found);
+      /*
+       * A kind the words were *guessed* to mean is a preference, not a filter.
+       *
+       * The phrase reader treats any three words as a sentence and maps
+       * "parts", "people", "account", "bill", "order", "lead" and "supplier"
+       * onto a kind. Those words are in real site names — Burson Auto Parts
+       * Rockhampton, People First Stadium — so typing a building's name
+       * exactly asked the catalogue, or the contacts, for it, the site was
+       * never queried, and the screen answered "Nothing matched. Try a number
+       * on its own, or a shorter piece of the name." A shorter piece does find
+       * it, which makes the advice accidentally right and the search wrong:
+       * the more precisely somebody typed the name, the less chance they had.
+       *
+       * So where a guess found nothing, every kind is asked and the screen
+       * says it widened. A kind the person typed as a prefix — "site 8812" —
+       * is a deliberate narrowing and still means it: parsed.hint is set only
+       * for that, and it is left alone.
+       */
+      const guessed = onlyKind && !parsed.hint;
+      const widerRows = !found.length && guessed
+        ? await searchEverything(parsed.text, { limitPerKind: PER_KIND })
+        : null;
+      setWidened(!!widerRows?.length);
+      const rows = widerRows?.length ? widerRows : found;
+      setHits(rows);
       // The app's own screens answer to what was typed, not to what the
       // phrase was reduced to: "purchase orders" should still offer the
       // purchase orders screen.
       setScreens(searchDestinations(query, readMode(prefs.appMode).mode, 4).filter((d) => !d.destination.needsContext));
-      if (!found.length && !held) {
+      if (!rows.length && !held) {
         setEmpty(officeEmptyState(
           { held: 0, connected: Boolean(prefs.simproClientId && prefs.simproCompanyId), everSynced: await everSynced() },
           'records',
@@ -112,7 +138,7 @@ export default function SearchScreen() {
     } catch (e) {
       setFailed(describeLoadFailure(e, 'the search'));
     }
-  }, [parsed.text, onlyKind, query]);
+  }, [parsed.text, parsed.hint, onlyKind, query]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
@@ -163,6 +189,16 @@ export default function SearchScreen() {
         <View style={{ padding: t.space(4), paddingBottom: t.space(2), gap: t.space(2) }}>
           <SearchBox value={typed} onChange={setTyped} placeholder="Job, invoice, PO, quote, site, customer, part, phone" />
           {readAs ? <Txt size="xs" tone="muted">{readAs}</Txt> : null}
+          {/*
+            * Said, because the row the person wanted is now in a list they
+            * were told they were not looking at. Without this the screen
+            * reads as having ignored them.
+            */}
+          {widened && onlyKind ? (
+            <Txt size="xs" tone="muted">
+              {`Nothing matched ${KIND_LABEL[onlyKind].many.toLowerCase()} only, so every kind was searched.`}
+            </Txt>
+          ) : null}
           {refusal ? <Txt size="xs" tone="muted">{refusal}</Txt> : null}
           {hits ? (
             <Txt size="xs" tone="faint">
