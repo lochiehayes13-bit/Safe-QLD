@@ -26,6 +26,7 @@ import {
   flowRowRead, flowRowUntouched, form72DefectForRegister,
   provedDuty, provedDutyDisagrees,
   intervalsTested, maintenanceTestFromAxes, overloadCheck, overloadRun, resolveFrictionalLoss,
+  toggleMaintenanceAxes,
   sprinklerTestPointLines, sprinklerTestPointUntouched, systemTypesTested, unraisedDefects,
   validateForm72,
   unTickedAnsweredKinds,
@@ -141,6 +142,42 @@ const num = (s: string): number | undefined => {
 };
 
 const str = (n: number | undefined): string => (n === undefined ? '' : String(n));
+
+/**
+ * A stored form as its PDF, from one place.
+ *
+ * Four paths produce this document — Produce PDF, Email to the office, the
+ * attachment queued onto the Simpro job, and the occupier's copy — and three
+ * of them built the call by hand and left `status` and `issuedAt` off it.
+ * form72Html treats a caller that does not say as a draft, deliberately, so
+ * those three rendered every issued form as a draft: the "Check before issue"
+ * cautions printed as advice about a decision already taken, the
+ * "Issued dd/mm/yyyy, and held unaltered since" line was missing, and the
+ * clean-draft caution never appeared on an actual draft. The attachment is the
+ * one that runs automatically on issue, so the copy filed against the Simpro
+ * job disagreed with the copy in the occupier's hand.
+ *
+ * Worse, it reached backwards. A rule added to validateForm72 after a form was
+ * issued stamps that form's reprint "DRAFT — NOT FOR ISSUE" — which is exactly
+ * what happened the morning the Part C date reader learned to read a slashed
+ * date: a stale certificate that used to be an unreadable-date caution became
+ * an out-of-calibration blocker, and every reprint of a form issued before
+ * that came out stamped.
+ *
+ * So the record decides, in one expression, and a test fails any call that
+ * builds its own.
+ */
+function renderForm72(form: StoredForm72, companyName: string): string {
+  return form72Html({
+    form,
+    systemLabel: form.systemLabel,
+    companyName,
+    generatedAt: nowIso(),
+    status: form.status,
+    issuedAt: form.issuedAt,
+    overload: form.overload,
+  });
+}
 
 export default function Form72Screen() {
   const t = useTheme();
@@ -306,7 +343,7 @@ export default function Form72Screen() {
     if (!target.jobExternalId) return false;
     setAttaching(true);
     try {
-      const html = form72Html({ form: target, systemLabel: target.systemLabel, companyName, generatedAt: nowIso(), overload: target.overload });
+      const html = renderForm72(target, companyName);
       const file = await writePdf(form72AttachmentName(target).replace(/\.pdf$/i, ''), html);
       if (file.printed) {
         if (!quiet) showAlert('Printed, not attached', 'On the web the PDF is printed rather than written, so it cannot be queued onto the job from here. Do this from a phone.');
@@ -344,7 +381,7 @@ export default function Form72Screen() {
     if (!form) return;
     setAttaching(true);
     try {
-      const html = form72Html({ form, systemLabel: form.systemLabel, companyName, generatedAt: nowIso(), overload: form.overload });
+      const html = renderForm72(form, companyName);
       const file = await writePdf(form72AttachmentName(form).replace(/\.pdf$/i, ''), html);
 
       const outcome = await sendMail({
@@ -413,10 +450,7 @@ export default function Form72Screen() {
           onPress: async () => {
             setAttaching(true);
             try {
-              const html = form72Html({
-                form, systemLabel: form.systemLabel, companyName, generatedAt: nowIso(),
-                status: form.status, issuedAt: form.issuedAt, overload: form.overload,
-              });
+              const html = renderForm72(form, companyName);
               const file = await writePdf(form72AttachmentName(form).replace(/\.pdf$/i, ''), html);
               const outcome = await sendMail({
                 to: to.email!,
@@ -557,13 +591,7 @@ export default function Form72Screen() {
     if (!form) return;
     setBusy(true);
     try {
-      const html = form72Html({
-        form,
-        systemLabel: form.systemLabel,
-        companyName,
-        generatedAt: nowIso(),
-        overload: form.overload,
-      });
+      const html = renderForm72(form, companyName);
       const file = await writePdf(`Form 72 ${form.siteName}`, html);
       const shared = await shareFile(file, 'Form 72');
       if (!shared) {
@@ -1167,16 +1195,47 @@ const INTERVALS: TestInterval[] = ['annual', 'fiveYear'];
  */
 function MaintenanceGrid({ form, locked, patch }: PartProps) {
   const m = form.maintenanceTest;
-  const types = systemTypesTested(m);
-  const intervals = intervalsTested(m);
   const ticked = TEST_KINDS.filter((k) => m[k.key]);
 
-  const fromAxes = maintenanceTestFromAxes(types, intervals);
+  /*
+   * The half-answer the stored form cannot hold.
+   *
+   * These two questions are a product: the six cells are system × interval,
+   * and maintenanceTestFromAxes ticks only the cells both axes name. So one
+   * axis chosen and the other not is, correctly, a grid with nothing ticked —
+   * and that is right for the document, because a five-yearly that printed as
+   * an annual because the app answered the second question first is the fault
+   * the one-tap-one-question rule exists to prevent.
+   *
+   * What it is not right for is the screen. The axes were derived from the
+   * stored grid on every render, so tapping "Fire hydrant" wrote six falses,
+   * came back as no system chosen, and un-lit the chip the technician had just
+   * pressed. Tapping "Annual" next did the same. Neither axis could ever be
+   * set, so Part A could not be answered at all — and validateForm72 blocks
+   * issuing a form with nothing ticked, so no Form 72 could be issued through
+   * this screen.
+   *
+   * The half-answer therefore lives here until its partner arrives. Nothing
+   * about what is written changes: a single axis still stores an all-false
+   * grid, the form still says it is not answered, and the printed page still
+   * says so in red. The chip simply stays lit so the person can finish.
+   */
+  const [pending, setPending] = useState<{ types: SystemType[]; intervals: TestInterval[] } | null>(null);
+  const types = pending?.types ?? systemTypesTested(m);
+  const intervals = pending?.intervals ?? intervalsTested(m);
+
+  const fromAxes = maintenanceTestFromAxes(systemTypesTested(m), intervalsTested(m));
   const expressible = TEST_KINDS.every((k) => fromAxes[k.key] === m[k.key]);
 
-  const toggle = (nextTypes: SystemType[], nextIntervals: TestInterval[]) => patch({
-    maintenanceTest: maintenanceTestFromAxes(nextTypes, nextIntervals),
-  });
+  // The transition lives in the domain, where it can be argued with and where
+  // a test can run the two taps end to end. Once both questions are answered
+  // the grid holds the whole of it, so the half-answer is dropped and the
+  // stored form is the one source again.
+  const tap = (t: { axis: 'type'; value: SystemType } | { axis: 'interval'; value: TestInterval }) => {
+    const next = toggleMaintenanceAxes({ types, intervals }, t);
+    setPending(next.pending ? next.shown : null);
+    patch({ maintenanceTest: next.grid });
+  };
 
   if (!expressible) {
     return (
@@ -1217,10 +1276,7 @@ function MaintenanceGrid({ form, locked, patch }: PartProps) {
               label={SYSTEM_TYPE_LABEL[type]}
               selected={on}
               tone={on ? 'accent' : 'default'}
-              onPress={locked ? undefined : () => toggle(
-                on ? types.filter((x) => x !== type) : [...types, type],
-                intervals,
-              )}
+              onPress={locked ? undefined : () => tap({ axis: 'type', value: type })}
             />
           );
         })}
@@ -1236,10 +1292,7 @@ function MaintenanceGrid({ form, locked, patch }: PartProps) {
               label={TEST_INTERVAL_LABEL[interval]}
               selected={on}
               tone={on ? 'accent' : 'default'}
-              onPress={locked ? undefined : () => toggle(
-                types,
-                on ? intervals.filter((x) => x !== interval) : [...intervals, interval],
-              )}
+              onPress={locked ? undefined : () => tap({ axis: 'interval', value: interval })}
             />
           );
         })}

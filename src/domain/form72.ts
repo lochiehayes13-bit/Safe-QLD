@@ -972,6 +972,67 @@ export function intervalsTested(m: MaintenanceTest): TestInterval[] {
 }
 
 /**
+ * What is on screen for Part A's two questions, which is not always what the
+ * stored grid can say.
+ *
+ * The six cells are a product — system × interval — so one axis answered and
+ * the other not is, correctly, a grid with nothing ticked. That is right for
+ * the document: a five-yearly printing as an annual because the app answered
+ * the second question itself is the fault the one-tap-one-question rule exists
+ * to prevent, and it is why the defaults were taken out.
+ *
+ * It was not right for the screen. The chips read their state back out of the
+ * stored grid, so tapping "Fire hydrant" wrote six falses, came back as no
+ * system chosen, and un-lit the chip that had just been pressed. Tapping
+ * "Annual" next did the same. Neither axis could ever be set — Part A could
+ * not be answered at all, and since validateForm72 blocks issuing a form with
+ * nothing ticked, no Form 72 could be issued through that screen.
+ *
+ * So the half-answer is carried on screen until its partner arrives. Nothing
+ * about what is stored changes: a single axis still writes an all-false grid,
+ * the form still reports itself unanswered, and the printed page still says so
+ * in red.
+ */
+export interface MaintenanceAxes {
+  types: SystemType[];
+  intervals: TestInterval[];
+}
+
+export interface MaintenanceTap {
+  /** What is lit on screen after the tap. */
+  shown: MaintenanceAxes;
+  /** What goes into the form, which is the product of the two and nothing else. */
+  grid: MaintenanceTest;
+  /** Whether one question is still waiting, so the screen has to carry `shown` itself. */
+  pending: boolean;
+}
+
+/** One tap on one of the two questions, as a transition the screen can be held to. */
+export function toggleMaintenanceAxes(
+  shown: MaintenanceAxes,
+  tap: { axis: 'type'; value: SystemType } | { axis: 'interval'; value: TestInterval },
+): MaintenanceTap {
+  const next: MaintenanceAxes = tap.axis === 'type'
+    ? {
+      types: shown.types.includes(tap.value)
+        ? shown.types.filter((x) => x !== tap.value)
+        : [...shown.types, tap.value],
+      intervals: shown.intervals,
+    }
+    : {
+      types: shown.types,
+      intervals: shown.intervals.includes(tap.value)
+        ? shown.intervals.filter((x) => x !== tap.value)
+        : [...shown.intervals, tap.value],
+    };
+  return {
+    shown: next,
+    grid: maintenanceTestFromAxes(next.types, next.intervals),
+    pending: !(next.types.length > 0 && next.intervals.length > 0),
+  };
+}
+
+/**
  * Tick the grid from the two axes.
  *
  * Every combination of the chosen types and intervals is set, which for one
