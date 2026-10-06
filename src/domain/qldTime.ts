@@ -127,6 +127,24 @@ export function qldMoment(iso: string | undefined): string | undefined {
 }
 
 /**
+ * The Queensland clock time of an instant, as HH:MM, or nothing where there
+ * is no time in it.
+ *
+ * Read off qldMoment rather than off the string: characters eleven to sixteen
+ * of an ISO instant are its UTC clock, ten hours behind the one the work
+ * happened in. Between midnight and ten in the morning Brisbane time, the UTC
+ * clock is yesterday evening's.
+ *
+ * Today's run had this as a private function of its own and Form 72's time
+ * box had nothing, so a technician typed the time by hand on a form where
+ * every other date and time comes from somewhere. One copy, so the two cannot
+ * disagree about what time it is.
+ */
+export function qldClock(iso: string | undefined): string | undefined {
+  return qldMoment(iso)?.match(/ (\d{2}:\d{2}) /)?.[1];
+}
+
+/**
  * A date somebody typed, as an ISO day — or nothing, if it is not one yet.
  *
  * Form 72's test date was a plain text box holding an ISO string, on a phone

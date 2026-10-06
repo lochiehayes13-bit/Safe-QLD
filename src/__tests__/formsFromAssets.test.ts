@@ -1,11 +1,14 @@
 import {
   applyForm72Prefill, assetDescriptor, assetLocation, assetTag, assetTypeLabel, deviceTypeForAsset,
+  REGISTER_FILLS, REGISTER_FILLS_PARTS,
   form72FromAssets, headingKey, occupierEvidenceFromAssets, orderForWalk, prefillOccupierRows,
   registerSystemFor, testRowsFromAssets, type RegisterAsset,
 } from '@/domain/formsFromAssets';
 import { emptyForm72 } from '@/domain/form72';
 import { OCCUPIER_STATEMENT_INSTALLATIONS } from '@/domain/qldCompliance';
 import { SYSTEM_LABEL } from '@/parsers/assetRegister';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /**
  * The forms, built from the asset register.
@@ -218,6 +221,45 @@ describe('Form 72 from the register', () => {
       sprinklerFlow: { ...blank.sprinklerFlow, testPoints: [{ location: 'Valve 1' }] },
     };
     expect(applyForm72Prefill(typed, prefill)).toEqual({});
+  });
+
+  /*
+   * Where the button that does this belongs.
+   *
+   * It sat on Part A alone, because the system label is a Part A field and
+   * that is where it was first wanted — while the register also fills Part D's
+   * hydrant locations, Part E's booster and pump comments and Part G's
+   * sprinkler test points. A technician on Part D with an empty hydrant list
+   * had to go back to Part A, press a button about the register, and come
+   * forward again, with nothing on Part D to suggest it.
+   *
+   * Asserted against what a prefill actually writes rather than against a
+   * list somebody kept up to date, because the list going stale is how the
+   * button went missing from a part in the first place.
+   */
+  it('offers itself on every part it can fill and no others', () => {
+    const blank = emptyForm72({ id: 'f', siteId: 's', siteName: 'Site', now: '2026-07-03T00:00:00.000Z' });
+    const patch = applyForm72Prefill(blank, prefill);
+    const touched = Object.keys(patch) as (keyof typeof patch)[];
+    expect(touched.length).toBeGreaterThan(1);
+    const parts = [...new Set(touched.map((k) => REGISTER_FILLS[k]))].sort();
+    expect(parts).toEqual([...REGISTER_FILLS_PARTS].sort());
+  });
+
+  it('names a part for every single thing it writes', () => {
+    // A key with no part would silently drop off the list of parts the button
+    // appears on, which is the fault this guards.
+    const blank = emptyForm72({ id: 'f', siteId: 's', siteName: 'Site', now: '2026-07-03T00:00:00.000Z' });
+    for (const key of Object.keys(applyForm72Prefill(blank, prefill))) {
+      expect({ key, named: Boolean(REGISTER_FILLS[key as keyof typeof REGISTER_FILLS]) })
+        .toEqual({ key, named: true });
+    }
+  });
+
+  it('the screen reads the list rather than naming Part A', () => {
+    const screen = readFileSync(join(__dirname, '..', '..', 'app', 'form72', '[id].tsx'), 'utf8');
+    expect(screen).toContain('REGISTER_FILLS_PARTS.includes(part)');
+    expect(screen).not.toContain("(whole || part === 'A')");
   });
 
   it('does not average two pumps into one duty', () => {

@@ -436,6 +436,32 @@ export type Form72PrefillPatch = {
 };
 
 /**
+ * Which lettered part each thing the register fills belongs to.
+ *
+ * The button that does the filling sat on Part A alone, because the system
+ * label is a Part A field and that is where it was first wanted. But the
+ * register also fills Part D's hydrant locations, Part E's booster and pump
+ * comments and Part G's sprinkler test points — so a technician standing on
+ * Part D with an empty hydrant list had to go back to Part A, press a button
+ * about the register, and come forward again, with nothing on Part D to
+ * suggest it.
+ *
+ * Declared here rather than beside the button so that a test can apply a
+ * prefill to an empty form and check this covers exactly what came back. A
+ * list of parts that drifts from what the function writes is how the button
+ * ends up missing from a part again.
+ */
+export const REGISTER_FILLS: Record<keyof Form72PrefillPatch, string> = {
+  systemLabel: 'A',
+  flowTest: 'D',
+  booster: 'E',
+  sprinklerFlow: 'G',
+};
+
+/** The lettered parts the register can fill something on, in the form's order. */
+export const REGISTER_FILLS_PARTS: readonly string[] = ['A', 'D', 'E', 'G'];
+
+/**
  * Lays the register's lists onto a form, blanks only.
  *
  * A form somebody has started typing into keeps what they typed. Each list is

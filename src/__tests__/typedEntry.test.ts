@@ -11,7 +11,9 @@
  * read, which is the property that matters: a half-typed date must never
  * become a stored one.
  */
-import { typedClock, typedDay } from '@/domain/qldTime';
+import { qldClock, typedClock, typedDay } from '@/domain/qldTime';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 describe('a date somebody typed', () => {
   it('reads eight digits straight off a keypad as the order we write them in', () => {
@@ -121,5 +123,62 @@ describe('a time somebody typed', () => {
     for (const junk of ['morning', '9am', '9:30pm', '12345']) {
       expect({ junk, read: typedClock(junk) }).toEqual({ junk, read: undefined });
     }
+  });
+});
+
+/**
+ * The Queensland clock, where the time of test comes from.
+ *
+ * Form 72's Time box was typed by hand on a form where every other date comes
+ * from somewhere, so it is offered on a chip — and Today's run had its own
+ * private copy of this function, which is two things that can disagree about
+ * what time it is.
+ */
+describe('the Queensland clock time of an instant', () => {
+  it('reads the Brisbane clock rather than the UTC one', () => {
+    // 23:30 UTC on the 2nd is half past nine on the morning of the 3rd here.
+    expect(qldClock('2026-09-02T23:30:00.000Z')).toBe('09:30');
+  });
+
+  it('is nothing for a date with no time in it', () => {
+    // A test "at 00:00" that nobody recorded a time for is a fact invented by
+    // a formatter, and on this form it reads as evidence.
+    expect(qldClock('2026-09-02')).toBeUndefined();
+  });
+
+  it('is nothing for an absent or unreadable instant', () => {
+    expect(qldClock(undefined)).toBeUndefined();
+    expect(qldClock('not a time')).toBeUndefined();
+  });
+
+  it('pads both halves, so it is always five characters', () => {
+    expect(qldClock('2026-09-02T21:05:00.000Z')).toBe('07:05');
+  });
+});
+
+describe('the one-tap Time on Part A', () => {
+  const screen = readFileSync(
+    join(__dirname, '..', '..', 'app', 'form72', '[id].tsx'), 'utf8',
+  );
+
+  it('offers the time rather than prefilling it', () => {
+    /*
+     * The time of test is the time the test was done, not the time the form
+     * was opened. A technician who raises the form in the van at eight and
+     * tests at two would sign a document saying eight o'clock, and a prefilled
+     * box reads exactly like a box somebody checked.
+     */
+    expect(screen).toContain("quick={{ label: 'Now', value: () => qldClock(nowIso()) }}");
+    expect(screen).toContain('{!locked && quick ?');
+  });
+
+  it('reads the clock when the chip is pressed, not when the screen drew', () => {
+    // A value captured at render would offer a minute that had already passed
+    // by the time somebody tapped it.
+    expect(screen).toContain('const next = quick.value();');
+  });
+
+  it('stores nothing where the clock cannot be read', () => {
+    expect(screen).toContain('if (!next) return;');
   });
 });

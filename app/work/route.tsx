@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { nowIso } from '@/db';
-import { qldIsoDay, qldMoment } from '@/domain/qldTime';
+import { qldClock, qldIsoDay } from '@/domain/qldTime';
 import { Linking, Platform, View } from 'react-native';
 import { Stack, router } from 'expo-router';
 import * as Location from 'expo-location';
@@ -47,16 +47,6 @@ type Start = 'here' | 'first';
  */
 const OPEN_PAGE = 1500;
 
-/**
- * The Queensland clock time of an instant, as HH:MM.
- *
- * Read off qldMoment rather than off the string: the eleventh to sixteenth
- * characters of an ISO instant are its UTC clock, ten hours behind the one
- * the job was booked in.
- */
-function qldClock(iso: string): string | undefined {
-  return qldMoment(iso)?.match(/ (\d{2}:\d{2}) /)?.[1];
-}
 
 export default function RouteScreen() {
   const t = useTheme();

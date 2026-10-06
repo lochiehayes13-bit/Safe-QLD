@@ -14,7 +14,7 @@ import {
   occupierCopyBody, occupierCopyRecipient, occupierCopySubject, rankJobsForForm,
 } from '@/domain/form72Link';
 import type { Site } from '@/domain/types';
-import { qldIsoDay, qldMoment, typedClock, typedDay } from '@/domain/qldTime';
+import { qldClock, qldIsoDay, qldMoment, typedClock, typedDay } from '@/domain/qldTime';
 import { attachmentContentKey } from '@/domain/outboundWork';
 import { describeActionFailure } from '@/domain/loadFailure';
 import { router } from 'expo-router';
@@ -53,7 +53,7 @@ import { notSharedNotice } from '@/export/shareOutcome';
 import { formatAuDate } from '@/export/sheets';
 import { queryAssets } from '@/db/assetRepo';
 import { createDefect, getSite } from '@/db/repo';
-import { applyForm72Prefill, form72FromAssets } from '@/domain/formsFromAssets';
+import { applyForm72Prefill, form72FromAssets, REGISTER_FILLS_PARTS } from '@/domain/formsFromAssets';
 import { loadPrefs } from '@/app-prefs';
 import { nowIso } from '@/db';
 import { useTheme } from '@/theme';
@@ -727,7 +727,19 @@ export default function Form72Screen() {
         onChange={goToPart}
       />
 
-      {!locked && (whole || part === 'A') ? (
+      {/*
+        * On every part the register fills, not only on Part A.
+        *
+        * The system label is a Part A field and that is where this button was
+        * first wanted, so that is where it stayed — while the register also
+        * fills Part D's hydrant locations, Part E's booster and pump comments
+        * and Part G's sprinkler test points. A technician on Part D with an
+        * empty hydrant list had to go back to Part A, press a button about the
+        * register, and come forward again, with nothing on Part D to suggest
+        * it. REGISTER_FILLS_PARTS is held to covering exactly what the prefill
+        * writes.
+        */}
+      {!locked && (whole || REGISTER_FILLS_PARTS.includes(part)) ? (
         <Button
           title="Fill the lists from the site's register"
           variant="secondary"
@@ -1310,6 +1322,7 @@ function PartA({ form, locked, patch }: PartProps) {
             hint="0930"
             locked={locked}
             onChange={(v) => patch({ testTime: v })}
+            quick={{ label: 'Now', value: () => qldClock(nowIso()) }}
           />
         </View>
       </Rowed>
@@ -1428,7 +1441,7 @@ function toggleNamed(value: string, name: string): string {
  * a half-typed date never becomes a stored one.
  */
 function TypedField({
-  label, value, placeholder, hint, read, show, locked, onChange,
+  label, value, placeholder, hint, read, show, locked, onChange, quick,
 }: {
   label: string;
   /** The stored value, which is what this field is about. */
@@ -1441,6 +1454,17 @@ function TypedField({
   show: (stored: string) => string;
   locked: boolean;
   onChange: (stored: string | undefined) => void;
+  /**
+   * A one-tap answer, where the phone knows one.
+   *
+   * Offered rather than prefilled, and the difference matters on this form.
+   * The time of test is the time the test was done, not the time the form was
+   * opened — a technician who raises the form in the van at eight and tests at
+   * two would sign a document saying eight o'clock, and a prefilled box reads
+   * exactly like a box somebody checked. One tap, taken when it is pressed and
+   * not when the screen drew, so the chip cannot offer a stale minute.
+   */
+  quick?: { label: string; value: () => string | undefined };
 }) {
   const t = useTheme();
   /*
@@ -1478,6 +1502,19 @@ function TypedField({
         // What it understood, where that is not character for character what
         // was typed. Two digits of a year are the case this exists for.
         <Txt size="xs" style={{ color: t.color.textFaint }}>{`Read as ${show(resolved)}`}</Txt>
+      ) : null}
+      {!locked && quick ? (
+        <Rowed gap={2} wrap>
+          <Chip
+            label={quick.label}
+            onPress={() => {
+              const next = quick.value();
+              if (!next) return;
+              setText(show(next));
+              onChange(next);
+            }}
+          />
+        </Rowed>
       ) : null}
     </View>
   );
