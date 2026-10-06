@@ -132,6 +132,9 @@ export interface BuilderDraft {
  */
 export function builderDraft(input: {
   job: BuilderJob | null;
+  /** The site, where there is no job to read it off. */
+  siteId?: string;
+  siteName?: string;
   works: string;
   templateIds: readonly string[];
   templates: readonly SwmsTemplate[];
@@ -146,10 +149,18 @@ export function builderDraft(input: {
     templateIds: chosen.map((t) => t.id),
     date: input.date,
     title: builderTitle(input.job, chosen),
-    siteId: input.job?.siteId,
-    // The site comes off the job rather than being asked for again. A statement
-    // with no site on it cannot be signed, and the job always knows.
-    siteName: input.job?.siteName?.trim() || undefined,
+    /*
+     * The site off the job where there is one, and off the site that was
+     * picked where there is not.
+     *
+     * This read only the job, under a comment saying "the job always knows" —
+     * true of a job, and the reason a site with no job could not have a
+     * statement at all. A statement with no site on it still cannot be
+     * signed; the site is just no longer only reachable through the office's
+     * paperwork.
+     */
+    siteId: input.job?.siteId ?? input.siteId,
+    siteName: input.job?.siteName?.trim() || input.siteName?.trim() || undefined,
     jobExternalId: input.job?.externalId,
     jobTitle: input.job?.title?.trim() || undefined,
     // The person building it is on the crew. They can take themselves off, but
@@ -179,8 +190,23 @@ export function builderTitle(job: BuilderJob | null, templates: readonly SwmsTem
  * to collect a form — everything else the record needs is asked for on the
  * record itself, where there is room to explain it.
  */
-export function builderNotReady(input: { job: BuilderJob | null; templateIds: readonly string[] }): string | null {
-  if (!input.job) return 'Pick the job this is for.';
+export function builderNotReady(input: {
+  job: BuilderJob | null;
+  /** The site, where the work is at one the office has not raised a job for. */
+  siteId?: string;
+  templateIds: readonly string[];
+}): string | null {
+  /*
+   * A job OR a site. The comment below used to read "the job always knows",
+   * which is true of a job and was the whole problem: a site the office has
+   * not booked work at has no job to know it, so this gate refused and the
+   * Start button never enabled. A crew at a site with no job could not have a
+   * safe work method statement at all, which is the one document that should
+   * never depend on the office's paperwork.
+   */
+  if (!input.job && !input.siteId) {
+    return 'Pick the job this is for, or the site if the office has not raised one.';
+  }
   if (!input.templateIds.length) return 'Tick at least one statement. Nothing below covers the work? Say more about it above.';
   return null;
 }

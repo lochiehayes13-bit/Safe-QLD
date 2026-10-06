@@ -12,6 +12,8 @@ import { type TemplateMatch } from '@/domain/swmsMatch';
 import { createSwms } from '@/db/swmsRepo';
 import { jobsByExternalIds, openJobPicks, type JobPick } from '@/db/opsRepo';
 import { assetCountsBySystem } from '@/db/assetRepo';
+import { listSitePicks, type SitePick } from '@/db/repo';
+import { SitePicker } from '@/components/SitePicker';
 import { dueAtSite } from '@/db/routineRunRepo';
 import { loadPrefs } from '@/app-prefs';
 import { qldIsoDay } from '@/domain/qldTime';
@@ -57,6 +59,17 @@ export default function SwmsBuilderScreen() {
   const [job, setJob] = useState<BuilderJob | null>(null);
   const [picking, setPicking] = useState(true);
   const [suggested, setSuggested] = useState<JobPick[]>([]);
+  /*
+   * The site, where the work is at one the office has not raised a job for.
+   *
+   * This module had no site surface at all: no SitePicker, no site lister,
+   * nothing — and the gate refused to enable Start without a job, so a crew at
+   * a site with no job could not have a safe work method statement. That is
+   * the one document that should never wait on the office's paperwork.
+   */
+  const [site, setSite] = useState<SitePick | null>(null);
+  const [sites, setSites] = useState<SitePick[]>([]);
+  const [pickingSite, setPickingSite] = useState(false);
   const [works, setWorks] = useState('');
   const [touchedWorks, setTouchedWorks] = useState(false);
   /**
@@ -89,6 +102,16 @@ export default function SwmsBuilderScreen() {
    * is due there. A failure in any of it costs a better suggestion, never the
    * statement — so each falls back to nothing rather than to an error.
    */
+  const openSitePicker = useCallback(async () => {
+    setPickingSite(true);
+    if (sites.length) return;
+    try {
+      setSites(await listSitePicks());
+    } catch (e) {
+      showAlert('Could not read the site list', describeActionFailure(e, 'read the site list'));
+    }
+  }, [sites.length]);
+
   const takeJob = useCallback(async (pick: JobPick) => {
     setPicking(false);
     const picked: BuilderJob = {
@@ -138,7 +161,7 @@ export default function SwmsBuilderScreen() {
     });
   };
 
-  const blocked = builderNotReady({ job, templateIds: selected });
+  const blocked = builderNotReady({ job, siteId: site?.id, templateIds: selected });
 
   const start = async () => {
     if (blocked) return;
@@ -147,6 +170,8 @@ export default function SwmsBuilderScreen() {
       const prefs = await loadPrefs();
       const draft = builderDraft({
         job,
+        siteId: site?.id,
+        siteName: site?.name,
         works,
         templateIds: selected,
         templates: SWMS_TEMPLATES,
@@ -189,17 +214,58 @@ export default function SwmsBuilderScreen() {
             <Txt size="sm" tone="faint">Change</Txt>
           </Rowed>
         </Card>
+      ) : site ? (
+        <Card onPress={() => { setSite(null); setPickingSite(false); }}>
+          <Rowed>
+            <View style={{ flex: 1 }}>
+              <Txt weight="700">{site.name}</Txt>
+              <Txt size="sm" tone="muted">
+                {[site.suburb, site.clientName].filter(Boolean).join(' · ') || 'No job — the site itself'}
+              </Txt>
+            </View>
+            <Txt size="sm" tone="faint">Change</Txt>
+          </Rowed>
+        </Card>
+      ) : pickingSite ? (
+        <Card>
+          <Txt weight="700">Which site is this statement for?</Txt>
+          <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+            The statement goes on the site. A job can be linked to it later if the office raises one.
+          </Txt>
+          <SitePicker
+            sites={sites}
+            onChange={(id: string) => {
+              setSite(sites.find((x) => x.id === id) ?? null);
+              setPickingSite(false);
+            }}
+          />
+          <Button title="Back to the job list" variant="ghost" onPress={() => setPickingSite(false)} />
+        </Card>
       ) : (
-        <JobPicker
-          heading="Which job is this statement for?"
-          suggested={suggested}
-          suggestedLabel="Open jobs on this phone"
-          emptyWhenNoneSuggested="No open jobs on this phone. Search for it by number."
-          emptyWhenNothingOnDevice="No jobs on this phone yet. Run a sync in Settings first — you can still pick statements below and add the job later."
-          busy={starting}
-          onPick={(pick) => { void takeJob(pick); }}
-          onClose={() => setPicking(false)}
-        />
+        <>
+          <JobPicker
+            heading="Which job is this statement for?"
+            suggested={suggested}
+            suggestedLabel="Open jobs on this phone"
+            emptyWhenNoneSuggested="No open jobs on this phone. Search for it by number, or pick the site instead."
+            /* It used to say "you can still pick statements below and add the
+               job later" while the Start button stayed disabled without one —
+               the message promised what the button refused. */
+            emptyWhenNothingOnDevice="No jobs on this phone yet. Run a sync in Settings, or pick the site this work is at."
+            busy={starting}
+            onPick={(pick) => { void takeJob(pick); }}
+            onClose={() => setPicking(false)}
+          />
+          {/*
+            * Plenty of this work happens before the office books anything, and
+            * a statement is read to a crew on the day rather than filed after.
+            */}
+          <Button
+            title="No job — pick the site"
+            variant="secondary"
+            onPress={() => { void openSitePicker(); }}
+          />
+        </>
       )}
 
       <H2>What sort of works</H2>

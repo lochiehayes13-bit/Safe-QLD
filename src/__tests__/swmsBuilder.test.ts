@@ -164,8 +164,20 @@ describe('what the statement is called six weeks later', () => {
 });
 
 describe('what stops it being started', () => {
-  it('wants a job', () => {
-    expect(builderNotReady({ job: null, templateIds: ['live-testing'] })).toMatch(/Pick the job/);
+  it('wants a job or a site', () => {
+    /*
+     * It wanted a job, full stop, and this module had no site surface at all —
+     * no picker, no site lister. So a crew at a site the office had not raised
+     * a job for could not have a safe work method statement, which is the one
+     * document that should never wait on the office's paperwork. Plenty of
+     * this work happens before anything is booked.
+     */
+    expect(builderNotReady({ job: null, templateIds: ['live-testing'] }))
+      .toMatch(/Pick the job this is for, or the site/);
+  });
+
+  it('is satisfied by a site with no job', () => {
+    expect(builderNotReady({ job: null, siteId: 's1', templateIds: ['live-testing'] })).toBeNull();
   });
 
   it('wants at least one statement', () => {
@@ -174,5 +186,57 @@ describe('what stops it being started', () => {
 
   it('asks for nothing else, because the record itself asks for the rest', () => {
     expect(builderNotReady({ job: JOB, templateIds: ['live-testing'] })).toBeNull();
+  });
+
+  it('still wants a statement, whichever of the two it was given', () => {
+    expect(builderNotReady({ job: null, siteId: 's1', templateIds: [] }))
+      .toMatch(/at least one statement/);
+  });
+});
+
+describe('a statement for a site with no job', () => {
+  it('puts the site on the record', () => {
+    // A statement with no site on it cannot be signed. The site is simply no
+    // longer reachable only through a job.
+    const draft = builderDraft({
+      job: null,
+      siteId: 's1',
+      siteName: 'Kingaroy Fire Station',
+      works: 'Core drilling the slab',
+      templateIds: ['live-testing'],
+      templates: SWMS_TEMPLATES,
+      date: '2026-10-02',
+    });
+    expect(draft.siteId).toBe('s1');
+    expect(draft.siteName).toBe('Kingaroy Fire Station');
+    expect(draft.jobExternalId).toBeUndefined();
+  });
+
+  it('prefers the job’s site where there is a job, so nothing changes for one', () => {
+    const draft = builderDraft({
+      job: JOB,
+      siteId: 'other',
+      siteName: 'Somewhere else',
+      works: '',
+      templateIds: ['live-testing'],
+      templates: SWMS_TEMPLATES,
+      date: '2026-10-02',
+    });
+    expect(draft.siteId).toBe(JOB.siteId);
+    expect(draft.siteName).toBe(JOB.siteName);
+  });
+
+  it('falls back to the picked site where the job names none', () => {
+    const draft = builderDraft({
+      job: { ...JOB, siteId: undefined, siteName: '' },
+      siteId: 's1',
+      siteName: 'Kingaroy Fire Station',
+      works: '',
+      templateIds: ['live-testing'],
+      templates: SWMS_TEMPLATES,
+      date: '2026-10-02',
+    });
+    expect(draft.siteId).toBe('s1');
+    expect(draft.siteName).toBe('Kingaroy Fire Station');
   });
 });

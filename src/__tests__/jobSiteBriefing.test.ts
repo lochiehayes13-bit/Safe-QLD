@@ -198,3 +198,38 @@ describe('starting a Form 72 for a site with no job', () => {
     expect(screen).toContain("showAlert('Could not read the site list'");
   });
 });
+
+describe('the SWMS builder’s site surface', () => {
+  /*
+   * This module had none: no SitePicker, no site lister, nothing — and its
+   * gate refused to enable Start without a job. So a crew at a site the office
+   * had not raised a job for could not have a safe work method statement,
+   * which is the one document that should never wait on the office's
+   * paperwork. The empty state even said "you can still pick statements below
+   * and add the job later" while the button it referred to stayed disabled.
+   */
+  const screen = readFileSync(
+    join(__dirname, '..', '..', 'app', 'swms', 'new.tsx'), 'utf8',
+  );
+
+  it('offers the site as well as the job', () => {
+    expect(screen).toContain('title="No job — pick the site"');
+    expect(screen).toContain('<SitePicker');
+  });
+
+  it('passes the site to the gate and to the draft', () => {
+    expect(screen).toContain('builderNotReady({ job, siteId: site?.id, templateIds: selected })');
+    expect(screen).toContain('siteId: site?.id,');
+    expect(screen).toContain('siteName: site?.name,');
+  });
+
+  it('no longer promises what the disabled button refused', () => {
+    expect(screen).not.toContain('you can still pick statements below and add the job later');
+    expect(screen).toContain('or pick the site this work is at');
+  });
+
+  it('reads the site list only when it is asked for', () => {
+    expect(screen).toContain('if (sites.length) return;');
+    expect(screen).toContain('setSites(await listSitePicks());');
+  });
+});
