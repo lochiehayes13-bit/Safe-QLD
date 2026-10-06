@@ -606,8 +606,8 @@ function atPair(
   return `${half(lps, 'L/s')} at ${half(kpa, 'kPa')}`;
 }
 
-function wide(label: string, value: string): string {
-  return `<tr><td class="k">${label}</td><td class="v" colspan="3">${value}</td></tr>`;
+function wide(label: string, value: string, span = 3): string {
+  return `<tr><td class="k">${label}</td><td class="v" colspan="${span}">${value}</td></tr>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -632,9 +632,19 @@ function partA(form: Form72): string {
    */
   return `${band('Part A—Test details')}
   <table class="grid">
-    ${wide('Site name', cell(form.siteName, 'pass'))}
-    ${wide('Site address', cell(form.siteAddress, 'pass'))}
-    ${wide('Contractor', cell(form.contractor, 'pass'))}
+    ${/*
+       * Four, not the usual three.
+       *
+       * Part A's grid is five columns wide, not four: the "Test details" cell
+       * below spans two rows down the left and every row has to account for
+       * it. These three did not, so Site name, Site address and Contractor
+       * were each one column short of the table and ended in a borderless
+       * notch at the right-hand edge — on every Form 72 this app has ever
+       * printed. The test below counts every row of every grid.
+       */''}
+    ${wide('Site name', cell(form.siteName, 'pass'), 4)}
+    ${wide('Site address', cell(form.siteAddress, 'pass'), 4)}
+    ${wide('Contractor', cell(form.contractor, 'pass'), 4)}
     <tr>
       <td class="grp" rowspan="2">Test details</td>
       <td class="k">Test date:</td><td class="v">${cell(formatAuDate(form.testDate), 'pass')}</td>
