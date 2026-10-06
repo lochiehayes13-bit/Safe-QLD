@@ -11,7 +11,8 @@ import { MIGRATION_V12 } from '@/db/schemaForm72';
 import { DEVICE_PRESETS, DEVICE_PRESET_SOURCE, unusedDevicePresets } from '@/domain/form72Devices';
 import {
   CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, FLOW_ROW_COLUMNS,
-  flowCellState, flowRowColumnsRun,
+  PART_G_PRINTED_TEST_POINTS, flowCellState, flowRowColumnsRun,
+  sprinklerTestPointLines, sprinklerTestPointUntouched,
   PART_D_NOZZLE_SIZES_MM, PART_D_ROWS, deviceCalibration, emptyForm72, intervalsTested,
   maintenanceTestCell, maintenanceTestFromAxes, overloadCheck, resolveFrictionalLoss,
   systemTypesTested, validateForm72,
@@ -2144,5 +2145,38 @@ describe('the department’s footer, as two paragraphs and an imprint', () => {
     // It is the one thing that tells two forms for the same site on the same
     // day apart, so it prints — up where a reader finds it, marked.
     expect(flat(html)).toContain('Towns Main System <span class="extra">added</span>');
+  });
+});
+
+describe('Part G’s two printed test points', () => {
+  it('lays the department’s two over whatever the form holds', () => {
+    // The screen built its list from what was stored and started at none, so an
+    // untouched Part G showed nothing while the printed page showed two — the
+    // same mismatch Part D's flow table had with its five metered rates.
+    const empty = sprinklerTestPointLines({ testPoints: [] });
+    expect(empty).toHaveLength(PART_G_PRINTED_TEST_POINTS);
+    expect(empty.every((l) => l.printed && l.index === undefined)).toBe(true);
+
+    const one = sprinklerTestPointLines({ testPoints: [{ location: 'Valve room 1' }] });
+    expect(one).toHaveLength(2);
+    expect(one[0]).toMatchObject({ index: 0, printed: true });
+    expect(one[0]!.point.location).toBe('Valve room 1');
+    expect(one[1]).toMatchObject({ index: undefined, printed: true });
+  });
+
+  it('keeps a third point and marks it as beyond the printed form', () => {
+    const three = sprinklerTestPointLines({
+      testPoints: [{ location: 'a' }, { location: 'b' }, { location: 'Roof tank' }],
+    });
+    expect(three).toHaveLength(3);
+    expect(three[2]).toMatchObject({ index: 2, printed: false });
+  });
+
+  it('knows an untouched point from one somebody started', () => {
+    expect(sprinklerTestPointUntouched({ location: '  ' })).toBe(true);
+    expect(sprinklerTestPointUntouched({ location: 'Valve room 1' })).toBe(false);
+    expect(sprinklerTestPointUntouched({ location: '', requiredFlowLpm: 540 })).toBe(false);
+    // A tick with no figures against it is still somebody's answer.
+    expect(sprinklerTestPointUntouched({ location: '', flowResult: 'pass' })).toBe(false);
   });
 });

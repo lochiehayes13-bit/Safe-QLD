@@ -382,6 +382,39 @@ export interface SprinklerTestPoint {
   pressureResult?: 'pass' | 'fail';
 }
 
+/**
+ * The department prints two test points, whether or not the job needs them.
+ *
+ * The screen built its list from what was stored and started at none, so an
+ * untouched Part G showed no test points while the printed page showed two —
+ * the same mismatch Part D's flow table had, where the five metered rates were
+ * behind chips.
+ */
+export const PART_G_PRINTED_TEST_POINTS = 2;
+
+/** Part G's two printed lines, laid over whatever a form holds. */
+export function sprinklerTestPointLines(
+  test: Pick<SprinklerFlowTest, 'testPoints'>,
+): { point: SprinklerTestPoint; index: number | undefined; printed: boolean }[] {
+  const lines: { point: SprinklerTestPoint; index: number | undefined; printed: boolean }[] = [];
+  for (let i = 0; i < PART_G_PRINTED_TEST_POINTS; i += 1) {
+    const held = test.testPoints[i];
+    lines.push({ point: held ?? { location: '' }, index: held ? i : undefined, printed: true });
+  }
+  test.testPoints.slice(PART_G_PRINTED_TEST_POINTS).forEach((point, n) => {
+    lines.push({ point, index: PART_G_PRINTED_TEST_POINTS + n, printed: false });
+  });
+  return lines;
+}
+
+/** True where nobody has put anything on this test point. */
+export function sprinklerTestPointUntouched(point: SprinklerTestPoint): boolean {
+  return !point.location.trim()
+    && point.requiredFlowLpm === undefined && point.resultFlowLpm === undefined
+    && point.requiredPressureKpa === undefined && point.resultPressureKpa === undefined
+    && point.flowResult === undefined && point.pressureResult === undefined;
+}
+
 export interface SprinklerFlowTest {
   result: PartResult;
   systemSpec?: string;

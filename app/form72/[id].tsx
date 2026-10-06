@@ -21,8 +21,9 @@ import {
   CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, FLOW_DEVICE_LABEL, PART_D_ROWS,
   PART_RESULT_LABEL, SYSTEM_TYPE_LABEL, TEST_INTERVAL_LABEL,
   deviceCalibration, elevationHeadKpa, flowRowKey, flowRowLongLabel, flowRowUntouched,
+  PART_G_PRINTED_TEST_POINTS,
   intervalsTested, maintenanceTestFromAxes, overloadCheck, resolveFrictionalLoss,
-  systemTypesTested, validateForm72,
+  sprinklerTestPointLines, sprinklerTestPointUntouched, systemTypesTested, validateForm72,
   type BoosterTest, type FlowDeviceKind, type FlowRow, type FormDefect, type FormIssue,
   type HydrostaticTest, type PartResult, type SprinklerFlowTest, type SprinklerHydrostatic,
   type SprinklerTestPoint, type SystemType, type TestDevice, type TestInterval,
@@ -800,6 +801,45 @@ type PartProps = {
   patch: (p: Form72Patch) => void;
 };
 
+/**
+ * The readings of a part the technician has marked not applicable.
+ *
+ * Folded away, because they are not being filled in. Part E alone is thirteen
+ * number pads, and on the commonest form this company raises — a hydrant test —
+ * Parts F and G are both N/A and both were a screen of empty boxes to scroll
+ * past on the way to Part H.
+ *
+ * It is not the hiding this file's own comment warns about. That warning is
+ * about a field whose absence would be read as N/A; here the technician has
+ * said N/A, and the printed page prints N/A in every one of these boxes. And
+ * nothing becomes unreachable: the fold opens, so a reading taken before the
+ * part was marked N/A can still be found and the mistake corrected.
+ */
+function WhenApplicable({
+  result, children,
+}: {
+  result: PartResult | 'refer-to-report';
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  if (result !== 'na') return <>{children}</>;
+  return (
+    <>
+      <Card>
+        <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+          Marked not applicable, so its readings are folded away. The form prints N/A in every one
+          of them.
+        </Txt>
+        <Chip
+          label={open ? 'Hide the readings again' : 'Show the readings anyway'}
+          onPress={() => setOpen(!open)}
+        />
+      </Card>
+      {open ? children : null}
+    </>
+  );
+}
+
 /** A part's na/pass/fail selector, which every part but A and C carries. */
 function ResultPicker({
   value, onChange, locked,
@@ -1006,29 +1046,36 @@ function PartB({ form, locked, patch }: PartProps) {
     : undefined;
 
   return (
-    <Card>
-      <Txt size="sm" tone="muted">{PART_B_NOTE}</Txt>
-      <ResultPicker value={h.result} onChange={(v) => set({ result: v })} locked={locked} />
-      <NumField label="Boost pressure" suffix="kPa" value={h.boostPressureKpa} onChange={(v) => set({ boostPressureKpa: v })} locked={locked} />
-      <NumField label="Test pressure" suffix="kPa" value={h.testPressureKpa} onChange={(v) => set({ testPressureKpa: v })} locked={locked} />
-      <NumField label="Held for" suffix="min" value={h.durationMinutes} onChange={(v) => set({ durationMinutes: v })} locked={locked} />
-      <NumField label="Pressure at end" suffix="kPa" value={h.endPressureKpa} onChange={(v) => set({ endPressureKpa: v })} locked={locked} />
-      {loss !== undefined ? (
-        <Banner
-          tone={loss > 0 ? 'warn' : 'pass'}
-          title={loss > 0 ? `Dropped ${loss} kPa over the hold` : 'Held pressure'}
-        />
-      ) : null}
-      <NumField label="Loss" suffix="L/min" value={h.lossLpm} onChange={(v) => set({ lossLpm: v })} locked={locked} />
-      <Field
-        label="Comments"
-        value={h.comments ?? ''}
-        onChangeText={(v) => set({ comments: v })}
-        multiline
-        hint="Your line breaks are kept on the printed form."
-        editable={!locked}
-      />
-    </Card>
+    <View style={{ gap: 12 }}>
+      <Card>
+        <Txt size="sm" tone="muted">{PART_B_NOTE}</Txt>
+        <ResultPicker value={h.result} onChange={(v) => set({ result: v })} locked={locked} />
+      </Card>
+      <WhenApplicable result={h.result}>
+        <Card>
+          {/* The department's own labels, so the screen and the page agree. */}
+          <NumField label="Boost pressure" suffix="kPa" value={h.boostPressureKpa} onChange={(v) => set({ boostPressureKpa: v })} locked={locked} />
+          <NumField label="Test pressure" suffix="kPa" value={h.testPressureKpa} onChange={(v) => set({ testPressureKpa: v })} locked={locked} />
+          <NumField label="Duration of test" suffix="mins" value={h.durationMinutes} onChange={(v) => set({ durationMinutes: v })} locked={locked} />
+          <NumField label="End of test pressure" suffix="kPa" value={h.endPressureKpa} onChange={(v) => set({ endPressureKpa: v })} locked={locked} />
+          {loss !== undefined ? (
+            <Banner
+              tone={loss > 0 ? 'warn' : 'pass'}
+              title={loss > 0 ? `Dropped ${loss} kPa over the hold` : 'Held pressure'}
+            />
+          ) : null}
+          <NumField label="Loss (if any)" suffix="L/min" value={h.lossLpm} onChange={(v) => set({ lossLpm: v })} locked={locked} />
+          <Field
+            label="Comments"
+            value={h.comments ?? ''}
+            onChangeText={(v) => set({ comments: v })}
+            multiline
+            hint="Your line breaks are kept on the printed form."
+            editable={!locked}
+          />
+        </Card>
+      </WhenApplicable>
+    </View>
   );
 }
 
@@ -1636,7 +1683,17 @@ function PartE({ form, locked, patch }: PartProps) {
       <Card>
         <Txt size="sm" tone="muted">{PART_E_NOTE}</Txt>
         <ResultPicker value={b.result} onChange={(v) => set({ result: v })} locked={locked} />
-        <Field label="Hydrants tested" value={b.hydrantLocations ?? ''} onChangeText={(v) => set({ hydrantLocations: v })} editable={!locked} />
+      </Card>
+
+      {/*
+        * Thirteen number pads, folded away on a part the technician has marked
+        * not applicable. On a towns-main hydrant test with no booster that is
+        * the whole of Part E, and it was a screen of empty boxes to scroll
+        * past.
+        */}
+      <WhenApplicable result={b.result}>
+      <Card>
+        <Field label="Hydrant locations" value={b.hydrantLocations ?? ''} onChangeText={(v) => set({ hydrantLocations: v })} editable={!locked} />
         <NumField
           label="Highest hydrant above booster"
           suffix="m"
@@ -1753,6 +1810,7 @@ function PartE({ form, locked, patch }: PartProps) {
       <Card>
         <Field label="Comments" value={b.comments ?? ''} onChangeText={(v) => set({ comments: v })} multiline editable={!locked} />
       </Card>
+      </WhenApplicable>
     </View>
   );
 }
@@ -1761,13 +1819,19 @@ function PartF({ form, locked, patch }: PartProps) {
   const s = form.sprinklerHydrostatic;
   const set = (p: Partial<SprinklerHydrostatic>) => patch({ sprinklerHydrostatic: { ...s, ...p } });
   return (
-    <Card>
-      <Txt size="sm" tone="muted">{PART_F_NOTE}</Txt>
-      <ResultPicker value={s.result} onChange={(v) => set({ result: v })} locked={locked} />
-      <NumField label="Test pressure" suffix="kPa" value={s.pressureKpa} onChange={(v) => set({ pressureKpa: v })} locked={locked} />
-      <NumField label="Held for" suffix="min" value={s.timeHeldMinutes} onChange={(v) => set({ timeHeldMinutes: v })} locked={locked} />
-      <Field label="Comments" value={s.comments ?? ''} onChangeText={(v) => set({ comments: v })} multiline editable={!locked} />
-    </Card>
+    <View style={{ gap: 12 }}>
+      <Card>
+        <Txt size="sm" tone="muted">{PART_F_NOTE}</Txt>
+        <ResultPicker value={s.result} onChange={(v) => set({ result: v })} locked={locked} />
+      </Card>
+      <WhenApplicable result={s.result}>
+        <Card>
+          <NumField label="Pressure" suffix="kPa" value={s.pressureKpa} onChange={(v) => set({ pressureKpa: v })} locked={locked} />
+          <NumField label="Time held" suffix="mins" value={s.timeHeldMinutes} onChange={(v) => set({ timeHeldMinutes: v })} locked={locked} />
+          <Field label="Comments" value={s.comments ?? ''} onChangeText={(v) => set({ comments: v })} multiline editable={!locked} />
+        </Card>
+      </WhenApplicable>
+    </View>
   );
 }
 
@@ -1788,8 +1852,29 @@ function PartF({ form, locked, patch }: PartProps) {
 function PartG({ form, locked, patch }: PartProps) {
   const g = form.sprinklerFlow;
   const set = (p: Partial<SprinklerFlowTest>) => patch({ sprinklerFlow: { ...g, ...p } });
-  const setPoint = (i: number, p: Partial<SprinklerTestPoint>) => set({
-    testPoints: g.testPoints.map((x, n) => (n === i ? { ...x, ...p } : x)),
+
+  /*
+   * The department's two printed test points, always on screen.
+   *
+   * The list used to be built from what was stored and started at none, so an
+   * untouched Part G showed nothing while the printed page showed two empty
+   * test points — the same mismatch Part D's flow table had. A line only
+   * becomes a stored test point once something is typed into it.
+   */
+  const lines = sprinklerTestPointLines(g);
+
+  /*
+   * Writes one line by its slot, filling any slot before it with a blank.
+   *
+   * Test point 2 filled before test point 1 has to stay test point 2: the form
+   * numbers them and Part G's figures are read against the point they name. An
+   * append would have made it test point 1 and quietly renamed the test.
+   */
+  const setLine = (slot: number, p: Partial<SprinklerTestPoint>) => set({
+    testPoints: Array.from(
+      { length: Math.max(g.testPoints.length, slot + 1) },
+      (_, n) => g.testPoints[n] ?? { location: '' },
+    ).map((x, n) => (n === slot ? { ...x, ...p } : x)),
   });
 
   return (
@@ -1797,50 +1882,72 @@ function PartG({ form, locked, patch }: PartProps) {
       <Card>
         <Txt size="sm" tone="muted">{PART_G_NOTE}</Txt>
         <ResultPicker value={g.result} onChange={(v) => set({ result: v })} locked={locked} />
-        <Field label="System specification" value={g.systemSpec ?? ''} onChangeText={(v) => set({ systemSpec: v })} editable={!locked} />
-        <NumField label="Running test gauge" suffix="kPa" value={g.runningTestGaugeKpa} onChange={(v) => set({ runningTestGaugeKpa: v })} locked={locked} />
       </Card>
 
-      {g.testPoints.map((p, i) => {
+      <WhenApplicable result={g.result}>
+      <Card>
+        <Field
+          label="System specifications (block plan)"
+          value={g.systemSpec ?? ''}
+          onChangeText={(v) => set({ systemSpec: v })}
+          editable={!locked}
+        />
+        <NumField
+          label="Running test — installation gauge pressure"
+          suffix="kPa"
+          value={g.runningTestGaugeKpa}
+          onChange={(v) => set({ runningTestGaugeKpa: v })}
+          locked={locked}
+        />
+      </Card>
+
+      {lines.map((line, slot) => {
+        const p = line.point;
         const flow = testPointOutcome(p.requiredFlowLpm, p.resultFlowLpm);
         const press = testPointOutcome(p.requiredPressureKpa, p.resultPressureKpa);
+        const untouched = sprinklerTestPointUntouched(p);
         return (
-          <Card key={i}>
+          <Card key={slot}>
             <Rowed>
-              <Txt weight="700" style={{ flex: 1 }}>{p.location || `Test point ${i + 1}`}</Txt>
-              {!locked ? (
-                <RemoveButton what="test point" onRemove={() => set({ testPoints: g.testPoints.filter((_, n) => n !== i) })} />
+              <Txt weight="700" style={{ flex: 1 }}>{p.location || `Test point ${slot + 1}`}</Txt>
+              {!line.printed ? <Chip label="Beyond the printed form" tone="warn" /> : null}
+              {untouched ? <Chip label="Not used" tone="muted" /> : null}
+              {!locked && !line.printed && line.index !== undefined ? (
+                <RemoveButton
+                  what="test point"
+                  onRemove={() => set({ testPoints: g.testPoints.filter((_, n) => n !== line.index) })}
+                />
               ) : null}
             </Rowed>
-            <Field label="Location" value={p.location} onChangeText={(v) => setPoint(i, { location: v })} editable={!locked} />
+            <Field label="Location" value={p.location} onChangeText={(v) => setLine(slot, { location: v })} editable={!locked} />
             <Rowed gap={2}>
               <View style={{ flex: 1 }}>
-                <NumField label="Required flow" suffix="L/min" value={p.requiredFlowLpm} onChange={(v) => setPoint(i, { requiredFlowLpm: v })} locked={locked} />
+                <NumField label="Required flow" suffix="L/min" value={p.requiredFlowLpm} onChange={(v) => setLine(slot, { requiredFlowLpm: v })} locked={locked} />
               </View>
               <View style={{ flex: 1 }}>
-                <NumField label="Achieved" suffix="L/min" value={p.resultFlowLpm} onChange={(v) => setPoint(i, { resultFlowLpm: v })} locked={locked} />
+                <NumField label="Achieved" suffix="L/min" value={p.resultFlowLpm} onChange={(v) => setLine(slot, { resultFlowLpm: v })} locked={locked} />
               </View>
             </Rowed>
             <OutcomePicker
               label="Flow"
               value={p.flowResult}
               derived={flow}
-              onChange={(v) => setPoint(i, { flowResult: v })}
+              onChange={(v) => setLine(slot, { flowResult: v })}
               locked={locked}
             />
             <Rowed gap={2}>
               <View style={{ flex: 1 }}>
-                <NumField label="Required pressure" suffix="kPa" value={p.requiredPressureKpa} onChange={(v) => setPoint(i, { requiredPressureKpa: v })} locked={locked} />
+                <NumField label="Required pressure" suffix="kPa" value={p.requiredPressureKpa} onChange={(v) => setLine(slot, { requiredPressureKpa: v })} locked={locked} />
               </View>
               <View style={{ flex: 1 }}>
-                <NumField label="Achieved" suffix="kPa" value={p.resultPressureKpa} onChange={(v) => setPoint(i, { resultPressureKpa: v })} locked={locked} />
+                <NumField label="Achieved" suffix="kPa" value={p.resultPressureKpa} onChange={(v) => setLine(slot, { resultPressureKpa: v })} locked={locked} />
               </View>
             </Rowed>
             <OutcomePicker
               label="Pressure"
               value={p.pressureResult}
               derived={press}
-              onChange={(v) => setPoint(i, { pressureResult: v })}
+              onChange={(v) => setLine(slot, { pressureResult: v })}
               locked={locked}
             />
           </Card>
@@ -1851,13 +1958,22 @@ function PartG({ form, locked, patch }: PartProps) {
         <Button
           title="Add a test point"
           variant="secondary"
-          onPress={() => set({ testPoints: [...g.testPoints, { location: '' }] })}
+          onPress={() => set({
+            testPoints: [
+              ...Array.from(
+                { length: Math.max(g.testPoints.length, PART_G_PRINTED_TEST_POINTS) },
+                (_, n) => g.testPoints[n] ?? { location: '' },
+              ),
+              { location: '' },
+            ],
+          })}
         />
       ) : null}
 
       <Card>
         <Field label="Comments" value={g.comments ?? ''} onChangeText={(v) => set({ comments: v })} multiline editable={!locked} />
       </Card>
+      </WhenApplicable>
     </View>
   );
 }
