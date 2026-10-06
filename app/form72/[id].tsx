@@ -1753,7 +1753,34 @@ function PartE({ form, locked, patch }: PartProps) {
         */}
       <WhenApplicable result={b.result}>
       <Card>
+        {/*
+          * Part D's locations, offered rather than retyped.
+          *
+          * Both parts have a hydrant-locations field on the department's form
+          * and they are genuinely separate answers — the hydrants run off the
+          * booster are often not the ones in the flow table — so this copies
+          * rather than shares. One tap each, and the two parts stop
+          * disagreeing about the name of the same hydrant.
+          */}
         <Field label="Hydrant locations" value={b.hydrantLocations ?? ''} onChangeText={(v) => set({ hydrantLocations: v })} editable={!locked} />
+        {!locked && form.flowTest.hydrantLocations.some((x) => x.trim()) ? (
+          <Rowed gap={2} wrap>
+            {form.flowTest.hydrantLocations.filter((x) => x.trim()).map((place) => {
+              const already = (b.hydrantLocations ?? '')
+                .split(',').map((x) => x.trim().toLowerCase())
+                .includes(place.trim().toLowerCase());
+              return (
+                <Chip
+                  key={place}
+                  label={already ? place : `+ ${place}`}
+                  selected={already}
+                  tone={already ? 'accent' : 'default'}
+                  onPress={() => set({ hydrantLocations: toggleNamed(b.hydrantLocations ?? '', place.trim()) })}
+                />
+              );
+            })}
+          </Rowed>
+        ) : null}
         <NumField
           label="Highest hydrant above booster"
           suffix="m"
