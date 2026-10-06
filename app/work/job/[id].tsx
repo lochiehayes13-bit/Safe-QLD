@@ -984,12 +984,19 @@ export default function JobScreen() {
           * the form for no good reason. Searching the site list from a job the
           * technician already has open is the detour this removes.
           */}
-        <Button
-          title="Form 72 for this job"
-          variant="secondary"
-          icon={<MaterialCommunityIcons name="clipboard-check-outline" size={18} color={t.color.text} />}
-          onPress={() => router.push({ pathname: '/form72/new', params: { siteId: job.siteId ?? '' } })}
-        />
+        {job.siteId ? (
+          <Button
+            title="Form 72 for this job"
+            variant="secondary"
+            icon={<MaterialCommunityIcons name="clipboard-check-outline" size={18} color={t.color.text} />}
+            onPress={() => router.push({
+              pathname: '/form72/new',
+              // The job as well as the site, so the one being looked at is the
+              // one already chosen rather than one to be found in a list again.
+              params: { siteId: job.siteId!, jobId: job.id },
+            })}
+          />
+        ) : null}
 
         {job.notes ? (
           <>

@@ -18,7 +18,8 @@ import { attachmentContentKey } from '@/domain/outboundWork';
 import { describeActionFailure } from '@/domain/loadFailure';
 import { router } from 'expo-router';
 import {
-  CALIBRATION_MONTHS, PART_D_ROWS, PART_RESULT_LABEL, SYSTEM_TYPE_LABEL, TEST_INTERVAL_LABEL,
+  CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, FLOW_DEVICE_LABEL, PART_D_ROWS,
+  PART_RESULT_LABEL, SYSTEM_TYPE_LABEL, TEST_INTERVAL_LABEL,
   deviceCalibration, elevationHeadKpa, flowRowKey, flowRowLongLabel, flowRowUntouched,
   intervalsTested, maintenanceTestFromAxes, overloadCheck, resolveFrictionalLoss,
   systemTypesTested, validateForm72,
@@ -113,12 +114,6 @@ const RESULT_OPTIONS: { value: PartResult; label: string }[] = [
   { value: 'pass', label: 'Pass' },
   { value: 'fail', label: 'Fail' },
 ];
-
-const FLOW_DEVICE_LABEL: Record<FlowDeviceKind, string> = {
-  orifice: 'Orifice plate',
-  mechanical: 'Mechanical',
-  electromagnetic: 'Electromagnetic',
-};
 
 /** Reads a typed number without turning an empty box into a zero. */
 const num = (s: string): number | undefined => {
@@ -1063,7 +1058,7 @@ function PartC({ form, locked, patch }: PartProps) {
       <Card>
         <Txt size="sm" tone="muted">{PART_C_NOTE}</Txt>
         <Divider />
-        <Label>Flow device type</Label>
+        <Label>Flow measuring device</Label>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
           {(['orifice', 'mechanical', 'electromagnetic'] as FlowDeviceKind[]).map((k) => (
             <Chip
@@ -1079,6 +1074,32 @@ function PartC({ form, locked, patch }: PartProps) {
             />
           ))}
         </View>
+        {!form.flowDeviceKinds.length ? (
+          <Txt size="sm" tone="muted">
+            Nothing ticked yet, and the form prints that as not answered.
+          </Txt>
+        ) : null}
+
+        {/*
+          * The two "Calibrated: __/__/__" dates the department prints on this
+          * same line, beside the note that Part C is not required for orifice
+          * testing. Those are the flow device's own calibration, not the
+          * gauges' below, and the app had nowhere to put a date the paper asks
+          * for twice. Only offered for a ticked kind: an orifice plate is a
+          * hole of a known size and has nothing to calibrate.
+          */}
+        {CALIBRATED_FLOW_DEVICE_KINDS.filter((k) => form.flowDeviceKinds.includes(k)).map((k) => (
+          <Field
+            key={k}
+            label={`${FLOW_DEVICE_LABEL[k]} calibrated`}
+            value={form.flowDeviceCalibrated?.[k] ?? ''}
+            onChangeText={(v) => patch({
+              flowDeviceCalibrated: { ...form.flowDeviceCalibrated, [k]: v },
+            })}
+            placeholder="2026-07-18"
+            editable={!locked}
+          />
+        ))}
       </Card>
 
       {devices.map((d, i) => {
@@ -1155,8 +1176,9 @@ function PartC({ form, locked, patch }: PartProps) {
             )}
             {d.calibrationBasis === 'service-life' ? (
               <Txt size="xs" tone="faint">
-                Only for a device whose certificate says so — our inline meters do. On a pressure
-                gauge this is wrong, and the form prints which basis each device was accepted on.
+                Only for a device whose certificate says so — our inline meters do, absent fault or
+                damage, and unless an authority has stipulated recertification. On a pressure gauge
+                this is wrong, and the form prints which basis each device was accepted on.
               </Txt>
             ) : null}
           </View>
@@ -1238,9 +1260,17 @@ function PartC({ form, locked, patch }: PartProps) {
               />
             ) : null}
           </View>
-          <Chip
-            label={d.digitalReader ? 'Digital reader' : 'Analogue'}
-            onPress={locked ? undefined : () => setDevice(i, { digitalReader: !d.digitalReader })}
+          {/*
+            * Three states, as the department's tickbox has: ticked, not
+            * ticked, and nobody answered. The chip read "Analogue" whenever
+            * the field was unset, which asserts something about the gauge that
+            * nobody had said — and the page prints that assertion.
+            */}
+          <TriState
+            label="Digital reader"
+            value={d.digitalReader}
+            onChange={(v) => setDevice(i, { digitalReader: v })}
+            locked={locked}
           />
         </Card>
         );
@@ -1513,7 +1543,7 @@ function PartD({ form, locked, patch }: PartProps) {
         const r = line.row;
         const untouched = flowRowUntouched(r);
         return (
-          <Card key={flowRowKey(r)}>
+          <Card key={line.index !== undefined ? `row-${line.index}` : flowRowKey(r)}>
             <Rowed>
               <Txt weight="700" style={{ flex: 1 }}>{flowRowLongLabel(r)}</Txt>
               {!line.printed ? <Chip label="Not on the printed table" tone="warn" /> : null}
@@ -2242,18 +2272,29 @@ function RemoveButton({ what, onRemove }: { what: string; onRemove: () => void }
   );
 }
 
-/** A numeric box that leaves an empty box empty rather than reading it as zero. */
+/**
+ * A numeric box that leaves an empty box empty rather than reading it as zero.
+ *
+ * It also says when what is in the box is not what the form holds. The box
+ * keeps the characters typed, because fighting somebody's typing mid-number is
+ * worse, but "12x" or "1 2 0" stores nothing — so the screen showed a reading
+ * while the page printed "Not recorded". That is precisely the ambiguity this
+ * document exists to remove, running the other way, and it is invisible until
+ * the PDF is produced.
+ */
 function NumField({
-  label, value, onChange, suffix, locked,
+  label, value, onChange, suffix, locked, hint,
 }: {
   label: string;
   value: number | undefined;
   onChange: (v: number | undefined) => void;
   suffix?: string;
   locked: boolean;
+  hint?: string;
 }) {
   const [text, setText] = useState(str(value));
   useEffect(() => { setText(str(value)); }, [value]);
+  const unreadable = text.trim() !== '' && num(text) === undefined;
   return (
     <Field
       label={label}
@@ -2261,6 +2302,9 @@ function NumField({
       onChangeText={(v) => { setText(v); onChange(num(v)); }}
       keyboardType="decimal-pad"
       suffix={suffix}
+      hint={unreadable
+        ? `"${text.trim()}" is not a number, so nothing is recorded here. The form will print this box as not recorded.`
+        : hint}
       editable={!locked}
     />
   );

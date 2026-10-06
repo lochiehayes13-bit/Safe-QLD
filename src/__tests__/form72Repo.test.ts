@@ -149,7 +149,7 @@ describe('the fields that ride inside the JSON parts', () => {
     expect(back!.devices).toHaveLength(2);
     expect(back!.devices[0]).toMatchObject({
       serialNumber: 'SQF-001',
-      correctionFactor: '+0.35 %',
+      correctionFactor: '+0.35 % (MM Error)',
       calibrationBasis: 'service-life',
       kind: 'flow-meter',
       dateCalibrated: '2026-07-18',

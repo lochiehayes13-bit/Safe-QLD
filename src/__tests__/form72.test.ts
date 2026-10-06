@@ -9,7 +9,8 @@ import {
 import { MIGRATION_V12 } from '@/db/schemaForm72';
 import { DEVICE_PRESETS, DEVICE_PRESET_SOURCE, unusedDevicePresets } from '@/domain/form72Devices';
 import {
-  CALIBRATION_MONTHS, FLOW_ROW_COLUMNS, flowCellState, flowRowColumnsRun,
+  CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, FLOW_ROW_COLUMNS,
+  flowCellState, flowRowColumnsRun,
   PART_D_NOZZLE_SIZES_MM, PART_D_ROWS, deviceCalibration, emptyForm72, intervalsTested,
   maintenanceTestCell, maintenanceTestFromAxes, overloadCheck, resolveFrictionalLoss,
   systemTypesTested, validateForm72,
@@ -618,7 +619,8 @@ describe('Part G — the sprinkler test points', () => {
 
   it('prints the achieved pair opposite the block plan figure only when both halves were measured', () => {
     const html = form72Html(doc({ form: issuable({ sprinklerFlow }) }));
-    expect(html).toContain('950 l/m @ 180 kPa');
+    // The department writes litres per minute as L/min, not l/m.
+    expect(html).toContain('950 L/min at 180 kPa');
 
     const halfMeasured = form72Html(doc({
       form: issuable({
@@ -628,7 +630,7 @@ describe('Part G — the sprinkler test points', () => {
         },
       }),
     }));
-    expect(halfMeasured).not.toContain('950 l/m @');
+    expect(halfMeasured).not.toContain('950 L/min at');
   });
 
   it('says a second test point was not used, rather than flagging four missing readings', () => {
@@ -1478,7 +1480,9 @@ describe('the company’s own test equipment', () => {
         serialNumber: serial,
         dateCalibrated: '2026-07-18',
         calibrationCertificate: `CR-${serial}-IN-01`,
-        correctionFactor: '+0.35 %',
+        // The certificate's own label travels with the number: it says
+        // "MM Error: + 0.35 %", not "correction factor".
+        correctionFactor: '+0.35 % (MM Error)',
         calibrationBasis: 'service-life',
         digitalReader: true,
       });
@@ -1569,6 +1573,18 @@ describe('a meter certified for its service life', () => {
       form: issuable({ devices: [meter({ calibrationBasis: 'interval' })] }),
     }));
     expect(flat(onInterval)).toContain('12 month interval');
+  });
+
+  it('prints the conditions the certificate attaches, so the basis is not read as a guarantee', () => {
+    // The certificate holds "excepting if a fault or damage has occurred" and
+    // "a periodic meter calibration service and recertification may be
+    // stipulated by Councils or other authorities". Both are things only the
+    // person holding the meter can answer.
+    const html = form72Html(doc({
+      form: issuable({ devices: [meter({ calibrationCertificate: 'CR-SQF-001-IN-01' })] }),
+    }));
+    expect(flat(html)).toContain('absent fault or damage');
+    expect(flat(html)).toContain('unless an authority stipulates recertification');
   });
 });
 
@@ -1694,7 +1710,7 @@ describe('the department’s own words, label for label', () => {
     // here without a reason recorded in this test is a row that slipped in.
     const inParts = between(html, 'Part A — Test details', 'Part I — Signature');
     const marked = inParts.match(/<span class="extra">added<\/span>/g) ?? [];
-    expect(marked.length).toBe(3);
+    expect(marked.length).toBe(5);
     // Part C's note promises a correction factor and the printed grid has no row for it.
     expect(flat(inParts)).toContain('Correction factor (kPa or %) <span class="extra">added</span>');
     // One of our flow meters is certified for its service life, not for twelve
@@ -1702,6 +1718,12 @@ describe('the department’s own words, label for label', () => {
     expect(flat(inParts)).toContain('Calibration basis <span class="extra">added</span>');
     // Part H prints the System Pass/Fail pair and no note field.
     expect(flat(inParts)).toContain('System notes <span class="extra">added</span>');
+    // Parts B, E, F and G carry a Comments field; the department's Part D does
+    // not, and ends at the pressure zone number.
+    expect(flat(inParts)).toContain('Comment <span class="extra">added</span>');
+    // The department asks for a calculated frictional loss and gives no box for
+    // the residual it is calculated from, which the working beside it cites.
+    expect(flat(inParts)).toContain('Residual at the hydrant (kPa) <span class="extra">added</span>');
   });
 });
 
@@ -1885,5 +1907,165 @@ describe('the three Part C columns most tests do not use', () => {
     const serial = between(html, 'Serial number', '</tr>');
     expect((serial.match(/Not used/g) ?? [])).toHaveLength(4);
     expect(serial).not.toContain('Not recorded');
+  });
+});
+
+describe('a part nobody looked at, reading as a part that did not apply', () => {
+  const grid = (over: Partial<MaintenanceTest>): MaintenanceTest => ({
+    hydrantAnnual: false, hydrantFiveYear: false,
+    sprinklerAnnual: false, sprinklerFiveYear: false,
+    combinedAnnual: false, combinedFiveYear: false,
+    ...over,
+  });
+  const naPart = { result: 'na' as const };
+
+  it('cautions where Part A says hydrant and every hydrant part is N/A', () => {
+    /*
+     * 'na' is the stored default, so a form opened and signed without Part D
+     * being touched prints N/A ticked against the hydrant flow test — a
+     * positive statement nobody made. There is no fourth state to tell the two
+     * apart, but Part A says which test this was, and that is checkable.
+     */
+    const form = issuable({
+      maintenanceTest: grid({ hydrantAnnual: true }),
+      hydrostatic: naPart,
+      flowTest: { result: 'na', hydrantLocations: [], rows: [] },
+      booster: naPart,
+    });
+    const issue = validateForm72(form).find((i) => i.message.includes('Parts B, D and E'));
+    expect(issue).toBeDefined();
+    expect(issue!.part).toBe('A');
+    expect(issue!.blocking).toBe(false);
+    expect(issue!.message).toContain('not a record of anything');
+  });
+
+  it('says nothing where one hydrant part is answered, because N/A is legitimate on the others', () => {
+    // A hydrostatic test is not always due, so only every one of them being
+    // N/A says nobody looked.
+    const form = issuable({
+      maintenanceTest: grid({ hydrantAnnual: true }),
+      hydrostatic: naPart,
+      flowTest: { result: 'pass', hydrantLocations: ['Booster'], rows: [] },
+      booster: naPart,
+    });
+    expect(validateForm72(form).some((i) => i.message.includes('Parts B, D and E'))).toBe(false);
+  });
+
+  it('cautions where Part A says sprinkler and both sprinkler parts are N/A', () => {
+    const form = issuable({
+      maintenanceTest: grid({ sprinklerAnnual: true }),
+      sprinklerHydrostatic: naPart,
+      sprinklerFlow: { result: 'na', testPoints: [] },
+    });
+    const issue = validateForm72(form).find((i) => i.message.includes('Parts F and G'));
+    expect(issue).toBeDefined();
+    expect(issue!.blocking).toBe(false);
+  });
+
+  it('checks both halves of a combined test, because combined means both systems', () => {
+    const form = issuable({
+      maintenanceTest: grid({ combinedAnnual: true }),
+      hydrostatic: naPart,
+      flowTest: { result: 'na', hydrantLocations: [], rows: [] },
+      booster: naPart,
+      sprinklerHydrostatic: naPart,
+      sprinklerFlow: { result: 'na', testPoints: [] },
+    });
+    const messages = validateForm72(form).map((i) => i.message).join(' ');
+    expect(messages).toContain('Parts B, D and E');
+    expect(messages).toContain('Parts F and G');
+  });
+
+  it('says nothing about sprinkler parts on a hydrant-only test', () => {
+    // The commonest form in the company. N/A on F and G is exactly right there,
+    // and a caution would be noise on nearly every form raised.
+    const form = issuable({
+      maintenanceTest: grid({ hydrantAnnual: true }),
+      flowTest: { result: 'pass', hydrantLocations: ['Booster'], rows: [] },
+      sprinklerHydrostatic: naPart,
+      sprinklerFlow: { result: 'na', testPoints: [] },
+    });
+    expect(validateForm72(form).some((i) => i.message.includes('Parts F and G'))).toBe(false);
+  });
+
+  it('says nothing where Part A is not answered, which has its own blocker', () => {
+    const form = issuable({ maintenanceTest: grid({}) });
+    expect(validateForm72(form).some((i) => i.message.includes('not applicable. One of the two')))
+      .toBe(false);
+  });
+});
+
+describe('the two calibration dates on Part C’s flow device line', () => {
+  it('prints both, which the page did not print at all', () => {
+    const html = form72Html(doc({
+      form: issuable({
+        flowDeviceKinds: ['electromagnetic'],
+        flowDeviceCalibrated: { electromagnetic: '2026-07-18' },
+      }),
+    }));
+    const line = between(html, 'Part C not required for orifice testing', '</tr>');
+    expect(line).toContain('Electro magnetic calibrated:');
+    expect(line).toContain('18/07/2026');
+    // Mechanical was not the device used, so its date is not a missing reading.
+    expect(line).toContain('Mechanical calibrated:');
+    expect(line).toContain('Not used');
+  });
+
+  it('flags a ticked device with no calibration date', () => {
+    const html = form72Html(doc({ form: issuable({ flowDeviceKinds: ['mechanical'] }) }));
+    const line = between(html, 'Part C not required for orifice testing', '</tr>');
+    expect(line).toContain('Not recorded');
+  });
+
+  it('asks for no date against an orifice plate, which has nothing to calibrate', () => {
+    expect(CALIBRATED_FLOW_DEVICE_KINDS).toEqual(['mechanical', 'electromagnetic']);
+    const html = form72Html(doc({ form: issuable({ flowDeviceKinds: ['orifice'] }) }));
+    const line = between(html, 'Part C not required for orifice testing', '</tr>');
+    expect(line).not.toContain('Not recorded');
+  });
+
+  it('says the device type question is unanswered rather than showing three empty boxes', () => {
+    const html = form72Html(doc({ form: issuable({ flowDeviceKinds: [] }) }));
+    const row = between(html, 'Flow measuring device', '</tr>');
+    expect(row).toContain('Not answered');
+  });
+});
+
+describe('Part G in the department’s column order', () => {
+  const point = {
+    location: 'Valve room 1', requiredFlowLpm: 540, resultFlowLpm: 560,
+    requiredPressureKpa: 200, resultPressureKpa: 210,
+  };
+
+  it('puts the requirement, then the boxes, then what was achieved', () => {
+    // Ours put the achieved value before the boxes, which reads as a box
+    // ticked about the figure to its left rather than the one to its right.
+    const html = form72Html(doc({
+      form: issuable({ sprinklerFlow: { result: 'pass', testPoints: [point] } }),
+    }));
+    const row = between(html, 'Required flow rate (L/min)', '</tr>');
+    expect(row.indexOf('540')).toBeLessThan(row.indexOf('Pass'));
+    expect(row.indexOf('Pass')).toBeLessThan(row.indexOf('560'));
+  });
+
+  it('prints the achieved value with its unit, as the department annotates it', () => {
+    const html = form72Html(doc({
+      form: issuable({ sprinklerFlow: { result: 'pass', testPoints: [point] } }),
+    }));
+    expect(flat(html)).toContain('560 <span class="u">L/min</span>');
+    expect(flat(html)).toContain('210 <span class="u">kPa</span>');
+  });
+
+  it('marks a third test point as added, because the department prints two', () => {
+    const html = form72Html(doc({
+      form: issuable({
+        sprinklerFlow: {
+          result: 'pass',
+          testPoints: [point, { ...point, location: 'Valve room 2' }, { ...point, location: 'Roof tank' }],
+        },
+      }),
+    }));
+    expect(flat(html)).toContain('Test point 3 <span class="extra">added</span>');
+    expect(flat(html)).not.toContain('Test point 1 <span class="extra">added</span>');
   });
 });

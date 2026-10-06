@@ -63,6 +63,13 @@ export const DEVICE_PRESET_SOURCE = 'Transcribed from the Flowtech Omega Series 
  * than the twelve-month interval a pressure gauge gets: on the interval rule a
  * form raised after 18 July 2027 would be refused for a reason the certificate
  * contradicts. The claim is the manufacturer's and the form prints it as such.
+ *
+ * The certificate's claim is conditional and the two conditions are on the
+ * printed page rather than buried here, because both are things only the person
+ * holding the meter can answer: it holds "excepting if a fault or damage has
+ * occurred", and it says "a periodic meter calibration service and
+ * recertification may be stipulated by Councils or other authorities". A basis
+ * printed without them would read as unconditional.
  */
 const FLOWTECH_MODEL = 'Flowtech Omega Series inline meter, DN80';
 
@@ -87,7 +94,17 @@ const flowtech = (serial: string, report: string): DevicePreset => ({
     model: FLOWTECH_MODEL,
     dateCalibrated: '2026-07-18',
     calibrationCertificate: report,
-    correctionFactor: '+0.35 %',
+    /*
+     * The certificate's own words, not a translation of them.
+     *
+     * It states "MM Error: + 0.35 %" — the device's mean measured error. Part C
+     * asks for a correction factor in kPa or a percentage, and that figure is
+     * what a technician would apply, but writing it as a bare "+0.35 %"
+     * silently turns the manufacturer's accuracy statement into our correction
+     * factor. The label travels with the number so a reader can see which claim
+     * is being made and go and check the certificate.
+     */
+    correctionFactor: '+0.35 % (MM Error)',
     calibrationBasis: 'service-life',
     digitalReader: true,
     /*

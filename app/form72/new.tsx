@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -58,6 +58,26 @@ export default function NewForm72Screen() {
 
   const today = qldIsoDay(nowIso()) ?? '';
 
+  /*
+   * Arrived from a job screen: that job is the one, so it is already chosen and
+   * what it fills is already on screen. Walking somebody from a job they have
+   * open back to a list to find it again is the detour this screen exists to
+   * remove, and it was still there.
+   */
+  const autoPicked = useRef(false);
+
+  /** What the job will fill, shown before anything is created. */
+  const describeJob = useCallback(async (job: JobSummary) => {
+    try {
+      const prefs = await loadPrefs();
+      const site = job.siteId ? await getSite(job.siteId) : null;
+      const mapped = form72FromJob(toJobForForm(job), ownFrom(prefs), today, site);
+      setPreview({ job, lines: mapped.filled, gaps: mapped.notFilled });
+    } catch (e) {
+      showAlert('Could not read the job', describeActionFailure(e, 'reading the job'));
+    }
+  }, [today]);
+
   const load = useCallback(async () => {
     try {
       // Every job, ranked here rather than by the query: "the one I am standing
@@ -68,11 +88,20 @@ export default function NewForm72Screen() {
       });
       setJobs(page.rows);
       setLoadError(null);
+
+      // The job we arrived from, chosen once. Done here rather than in an
+      // effect watching the list, which would be a setState inside an effect
+      // body and a cascading render for a thing that happens once.
+      if (params.jobId && !autoPicked.current) {
+        autoPicked.current = true;
+        const found = page.rows.find((j) => j.id === params.jobId);
+        if (found) await describeJob(found);
+      }
     } catch (e) {
       setJobs([]);
       setLoadError(describeLoadFailure(e, 'the job list'));
     }
-  }, [today, params.siteId]);
+  }, [today, params.siteId, params.jobId, describeJob]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
@@ -107,17 +136,6 @@ export default function NewForm72Screen() {
       });
   }, [jobs, typed, mode, today]);
 
-  /** What the job will fill, shown before anything is created. */
-  const describe = useCallback(async (job: JobSummary) => {
-    try {
-      const prefs = await loadPrefs();
-      const site = job.siteId ? await getSite(job.siteId) : null;
-      const mapped = form72FromJob(toJobForForm(job), ownFrom(prefs), today, site);
-      setPreview({ job, lines: mapped.filled, gaps: mapped.notFilled });
-    } catch (e) {
-      showAlert('Could not read the job', describeActionFailure(e, 'reading the job'));
-    }
-  }, [today]);
 
   const create = useCallback(async (job: JobSummary) => {
     /*
@@ -270,7 +288,7 @@ export default function NewForm72Screen() {
               const fire = looksLikeHydrantWork(toJobForForm(j));
               const day = j.scheduledFor?.slice(0, 10);
               return (
-                <Card key={j.id} onPress={() => { void describe(j); }}>
+                <Card key={j.id} onPress={() => { void describeJob(j); }}>
                   <Rowed gap={2} align="flex-start">
                     <View style={{ flex: 1 }}>
                       <Txt weight="700">{j.siteName || j.title}</Txt>

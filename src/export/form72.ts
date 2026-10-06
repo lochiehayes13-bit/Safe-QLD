@@ -1,5 +1,5 @@
 import {
-  CALIBRATION_MONTHS,
+  CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, FLOW_DEVICE_LABEL,
   FLOW_ROW_GROUP_LABEL, FRICTIONAL_LOSS_TOLERANCE_KPA, PART_D_DEVICE_RATES_LPS, PART_D_ROWS,
   canIssue, elevationHeadKpa, flowCellState, flowRowGroup, flowRowKey, flowRowLabel,
   flowRowLongLabel, flowRowUntouched, overloadCheck, resolveFrictionalLoss, validateForm72,
@@ -650,12 +650,31 @@ function partC(form: Form72, issues: FormIssue[]): string {
   ${note(PART_C_NOTE)}
   <table class="grid">
     <tr><td class="k">Flow measuring device</td><td class="v" colspan="3">
-      ${tick('Orifice', kinds.includes('orifice'))}
-      ${tick('Mechanical', kinds.includes('mechanical'))}
-      ${tick('Electro magnetic', kinds.includes('electromagnetic'))}
+      ${tick(FLOW_DEVICE_LABEL.orifice, kinds.includes('orifice'))}
+      ${tick(FLOW_DEVICE_LABEL.mechanical, kinds.includes('mechanical'))}
+      ${tick(FLOW_DEVICE_LABEL.electromagnetic, kinds.includes('electromagnetic'))}
+      ${kinds.length === 0 ? '<span class="missing">Not answered</span>' : ''}
     </td></tr>
+    ${/*
+       * The two "Calibrated: __/__/__" fields the department prints on this
+       * line. They sit beside the note that Part C is not required for orifice
+       * testing, which is what identifies them: they are the calibration of the
+       * mechanical and the electromagnetic device, the two kinds that have one.
+       * The app printed neither, so a technician filling our page had nowhere
+       * to put a date the paper asks for twice.
+       */''}
+    <tr>
+      <td class="k" colspan="2">Part C not required for orifice testing</td>
+      ${CALIBRATED_FLOW_DEVICE_KINDS.map((kind) => `<td class="v">${
+  esc(FLOW_DEVICE_LABEL[kind])} calibrated: ${
+  form.flowDeviceCalibrated?.[kind]?.trim()
+    ? esc(formatAuDate(form.flowDeviceCalibrated[kind]))
+    : kinds.includes(kind)
+      ? '<span class="missing">Not recorded</span>'
+      : '<span class="na">Not used</span>'
+}</td>`).join('')}
+    </tr>
   </table>
-  <div class="subnote">Part C not required for orifice testing.</div>
   <table class="grid devices">
     <tr><td class="k"></td>${columns.map((col, i) => `<td class="dh">${esc(col.head)}${
   i >= DEPARTMENT_DEVICE_SLOTS.length ? ' <span class="extra">added</span>' : ''}${
@@ -708,7 +727,11 @@ function partC(form: Form72, issues: FormIssue[]): string {
   row('Calibration basis <span class="extra">added</span>',
     (d) => (!d.serialNumber.trim() ? undefined
       : d.calibrationBasis === 'service-life'
-        ? `Manufacturer certifies for the device's service life`
+        // The manufacturer's claim, with the conditions it carries. Printed
+        // unconditionally it reads as a guarantee, and both conditions are
+        // things only the person holding the meter can answer.
+        ? "Manufacturer certifies for the device's service life, absent fault or damage, "
+          + 'unless an authority stipulates recertification'
         : `${CALIBRATION_MONTHS} month interval`))}
   </table>
   ${partCIssues.length
@@ -883,7 +906,13 @@ function partD(form: Form72): string {
       d.onSitePumpSet === undefined ? ' <span class="missing">Not answered</span>' : ''}`],
     ['Pressure zone number', cell(d.pressureZone, r)],
   )}
-    ${wide('Comment', comment(d.comment, r))}
+    ${/*
+       * Ours. Parts B, E, F and G carry a Comments field and Part D does not —
+       * the department's Part D ends at the pressure zone number. It is kept
+       * because a flow test that did not make its duty needs a sentence
+       * somewhere, and marked because it is not one of their boxes.
+       */''}
+    ${wide('Comment <span class="extra">added</span>', comment(d.comment, r))}
   </table>
   ${table}
   ${spareLocations.length
@@ -942,8 +971,16 @@ function partE(form: Form72, input: Form72DocumentInput): string {
       + 'the licensee is the one who can say which.</div>'
     : '';
 
-  const req = b.requiredLps !== undefined && b.requiredKpa !== undefined
-    ? `${b.requiredLps} L/s at ${b.requiredKpa} kPa`
+  /*
+   * "System requirements ___ L/s at ___ kPa" is one field, and half of it
+   * filled in must print as half of it filled in. Requiring both collapsed a
+   * flow somebody had recorded into "Not recorded" for the pair — the same
+   * mistake Part D's requirement had, in the part the overload check is worked
+   * out from.
+   */
+  const req = b.requiredLps !== undefined || b.requiredKpa !== undefined
+    ? `${b.requiredLps !== undefined ? `${b.requiredLps} L/s` : '<span class="missing">flow not recorded</span>'}`
+      + ` at ${b.requiredKpa !== undefined ? `${b.requiredKpa} kPa` : '<span class="missing">pressure not recorded</span>'}`
     : undefined;
 
   const check = b.requiredLps !== undefined && b.requiredKpa !== undefined
@@ -981,14 +1018,36 @@ function partE(form: Form72, input: Form72DocumentInput): string {
   <table class="grid">
     ${pair(['Hydrant locations', cell(b.hydrantLocations, r)],
     ['Height of highest hydrant above booster (m)', cell(b.highestHydrantAboveBoosterM, r)])}
-    ${pair(['System requirements (L/s at kPa)', cell(req, r)], ['Static pressure (kPa)', cell(b.staticPressureKpa, r)])}
+    ${pair(
+    ['System requirements (L/s at kPa)',
+      req ?? (r === 'na' ? '<span class="na">N/A</span>' : '<span class="missing">Not recorded</span>')],
+    ['Static pressure (kPa)', cell(b.staticPressureKpa, r)],
+  )}
     ${pair(['Pump inlet pressure (kPa)', cell(b.pumpInletKpa, r)], ['Pump discharge pressure (kPa)', cell(b.pumpDischargeKpa, r)])}
     ${pair(['Boost pressure (kPa)', cell(b.boostPressureKpa, r)], ['Calculated frictional loss (kPa)', lossCell])}
+    ${/*
+       * Ours, and it had to be printed.
+       *
+       * The department asks for a calculated frictional loss and gives no box
+       * for the residual it is calculated from. The working beside the figure
+       * cited a number — "less 900 kPa residual at the hydrant" — that appeared
+       * nowhere else on the page, so a reader could not check the subtraction
+       * they were being shown. Now they can.
+       */''}
+    ${wide('Residual at the hydrant (kPa) <span class="extra">added</span>', cell(b.hydrantResidualKpa, r))}
     ${wide('Comments', comment(b.comments, r))}
   </table>
   ${r === 'na' ? '' : `<div class="stated">${esc(working)}</div>`}
   ${lossConflict}
-  ${overloadBlock}`;
+  ${overloadBlock}
+  ${/*
+     * One line, where the added blocks are, saying whose they are. The boxed
+     * notes down this page carry working and checks the department's form has
+     * no room for, and a reader has to be able to tell them from its text.
+     */''}
+  ${r === 'na' && !input.overload ? '' : '<div class="subnote">The boxed notes above are not part of '
+    + "the department's form: they are the working behind the frictional loss and the 150% overload "
+    + 'check, which Form 72 has no field for.</div>'}`;
 }
 
 function partF(form: Form72): string {
@@ -1026,7 +1085,7 @@ function partG(form: Form72): string {
   // disagreement is written out under the table rather than resolved here.
   const disagreements: string[] = [];
 
-  const point = (n: number, p: SprinklerTestPoint | undefined): string => {
+  const point = (n: number, p: SprinklerTestPoint | undefined, extraPoint = false): string => {
     const spare = unused(p);
     const c = (v: string | number | undefined): string =>
       (spare ? '<span class="na">Not used</span>' : cell(v, r));
@@ -1051,17 +1110,23 @@ function partG(form: Form72): string {
         typed === undefined && derived !== undefined ? ' <span class="extra">from the figures</span>' : ''}`;
     };
     return `
-    <tr><td class="sub" colspan="4">Test point ${n}</td></tr>
+    <tr><td class="sub" colspan="4">Test point ${n}${extraPoint ? ' <span class="extra">added</span>' : ''}</td></tr>
     ${wide('Location', c(p?.location))}
+    ${/*
+       * The department's order on each of these two lines is: the requirement,
+       * then the Pass and Fail boxes, then what was achieved. Ours put the
+       * achieved value before the boxes, which reads as a box ticked about the
+       * figure to its left rather than about the one to its right.
+       */''}
     <tr>
       <td class="k">Required flow rate (L/min)</td><td class="v">${c(p?.requiredFlowLpm)}</td>
-      <td class="k">Result: ${c(p?.resultFlowLpm)}</td>
       <td class="v">${line('flow', p?.flowResult, p?.requiredFlowLpm, p?.resultFlowLpm)}</td>
+      <td class="v">${c(p?.resultFlowLpm)}${p?.resultFlowLpm !== undefined ? ' <span class="u">L/min</span>' : ''}</td>
     </tr>
     <tr>
       <td class="k">Required pressure (kPa)</td><td class="v">${c(p?.requiredPressureKpa)}</td>
-      <td class="k">Result: ${c(p?.resultPressureKpa)}</td>
       <td class="v">${line('pressure', p?.pressureResult, p?.requiredPressureKpa, p?.resultPressureKpa)}</td>
+      <td class="v">${c(p?.resultPressureKpa)}${p?.resultPressureKpa !== undefined ? ' <span class="u">kPa</span>' : ''}</td>
     </tr>`;
   };
 
@@ -1073,14 +1138,14 @@ function partG(form: Form72): string {
   // half a pair against a block plan figure invites the wrong comparison.
   const first = g.testPoints[0];
   const achieved = first?.resultFlowLpm !== undefined && first.resultPressureKpa !== undefined
-    ? `${first.resultFlowLpm} l/m @ ${first.resultPressureKpa} kPa`
+    ? `${first.resultFlowLpm} L/min at ${first.resultPressureKpa} kPa`
     : undefined;
 
   // Built before the table string so the rows have run and filled it.
   const rows = `
     ${point(1, g.testPoints[0])}
     ${point(2, g.testPoints[1])}
-    ${extra.map((p, i) => point(3 + i, p)).join('')}`;
+    ${extra.map((p, i) => point(3 + i, p, true)).join('')}`;
 
   /*
    * Part G is the one part the department bands with no result boxes at all.

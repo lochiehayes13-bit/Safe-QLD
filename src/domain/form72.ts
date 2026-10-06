@@ -403,6 +403,21 @@ export interface Form72 {
 
   hydrostatic: HydrostaticTest;
   flowDeviceKinds: FlowDeviceKind[];
+  /**
+   * The two "Calibrated: __/__/__" dates the department prints on the
+   * flow-measuring-device line, keyed by the kind each belongs to.
+   *
+   * The printed form carries two of them, next to the three device-type ticks
+   * and the note that Part C is not required for orifice testing — so they are
+   * the calibration of the mechanical and the electromagnetic device, the two
+   * kinds that have one. The app had nowhere to put them: the Device/gauge
+   * columns below hold a calibration date each, but those are the gauges, and
+   * a technician filling the paper writes the flow device's date here.
+   *
+   * Keyed rather than a pair of loose dates, so the date cannot drift away
+   * from the tick it belongs to when somebody changes which device was used.
+   */
+  flowDeviceCalibrated?: Partial<Record<FlowDeviceKind, string>>;
   devices: TestDevice[];
   flowTest: FlowTest;
   booster: BoosterTest;
@@ -455,6 +470,21 @@ export interface FormDefect {
   description: string;
   critical: boolean;
 }
+
+/**
+ * The flow device kinds the department prints a calibration date for.
+ *
+ * Orifice is left out because the form's own note says Part C is not required
+ * for orifice testing — an orifice plate is a hole of a known size and has
+ * nothing to calibrate.
+ */
+export const CALIBRATED_FLOW_DEVICE_KINDS: readonly FlowDeviceKind[] = ['mechanical', 'electromagnetic'];
+
+export const FLOW_DEVICE_LABEL: Record<FlowDeviceKind, string> = {
+  orifice: 'Orifice',
+  mechanical: 'Mechanical',
+  electromagnetic: 'Electro magnetic',
+};
 
 export const PART_RESULT_LABEL: Record<PartResult, string> = {
   na: 'N/A',
@@ -928,6 +958,50 @@ export function validateForm72(form: Form72): FormIssue[] {
           : 'does not answer the critical defect question'}. If a defect is critical the owner or `
         + 'occupier has to be given a notice.',
       blocking: true,
+    });
+  }
+
+  /*
+   * A part nobody looked at, reading as a part that did not apply.
+   *
+   * 'na' is the stored default, so a form opened and signed without Part D
+   * being touched prints N/A ticked against the hydrant flow test — a positive
+   * statement that the test did not apply, which nobody made. There is no
+   * fourth state to tell the two apart, and adding one would change the shape
+   * of every form already signed.
+   *
+   * What the form does hold is Part A, where the technician said which
+   * maintenance test this was. A hydrant test whose hydrant parts are all N/A
+   * is the form contradicting itself, and that is checkable without a new
+   * state. A caution rather than a blocker: a part can legitimately be N/A on
+   * a test of its own system — a hydrostatic test is not always due — and only
+   * every one of them being N/A says nobody looked.
+   */
+  const types = systemTypesTested(form.maintenanceTest);
+  const hydrantTested = types.includes('hydrant') || types.includes('combined');
+  const sprinklerTested = types.includes('sprinkler') || types.includes('combined');
+
+  if (hydrantTested
+    && form.hydrostatic.result === 'na'
+    && form.flowTest.result === 'na'
+    && form.booster.result === 'na') {
+    issues.push({
+      part: 'A',
+      message: 'Part A says this was a hydrant test, and Parts B, D and E are all marked not '
+        + 'applicable. One of the two is wrong — a hydrant test with no hydrant part answered is '
+        + 'not a record of anything.',
+      blocking: false,
+    });
+  }
+
+  if (sprinklerTested
+    && form.sprinklerHydrostatic.result === 'na'
+    && form.sprinklerFlow.result === 'na') {
+    issues.push({
+      part: 'A',
+      message: 'Part A says this was a sprinkler test, and Parts F and G are both marked not '
+        + 'applicable. One of the two is wrong.',
+      blocking: false,
     });
   }
 
