@@ -2282,3 +2282,86 @@ describe('Part A and Part B in the department’s own shape', () => {
     expect(row).not.toContain('Not answered');
   });
 });
+
+describe('Part G’s three rows per test point', () => {
+  const point = {
+    location: 'Valve room 1', requiredFlowLpm: 540, resultFlowLpm: 560,
+    requiredPressureKpa: 200, resultPressureKpa: 210,
+  };
+  const withPoint = form72Html(doc({
+    form: issuable({ sprinklerFlow: { result: 'pass', testPoints: [point] } }),
+  }));
+
+  it('puts the point and its location on one row, as the department does', () => {
+    // A sub-header of its own followed by a Location row is four rows per
+    // point against the department's three.
+    expect(flat(withPoint)).toContain(
+      '<td class="sub">Test point 1</td> <td class="k">Location</td>',
+    );
+  });
+
+  it('keeps the added marker inside the point’s own cell', () => {
+    const three = form72Html(doc({
+      form: issuable({
+        sprinklerFlow: {
+          result: 'pass',
+          testPoints: [point, { ...point, location: 'Valve room 2' }, { ...point, location: 'Roof tank' }],
+        },
+      }),
+    }));
+    expect(flat(three)).toContain('Test point 3 <span class="extra">added</span>');
+  });
+
+  it('says the "Test results" pair came off test point 1, because no field holds it', () => {
+    // The department's box has nothing behind it — the pair is read off the
+    // line below rather than typed — and a reader must never be shown a figure
+    // in one of their boxes that the licensee did not write.
+    expect(flat(withPoint)).toContain('560 L/min at 210 kPa <span class="extra">from test point 1</span>');
+  });
+
+  it('reports the "Test results" box as not recorded where point 1 was not measured', () => {
+    const half = form72Html(doc({
+      form: issuable({
+        sprinklerFlow: { result: 'pass', testPoints: [{ location: 'Valve room 1', resultFlowLpm: 560 }] },
+      }),
+    }));
+    const row = between(half, 'Test results:', '</tr>');
+    expect(row).toContain('Not recorded');
+    expect(row).not.toContain('from test point 1');
+  });
+
+  it('answers an unused point’s Pass and Fail boxes with the row’s own word', () => {
+    // Two empty boxes and no word is the blank this page exists to remove —
+    // and on Part G those two boxes are the department's own.
+    const second = between(withPoint, 'Test point 2', 'Running test');
+    expect((second.match(/Not used/g) ?? []).length).toBeGreaterThanOrEqual(5);
+    expect(second).not.toContain('Not decided');
+  });
+
+  it('answers an N/A part’s undecided lines N/A rather than printing nothing', () => {
+    const na = form72Html(doc({
+      form: issuable({
+        sprinklerFlow: {
+          result: 'na',
+          testPoints: [{ location: 'Valve room 1', requiredFlowLpm: 540 }],
+        },
+      }),
+    }));
+    const row = between(na, 'Required flow rate', '</tr>');
+    expect(row).toContain('N/A');
+    expect(row).not.toContain('Not decided');
+  });
+
+  it('still says "Not decided" on a live line nobody ticked', () => {
+    const live = form72Html(doc({
+      form: issuable({
+        sprinklerFlow: {
+          result: 'pass',
+          testPoints: [{ location: 'Valve room 1', requiredFlowLpm: 540 }],
+        },
+      }),
+    }));
+    const row = between(live, 'Required flow rate', '</tr>');
+    expect(row).toContain('Not decided');
+  });
+});

@@ -1172,7 +1172,11 @@ function partG(form: Form72): string {
 
   const outcomeBoxes = (o: 'pass' | 'fail' | undefined): string =>
     `${tick('Pass', o === 'pass')}${tick('Fail', o === 'fail')}${
-      o === undefined && r !== 'na' ? ' <span class="missing">Not decided</span>' : ''}`;
+      o !== undefined ? ''
+        // Undecided on a live part is an omission; on an N/A part it is the
+        // answer. Printing neither left two empty boxes and no word on the one
+        // part of this form whose Pass and Fail boxes are the department's own.
+        : r === 'na' ? ' <span class="na">N/A</span>' : ' <span class="missing">Not decided</span>'}`;
 
   // The department prints two test points and its own note says multiple points
   // may be required — meaning one is often the right answer. An unused second
@@ -1200,7 +1204,15 @@ function partG(form: Form72): string {
       required: number | undefined,
       result: number | undefined,
     ): string => {
-      if (spare) return `${tick('Pass', false)}${tick('Fail', false)}`;
+      /*
+       * An unused point's result cell gets the same word as the rest of its
+       * row. The department's two boxes still print, both unticked — never a
+       * tick the technician did not make — with the row's own answer beside
+       * them, because two empty boxes and no word is exactly the blank this
+       * page exists to remove. `c` rather than a literal, so this cell can
+       * never say something different from the five beside it.
+       */
+      if (spare) return `${tick('Pass', false)}${tick('Fail', false)} ${c(undefined)}`;
       const derived = testPointOutcome(required, result);
       if (typed !== undefined && derived !== undefined && typed !== derived) {
         disagreements.push(
@@ -1215,8 +1227,15 @@ function partG(form: Form72): string {
         typed === undefined && derived !== undefined ? ' <span class="extra">from the figures</span>' : ''}`;
     };
     return `
-    <tr><td class="sub" colspan="4">Test point ${n}${extraPoint ? ' <span class="extra">added</span>' : ''}</td></tr>
-    ${wide('Location', c(p?.location))}
+    ${/*
+       * The department prints three rows per test point, not four: the point
+       * and its location share the first one. A sub-header of its own followed
+       * by a Location row is a row the form does not have.
+       */''}
+    <tr>
+      <td class="sub">Test point ${n}${extraPoint ? ' <span class="extra">added</span>' : ''}</td>
+      <td class="k">Location</td><td class="v" colspan="2">${c(p?.location)}</td>
+    </tr>
     ${/*
        * The department's order on each of these two lines is: the requirement,
        * then the Pass and Fail boxes, then what was achieved. Ours put the
@@ -1242,9 +1261,19 @@ function partG(form: Form72): string {
   // than typed again, and left unanswered unless both halves were measured —
   // half a pair against a block plan figure invites the wrong comparison.
   const first = g.testPoints[0];
-  const achieved = first?.resultFlowLpm !== undefined && first.resultPressureKpa !== undefined
+  const achievedFrom = first?.resultFlowLpm !== undefined && first.resultPressureKpa !== undefined
     ? `${first.resultFlowLpm} L/min at ${first.resultPressureKpa} kPa`
     : undefined;
+  /*
+   * The department's box has no field of its own behind it: this pair is test
+   * point 1's measured result, read off the line below rather than typed
+   * again. It says so, for the reason the derived Pass/Fail boxes below say so
+   * — a reader must never be shown a figure in one of the department's boxes
+   * that the licensee did not write.
+   */
+  const achieved = achievedFrom !== undefined
+    ? `${esc(achievedFrom)} <span class="extra">from test point 1</span>`
+    : cell(undefined, r);
 
   // Built before the table string so the rows have run and filled it.
   const rows = `
@@ -1260,7 +1289,7 @@ function partG(form: Form72): string {
   return `${band('Part G—Sprinkler system flow test', resultBoxes(r, PART_G_RESULT_OPTIONS))}
   ${note(PART_G_NOTE)}
   <table class="grid">
-    ${pair(['System specifications (block plan):', cell(g.systemSpec, r)], ['Test results:', cell(achieved, r)])}
+    ${pair(['System specifications (block plan):', cell(g.systemSpec, r)], ['Test results:', achieved])}
     ${rows}
     <tr>
       <td class="k">Running test</td>
