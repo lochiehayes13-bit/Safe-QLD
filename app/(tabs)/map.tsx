@@ -243,11 +243,13 @@ export default function MapScreen() {
    */
   const unplaced = useMemo(() => {
     const q = query.trim();
-    if (!q) return [];
+    if (!q) return { shown: [] as MapSiteRow[], matching: 0 };
     const placed = new Set(pins.map((p) => p.siteId));
-    return (data?.sites ?? [])
-      .filter((site) => !placed.has(site.id) && siteMatches(site, q))
-      .slice(0, UNPLACED_SHOWN);
+    const all = (data?.sites ?? []).filter((site) => !placed.has(site.id) && siteMatches(site, q));
+    // Both numbers. The line used to read "4 on this phone, but nothing knows
+    // where they are yet" when there were eleven, which is not a cut list —
+    // it is a wrong sentence about how many buildings the phone holds.
+    return { shown: all.slice(0, UNPLACED_SHOWN), matching: all.length };
   }, [query, pins, data]);
 
   // The tab bar floats over the bottom of the map; the attribution has to
@@ -410,7 +412,7 @@ export default function MapScreen() {
       if (results.length) setCard({ type: 'place', index: 0 });
       // Not "nothing found" where a site matched and simply has no position:
       // the rows below say so and offer it.
-      else if (!shown.length && !unplaced.length) setPlaceError(`Nothing found for “${q}”`);
+      else if (!shown.length && !unplaced.shown.length) setPlaceError(`Nothing found for “${q}”`);
     } catch (e) {
       setPlaceError(e instanceof Error ? e.message : 'The place search did not answer');
     } finally {
@@ -629,14 +631,15 @@ export default function MapScreen() {
             * opens the site, where its address can be fixed or a position
             * taken.
             */}
-          {unplaced.length ? (
+          {unplaced.shown.length ? (
             <View style={{ ...floating, padding: t.space(2.5), gap: t.space(2) }}>
               <Txt size="xs" tone="muted">
-                {unplaced.length === 1
+                {unplaced.matching === 1
                   ? 'On this phone, but nothing knows where it is yet:'
-                  : `${unplaced.length} on this phone, but nothing knows where they are yet:`}
+                  : `${unplaced.matching} on this phone, but nothing knows where they are yet${
+                    unplaced.matching > unplaced.shown.length ? ` — the first ${unplaced.shown.length}` : ''}:`}
               </Txt>
-              {unplaced.map((site) => (
+              {unplaced.shown.map((site) => (
                 <Pressable
                   key={site.id}
                   onPress={() => router.push({ pathname: '/site/[id]', params: { id: site.id } })}

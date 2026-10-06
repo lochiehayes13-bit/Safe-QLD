@@ -138,7 +138,18 @@ describe('a site the map cannot place', () => {
 
   it('does not call it nothing found when a site matched and has no position', () => {
     expect(map).not.toContain('else if (!shown.length) setPlaceError');
-    expect(map).toContain('!shown.length && !unplaced.length');
+    expect(map).toContain('!shown.length && !unplaced.shown.length');
+  });
+
+  it('says how many it holds rather than how many it drew', () => {
+    /*
+     * It listed four and wrote "4 on this phone, but nothing knows where they
+     * are yet". With eleven matching, that is not a cut list — it is a wrong
+     * sentence about how many buildings the phone is holding, on the screen
+     * whose whole job here is to stop the app denying a site it has.
+     */
+    expect(map).toContain('matching: all.length');
+    expect(map).toContain('unplaced.matching > unplaced.shown.length');
   });
 
   it('offers the matched sites rather than only reporting them', () => {
