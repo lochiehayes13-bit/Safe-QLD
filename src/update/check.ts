@@ -165,6 +165,19 @@ async function run(force: boolean): Promise<UpdateCheckRecord> {
     await restore();
     const running = buildInfo();
     if (!shouldCheck(record, new Date(), force, running)) return record;
+
+    /*
+     * A forced check clears "not now".
+     *
+     * Force only ever comes from somebody pressing a button that says check,
+     * and they are entitled to see the answer. Without this, a technician who
+     * snoozed the banner in the morning and pressed check in the afternoon got
+     * told a newer build was available in the alert and then watched the home
+     * screen stay quiet about it, because the snooze still hid the card.
+     */
+    if (force && (record.snoozedUntil !== null || record.snoozedSha !== null)) {
+      await remember({ snoozedUntil: null, snoozedSha: null });
+    }
     const { repo } = running;
     const token = await readToken();
     let exchange: { status: number; json: unknown };

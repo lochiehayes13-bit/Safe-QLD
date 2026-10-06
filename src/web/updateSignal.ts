@@ -28,9 +28,13 @@ export const UPDATE_READY_EVENT = 'safeqld:update-ready';
 /** Left on `window` by the registration script: takes the waiting build and reloads. */
 export const APPLY_UPDATE_FUNCTION = '__safeqldApplyUpdate';
 
+/** Also left on `window`: asks the worker for a newer build now. */
+export const CHECK_UPDATE_FUNCTION = '__safeqldCheckForUpdate';
+
 type UpdateWindow = Window & {
   [UPDATE_READY_FLAG]?: boolean;
   [APPLY_UPDATE_FUNCTION]?: () => void;
+  [CHECK_UPDATE_FUNCTION]?: () => void;
 };
 
 function browserWindow(): UpdateWindow | null {
@@ -54,6 +58,26 @@ export function onUpdateReady(listener: () => void): () => void {
   if (updateReady()) listener();
   w.addEventListener(UPDATE_READY_EVENT, listener);
   return () => w.removeEventListener(UPDATE_READY_EVENT, listener);
+}
+
+/**
+ * Asks the worker to go and look for a newer build, now.
+ *
+ * The script already asks on load, every half hour, on becoming visible and on
+ * the signal returning. This is the deliberate ask, from the button on the home
+ * screen, for the technician who has just been told over the phone that
+ * something was fixed.
+ *
+ * It answers only whether the ask could be made. Whether anything newer exists
+ * arrives through `onUpdateReady`, which is the single route by which that news
+ * ever travels — a version of this that resolved with the answer would be a
+ * second route to the same fact, and the two would drift.
+ */
+export function askForUpdate(): boolean {
+  const ask = browserWindow()?.[CHECK_UPDATE_FUNCTION];
+  if (typeof ask !== 'function') return false;
+  ask();
+  return true;
 }
 
 /**

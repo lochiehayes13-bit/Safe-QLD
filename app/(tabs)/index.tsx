@@ -19,6 +19,7 @@ import { PhotoDrop } from '@/components/PhotoDrop';
 import { describeLoadFailure } from '@/domain/loadFailure';
 import { Bounce, Reveal, animateNextLayout } from '@/components/motion';
 import { UpdateBanner } from '@/components/UpdateBanner';
+import { UpdateCheckButton } from '@/components/UpdateCheckButton';
 import { SyncStrip } from '@/components/SyncStrip';
 import { StuckWorkStrip } from '@/components/StuckWorkStrip';
 import { showAlert } from '@/components/alert';
@@ -195,6 +196,18 @@ function Hero({ name }: { name: string }) {
         <Rowed gap={2}>
           <View style={{ width: 3, height: t.font.size.xs + 2, borderRadius: 2, backgroundColor: t.color.accent }} />
           <Txt size="xs" tone="accent" weight="800" style={{ letterSpacing: 2 }}>SAFE QLD</Txt>
+          {/*
+            * Top right of the front page, in the header rather than below it.
+            *
+            * The banner underneath appears on its own when a newer build is
+            * known, but a technician told over the phone that something has
+            * been fixed wants to ask now — and the automatic check runs at most
+            * once every six hours, so the answer was three screens into
+            * Settings. It sits in the gap the swoosh leaves, which is otherwise
+            * decoration.
+            */}
+          <View style={{ flex: 1 }} />
+          <UpdateCheckButton />
         </Rowed>
         <Txt size="display" weight="800" style={{ letterSpacing: -1.4, marginTop: t.space(1) }} numberOfLines={1}>
           {first ? `${part}, ${first}` : part}

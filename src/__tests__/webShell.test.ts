@@ -12,13 +12,15 @@ const { injectShell, GROUND } = require('../../scripts/webShellHtml') as {
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const {
   serviceWorkerSource, REGISTRATION,
-  UPDATE_READY_FLAG, UPDATE_READY_EVENT, APPLY_UPDATE_FUNCTION, FRESH_PAGE_MS,
+  UPDATE_READY_FLAG, UPDATE_READY_EVENT, APPLY_UPDATE_FUNCTION, CHECK_UPDATE_FUNCTION,
+  FRESH_PAGE_MS,
 } = require('../../scripts/webServiceWorker') as {
   serviceWorkerSource: (files: string[]) => string;
   REGISTRATION: string;
   UPDATE_READY_FLAG: string;
   UPDATE_READY_EVENT: string;
   APPLY_UPDATE_FUNCTION: string;
+  CHECK_UPDATE_FUNCTION: string;
   FRESH_PAGE_MS: number;
 };
 
@@ -235,16 +237,30 @@ describe('how the page finds out a new build exists', () => {
   });
 
   /**
-   * Three names agreed in two places — a build script and a React component —
+   * Four names agreed in two places — a build script and a React component —
    * which is exactly the kind of thing that drifts the day one is renamed.
    */
-  it('uses the same three names the app listens on', () => {
+  it('uses the same four names the app listens on', () => {
     expect(UPDATE_READY_FLAG).toBe(SIGNAL.UPDATE_READY_FLAG);
     expect(UPDATE_READY_EVENT).toBe(SIGNAL.UPDATE_READY_EVENT);
     expect(APPLY_UPDATE_FUNCTION).toBe(SIGNAL.APPLY_UPDATE_FUNCTION);
+    expect(CHECK_UPDATE_FUNCTION).toBe(SIGNAL.CHECK_UPDATE_FUNCTION);
 
     expect(shell).toContain(`window.${UPDATE_READY_FLAG} = true`);
     expect(shell).toContain(`new CustomEvent('${UPDATE_READY_EVENT}')`);
     expect(shell).toContain(`window.${APPLY_UPDATE_FUNCTION} = apply`);
+    expect(shell).toContain(`window.${CHECK_UPDATE_FUNCTION} = check`);
+  });
+
+  it('leaves the check function where the registration can reach reg.update', () => {
+    /*
+     * reg.update() only exists inside the registration's own callback, so the
+     * name has to be assigned there. Assigned outside it the button would find
+     * a function on the window and calling it would throw into nothing.
+     */
+    const inRegistration = shell.slice(shell.indexOf('navigator.serviceWorker.register'));
+    expect(inRegistration).toContain(`window.${CHECK_UPDATE_FUNCTION} = check;`);
+    expect(inRegistration.indexOf(`window.${CHECK_UPDATE_FUNCTION}`))
+      .toBeGreaterThan(inRegistration.indexOf('var check = function () { try { reg.update(); }'));
   });
 });

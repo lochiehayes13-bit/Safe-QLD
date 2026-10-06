@@ -8,8 +8,8 @@
  * refused the registration, and the Node process this suite runs in.
  */
 import {
-  APPLY_UPDATE_FUNCTION, UPDATE_READY_EVENT, UPDATE_READY_FLAG,
-  applyUpdate, onUpdateReady, updateReady,
+  APPLY_UPDATE_FUNCTION, CHECK_UPDATE_FUNCTION, UPDATE_READY_EVENT, UPDATE_READY_FLAG,
+  applyUpdate, askForUpdate, onUpdateReady, updateReady,
 } from '@/web/updateSignal';
 
 type Listener = () => void;
@@ -126,5 +126,52 @@ describe('in a browser where a newer build is waiting', () => {
     globals.window = w;
 
     expect(applyUpdate()).toBe(false);
+  });
+});
+
+describe('asking the worker to look now', () => {
+  it('calls the function the registration script left behind', () => {
+    const w = fakeWindow();
+    let asked = 0;
+    w[CHECK_UPDATE_FUNCTION] = () => { asked += 1; };
+    globals.window = w;
+
+    expect(askForUpdate()).toBe(true);
+    expect(asked).toBe(1);
+  });
+
+  it('answers false where the script never ran, so the caller can say so', () => {
+    // A browser with no service worker support, or one that refused the
+    // registration. The app still works — online, current when reloaded by
+    // hand — and a button that silently did nothing would be worse than one
+    // that says there is nothing here to check.
+    globals.window = fakeWindow();
+    expect(askForUpdate()).toBe(false);
+  });
+
+  it('answers false with no window at all, which is the Node this suite runs in', () => {
+    expect(askForUpdate()).toBe(false);
+  });
+
+  it('answers false where the name holds something that is not a function', () => {
+    const w = fakeWindow();
+    w[CHECK_UPDATE_FUNCTION] = 'not a function';
+    globals.window = w;
+
+    expect(askForUpdate()).toBe(false);
+  });
+
+  it('does not itself report whether anything newer exists', () => {
+    /*
+     * The answer travels by the flag and the event and nothing else. A version
+     * of this that resolved with the verdict would be a second route to the
+     * same fact, and two routes drift.
+     */
+    const w = fakeWindow();
+    w[CHECK_UPDATE_FUNCTION] = () => {};
+    globals.window = w;
+
+    expect(askForUpdate()).toBe(true);
+    expect(updateReady()).toBe(false);
   });
 });

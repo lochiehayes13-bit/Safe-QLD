@@ -199,6 +199,22 @@ const APPLY_UPDATE_FUNCTION = '__safeqldApplyUpdate';
 const UPDATE_READY_FLAG = '__safeqldUpdateReady';
 
 /**
+ * The function the app calls when somebody presses "check for updates".
+ *
+ * The script already asks on load, every half hour, on becoming visible and on
+ * the signal returning — but a person told over the phone that something has
+ * been fixed wants to ask now, and `reg.update()` only exists inside the
+ * registration's own callback. Left on the window so the button on the home
+ * screen can reach it.
+ *
+ * It answers nothing: the worker's reply arrives through the flag and the event
+ * above, which is the only route by which a newer build is ever announced. A
+ * version that resolved a promise would be a second route to the same news and
+ * the two would drift.
+ */
+const CHECK_UPDATE_FUNCTION = '__safeqldCheckForUpdate';
+
+/**
  * The line the page runs to install it. Kept here so the shell and the worker
  * cannot drift.
  *
@@ -285,6 +301,7 @@ const REGISTRATION = `
               .then(function (reg) {
                 watch(reg);
                 var check = function () { try { reg.update(); } catch (e) {} };
+                window.${CHECK_UPDATE_FUNCTION} = check;
                 check();
                 setInterval(check, CHECK_EVERY_MS);
                 // The moments an app is most likely to have fallen behind: it
@@ -307,6 +324,7 @@ module.exports = {
   UPDATE_READY_EVENT,
   APPLY_UPDATE_FUNCTION,
   UPDATE_READY_FLAG,
+  CHECK_UPDATE_FUNCTION,
   UPDATE_CHECK_EVERY_MS,
   FRESH_PAGE_MS,
 };
