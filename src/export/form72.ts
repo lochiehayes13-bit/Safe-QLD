@@ -1469,6 +1469,12 @@ const CSS = `
   .head h1 { font-size: 16px; margin: 0; letter-spacing: -0.2px; }
   .head .sub { font-size: 11px; font-weight: 700; margin-top: 2px; }
   .head .right { text-align: right; font-size: 8.5px; line-height: 1.5; }
+  /* Ours, and shaped so it cannot be mistaken for the department's masthead. */
+  .ourstrip { display: flex; gap: 10px; align-items: baseline; padding: 0 2px 5px;
+              font-size: 8px; color: #444; }
+  .ourstrip .who { font-weight: 700; color: #1b1b1b; letter-spacing: 0.3px; }
+  .ourstrip .what { font-weight: 700; color: #1F3864; }
+  .ourstrip .ver { margin-left: auto; color: #666; }
   .intro { background: #EDF0F7; border: 1px solid #C7CEE0; border-top: none;
            padding: 7px 9px; font-size: 8px; line-height: 1.45; }
   .band { background: #1F3864; color: #fff; padding: 6px 10px; margin-top: 12px;
@@ -1590,20 +1596,32 @@ export function form72Html(input: Form72DocumentInput): string {
     css: CSS,
     masthead: false,
     body: `
+  ${/*
+     * Our strip, above the department's form rather than inside its header.
+     *
+     * The system descriptor had to go somewhere. It is not on the department's
+     * form, and it is the one thing that tells two forms for the same site on
+     * the same day apart, so it cannot be dropped — but marked "added" inside
+     * the reproduced header it still left a reader comparing the two documents
+     * finding an extra line in the department's own masthead.
+     *
+     * Above it, in a strip that is visibly not the form, both hold: the
+     * reproduced header is the title and nothing else, exactly as published,
+     * and the descriptor is the first thing anybody reads. The same strip
+     * carries the version, which the department prints at the foot and this
+     * document also prints there — here it is for finding the right form, not
+     * for reproducing the published one.
+     */''}
+  ${input.systemLabel?.trim() ? `<div class="ourstrip">
+    <span class="who">${esc(company)}</span>
+    ${input.systemLabel?.trim() ? `<span class="what">${esc(input.systemLabel)}</span>` : ''}
+    <span class="ver">${esc(FORM_VERSION)}</span>
+  </div>` : ''}
   <div class="head">
     <div>
       <h1>${esc(FORM_TITLE)}</h1>
       <div class="sub">${esc(FORM_SUBTITLE)}</div>
     </div>
-    <div class="right">${esc(FORM_VERSION)}${
-  /*
-   * The system descriptor is not on the department's form, and it is the one
-   * thing that tells two forms for the same site on the same day apart — so it
-   * prints, up here where a reader finds it, and says it is ours.
-   */
-  input.systemLabel?.trim()
-    ? `<br />${esc(input.systemLabel)} <span class="extra">added</span>`
-    : ''}</div>
   </div>
   <div class="intro">${esc(FORM_INTRO)}</div>
 

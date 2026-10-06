@@ -2141,10 +2141,32 @@ describe('the department’s footer, as two paragraphs and an imprint', () => {
     expect(html).not.toContain('&#39;Relevant');
   });
 
-  it('says the system descriptor in the header is ours, because it is', () => {
-    // It is the one thing that tells two forms for the same site on the same
-    // day apart, so it prints — up where a reader finds it, marked.
-    expect(flat(html)).toContain('Towns Main System <span class="extra">added</span>');
+  it('puts the system descriptor above the department’s header, not inside it', () => {
+    /*
+     * It is the one thing that tells two forms for the same site on the same
+     * day apart, so it cannot be dropped — and marked "added" inside the
+     * reproduced masthead it still left a reader comparing the two documents
+     * finding an extra line in the department's own header. Above it, in a
+     * strip that is visibly not the form, both hold.
+     */
+    const strip = between(html, '<div class="ourstrip">', '</div>');
+    expect(strip).toContain('Towns Main System');
+    expect(strip).toContain('Safe QLD Fire Protection');
+
+    // And the reproduced header is the title and nothing else, as published.
+    const head = between(html, '<div class="head">', '<div class="intro">');
+    expect(head).toContain(FORM_TITLE);
+    expect(head).toContain(FORM_SUBTITLE);
+    expect(head).not.toContain('Towns Main System');
+    expect(head).not.toContain('Version 1');
+  });
+
+  it('leaves the strip off a form with nothing of ours to put on it', () => {
+    const plain = form72Html({
+      form: issuable(), generatedAt: '2026-07-06T02:00:00.000Z',
+    });
+    // The stylesheet always carries the class; the strip itself must not print.
+    expect(plain).not.toContain('<div class="ourstrip">');
   });
 });
 
