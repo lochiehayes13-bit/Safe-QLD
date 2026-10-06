@@ -103,7 +103,7 @@ export default function SiteHistoryScreen() {
 
   const late = byRoutine.reduce((n, g) => n + g.late, 0);
 
-  if (!siteId) return <ContextGate kind="site" what="every routine carried out" title="Service history" />;
+  if (!siteId) return <ContextGate kind="site" what="every routine carried out" title="Service history" backTo="/site/history" />;
 
   return (
     <>

@@ -150,7 +150,7 @@ export default function SitePartsScreen() {
     };
   }, [defects, prefs, card]);
 
-  if (!siteId) return <ContextGate kind="site" what="the parts the open defects need" title="Parts needed" />;
+  if (!siteId) return <ContextGate kind="site" what="the parts the open defects need" title="Parts needed" backTo="/site/parts" />;
 
   return (
     <>

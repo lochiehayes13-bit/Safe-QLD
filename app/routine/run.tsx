@@ -478,7 +478,7 @@ export default function RunRoutineScreen() {
    * screen let a whole annual be answered and then did nothing at all when
    * "Record this routine" was pressed. Nothing was saved and nothing was said.
    */
-  if (!siteId) return <ContextGate kind="site" what="a service routine run against its assets" title="Run a routine" />;
+  if (!siteId) return <ContextGate kind="site" what="a service routine run against its assets" title="Run a routine" backTo="/routine/run" />;
 
   if (!routine) {
     return (

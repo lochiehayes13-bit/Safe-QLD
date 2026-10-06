@@ -145,7 +145,7 @@ export default function PointsScreen() {
     }
   };
 
-  if (!siteId) return <ContextGate kind="site" what="every point on the panels" title="Points" />;
+  if (!siteId) return <ContextGate kind="site" what="every point on the panels" title="Points" backTo="/site/points" />;
 
   return (
     <>

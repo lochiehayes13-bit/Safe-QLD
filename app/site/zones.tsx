@@ -136,7 +136,7 @@ export default function ZonesScreen() {
     }
   };
 
-  if (!siteId) return <ContextGate kind="site" what="the zones on the panels" title="Zones" />;
+  if (!siteId) return <ContextGate kind="site" what="the zones on the panels" title="Zones" backTo="/site/zones" />;
 
   return (
     <>

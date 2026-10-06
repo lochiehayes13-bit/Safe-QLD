@@ -69,7 +69,7 @@ export default function CoverageScreen() {
 
   const repeated = gaps.filter((g) => g.attempts > 1).length;
 
-  if (!siteId) return <ContextGate kind="site" what="what was not tested" title="Not tested" />;
+  if (!siteId) return <ContextGate kind="site" what="what was not tested" title="Not tested" backTo="/site/coverage" />;
 
   return (
     <>

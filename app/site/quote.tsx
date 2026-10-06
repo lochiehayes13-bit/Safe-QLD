@@ -365,7 +365,7 @@ export default function SiteQuoteScreen() {
 
   // Said "No site" with nothing to press, which is a dead end for anybody who
   // reached this from search rather than from a site. See ContextGate.
-  if (!siteId) return <ContextGate kind="site" what="a quote priced from the open defects" title="Quote" />;
+  if (!siteId) return <ContextGate kind="site" what="a quote priced from the open defects" title="Quote" backTo="/site/quote" />;
 
   return (
     <>

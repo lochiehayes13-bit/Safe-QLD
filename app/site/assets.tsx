@@ -48,7 +48,7 @@ export default function SiteAssetsScreen() {
   // Opened from search or a stale link there is no site, and the screen used
   // to answer "No assets recorded" — a statement about a building nobody
   // named, and one a technician believes.
-  if (!siteId) return <ContextGate kind="site" what="an asset register" title="Assets" />;
+  if (!siteId) return <ContextGate kind="site" what="an asset register" title="Assets" backTo="/site/assets" />;
 
   return (
     <>

@@ -195,7 +195,7 @@ export default function SiteDefectsScreen() {
     }
   };
 
-  if (!siteId) return <ContextGate kind="site" what="the defects raised" title="Defects" />;
+  if (!siteId) return <ContextGate kind="site" what="the defects raised" title="Defects" backTo="/site/defects" />;
 
   return (
     <>

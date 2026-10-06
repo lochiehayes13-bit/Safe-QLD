@@ -71,7 +71,7 @@ export default function SiteDueScreen() {
   const overdue = items.filter((i) => i.state === 'overdue').length;
   const dueNow = items.filter((i) => i.state === 'due').length;
 
-  if (!siteId) return <ContextGate kind="site" what="what is due" title="What is due" />;
+  if (!siteId) return <ContextGate kind="site" what="what is due" title="What is due" backTo="/site/due" />;
 
   return (
     <>

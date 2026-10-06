@@ -118,7 +118,7 @@ export default function CauseEffectScreen() {
     }
   };
 
-  if (!siteId) return <ContextGate kind="site" what="the cause and effect matrix" title="Cause &amp; effect" />;
+  if (!siteId) return <ContextGate kind="site" what="the cause and effect matrix" title="Cause &amp; effect" backTo="/site/cause-effect" />;
 
   return (
     <>
