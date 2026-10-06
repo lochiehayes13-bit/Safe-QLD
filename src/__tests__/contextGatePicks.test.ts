@@ -91,3 +91,35 @@ describe('every screen that asks for a site', () => {
     },
   );
 });
+
+describe('a screen with no site reads nothing', () => {
+  /*
+   * The gate returns before the screen renders, and hooks do not care: the
+   * effects fire anyway. app/site/points.tsx read every point on the phone
+   * that way — queryPoints with neither a site nor a panel has one condition
+   * left, `unused = 0`, so twenty-two thousand rows came back to draw an empty
+   * state asking which site was meant. A probe against a three-site fixture
+   * returned 120 of 120 with no site and 40 with one.
+   *
+   * Every other gated screen already guarded its loader. This is so the
+   * thirteenth cannot be written without one.
+   */
+  it.each(gated.map((g) => [g.file, g.source] as const))(
+    '%s guards its own read before querying',
+    (file, source) => {
+      const guards = /if \(!siteId\)\s*(\{[^}]*\})?\s*(return|\{)/.test(source)
+        || /if \(!siteId && !activePanel\)/.test(source);
+      expect({ file, guardsItsRead: guards }).toEqual({ file, guardsItsRead: true });
+    },
+  );
+
+  it('and the guard sits before the query, not after it', () => {
+    // Points is the one this was found on, so it is checked by name: the
+    // early return has to come before queryPoints, or it changes nothing.
+    const source = read('app/site/points.tsx');
+    const guard = source.indexOf('if (!siteId && !activePanel)');
+    const query = source.indexOf('await queryPoints(');
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(query);
+  });
+});

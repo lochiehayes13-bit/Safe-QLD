@@ -74,6 +74,16 @@ export default function PointsScreen() {
   const readSeq = useRef(0);
 
   const load = useCallback(async () => {
+    /*
+     * Nothing to read without a site.
+     *
+     * The gate below returns before this screen renders, but hooks do not
+     * care about that: the effect fired anyway, and queryPoints with neither
+     * a site nor a panel has one condition left — `unused = 0` — so it read
+     * every point on the phone. Twenty-two thousand rows on this owner's,
+     * fetched to draw an empty state asking which site they meant.
+     */
+    if (!siteId && !activePanel) { setPoints([]); setLoading(false); return; }
     const seq = ++readSeq.current;
     setLoading(true);
     setFailed(null);
