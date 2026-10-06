@@ -94,6 +94,36 @@ export function allowanceTally(sheet: Pick<Timesheet, 'entries'>): [string, numb
   return [...extras].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 
+/** One row's note as the sheet prints it: the allowances, then what was typed. */
+export function entryNote(entry: TimesheetEntry): string {
+  return [...(entry.extras ?? []), entry.comments].map((x) => x.trim()).filter(Boolean).join(' · ');
+}
+
+/**
+ * Every note on the week, in full, with the day and the row it belongs to.
+ *
+ * The workbook's comments column is one of fifteen and is as wide as fifteen
+ * columns across a page allow, so a long note wraps — and a wrapped cell in a
+ * file Excel did not write itself opens at whatever row height the writer
+ * gave it. The writer capped that at four lines, about a hundred and twenty
+ * characters, because one row is not allowed to push the rest of the week down
+ * the page. So the note a technician wrote at the end of a hard day —
+ * "Booster valve seized, could not isolate, left a fire watch on site, owner
+ * notified, returning Monday with the right spanner" — reached payroll with
+ * its last third behind the row below, and payroll rang to ask what it said.
+ *
+ * Nothing is dropped from the cell; it is the page that cut it. So the notes
+ * also go on the summary sheet in full, in one block with room to be read,
+ * where a tall row pushes nothing around. Taken from the domain so the two
+ * sheets cannot print different notes for the same row.
+ */
+export function weekNotes(sheet: Pick<Timesheet, 'entries'>): { date: string; what: string; note: string }[] {
+  return [...sheet.entries]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((e) => ({ date: e.date, what: entryDescription(e), note: entryNote(e) }))
+    .filter((n) => n.note);
+}
+
 const HHMM = /^(\d{1,2}):(\d{2})$/;
 
 /** Parses "HH:MM" to minutes since midnight, or null when unparseable. */
@@ -555,14 +585,23 @@ export function weekPeak(days: readonly DaySummary[]): number {
 /**
  * Yesterday, on today.
  *
- * Every row and every field: the job, the site, the times, the
- * ordinary/overtime choice, the allowances, the report number, the notes,
- * the override and any leave. It used to carry the shape and drop the
- * words, on the reasoning that a report number and a note assert something
- * that has not happened yet — which is true, and still left a technician
- * retyping "Service" onto five identical days. A week of the same work is
- * the case this button exists for, and what comes across is on the screen
- * to read and change.
+ * Every field of every worked row: the job, the site, the times, the
+ * ordinary/overtime choice, the allowances, the report number, the notes and
+ * the override. It used to carry the shape and drop the words, on the
+ * reasoning that a report number and a note assert something that has not
+ * happened yet — which is true, and still left a technician retyping
+ * "Service" onto five identical days. A week of the same work is the case
+ * this button exists for, and what comes across is on the screen to read and
+ * change.
+ *
+ * **Leave does not come across.** It used to, and the screen's own alert
+ * already said it should not — "Tuesday is a day off, so there is nothing to
+ * bring across" could never print, because the filter it describes was never
+ * written. So copying a day off onto a day that had a job on it put annual
+ * leave beside eight hours of work, and the day card drew the leave and
+ * stopped drawing the job: sixteen hours on the payroll file, a leave picker
+ * on the phone, and the hours invisible on the device that made them. Nobody
+ * presses Copy previous day meaning "I was off again".
  *
  * Only the id and the date are new, because two rows cannot share an id and
  * the row is being put on another day.
@@ -571,7 +610,7 @@ export function copyDay(
   entries: TimesheetEntry[], fromDate: string, toDate: string, newId: () => string,
 ): TimesheetEntry[] {
   return entries
-    .filter((e) => e.date === fromDate)
+    .filter((e) => e.date === fromDate && !leaveOf(e))
     .map((e) => ({ ...e, id: newId(), date: toDate, extras: [...(e.extras ?? [])] }));
 }
 

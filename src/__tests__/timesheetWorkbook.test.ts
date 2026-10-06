@@ -165,6 +165,28 @@ describe('the timesheet as fifteen columns', () => {
     expect(at(short)).toBe(18);
     expect(at(long)).toBeGreaterThan(at(short));
   });
+
+  it('shows a whole end-of-day note rather than five sixths of it', () => {
+    /*
+     * The cap was four lines, about a hundred and twenty characters. This note
+     * is a hundred and twenty-three, and is the ordinary kind — payroll read
+     * most of it and rang to ask what the rest said.
+     */
+    const note = 'Booster valve seized, could not isolate, left a fire watch on site, '
+      + 'owner notified, returning Monday with the right spanner';
+    expect(note.length).toBeGreaterThan(120);
+    const sheet = timesheetSheet(timesheet([entry({ comments: note })]));
+    const at = sheet.rowHeights![rowNumberOf(sheet.rows, (r) => value(r[1]) === '43747')]!;
+    // Tall enough for every line of it, at the comments column's own width.
+    expect(at).toBeGreaterThanOrEqual(18 + 14 * (Math.ceil(note.length / 30) - 1));
+  });
+
+  it('still refuses to let one row push the week off the page', () => {
+    // The cap stays; what is past it is printed in full on the summary sheet.
+    const essay = timesheetSheet(timesheet([entry({ comments: 'x'.repeat(2000) })]));
+    const at = essay.rowHeights![rowNumberOf(essay.rows, (r) => value(r[1]) === '43747')]!;
+    expect(at).toBe(18 + 14 * 7);
+  });
 });
 
 describe('what the cells hold', () => {
@@ -300,6 +322,52 @@ describe('the summary and the timesheet as one workbook', () => {
     const sheet = timesheetSummarySheet(timesheet([]));
     expect(JSON.stringify(sheet.rows)).not.toContain('DAY BY DAY');
     expect(sheet.rows.some((r) => value(r[0]) === 'PAID TOTAL')).toBe(true);
+  });
+
+  it('prints every note in full, where a tall row pushes nothing around', () => {
+    /*
+     * The timesheet's comments column is one of fifteen across a page, so a
+     * long note wraps and the row can only be so tall before it pushes the
+     * week off. Here the column is forty-six wide and this block is the last
+     * thing on the sheet, so nothing is cut — payroll stops ringing to ask
+     * what the end of a note said.
+     */
+    const note = 'Booster valve seized, could not isolate, left a fire watch on site, '
+      + 'owner notified, returning Monday with the right spanner, called the owner at 4pm';
+    const sheet = timesheetSummarySheet(timesheet([
+      entry({ id: 'a', siteName: 'Barren Heights Tower', comments: note, extras: ['Call-out'] }),
+    ]));
+    const row = sheet.rows.find((r) => String(value(r[2]) ?? '').includes('fire watch'))!;
+    expect(value(row[1])).toBe('Barren Heights Tower');
+    // The allowance rides with it, exactly as the timesheet's own cell has it.
+    expect(value(row[2])).toBe(`Call-out · ${note}`);
+    // And the row is as tall as the whole note needs.
+    const at = sheet.rowHeights![sheet.rows.indexOf(row) + 1]!;
+    expect(at).toBeGreaterThanOrEqual(18 + 14 * (Math.ceil((`Call-out · ${note}`).length / 44) - 1));
+  });
+
+  it('names the day and the row each note belongs to', () => {
+    const sheet = timesheetSummarySheet(timesheet([
+      entry({ id: 'a', date: '2026-08-12', siteName: 'Logan DC', comments: 'Left the key with security' }),
+    ]));
+    const row = sheet.rows.find((r) => String(value(r[2]) ?? '').includes('security'))!;
+    expect(String(value(row[0]))).toContain('Wed');
+    expect(value(row[1])).toBe('Logan DC');
+  });
+
+  it('names a day off rather than leaving its note unattached', () => {
+    // entryDescription already names the leave where a row has no site, which
+    // is the same rule the timesheet's own description column uses.
+    const sheet = timesheetSummarySheet(timesheet([
+      { ...entry({ id: 'l', siteName: '', startTime: '', finishTime: '' }), annual: '7.6', comments: 'Booked in March' },
+    ]));
+    const row = sheet.rows.find((r) => String(value(r[2]) ?? '').includes('March'))!;
+    expect(value(row[1])).toBe('Annual leave');
+  });
+
+  it('says nothing about notes on a week that had none', () => {
+    const quiet = timesheet([entry({ id: 'a', comments: '', extras: [] })]);
+    expect(JSON.stringify(timesheetSummarySheet(quiet).rows)).not.toContain('NOTES');
   });
 });
 

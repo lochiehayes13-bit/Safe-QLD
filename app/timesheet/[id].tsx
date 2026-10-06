@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, TextInput, View, useWindowDimensions, type ViewStyle } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getTimesheet, listTimesheets, saveTimesheet } from '@/db/timesheetRepo';
@@ -34,7 +35,7 @@ import { newId, nowIso } from '@/db';
 import { qldIsoDay } from '@/domain/qldTime';
 import { BOARD_MAX, gridColumns, gridItemWidth, pageLayout } from '@/domain/layout';
 import { useTheme, type Theme } from '@/theme';
-import { Button, Card, Chip, Rowed, Screen, Segmented, Txt } from '@/components/ui';
+import { Banner, Button, Card, Chip, Rowed, Screen, Segmented, Txt } from '@/components/ui';
 import { ProgressRing, Reveal } from '@/components/motion';
 import { RecordGate } from '@/components/RecordGate';
 import { useRecordPatch } from '@/hooks/useRecordPatch';
@@ -790,8 +791,40 @@ function DayCard({
       <Rowed gap={2}>
         <Txt weight="800" style={{ letterSpacing: -0.2 }}>{dayName(date)}</Txt>
         <Txt size="sm" tone="muted" style={{ flex: 1 }}>{formatAuDate(date)}</Txt>
-        {worked > 0 ? <Chip label={`${worked} h`} tone="accent" /> : leave ? <Chip label={LEAVE_LABEL[leave.kind]} tone="warn" /> : null}
+        {/* Both chips where the day carries both, since one of them used to
+            stand in for a day that was two things. */}
+        {worked > 0 ? <Chip label={`${worked} h`} tone="accent" /> : null}
+        {leave ? <Chip label={LEAVE_LABEL[leave.kind]} tone="warn" /> : null}
       </Rowed>
+
+      {/*
+        * A day that holds both is drawn as both.
+        *
+        * The leave and the jobs used to be the two arms of a ternary, so a day
+        * carrying a leave row and a job row drew the leave picker and stopped
+        * drawing the jobs. The chip above still said "8 h", the workbook still
+        * printed the job and the leave, and the hours were invisible on the
+        * only device that could correct them — sixteen hours to payroll and a
+        * leave picker on the phone.
+        *
+        * Copy previous day was the way in (it brought leave across; it no
+        * longer does), but it is not the only one: entries are stored, they
+        * come off the clock, and a sheet half-filled on another device is the
+        * case this app is built around. A view that can hide hours is the
+        * fault, not the one path that produced it.
+        */}
+      {leave && jobs.length ? (
+        <Banner
+          tone="warn"
+          title={`This day is marked off and has ${worked} h of work on it`}
+          body={`Payroll gets both — ${worked} h worked and ${leave.hours} h ${LEAVE_LABEL[leave.kind].toLowerCase()}, `
+            + `${Math.round((worked + leave.hours) * 100) / 100} h for the day. Clear whichever is wrong.`}
+        />
+      ) : null}
+
+      {jobs.map((e) => (
+        <JobEntry key={e.id} entry={e} theme={t} extraChoices={extraChoices} onChange={onChange} onRemove={() => onRemove(e.id)} />
+      ))}
 
       {leave ? (
         <View style={{ marginTop: t.space(2.5), gap: t.space(2) }}>
@@ -806,22 +839,36 @@ function DayCard({
             onPress={() => onLeave(leave.kind, 0)}
             style={{ minHeight: 44, justifyContent: 'center' }}
           >
-            <Txt size="sm" tone="accent" weight="700">Actually, I worked — clear this</Txt>
+            <Txt size="sm" tone="accent" weight="700">
+              {jobs.length ? 'I worked this day — take the leave off' : 'Actually, I worked — clear this'}
+            </Txt>
           </Pressable>
         </View>
-      ) : (
-        <>
-          {jobs.map((e) => (
-            <JobEntry key={e.id} entry={e} theme={t} extraChoices={extraChoices} onChange={onChange} onRemove={() => onRemove(e.id)} />
-          ))}
+      ) : null}
 
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.space(2), marginTop: t.space(2.5) }}>
-            <TileButton icon="plus" label="Add a job" onPress={onAdd} theme={t} primary />
-            {canDuplicate ? <TileButton icon="content-copy" label="Copy previous day" onPress={onDuplicate} theme={t} /> : null}
+      {/*
+        * Add a job stays on a day that is marked off, because a day somebody
+        * worked part of is an ordinary thing — half a day's sick leave and an
+        * afternoon on site — and the sheet had no way to say it.
+        */}
+      {/*
+        * Two rows on purpose, rather than three by accident.
+        *
+        * All three used to sit in one wrapping row and none of them fitted
+        * beside another on a 360dp phone, so every day card carried two or
+        * three lines of buttons and the week was a scroll. The one anybody
+        * presses goes full width; the two occasional ones share the row under
+        * it, each half, label wrapping rather than cut.
+        */}
+      <View style={{ gap: t.space(2), marginTop: t.space(2.5) }}>
+        <TileButton icon="plus" label="Add a job" onPress={onAdd} theme={t} primary fill />
+        {(canDuplicate || !jobs.length) && !leave ? (
+          <View style={{ flexDirection: 'row', gap: t.space(2) }}>
+            {canDuplicate ? <TileButton icon="content-copy" label="Copy a day" onPress={onDuplicate} theme={t} fill /> : null}
             {!jobs.length ? <LeaveButton onLeave={onLeave} theme={t} /> : null}
           </View>
-        </>
-      )}
+        ) : null}
+      </View>
     </Card>
   );
 }
@@ -961,7 +1008,7 @@ function LeaveButton({ onLeave, theme: t, compact }: { onLeave: (kind: LeaveKind
   if (!open) {
     return compact
       ? <Chip label="Day off" onPress={() => setOpen(true)} />
-      : <TileButton icon="palm-tree" label="Day off" onPress={() => setOpen(true)} theme={t} />;
+      : <TileButton icon="palm-tree" label="Day off" onPress={() => setOpen(true)} theme={t} fill />;
   }
   return (
     <View style={{ width: '100%', gap: t.space(2) }}>
@@ -1099,7 +1146,16 @@ function JobPicker({
   );
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
-      <View style={{ flex: 1, backgroundColor: t.color.bg }}>
+      {/*
+        * Inside the insets, like every other screen in the app.
+        *
+        * presentationStyle="pageSheet" is honoured on iOS and ignored on
+        * Android, where this is a full-screen modal — so "Pick a job" sat
+        * under the status bar and the bottom of the list ran under the gesture
+        * bar. Screen handles this for the rest of the app through
+        * SafeAreaView; this sheet is the one view that does not go through it.
+        */}
+      <SafeAreaView style={{ flex: 1, backgroundColor: t.color.bg }} edges={['top', 'bottom', 'left', 'right']}>
         <Rowed gap={2} style={{ padding: t.space(4), paddingBottom: t.space(2) }}>
           <Txt size="xl" weight="800" style={{ flex: 1 }}>Pick a job</Txt>
           <Pressable onPress={onClose} hitSlop={10}><MaterialCommunityIcons name="close" size={26} color={t.color.textMuted} /></Pressable>
@@ -1148,7 +1204,7 @@ function JobPicker({
             </Txt>
           ) : null}
         </ScrollView>
-      </View>
+      </SafeAreaView>
     </Modal>
   );
 }
@@ -1205,22 +1261,42 @@ function Timeless({ value, onChange, theme: t }: { value: string; onChange: (v: 
   );
 }
 
-function TileButton({ icon, label, onPress, theme: t, primary }: {
-  icon: React.ComponentProps<typeof MaterialCommunityIcons>['name']; label: string; onPress: () => void; theme: Theme; primary?: boolean;
+/**
+ * One of the day card's actions.
+ *
+ * `fill` shares a row with its sibling instead of sizing to its own label,
+ * which is what stopped the week being a scroll. Measured against the bundled
+ * Manrope at the 17dp/700 the label is actually drawn in: "Add a job" is 75dp
+ * of text, so the tile is 131dp, and "Copy previous day" is 152dp, so 208dp.
+ * Side by side with the 8dp gap that is 347dp inside a card that has 296dp on
+ * a 360dp phone — the width most Android handsets are — so the second tile
+ * wrapped to its own line, on every day of every week.
+ *
+ * A filled tile centres its content and keeps its padding tighter, which
+ * leaves 96dp for the label at 360dp and 76dp at 320dp. The label wraps rather
+ * than truncating: an action whose words are cut is an action somebody has to
+ * guess at, and the tile is free to be two lines tall.
+ */
+function TileButton({ icon, label, onPress, theme: t, primary, fill }: {
+  icon: React.ComponentProps<typeof MaterialCommunityIcons>['name']; label: string; onPress: () => void;
+  theme: Theme; primary?: boolean; fill?: boolean;
 }) {
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => ({
         flexDirection: 'row', alignItems: 'center', gap: t.space(2),
-        paddingHorizontal: t.space(3.5), minHeight: 48, borderRadius: t.radius.md,
+        ...(fill
+          ? { flex: 1, flexBasis: 0, justifyContent: 'center', paddingHorizontal: t.space(2.5), paddingVertical: t.space(2) }
+          : { paddingHorizontal: t.space(3.5) }),
+        minHeight: 48, borderRadius: t.radius.md,
         backgroundColor: primary ? t.color.accent : pressed ? t.color.surfaceAlt : t.color.surface,
         borderWidth: primary ? 0 : 1, borderColor: t.color.border,
         opacity: pressed ? 0.85 : 1,
       })}
     >
       <MaterialCommunityIcons name={icon} size={20} color={primary ? t.color.onAccent : t.color.accentText} />
-      <Txt weight="700" style={{ color: primary ? t.color.onAccent : t.color.text }}>{label}</Txt>
+      <Txt weight="700" style={{ color: primary ? t.color.onAccent : t.color.text, flexShrink: 1 }}>{label}</Txt>
     </Pressable>
   );
 }

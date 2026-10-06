@@ -10,10 +10,12 @@ import {
   entryDescription,
   entryHours,
   allowanceTally,
+  entryNote,
   groupByDate,
   leaveOf,
   parseTime,
   timesheetTotals,
+  weekNotes,
   type Timesheet,
   type TimesheetEntry,
 } from '@/domain/timesheet';
@@ -207,12 +209,24 @@ function timeCell(raw: string): Cell {
  *
  * A wrapped cell in a file Excel did not write itself opens at the default row
  * height, so the second line of a comment sits behind the row below and nobody
- * reads it. The site name and the comments are the two that run long, and four
- * lines is as far as one row is allowed to push the rest of the week down.
+ * reads it. The site name and the comments are the two that run long.
+ *
+ * Four lines was about a hundred and twenty characters, and a real end-of-day
+ * note runs past that — "Booster valve seized, could not isolate, left a fire
+ * watch on site, owner notified, returning Monday with the right spanner" is a
+ * hundred and twenty-three. Payroll read five sixths of it and rang to ask
+ * what the rest said.
+ *
+ * Eight now, which covers the long ones, and the cap stays because one row is
+ * not allowed to push the rest of the week off the page. Where a note is
+ * longer still it is printed in full in the summary sheet's NOTES block, where
+ * a tall row pushes nothing around — see weekNotes.
  */
+const DAY_ROW_MAX_LINES = 8;
+
 function dayRowHeight(siteName: string, comments: string): number {
   const lines = Math.max(1, Math.ceil(siteName.length / 28), Math.ceil(comments.length / 30));
-  return 18 + 14 * (Math.min(lines, 4) - 1);
+  return 18 + 14 * (Math.min(lines, DAY_ROW_MAX_LINES) - 1);
 }
 
 /** The worked hours on an entry, in the one column its rate is paid at. */
@@ -343,8 +357,10 @@ export function timesheetSheet(sheet: Timesheet): Sheet {
       // The day name and date print once per day, on the first entry.
       const dateCell = i === 0 ? `${dayName(e.date)} ${formatAuDate(e.date)}` : '';
       // Extras go in with the comments rather than in columns of their own, so
-      // the sheet keeps the shape payroll's template has.
-      const comments = [...(e.extras ?? []), e.comments].filter((x) => x.trim()).join(' · ');
+      // the sheet keeps the shape payroll's template has. Built in the domain
+      // because the summary sheet prints the same note in full and two
+      // builders are how one row comes to say two things.
+      const comments = entryNote(e);
       const n = push([
         field(dateCell),
         { v: e.jobNumber, style: 'cell' },
@@ -543,6 +559,31 @@ export function timesheetSummarySheet(sheet: Timesheet): Sheet {
     push([{ v: 'What', style: 'header' }, { v: 'Days', style: 'header' }, { v: '', style: 'header' }]);
     for (const [label, count] of extras) {
       push([{ v: label, style: 'cell' }, { v: count, style: 'cell' }, { v: '', style: 'cell' }]);
+    }
+  }
+
+  /*
+   * Every note on the week, in full.
+   *
+   * The timesheet's comments column is one of fifteen across a page, so a long
+   * note wraps and the row can only be so tall before it pushes the week off
+   * the page — which is how a note's last third ended up behind the row below
+   * and payroll rang to ask what it said. Here the column is forty-six wide
+   * and a tall row pushes nothing around, so nothing is cut.
+   */
+  const notes = weekNotes(sheet);
+  if (notes.length) {
+    section('NOTES, IN FULL');
+    push([{ v: 'Day', style: 'header' }, { v: 'Row', style: 'header' }, { v: 'Note', style: 'header' }]);
+    for (const n of notes) {
+      const at = push([
+        field(`${dayName(n.date)} ${formatAuDate(n.date)}`),
+        { v: n.what, style: 'cell' },
+        { v: n.note, style: 'cell' },
+      ]);
+      // As tall as the note needs. Nothing below it is a week to be kept on
+      // one page — this block is the last thing on the sheet.
+      rowHeights[at] = 18 + 14 * Math.max(0, Math.ceil(n.note.length / 44) - 1);
     }
   }
 

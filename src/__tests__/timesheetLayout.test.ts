@@ -236,3 +236,169 @@ describe('the lines that were being cut off', () => {
     expect(head).not.toContain('<Chip');
   });
 });
+
+/**
+ * The day card's buttons, measured.
+ *
+ * Every number here came off the bundled Manrope 700 at the 17dp the label is
+ * actually drawn in, in the width the layout actually leaves: a 360dp phone —
+ * the width most Android handsets are — minus the Screen's 16dp either side
+ * and the Card's 16dp either side is 296dp.
+ */
+describe('the day card’s actions on the phone the week is filled in on', () => {
+  const PHONE = 360;
+  const CARD = PHONE - 16 * 2 - 16 * 2; // Screen padding, then Card padding.
+  const GAP = 8;
+
+  /** Manrope 700 at 17dp, measured off the TTF. */
+  const TEXT = {
+    'Add a job': 74.9,
+    'Copy previous day': 151.6,
+    'Copy a day': 89.4,
+    'Day off': 58.0,
+    previous: 72.0,
+  } as const;
+
+  /** The block of JSX the three actions are laid out in. */
+  const tileBlock = () => {
+    const from = timesheet.indexOf('Two rows on purpose');
+    expect(from).toBeGreaterThan(0);
+    return timesheet.slice(from, from + 1200);
+  };
+
+  const sized = (label: keyof typeof TEXT) => 14 + 20 + GAP + TEXT[label] + 14;
+  const filled = (label: keyof typeof TEXT) => 10 + 20 + GAP + TEXT[label] + 10;
+
+  it('is 296dp of card on a 360dp phone', () => {
+    expect(CARD).toBe(296);
+  });
+
+  it('shows why the old row could not hold two of them', () => {
+    // This is the fault, as arithmetic: the two tiles sized to their own
+    // labels came to more than the card had, so the second wrapped — on every
+    // day of every week.
+    expect(sized('Add a job') + GAP + sized('Copy previous day')).toBeGreaterThan(CARD);
+  });
+
+  it('gives the one anybody presses the whole row', () => {
+    const tiles = tileBlock();
+    expect(tiles).toMatch(/label="Add a job"[\s\S]{0,80}primary fill/);
+  });
+
+  it('puts the two occasional ones on a row of their own, each half', () => {
+    const tiles = tileBlock();
+    expect(tiles).toMatch(/flexDirection: 'row', gap: t\.space\(2\)/);
+    expect(tiles).toMatch(/label="Copy a day"[\s\S]{0,80}fill/);
+  });
+
+  it('and each half holds its label without wrapping on a 360dp phone', () => {
+    const half = (CARD - GAP) / 2;
+    expect(filled('Copy a day')).toBeLessThanOrEqual(half);
+    expect(filled('Day off')).toBeLessThanOrEqual(half);
+    // The label it replaced could not, which is why it was shortened.
+    expect(filled('Copy previous day')).toBeGreaterThan(half);
+  });
+
+  it('wraps rather than truncating where even a half is too narrow', () => {
+    /*
+     * On a 320dp phone a half is 124dp, which leaves 76dp of label — less than
+     * "Copy a day" at 89.4. It wraps to two lines, which the tile has room for,
+     * and the longest word still fits on one of them. An action whose words
+     * are cut is an action somebody has to guess at.
+     */
+    const narrowHalf = (320 - 16 * 2 - 16 * 2 - GAP) / 2;
+    expect(narrowHalf).toBe(124);
+    expect(filled('Copy a day')).toBeGreaterThan(narrowHalf);
+    // Both words of it fit on a line of their own, so the wrap is a wrap and
+    // not a hyphenless break through the middle of a word.
+    expect(10 + 20 + GAP + 43.0 + 10).toBeLessThanOrEqual(narrowHalf); // "Copy"
+    expect(10 + 20 + GAP + 33.0 + 10).toBeLessThanOrEqual(narrowHalf); // "day"
+    expect(timesheet).toContain("flexShrink: 1 }}>{label}</Txt>");
+    expect(timesheet).not.toMatch(/numberOfLines=\{1\}[\s\S]{0,40}\{label\}/);
+  });
+
+  it('a filled tile is still 48dp of target', () => {
+    const tile = timesheet.slice(timesheet.indexOf('function TileButton'), timesheet.indexOf('function TileButton') + 1600);
+    expect(tile).toContain('minHeight: 48');
+  });
+});
+
+describe('the job sheet that opens over the week', () => {
+  it('sits inside the insets, like every other screen', () => {
+    /*
+     * presentationStyle="pageSheet" is honoured on iOS and ignored on Android,
+     * where this is a full-screen modal — so "Pick a job" sat under the status
+     * bar and the end of the list ran under the gesture bar. Screen does this
+     * for the rest of the app; this sheet is the one view that does not go
+     * through it.
+     */
+    const sheet = timesheet.slice(timesheet.indexOf('<Modal visible={visible}'), timesheet.indexOf('</Modal>'));
+    expect(sheet).toContain('<SafeAreaView');
+    expect(sheet).toMatch(/edges=\{\['top', 'bottom', 'left', 'right'\]\}/);
+    expect(sheet).not.toMatch(/<Modal[\s\S]{0,400}?\n\s*<View style=\{\{ flex: 1, backgroundColor: t\.color\.bg \}\}>/);
+  });
+
+  it('takes it from the same library the rest of the app uses', () => {
+    expect(timesheet).toContain("import { SafeAreaView } from 'react-native-safe-area-context';");
+  });
+});
+
+/**
+ * A day that is marked off and has hours on it.
+ *
+ * The leave and the jobs were the two arms of a ternary, so a day carrying
+ * both drew the leave picker and stopped drawing the jobs. The chip above
+ * still said "8 h", the workbook still printed the job and the leave, and the
+ * hours were invisible on the only device that could correct them — sixteen
+ * hours to payroll and a leave picker on the phone.
+ *
+ * Copy previous day was the way in and no longer brings leave across (see
+ * timesheet.test.ts), but it was never the only one: entries are stored, they
+ * come off the clock, and a sheet half-filled on another device is the case
+ * this app is built around. A view that can hide hours is the fault.
+ */
+describe('a day the sheet says is both', () => {
+  const card = () => {
+    const from = timesheet.indexOf('A day that holds both is drawn as both');
+    expect(from).toBeGreaterThan(0);
+    return timesheet.slice(from, from + 2600);
+  };
+
+  it('does not choose between the leave and the jobs', () => {
+    // Neither is inside the other's branch any more: the jobs are mapped
+    // unconditionally and the leave block is its own test.
+    const body = card();
+    expect(body).toMatch(/\{jobs\.map\(\(e\) => \(/);
+    expect(body).not.toMatch(/\) : \(\s*<>\s*\{jobs\.map/);
+  });
+
+  it('says out loud that payroll gets both, and what the day comes to', () => {
+    const body = card();
+    expect(body).toMatch(/leave && jobs\.length \? \(\s*<Banner/);
+    expect(body).toContain('Payroll gets both');
+  });
+
+  it('shows both chips in the header rather than one standing in for the day', () => {
+    const head = timesheet.slice(timesheet.indexOf('Both chips where the day carries both'), timesheet.indexOf('A day that holds both is drawn as both'));
+    expect(head).toMatch(/worked > 0 \? <Chip label=\{`\$\{worked\} h`\}/);
+    expect(head).toMatch(/\{leave \? <Chip label=\{LEAVE_LABEL\[leave\.kind\]\}/);
+  });
+
+  it('offers a way to take the leave off a day that was worked', () => {
+    expect(card()).toContain('I worked this day — take the leave off');
+  });
+
+  it('still lets a job be added to a day that is marked off', () => {
+    /*
+     * Half a day's sick leave and an afternoon on site is an ordinary thing
+     * and the sheet had no way to say it: the tiles were inside the else arm,
+     * so a day with leave on it offered nothing but the leave picker. The Add
+     * tile is unconditional now, and only the two occasional ones are gated.
+     */
+    const from = timesheet.indexOf('Two rows on purpose');
+    const block = timesheet.slice(from, from + 1200);
+    expect(block).toMatch(/<TileButton icon="plus" label="Add a job"[\s\S]{0,80}primary fill \/>/);
+    // Gated, by name, so this reads as a decision rather than an accident.
+    expect(block).toMatch(/\(canDuplicate \|\| !jobs\.length\) && !leave \?/);
+  });
+});

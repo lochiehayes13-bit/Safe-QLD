@@ -325,10 +325,29 @@ describe('copying the previous day', () => {
     expect(entries[0]!.extras).toEqual(['Travel']);
   });
 
-  it('copies a day off too, because the button says the day', () => {
+  it('leaves a day off behind, which the button’s own alert already claimed', () => {
+    /*
+     * This asserted the opposite, on the reasoning that the button says the
+     * day. The screen's alert said otherwise — "Tuesday is a day off, so there
+     * is nothing to bring across" — and could never print, because the filter
+     * it described had not been written.
+     *
+     * What the old behaviour produced: copy a day off onto a day that already
+     * had a job on it and the day held both. The day card drew the leave and
+     * stopped drawing the job, so sixteen hours went onto the payroll file
+     * while the phone showed a leave picker and no hours at all. Nobody
+     * presses Copy previous day meaning "I was off again".
+     */
     const entries = [setLeave(blankEntry('x', '2026-09-07'), 'annual', 7.6)];
-    const [copied] = copyDay(entries, '2026-09-07', '2026-09-08', ids);
-    expect(copied).toMatchObject({ annual: '7.6', date: '2026-09-08' });
+    expect(copyDay(entries, '2026-09-07', '2026-09-08', ids)).toEqual([]);
+  });
+
+  it('brings the worked rows across from a day that was partly off', () => {
+    // A day that somehow holds both: the work copies, the leave does not.
+    const entries = [day('2026-09-07'), setLeave(blankEntry('l', '2026-09-07'), 'annual', 7.6)];
+    const copied = copyDay(entries, '2026-09-07', '2026-09-08', ids);
+    expect(copied.map((c) => ({ job: c.jobNumber, annual: c.annual })))
+      .toEqual([{ job: '43747', annual: '' }]);
   });
 
   it('finds the nearest earlier day that has entries', () => {
