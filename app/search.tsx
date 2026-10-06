@@ -15,7 +15,7 @@ import { officeEmptyState, type EmptyStateWords } from '@/domain/deviceData';
 import { describeLoadFailure } from '@/domain/loadFailure';
 import { everSynced } from '@/simpro/watermark';
 import { useTheme } from '@/theme';
-import { Banner, Card, Chip, EmptyState, IconPlate, Rowed, Screen, SearchBox, Txt } from '@/components/ui';
+import { Banner, Button, Card, Chip, EmptyState, IconPlate, Rowed, Screen, SearchBox, Txt } from '@/components/ui';
 import { Bounce, Reveal } from '@/components/motion';
 
 /**
@@ -182,7 +182,14 @@ export default function SearchScreen() {
           {hits === null && !failed ? <Hints onPick={setTyped} /> : null}
 
           {groups.map((g, gi) => (
-            <Group key={g.kind} group={g} index={gi} exactOf={(h) => isExact(h, parsed)} capped={g.hits.length >= PER_KIND} />
+            <Group
+              key={g.kind}
+              group={g}
+              index={gi}
+              exactOf={(h) => isExact(h, parsed)}
+              capped={g.hits.length >= PER_KIND}
+              term={parsed.text}
+            />
           ))}
 
           {screens.length ? <Screens hits={screens} /> : null}
@@ -257,8 +264,8 @@ function Hints({ onPick }: { onPick: (example: string) => void }) {
   );
 }
 
-function Group({ group, index, exactOf, capped }: {
-  group: HitGroup; index: number; exactOf: (h: SearchHit) => boolean; capped: boolean;
+function Group({ group, index, exactOf, capped, term }: {
+  group: HitGroup; index: number; exactOf: (h: SearchHit) => boolean; capped: boolean; term: string;
 }) {
   const t = useTheme();
   return (
@@ -270,7 +277,26 @@ function Group({ group, index, exactOf, capped }: {
           <Chip label={capped ? `first ${group.hits.length}` : String(group.hits.length)} />
         </Rowed>
         {group.hits.map((h) => <HitRow key={`${h.kind}-${h.id}`} hit={h} exact={exactOf(h)} />)}
-        {capped ? <Txt size="xs" tone="faint">More may match. Add a word, or the kind in front of a number.</Txt> : null}
+        {capped ? (
+          <>
+            <Txt size="xs" tone="faint">More may match. Add a word, or the kind in front of a number.</Txt>
+            {/*
+              * And somewhere to go for the rest, for the kinds that have a
+              * list of their own. "More may match" with no way to see them is
+              * a cut that has been announced rather than fixed: the Sites tab
+              * draws three hundred of the same search, so it takes the words
+              * across rather than making somebody type them again.
+              */}
+            {group.kind === 'site' && term ? (
+              <Button
+                title="See all the sites that match"
+                variant="ghost"
+                compact
+                onPress={() => router.push({ pathname: '/(tabs)/sites', params: { q: term } })}
+              />
+            ) : null}
+          </>
+        ) : null}
       </View>
     </Reveal>
   );

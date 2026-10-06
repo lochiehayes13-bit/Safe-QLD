@@ -26,6 +26,18 @@ import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure
 import { showAlert } from '@/components/alert';
 
 /**
+ * How many site matches the "Which site?" chips offer.
+ *
+ * Four, and silent about it, until the owner pointed out that a site he
+ * services could not be found anywhere in the app. Four chips drawn from
+ * however many matched, with nothing to say the list had been cut, is the same
+ * fault as a list with no search on it: somebody types a client name, sees
+ * four of their eleven buildings, and has no way of knowing the other seven
+ * are there. Raised, and said out loud when it bites.
+ */
+const SITE_SUGGESTIONS = 8;
+
+/**
  * Things I need — the parts list a technician keeps on the run.
  *
  * The note that is currently written on a dash, in a phone's notes app, or on
@@ -62,6 +74,14 @@ export default function NeedsScreen() {
   const [note, setNote] = useState('');
   const [detail, setDetail] = useState(false);
   const [siteText, setSiteText] = useState('');
+  /*
+   * How many sites the typed words actually match, which is not how many are
+   * offered. Four chips were drawn and nothing said there were eleven: three
+   * of this company's sites are called "Storage Choice - Sumner Park" and
+   * typing "Storage" offered four of them with no way to know the rest
+   * existed. A silent cut is the same fault as no search at all.
+   */
+  const [siteMatches, setSiteMatches] = useState(0);
   const [siteId, setSiteId] = useState<string>();
   const [siteName, setSiteName] = useState<string>();
   const [partNumber, setPartNumber] = useState<string>();
@@ -121,14 +141,17 @@ export default function NeedsScreen() {
     const timer = setTimeout(() => {
       void (async () => {
         if (siteName || term.length < 3) {
-          if (live) setSites([]);
+          if (live) { setSites([]); setSiteMatches(0); }
           return;
         }
         try {
-          const page = await listSiteSummaries({ query: term, limit: 4 });
-          if (live) setSites(page.rows.map((s) => ({ id: s.id, name: s.name, suburb: s.suburb })));
+          const page = await listSiteSummaries({ query: term, limit: SITE_SUGGESTIONS });
+          if (live) {
+            setSites(page.rows.map((s) => ({ id: s.id, name: s.name, suburb: s.suburb })));
+            setSiteMatches(page.matching);
+          }
         } catch {
-          if (live) setSites([]);
+          if (live) { setSites([]); setSiteMatches(0); }
         }
       })();
     }, 250);
@@ -152,6 +175,7 @@ export default function NeedsScreen() {
     setPartNumber(undefined);
     setParts([]);
     setSites([]);
+    setSiteMatches(0);
     setDetail(false);
   };
 
@@ -410,6 +434,11 @@ export default function NeedsScreen() {
                   />
                 ))}
               </Rowed>
+              {siteMatches > sites.length ? (
+                <Txt size="xs" tone="faint">
+                  {sites.length} of {siteMatches.toLocaleString()} matches. Add the suburb or the client to narrow it.
+                </Txt>
+              ) : null}
             </View>
           ) : null}
 

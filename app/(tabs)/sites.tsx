@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, RefreshControl, TextInput, View } from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { listSiteSummaries, type SiteSummary, type SiteSummaryPage } from '@/db/repo';
 import { useTheme } from '@/theme';
@@ -30,10 +30,18 @@ const PAGE = 300;
 
 export default function SitesScreen() {
   const t = useTheme();
+  /*
+   * Arrived from the global search, which shows the first eight sites of
+   * however many matched and had nowhere to send somebody for the rest. The
+   * words come across so the tab opens on the same search rather than on three
+   * thousand buildings and a cursor.
+   */
+  const params = useLocalSearchParams<{ q?: string }>();
+  const arrived = typeof params.q === 'string' ? params.q : '';
   const [page, setPage] = useState<SiteSummaryPage | null>(null);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [query, setQuery] = useState('');
+  const [search, setSearch] = useState(arrived);
+  const [query, setQuery] = useState(arrived);
   // What an empty list means here: a device nobody connected to the office is
   // not the same as one with nothing in it, and saying "add your first site"
   // to the first sends a person to type in a building the office already has.

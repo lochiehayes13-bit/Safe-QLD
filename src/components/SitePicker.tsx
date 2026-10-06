@@ -10,12 +10,17 @@ import { siteIsArchived } from '@/domain/siteNames';
  * How many matches the picker draws, and how many it offers before anything is
  * typed.
  *
- * Named, and said on screen when it bites. Thirty rows cut silently from a
- * search is the same fault as a list with no search: somebody types a client
- * name, sees thirty of their forty sites, and has no way of knowing the other
- * ten exist.
+ * Named, and said on screen when it bites. Rows cut silently from a search are
+ * the same fault as a list with no search: somebody types a client name, sees
+ * thirty of their forty sites, and has no way of knowing the other ten exist.
+ *
+ * It was thirty, which is below the number of sites a single client on this
+ * book has. The cut is cheap to raise — these rows are already in memory,
+ * fetched by the screen that opened the picker — and a cut that bites is worth
+ * avoiding even when it is disclosed, because the line under the list is read
+ * by nobody who has already found what they wanted.
  */
-const PICKER_MATCHES = 30;
+const PICKER_MATCHES = 60;
 const PICKER_SUGGESTIONS = 8;
 
 /**
