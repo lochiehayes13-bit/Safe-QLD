@@ -977,9 +977,23 @@ export async function listQuotePage(q: {
   if (q.siteId) { where.push('siteId = ?'); args.push(q.siteId); }
   if (q.customerExternalId) { where.push('customerExternalId = ?'); args.push(q.customerExternalId); }
   for (const word of (q.query ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean)) {
-    const like = `%${word.replace(/^#/, '').replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-    where.push(`(${QUOTE_SEARCH_COLUMNS.map((c) => `${c} LIKE ? ESCAPE '\\'`).join(' OR ')})`);
+    const bare = word.replace(/^#/, '');
+    const like = `%${bare.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    /*
+     * And the building, so the two faces of the quote switch agree.
+     *
+     * The office's quotes and the ones priced on this phone sit behind one
+     * Segmented control and had different ideas of what finding a quote
+     * means: this side matched the site's name as the office wrote it onto
+     * the quote, and nothing else about the building. A technician who found
+     * a quote by typing a suburb on one tab and nothing on the other is
+     * looking at one screen that contradicts itself.
+     */
+    const site = siteSearchClause(bare, 's');
+    where.push(`(${QUOTE_SEARCH_COLUMNS.map((c) => `${c} LIKE ? ESCAPE '\\'`).join(' OR ')}${site
+      ? ` OR siteId IN (SELECT s.id FROM site s WHERE ${site.where})` : ''})`);
     for (const _ of QUOTE_SEARCH_COLUMNS) args.push(like);
+    args.push(...(site?.args ?? []));
   }
   const clause = `WHERE ${where.join(' AND ')}`;
   const order = "ORDER BY COALESCE(dateModified, dateIssued, '') DESC";

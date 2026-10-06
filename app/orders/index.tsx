@@ -102,7 +102,7 @@ export default function OrdersScreen() {
       <Stack.Screen options={{ title }} />
       <Screen scroll={false} padded={false}>
         <View style={{ padding: t.space(4), paddingBottom: t.space(2), gap: t.space(2) }}>
-          <SearchBox value={typed} onChange={setTyped} placeholder="Order number, supplier, reference or job" />
+          <SearchBox value={typed} onChange={setTyped} placeholder="Order, supplier, reference, job, site or suburb" />
           <Segmented
             value={filter}
             onChange={setFilter}

@@ -122,7 +122,7 @@ export default function InvoicesScreen() {
       <Stack.Screen options={{ title: scope ? `Invoices ${scope}` : 'Invoices' }} />
       <Screen scroll={false} padded={false}>
         <View style={{ padding: t.space(4), paddingBottom: t.space(2), gap: t.space(2) }}>
-          <SearchBox value={query} onChange={setQuery} placeholder="Invoice, job number, customer or site" />
+          <SearchBox value={query} onChange={setQuery} placeholder="Invoice, job number, customer, site or suburb" />
           <Segmented
             value={filter}
             onChange={setFilter}

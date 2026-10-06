@@ -140,7 +140,7 @@ export default function JobsScreen() {
       <Stack.Screen options={{ title: scope ? `Jobs ${scope}` : 'Jobs' }} />
       <Screen scroll={false} padded={false}>
         <View style={{ padding: t.space(4), paddingBottom: t.space(2), gap: t.space(2) }}>
-          <SearchBox value={typed} onChange={setTyped} placeholder="Job number, site or customer" />
+          <SearchBox value={typed} onChange={setTyped} placeholder="Job number, site, suburb, client or customer" />
           <Segmented
             value={filter}
             onChange={setFilter}

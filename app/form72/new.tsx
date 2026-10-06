@@ -308,7 +308,7 @@ export default function NewForm72Screen() {
 
       {loadError ? <Banner tone="warn" title="The job list did not load" body={loadError} /> : null}
 
-      <SearchBox value={typed} onChange={setTyped} placeholder="Job number, site or customer" />
+      <SearchBox value={typed} onChange={setTyped} placeholder="Job number, site, suburb, client or customer" />
       <Segmented
         value={mode}
         onChange={setMode}

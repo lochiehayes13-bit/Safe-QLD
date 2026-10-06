@@ -86,7 +86,7 @@ export default function ContactsScreen() {
       <Stack.Screen options={{ title: scope ? `People ${scope}` : 'Contacts' }} />
       <Screen scroll={false} padded={false}>
         <View style={{ padding: t.space(4), paddingBottom: t.space(2), gap: t.space(2) }}>
-          <SearchBox value={typed} onChange={setTyped} placeholder="Name, number, email, role or department" />
+          <SearchBox value={typed} onChange={setTyped} placeholder="Name, number, email, role, site or customer" />
           {rows ? (
             <Txt size="xs" tone="faint">
               {rows.length >= PAGE ? `First ${PAGE} shown. Search to narrow.` : `${rows.length} ${rows.length === 1 ? 'person' : 'people'}${scope ? ` ${scope}` : ''}`}

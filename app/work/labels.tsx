@@ -356,7 +356,7 @@ export default function LabelsScreen() {
                   <TextInput
                     value={search}
                     onChangeText={setSearch}
-                    placeholder="Search sites, clients, references"
+                    placeholder="Name, suburb, address, postcode, client or number"
                     placeholderTextColor={t.color.textFaint}
                     autoCapitalize="none"
                     style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md }}

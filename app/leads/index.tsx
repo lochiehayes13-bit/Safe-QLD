@@ -76,7 +76,7 @@ export default function LeadsScreen() {
       <Stack.Screen options={{ title: 'Leads' }} />
       <Screen scroll={false} padded={false}>
         <View style={{ padding: t.space(4), paddingBottom: t.space(2), gap: t.space(2.5) }}>
-          <SearchBox value={typed} onChange={setTyped} placeholder="Lead, customer or site" />
+          <SearchBox value={typed} onChange={setTyped} placeholder="Lead, customer, site or suburb" />
           {stages.length ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2) }}>
               <Chip label="All stages" selected={!stage} onPress={() => setStage(undefined)} />

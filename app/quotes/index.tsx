@@ -220,7 +220,7 @@ export default function QuotesScreen() {
         and the rate card.
       </Txt>
 
-      <SearchBox value={typed} onChange={setTyped} placeholder="Quote number, site, suburb or client" />
+      <SearchBox value={typed} onChange={setTyped} placeholder="Quote number, site, suburb, client or address" />
       {page && page.total ? (
         <Txt size="xs" tone="faint">
           {page.matching.toLocaleString()} of {page.total.toLocaleString()} quote{page.total === 1 ? '' : 's'}

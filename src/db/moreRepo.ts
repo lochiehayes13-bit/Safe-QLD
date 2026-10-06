@@ -5,6 +5,7 @@ import type {
   SimproCustomerPayment, SimproLead, SimproNamedRef, SimproOfficeContact, SimproPaymentInvoice, SimproSetupActivity,
   SimproTimesheetRow, SimproVendor, SimproVendorOrder, SimproVendorOrderLine, SimproVendorOrderLineKind,
 } from '@/simpro/moreResources';
+import { siteSearchClause } from '@/domain/siteSearch';
 
 /**
  * The v23 mirror on the phone: purchase orders and their lines, suppliers,
@@ -54,8 +55,19 @@ function searchWords(query: string | undefined): string[] {
  * JSON.stringify produces for the object below and what refMarker finds.
  */
 const refJson = (refs: readonly SimproNamedRef[]): string => JSON.stringify(refs.map((r) => ({ id: r.id, name: r.name })));
-const refMarker = (id: string): string => `%${JSON.stringify({ id })
-  .replace(/}$/, '')}%`;
+/**
+ * The two halves of the text a ref's id appears as inside one of those JSON
+ * columns, either side of the id itself.
+ *
+ * Taken from JSON.stringify rather than typed out, so the marker and the SQL
+ * below cannot drift from what refJson actually writes. An id holding a LIKE
+ * wildcard would widen the match rather than narrow it; the office's ids are
+ * numbers.
+ */
+const REF_ID_OPEN = JSON.stringify({ id: '' }).slice(0, -2);
+const REF_ID_CLOSE = '"';
+
+const refMarker = (id: string): string => `%${REF_ID_OPEN}${id}${REF_ID_CLOSE}%`;
 
 // ---------------------------------------------------------------------------
 // Purchase orders
@@ -266,8 +278,22 @@ function vendorOrderWhere(query: string, options: VendorOrderFilter): { where: s
   if (options.openOnly) where.push(OPEN_ORDER);
   for (const word of searchWords(query)) {
     const like = `%${word}%`;
-    where.push('(externalId LIKE ? OR reference LIKE ? OR vendorName LIKE ? OR quoteNo LIKE ? OR jobExternalId LIKE ?)');
-    args.push(like, like, like, like, like);
+    /*
+     * And the building the order is for, through the job it is raised against.
+     *
+     * The clause reached the order number, the reference, the supplier, the
+     * quote number and the job number, and said nothing about where the parts
+     * are going — so "what have we got on order for Barren Heights" could not
+     * be asked, of a module whose whole purpose is answering that. The order
+     * names a job and the job names a site, which is the path the list already
+     * walks to print the site on the row.
+     */
+    const site = siteSearchClause(word, 's');
+    where.push(`(externalId LIKE ? OR reference LIKE ? OR vendorName LIKE ? OR quoteNo LIKE ? OR jobExternalId LIKE ?
+      OR jobExternalId IN (
+        SELECT j.externalId FROM job j LEFT JOIN site s ON s.id = j.siteId
+        WHERE j.externalId IS NOT NULL AND (j.siteName LIKE ?${site ? ` OR ${site.where}` : ''})))`);
+    args.push(like, like, like, like, like, like, ...(site?.args ?? []));
   }
   return { where, args };
 }
@@ -614,9 +640,23 @@ export async function searchContacts(query: string, options: { siteExternalId?: 
      * the same reason: a join would be a second definition of what a contact's
      * site is.
      */
-    where.push('(name LIKE ? OR email LIKE ? OR workPhone LIKE ? OR cellPhone LIKE ? OR altPhone LIKE ? '
-      + 'OR position LIKE ? OR department LIKE ? OR sitesJson LIKE ? OR customersJson LIKE ? OR externalId = ?)');
+    /*
+     * And the building itself, not only the name written into the JSON.
+     *
+     * Matching the column as text finds the site by the name it had when the
+     * contact was last synced, which leaves out the suburb, the postcode, the
+     * managing agent and the office's site number — and loses the person
+     * entirely once the office renames the building. The ref carries the
+     * office's site id, so this walks it to the site row and asks
+     * siteSearchClause, the same as every other module.
+     */
+    const site = siteSearchClause(word, 's');
+    where.push(`(name LIKE ? OR email LIKE ? OR workPhone LIKE ? OR cellPhone LIKE ? OR altPhone LIKE ?
+      OR position LIKE ? OR department LIKE ? OR sitesJson LIKE ? OR customersJson LIKE ? OR externalId = ?${site
+      ? ` OR EXISTS (SELECT 1 FROM site s WHERE s.externalId IS NOT NULL
+            AND sitesJson LIKE '%' || ? || s.externalId || ? || '%' AND ${site.where})` : ''})`);
     args.push(like, like, like, like, like, like, like, like, like, word);
+    if (site) args.push(REF_ID_OPEN, REF_ID_CLOSE, ...site.args);
   }
   const term = query.trim();
   args.push(`${term}%`, options.limit ?? 50);
@@ -715,8 +755,19 @@ export async function listLeads(filter: { stage?: string; customerExternalId?: s
   if (filter.siteExternalId) { where.push('siteExternalId = ?'); args.push(filter.siteExternalId); }
   for (const word of searchWords(filter.query)) {
     const like = `%${word}%`;
-    where.push('(name LIKE ? OR customerName LIKE ? OR siteName LIKE ? OR externalId = ?)');
-    args.push(like, like, like, word);
+    /*
+     * And the building, through the office's site number the lead carries.
+     *
+     * A lead held the site's name as the office wrote it onto the lead and
+     * nothing else about the building, so a suburb, a postcode, the managing
+     * agent or the number read out over the phone found nothing — while the
+     * sites tab found the building on every one of those. The lead is keyed to
+     * the site by externalId, so that is what this matches on.
+     */
+    const site = siteSearchClause(word, 's');
+    where.push(`(name LIKE ? OR customerName LIKE ? OR siteName LIKE ? OR externalId = ?${site
+      ? ` OR siteExternalId IN (SELECT s.externalId FROM site s WHERE s.externalId IS NOT NULL AND ${site.where})` : ''})`);
+    args.push(like, like, like, word, ...(site?.args ?? []));
   }
   args.push(filter.limit ?? 100);
   const rows = await db.getAllAsync<LeadRow>(

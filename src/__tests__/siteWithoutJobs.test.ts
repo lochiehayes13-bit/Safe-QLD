@@ -14,9 +14,9 @@
  * single module when searching a site, whether there's jobs available or not"
  * — in two modules where the site table was never consulted.
  */
-import { createSite, listSiteSummaries } from '@/db/repo';
+import { createSite, listSiteSummaries, updateSite } from '@/db/repo';
 import { siteFallbackWords } from '@/domain/siteMiss';
-import { searchJobPicks, upsertJob } from '@/db/opsRepo';
+import { listJobPage, searchJobPicks, upsertJob } from '@/db/opsRepo';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openMigrated, type NodeSqliteDb } from './support/nodeSqlite';
@@ -51,6 +51,68 @@ describe('what the job search can and cannot answer', () => {
   it('and finds it by the client too, which the job table has no column for', async () => {
     expect((await listSiteSummaries({ query: 'South Burnett', limit: 20 })).rows.map((r) => r.id))
       .toEqual(['bare']);
+  });
+});
+
+describe('a site that does have a job, found by what the job does not carry', () => {
+  /*
+   * The other half of the complaint, and the one with no empty state to fall
+   * back on. A job carries the site's name and address as the office wrote
+   * them onto it and nothing else about the building — so a technician who
+   * knows a site by its suburb, its postcode, its managing agent or the number
+   * read out over the phone searched the job list and found nothing, while the
+   * sites tab found it on every one of those.
+   *
+   * It matters most in the pickers. A site cannot be booked onto, filed
+   * against or clocked to, so "No job matches that" was the end of it.
+   */
+  beforeEach(async () => {
+    await updateSite('busy', {
+      address: '3 Emsworth Street', suburb: 'Hamilton', postcode: '4007',
+      clientName: 'Pelham Strata Management', siteRef: 'SIMPRO:8812', externalId: '8812',
+    });
+  });
+
+  it.each([
+    ['the suburb', 'Hamilton'],
+    ['the postcode', '4007'],
+    ['the managing agent, who is not the job’s customer', 'Pelham'],
+    ['the office’s site number', '8812'],
+    ['the office’s reference, from the colon', '881'],
+  ])('the job picker finds the site’s job by %s', async (_what, q) => {
+    expect({ q, found: (await searchJobPicks(q, 60)).map((p) => p.externalId) })
+      .toEqual({ q, found: ['43747'] });
+  });
+
+  it.each([
+    ['the suburb', 'Hamilton'],
+    ['the postcode', '4007'],
+    ['the managing agent', 'Pelham'],
+  ])('and so does the job list, on %s', async (_what, q) => {
+    const page = await listJobPage({ filter: 'all', today: '2026-10-06', query: q, limit: 50 });
+    expect({ q, ids: page.rows.map((j) => j.id), matching: page.matching })
+      .toEqual({ q, ids: ['j1'], matching: 1 });
+  });
+
+  it('does not turn a site word into a match for every job', async () => {
+    await upsertJob({
+      id: 'j2', externalId: '43748', siteId: 'bare', siteName: 'Kingaroy Fire Station',
+      title: 'Annual', status: 'scheduled',
+    });
+    expect((await searchJobPicks('Hamilton', 60)).map((p) => p.externalId)).toEqual(['43747']);
+    const page = await listJobPage({ filter: 'all', today: '2026-10-06', query: 'Hamilton', limit: 50 });
+    expect(page.rows.map((j) => j.id)).toEqual(['j1']);
+  });
+
+  it('still needs every word to land in the job list', async () => {
+    const page = await listJobPage({ filter: 'all', today: '2026-10-06', query: 'Hamilton Kingaroy', limit: 50 });
+    expect({ ids: page.rows.map((j) => j.id), matching: page.matching }).toEqual({ ids: [], matching: 0 });
+  });
+
+  it('leaves a site with no job answering nothing, which the empty state is for', async () => {
+    // The bare site's suburb matches no job because it has none. That is the
+    // true answer, and the way through is the card below the empty state.
+    expect(await searchJobPicks('Kingaroy', 60)).toEqual([]);
   });
 });
 

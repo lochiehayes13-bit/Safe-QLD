@@ -6,6 +6,7 @@ import {
 } from '@/domain/outboundWork';
 import type { Defect } from '@/domain/types';
 import { jobIsMine, type JobListFilter } from '@/domain/jobPresentation';
+import { siteSearchClause } from '@/domain/siteSearch';
 import type { WhoseSchedule } from '@/domain/myDay';
 import { QLD_UTC_OFFSET_HOURS } from '@/domain/qldTime';
 import { flushSoon } from '@/simpro/flushSoon';
@@ -335,8 +336,27 @@ export async function listJobPage(q: JobPageQuery): Promise<JobPage> {
   if (q.dayTo) { where.push(`${JOB_QLD_DAY} <= ?`); args.push(q.dayTo); }
 
   for (const word of searchWords(q.query)) {
-    where.push(`(${JOB_SEARCH_COLUMNS.map((c) => `${c} LIKE ? ESCAPE '\\'`).join(' OR ')})`);
+    /*
+     * The job's own columns, and the building it is at.
+     *
+     * A job carries the site's name and address as the office wrote them onto
+     * it, and nothing else about the building — so a technician who knows a
+     * site by its suburb, its postcode, its managing agent or the number read
+     * out over the phone searched the job list and found nothing. The sites
+     * tab finds it on all of those, which is the disagreement the owner's
+     * sentence is about.
+     *
+     * A subquery over site rather than a join, because this query's columns
+     * are unqualified throughout and qualifying every one of them to add a
+     * single OR is a wide change to the list's hottest read. What counts as
+     * matching a site is siteSearchClause's to decide, as it is everywhere
+     * else.
+     */
+    const site = siteSearchClause(word, 's');
+    where.push(`(${JOB_SEARCH_COLUMNS.map((c) => `${c} LIKE ? ESCAPE '\\'`).join(' OR ')}${site
+      ? ` OR siteId IN (SELECT s.id FROM site s WHERE ${site.where})` : ''})`);
     for (const _ of JOB_SEARCH_COLUMNS) args.push(likeWord(word));
+    args.push(...(site?.args ?? []));
   }
 
   if (q.filter === 'mine') {
@@ -433,6 +453,17 @@ export async function searchJobPicks(query: string, limit = 50): Promise<JobPick
   if (!q) return openJobPicks(limit);
   const db = await getDb();
   const like = `%${q}%`;
+  /*
+   * And the building, which is the dead end this picker had.
+   *
+   * Every screen that picks a job searches through here, and a picker has no
+   * way out: a site cannot be booked onto, filed against or clocked to, so
+   * "No job matches that" was the end of it. A technician booking themselves
+   * onto work at a building they know by its suburb, or reading the office's
+   * site number down the phone, got that sentence about a site whose jobs were
+   * sitting right there.
+   */
+  const site = siteSearchClause(q, 's');
   return db.getAllAsync<JobPick>(
     `SELECT externalId, siteName, siteId, status, customerName, title FROM job
      WHERE externalId IS NOT NULL
@@ -440,11 +471,12 @@ export async function searchJobPicks(query: string, limit = 50): Promise<JobPick
          OR LOWER(COALESCE(siteName, '')) LIKE ?
          OR LOWER(COALESCE(customerName, '')) LIKE ?
          OR LOWER(COALESCE(orderNo, '')) LIKE ?
-         OR LOWER(COALESCE(title, '')) LIKE ?)
+         OR LOWER(COALESCE(title, '')) LIKE ?
+         ${site ? `OR siteId IN (SELECT s.id FROM site s WHERE ${site.where})` : ''})
      ORDER BY CASE WHEN ${JOB_IS_OPEN} THEN 0 ELSE 1 END,
               COALESCE(dateModified, scheduledFor, '') DESC
      LIMIT ?`,
-    like, like, like, like, like, limit,
+    like, like, like, like, like, ...(site?.args ?? []), limit,
   );
 }
 

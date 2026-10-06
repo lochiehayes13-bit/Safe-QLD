@@ -1107,7 +1107,7 @@ function JobPicker({
         <View style={{ paddingHorizontal: t.space(4) }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.space(2), backgroundColor: t.color.surface, borderWidth: 1, borderColor: t.color.border, borderRadius: t.radius.pill, paddingHorizontal: t.space(4), minHeight: t.touch }}>
             <MaterialCommunityIcons name="magnify" size={20} color={t.color.textFaint} />
-            <TextInput value={q} onChangeText={setQ} placeholder="Job number, site or client" placeholderTextColor={t.color.textFaint} autoFocus style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md }} />
+            <TextInput value={q} onChangeText={setQ} placeholder="Job number, site, suburb or client" placeholderTextColor={t.color.textFaint} autoFocus style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md }} />
           </View>
         </View>
         <ScrollView contentContainerStyle={{ padding: t.space(4), gap: t.space(2) }}>
