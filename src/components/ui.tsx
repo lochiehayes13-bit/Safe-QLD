@@ -435,15 +435,36 @@ export function Segmented<T extends string>({
             }}
             style={{
               flex: 1,
-              minHeight: 42,
+              // 44, not 42. This is the control behind every result picker,
+              // every three-state question and Part G's outcome boxes — about
+              // fifteen of them on one Form 72, including the two that decide
+              // whether an occupier is handed a statutory notice — and two
+              // comments in this file already assert a 44dp floor because
+              // these are pressed with gloves on. It was the one control under
+              // it.
+              minHeight: 44,
               alignItems: 'center',
               justifyContent: 'center',
+              paddingHorizontal: 2,
               borderRadius: t.radius.sm,
               backgroundColor: active ? t.color.accent : 'transparent',
             }}
           >
             <Text
               numberOfLines={1}
+              /*
+               * Shrinks rather than clips.
+               *
+               * Three segments on a 320dp handset leave about 83dp each after
+               * the screen's and the card's padding, and "Not answered" at
+               * 14px is about 88dp — so the unanswered option, the third state
+               * the model goes to some length to keep, was the one that got
+               * cut off. Cutting it off is worse than any of the three states
+               * being hard to read, because it is the state a technician has
+               * to recognise to leave a statutory question alone.
+               */
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
               style={[
                 { color: active ? t.color.onAccent : t.color.textMuted, fontSize: t.font.size.sm },
                 typeFor(t, active ? '700' : '500'),

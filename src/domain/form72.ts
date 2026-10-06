@@ -291,6 +291,19 @@ export function flowRowDevices(
   return { known, unknown };
 }
 
+/**
+ * Whether any pressure has actually been read on this row.
+ *
+ * Distinct from flowRowUntouched, which also counts the device named against
+ * the row — so a row with a meter chosen and no readings is touched but unread,
+ * and that is exactly the row the page marks "Not recorded" in red. The screen
+ * needs to be able to say so while the technician is still standing there.
+ */
+export function flowRowRead(row: FlowRow): boolean {
+  return row.hydrant1Kpa !== undefined || row.hydrants12Kpa !== undefined
+    || row.hydrants123Kpa !== undefined || row.hydrants1234Kpa !== undefined;
+}
+
 /** True where the technician put nothing at all on this line. */
 export function flowRowUntouched(row: FlowRow): boolean {
   return !row.devices?.trim()

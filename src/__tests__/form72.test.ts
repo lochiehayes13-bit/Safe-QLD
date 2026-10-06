@@ -15,6 +15,7 @@ import {
   flowRowColumnsRun, flowRowDevices, flowRowLabel, form72DefectForRegister, unraisedDefects,
   sprinklerTestPointLines, sprinklerTestPointUntouched,
   PART_D_NOZZLE_SIZES_MM, PART_D_ROWS, canIssue, deviceCalibration, emptyForm72, intervalsTested,
+  flowRowRead, flowRowUntouched,
   maintenanceTestCell, maintenanceTestFromAxes, overloadCheck, resolveFrictionalLoss,
   systemTypesTested, validateForm72,
   type FlowDeviceKind, type FlowRow, type Form72, type MaintenanceTest, type TestDevice,
@@ -1548,6 +1549,54 @@ describe('Part A as the two questions it really is', () => {
   it('reports nothing ticked as neither axis answered', () => {
     expect(systemTypesTested(grid())).toEqual([]);
     expect(intervalsTested(grid())).toEqual([]);
+  });
+});
+
+describe('a Part D row with a meter named and nothing read', () => {
+  /*
+   * Naming the meter is what turns the page's quiet "Not run" into red "Not
+   * recorded" — the reasoning is right, since a row somebody set up and did
+   * not read is a gap — but on screen the only sign was a chip disappearing.
+   * A technician who taps the meter down the column first and then reads has
+   * created red cells for every row they do not reach.
+   */
+  it('is touched, so the page marks it rather than passing over it', () => {
+    expect(flowRowUntouched({ nozzleMm: 19, devices: 'SQF-001' })).toBe(false);
+    expect(flowRowRead({ nozzleMm: 19, devices: 'SQF-001' })).toBe(false);
+  });
+
+  it('is untouched, and unread, with neither', () => {
+    expect(flowRowUntouched({ nozzleMm: 19, devices: '' })).toBe(true);
+    expect(flowRowRead({ nozzleMm: 19, devices: '' })).toBe(false);
+  });
+
+  it('counts as read on any one of the four columns', () => {
+    for (const key of ['hydrant1Kpa', 'hydrants12Kpa', 'hydrants123Kpa', 'hydrants1234Kpa']) {
+      expect({ key, read: flowRowRead({ nozzleMm: 19, devices: '', [key]: 500 }) })
+        .toEqual({ key, read: true });
+    }
+  });
+
+  it('prints the row red once a device is named, which is what the chip warns about', () => {
+    const html = form72Html(doc({
+      form: issuable({
+        flowTest: {
+          result: 'pass', hydrantLocations: [], rows: [{ nozzleMm: 19, devices: 'SQF-001' }],
+        },
+      }),
+    }));
+    const row = between(html, '19 mm', '22 mm');
+    expect(row).toContain('<span class="missing">');
+  });
+
+  it('leaves the row quiet where no device is named either', () => {
+    const html = form72Html(doc({
+      form: issuable({
+        flowTest: { result: 'pass', hydrantLocations: [], rows: [] },
+      }),
+    }));
+    const row = between(html, '19 mm', '22 mm');
+    expect(row).not.toContain('<span class="missing">');
   });
 });
 

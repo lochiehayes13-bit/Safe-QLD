@@ -23,7 +23,7 @@ import {
   PART_RESULT_LABEL, SYSTEM_TYPE_LABEL, TEST_INTERVAL_LABEL,
   PART_G_PRINTED_TEST_POINTS,
   deviceCalibration, elevationHeadKpa, flowRowDevices, flowRowKey, flowRowLongLabel,
-  flowRowUntouched, form72DefectForRegister,
+  flowRowRead, flowRowUntouched, form72DefectForRegister,
   intervalsTested, maintenanceTestFromAxes, overloadCheck, overloadRun, resolveFrictionalLoss,
   sprinklerTestPointLines, sprinklerTestPointUntouched, systemTypesTested, unraisedDefects,
   validateForm72,
@@ -254,6 +254,21 @@ export default function Form72Screen() {
   }, [id]);
 
   useEffect(() => { void load(); }, [load]);
+
+  /*
+   * Going to a part, from anywhere that offers to.
+   *
+   * The issue lists and the Next button handed setPart straight through while
+   * the part strip cleared Whole form mode as well — so in Whole form mode a
+   * technician tapped an outstanding item, the chevron invited it, the row
+   * responded, and nothing moved, because all ten parts were still rendered.
+   * The point of making those lines pressable was lost in one of the two
+   * modes. One function now, so it cannot be half-done again.
+   */
+  const goToPart = useCallback((p: PartKey) => {
+    setPart(p);
+    setWhole(false);
+  }, []);
 
   const locked = form?.status === 'issued';
 
@@ -678,7 +693,7 @@ export default function Form72Screen() {
           tone="warn"
           title={`${blockers.length} thing${blockers.length === 1 ? '' : 's'} still to do before this can be issued`}
           issues={blockers}
-          onGo={setPart}
+          onGo={goToPart}
         />
       ) : null}
 
@@ -691,7 +706,7 @@ export default function Form72Screen() {
           tone="fail"
           title="Worth a look before you sign"
           issues={cautions}
-          onGo={setPart}
+          onGo={goToPart}
         />
       ) : null}
 
@@ -708,7 +723,7 @@ export default function Form72Screen() {
         form={form}
         issues={issues}
         value={part}
-        onChange={(p) => { setPart(p); setWhole(false); }}
+        onChange={goToPart}
       />
 
       {!locked && (whole || part === 'A') ? (
@@ -731,10 +746,10 @@ export default function Form72Screen() {
         : <PartBody part={part} form={form} locked={!!locked} patch={patch} reload={() => { void load(); }} kinds={kinds} />}
 
       {!whole && !locked ? (
-        <NextPart form={form} part={part} onGo={setPart} />
+        <NextPart form={form} part={part} onGo={goToPart} />
       ) : null}
 
-      {!locked ? <WhatIsLeft form={form} onGo={(p) => { setPart(p); setWhole(false); }} /> : null}
+      {!locked ? <WhatIsLeft form={form} onGo={goToPart} /> : null}
 
       <Divider />
 
@@ -1324,13 +1339,39 @@ function PartB({ form, locked, patch }: PartProps) {
           <NumField label="Test pressure" suffix="kPa" value={h.testPressureKpa} onChange={(v) => set({ testPressureKpa: v })} locked={locked} />
           <NumField label="Duration of test" suffix="mins" value={h.durationMinutes} onChange={(v) => set({ durationMinutes: v })} locked={locked} />
           <NumField label="End of test pressure" suffix="kPa" value={h.endPressureKpa} onChange={(v) => set({ endPressureKpa: v })} locked={locked} />
+          {/*
+            * The pressure drop, and the box below it, are different
+            * quantities in different units.
+            *
+            * This banner read "Dropped 150 kPa over the hold" and the very
+            * next control was the department's "Loss (if any)" in litres per
+            * minute — and validateForm72 makes a pass with a drop blocking
+            * precisely while that box is empty, so the app showed somebody a
+            * kilopascal figure and then told them to fill the box underneath
+            * it. One keystroke put a pressure into a flow box on a form a
+            * licensee signs, and the page printed "150 L/min" with nothing a
+            * reader could use to tell. So the banner says what the figure is
+            * not, and the box says what it wants.
+            */}
           {loss !== undefined ? (
             <Banner
               tone={loss > 0 ? 'warn' : 'pass'}
               title={loss > 0 ? `Dropped ${loss} kPa over the hold` : 'Held pressure'}
+              body={loss > 0
+                ? 'That is the pressure difference, worked out from the two boxes above. It is not '
+                  + 'the figure the next box wants — that one is a leak rate in litres per minute, '
+                  + 'measured, and most hydrostatic tests have none to record.'
+                : undefined}
             />
           ) : null}
-          <NumField label="Loss (if any)" suffix="L/min" value={h.lossLpm} onChange={(v) => set({ lossLpm: v })} locked={locked} />
+          <NumField
+            label="Loss (if any)"
+            suffix="L/min"
+            value={h.lossLpm}
+            onChange={(v) => set({ lossLpm: v })}
+            locked={locked}
+            hint="A measured leak rate, not the kPa drop above. Leave it empty if nothing leaked."
+          />
           <Field
             label="Comments"
             value={h.comments ?? ''}
@@ -1441,9 +1482,30 @@ function TypedField({
   );
 }
 
-/** The column the next device occupies, in the department's own words. */
-function deviceSlotName(index: number): string {
-  return DEPARTMENT_DEVICE_SLOTS[index] ?? `Device/gauge ${index + 1}`;
+/**
+ * The column the next device occupies, in the department's own words.
+ *
+ * Picked as the first of the department's four names nobody is using, not from
+ * the count of devices on the form. From the count, removing the first of two
+ * left the survivor called "Device/gauge 2" while sitting in the first column,
+ * and adding a meter back handed out "Device/gauge 2" a second time — two
+ * devices with one name, on a form where Part D cites its devices by that name
+ * and flowRowDevices resolves a citation to whichever it finds first.
+ *
+ * It does not renumber what is already there. A row in Part D citing
+ * "Device/gauge 2" means the instrument that was called that when the reading
+ * was taken, and renaming a column underneath a reading would quietly
+ * reattribute it.
+ */
+function deviceSlotName(held: readonly TestDevice[]): string {
+  const taken = new Set(held.map((d) => d.slot.trim()).filter(Boolean));
+  const free = DEPARTMENT_DEVICE_SLOTS.find((name) => !taken.has(name));
+  if (free) return free;
+  // Past the department's four columns. The page lists these under the note
+  // that says to put extra devices in the Notes section.
+  let n = DEPARTMENT_DEVICE_SLOTS.length + 1;
+  while (taken.has(`Device/gauge ${n}`)) n += 1;
+  return `Device/gauge ${n}`;
 }
 
 /**
@@ -1662,7 +1724,12 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
         <Card key={`${d.slot}-${i}`}>
           <Rowed>
             <View style={{ flex: 1 }}>
-              <Txt weight="700">{d.slot || deviceSlotName(i)}</Txt>
+              {/* A heading for a device with no stored slot: the department's
+                  name for the column it is sitting in, which is a different
+                  question from what to call the next one added. */}
+              <Txt weight="700">
+                {d.slot || DEPARTMENT_DEVICE_SLOTS[i] || `Device/gauge ${i + 1}`}
+              </Txt>
               {d.model ? <Txt size="xs" tone="faint">{d.model}</Txt> : null}
             </View>
             {cal.issue ? (
@@ -1678,6 +1745,31 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
             ) : null}
           </Rowed>
           <Field label="Serial number" value={d.serialNumber} onChangeText={(v) => setDevice(i, { serialNumber: v })} editable={!locked} />
+          {/*
+            * Gauge or flow meter, which decides how two of the department's
+            * rows read.
+            *
+            * The field existed, the renderer relied on it, and the screen
+            * never showed it — every device added by hand went on as a gauge
+            * with no way to say otherwise. So a borrowed inline meter printed
+            * red "Not recorded" against "65/100/150 mm face" and "Increments
+            * (kPa)": measurements somebody failed to take, for a dial the
+            * instrument does not have. That is the same red-where-nothing-is-
+            * wrong that teaches a reader to skip the red that matters.
+            */}
+          <Segmented
+            value={d.kind ?? 'gauge'}
+            onChange={(v) => setDevice(i, { kind: v })}
+            options={[
+              { value: 'gauge' as const, label: 'Pressure gauge' },
+              { value: 'flow-meter' as const, label: 'Flow meter' },
+            ]}
+          />
+          {(d.kind ?? 'gauge') === 'flow-meter' ? (
+            <Txt size="xs" tone="faint">
+              The dial size and kPa increment rows print as not applicable — a meter has neither.
+            </Txt>
+          ) : null}
           <Field
             label="Calibrated"
             value={d.dateCalibrated ?? ''}
@@ -1870,7 +1962,7 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
                     <Chip
                       label={`+ ${preset.label}`}
                       onPress={() => patch({
-                        devices: [...devices, { slot: deviceSlotName(devices.length), ...preset.device }],
+                        devices: [...devices, { slot: deviceSlotName(devices), ...preset.device }],
                         /*
                          * A measuring element the certificate names goes on with
                          * the device. One it does not name stays the
@@ -1908,7 +2000,7 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
             title="Add a device by hand"
             variant="secondary"
             onPress={() => patch({
-              devices: [...devices, { slot: deviceSlotName(devices.length), serialNumber: '', kind: 'gauge' }],
+              devices: [...devices, { slot: deviceSlotName(devices), serialNumber: '', kind: 'gauge' }],
             })}
           />
         </Card>
@@ -2151,6 +2243,19 @@ function PartD({ form, locked, patch }: PartProps) {
               <Txt weight="700" style={{ flex: 1 }}>{flowRowLongLabel(r)}</Txt>
               {!line.printed ? <Chip label="Not on the printed table" tone="warn" /> : null}
               {untouched ? <Chip label="Nothing read" tone="muted" /> : null}
+              {/*
+                * A row with a meter named on it and no reading is a gap, not a
+                * row nobody ran — and naming the meter is what makes it one.
+                *
+                * flowRowUntouched counts the device string, so tapping a meter
+                * chip down the column before taking any readings turned the
+                * page's quiet "Not run" into red "Not recorded" for every row
+                * reached. The only feedback was the "Nothing read" chip
+                * disappearing. The behaviour is right; it was invisible.
+                */}
+              {!untouched && !flowRowRead(r) ? (
+                <Chip label="Prints as not recorded" tone="warn" />
+              ) : null}
               {!line.printed && !locked && line.index !== undefined ? (
                 <RemoveButton
                   what="flow row"
