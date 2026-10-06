@@ -14,7 +14,7 @@ import {
   PART_G_PRINTED_TEST_POINTS, flowCellState, flowDeviceCalibrationFrom,
   flowRowColumnsRun, flowRowDevices, flowRowLabel, form72DefectForRegister, unraisedDefects,
   sprinklerTestPointLines, sprinklerTestPointUntouched,
-  PART_D_NOZZLE_SIZES_MM, PART_D_ROWS, deviceCalibration, emptyForm72, intervalsTested,
+  PART_D_NOZZLE_SIZES_MM, PART_D_ROWS, canIssue, deviceCalibration, emptyForm72, intervalsTested,
   maintenanceTestCell, maintenanceTestFromAxes, overloadCheck, resolveFrictionalLoss,
   systemTypesTested, validateForm72,
   type FlowDeviceKind, type FlowRow, type Form72, type MaintenanceTest, type TestDevice,
@@ -2660,5 +2660,73 @@ describe('a Form 72 defect on its way to the register', () => {
         { description: '   ', critical: false },
       ],
     }).map((d) => d.description)).toEqual(['Not yet']);
+  });
+});
+
+describe('an issued form reprints as the document that was issued', () => {
+  /*
+   * The stamp and the "Check before issue" box are both built by running
+   * today's validation over the stored form, so both change when the rules
+   * change — and this document is reprinted after issue, by the PDF button and
+   * by the occupier's copy. Every rule added to validateForm72 therefore
+   * reached backwards into forms already signed. The occupier holds one version
+   * of this document and we hold the other; they have to say the same thing.
+   */
+  const spoiled = (over: Partial<Form72> = {}): Form72 => issuable({
+    // A caution today's rules raise and yesterday's did not: a flow row citing
+    // equipment Part C does not list.
+    devices: [{ slot: 'Device/gauge 1', serialNumber: 'SQF-001', dateCalibrated: '2026-07-20' }],
+    flowTest: {
+      result: 'pass', hydrantLocations: ['Booster'],
+      rows: [{ rateLps: 20, devices: 'DG1', hydrant1Kpa: 320 }],
+    },
+    ...over,
+  });
+
+  it('prints no "Check before issue" box once issued', () => {
+    const form = spoiled();
+    // The caution is real — the draft says so.
+    expect(validateForm72(form).some((i) => !i.blocking)).toBe(true);
+    const draft = form72Html(doc({ form, status: 'draft' }));
+    expect(draft).toContain('Check before issue');
+
+    const after = form72Html(doc({ form, status: 'issued', issuedAt: '2026-10-03T01:00:00.000Z' }));
+    expect(after).not.toContain('Check before issue');
+  });
+
+  it('never stamps an issued form DRAFT — NOT FOR ISSUE', () => {
+    // Categorically wrong on it: the stamp exists so a draft is not handed over
+    // as the statutory record, and an issued form is the statutory record.
+    // issueForm72 refused to issue it until it passed the gate, on the day.
+    const blocked = issuable({ licenceNumber: '' });
+    expect(canIssue(blocked)).toBe(false);
+
+    const draft = form72Html(doc({ form: blocked, status: 'draft' }));
+    expect(draft).toContain('DRAFT — NOT FOR ISSUE');
+
+    const after = form72Html(doc({ form: blocked, status: 'issued', issuedAt: '2026-10-03T01:00:00.000Z' }));
+    expect(after).not.toContain('DRAFT — NOT FOR ISSUE');
+    expect(after).not.toContain('NOT FOR ISSUE');
+  });
+
+  it('says instead that it was issued and held unaltered', () => {
+    const after = form72Html(doc({
+      form: issuable(), status: 'issued', issuedAt: '2026-10-03T01:00:00.000Z',
+    }));
+    expect(flat(after)).toContain('Issued 03/10/2026');
+    expect(flat(after)).toContain('held unaltered since');
+  });
+
+  it('treats a caller that does not say as a draft, which is the cautious answer', () => {
+    const html = form72Html({ form: spoiled(), generatedAt: '2026-10-06T02:00:00.000Z' });
+    expect(html).toContain('Check before issue');
+  });
+
+  it('still prints every part exactly as it did, because only the two advisory blocks moved', () => {
+    const form = spoiled();
+    const draft = form72Html(doc({ form, status: 'draft' }));
+    const after = form72Html(doc({ form, status: 'issued', issuedAt: '2026-10-03T01:00:00.000Z' }));
+    const parts = (html: string) => html.slice(html.indexOf('Part A—Test details'), html.indexOf('Part I—Signature'));
+    expect(parts(after)).toBe(parts(draft));
   });
 });

@@ -1563,6 +1563,13 @@ export function form72Html(input: Form72DocumentInput): string {
   const blocking = issues.filter((i) => i.blocking);
   const cautions = issues.filter((i) => !i.blocking);
   const issuable = canIssue(form);
+  /*
+   * Issued, by the caller's own record of it rather than by anything on the
+   * form. A caller that does not say is treated as a draft: the stamp and the
+   * cautions are the cautious answer, and the Form 72 screen and the occupier
+   * email both pass the status.
+   */
+  const issued = input.status === 'issued';
 
   const due = occupierCopyDue(form.testDate);
   const keepUntil = testerCopyKeepUntil(form.testDate);
@@ -1625,7 +1632,29 @@ export function form72Html(input: Form72DocumentInput): string {
   </div>
   <div class="intro">${esc(FORM_INTRO)}</div>
 
-  ${issuable ? '' : `<div class="stamp">
+  ${/*
+     * Neither of these prints on an issued form, and that is a correctness
+     * rule rather than a tidy-up.
+     *
+     * Both are built by running today's validation over the stored form, so
+     * both change when the rules change — and this document is reprinted after
+     * issue, by the PDF button and by the occupier's copy. Every rule added to
+     * validateForm72 therefore reached backwards: a form signed last year,
+     * reprinted today, grew a "Check before issue" line the occupier's copy
+     * does not have, and a rule that blocks would have stamped it DRAFT — NOT
+     * FOR ISSUE. The occupier holds one version of this document and we hold
+     * the other; they have to say the same thing.
+     *
+     * The stamp is categorically wrong on an issued form in any case. It exists
+     * so a draft is not handed over as the statutory record, and an issued form
+     * is the statutory record — issueForm72 refused to issue it until it passed
+     * the gate, and that gate was passed on the day. "Check before issue" on a
+     * form that was issued is advice about a decision already taken.
+     *
+     * What an issued form says about itself instead is in the closing block:
+     * issued on a date and held unaltered since.
+     */''}
+  ${issued || issuable ? '' : `<div class="stamp">
     <h2>DRAFT — NOT FOR ISSUE</h2>
     <div>This form is not complete enough to be given to an occupier or relied on as a record under
       QDC MP 6.1. ${blocking.length} matter${blocking.length === 1 ? '' : 's'} must be resolved
@@ -1633,7 +1662,7 @@ export function form72Html(input: Form72DocumentInput): string {
     <ul>${blocking.map((i) => `<li>Part ${esc(i.part)} — ${esc(i.message)}</li>`).join('')}</ul>
   </div>`}
 
-  ${cautions.length ? `<div class="caution"><b>Check before issue</b><ul>${
+  ${!issued && cautions.length ? `<div class="caution"><b>Check before issue</b><ul>${
   cautions.map((i) => `<li>Part ${esc(i.part)} — ${esc(i.message)}</li>`).join('')}</ul></div>` : ''}
 
   ${issuable && input.status === 'draft' ? `<div class="caution">
