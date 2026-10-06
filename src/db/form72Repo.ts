@@ -367,6 +367,67 @@ export async function listForm72(siteId?: string): Promise<StoredForm72[]> {
   return rows.map(toForm);
 }
 
+/**
+ * How many forms are read back for the equipment list. Well past a year of
+ * hydrant work on this book, and one column of one table.
+ */
+const EQUIPMENT_LOOKBACK_FORMS = 80;
+
+/** A piece of test equipment this phone has recorded before, and when. */
+export interface RememberedDevice {
+  device: Omit<TestDevice, 'slot'>;
+  /** The test date of the form it was last used on, ISO. */
+  lastUsed?: string;
+}
+
+/**
+ * The gauges and meters this phone has recorded before, newest use first.
+ *
+ * Part C is nine fields per instrument — serial, model, calibration date,
+ * certificate, correction factor, dial size, digital reader, increments, and
+ * which basis the date was accepted on — and on nearly every hydrant form they
+ * are the same instruments as last time, typed again. Two of them are presets
+ * (see domain/form72Devices) because they are the company's own flow meters,
+ * transcribed from their certificates. The pressure gauge is the one that
+ * never is: a technician's own, or a borrowed one, typed out in full at a
+ * booster on every form.
+ *
+ * Read back off the forms already on this phone rather than from a new table,
+ * because what is wanted is precisely what this technician typed last time —
+ * not a catalogue somebody has to maintain. No migration, and nothing to go
+ * stale except the forms themselves.
+ *
+ * De-duplicated by serial number, keeping the most recent, because the serial
+ * is the instrument. A gauge recertified since will come back with the date it
+ * had on its last form; the screen offers it rather than writing it, and
+ * deviceCalibration still judges that date against this test. An offered date
+ * that has lapsed is caught exactly as a typed one is.
+ */
+export async function recentTestDevices(limit = 10): Promise<RememberedDevice[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ devices: string; testDate: string | null }>(
+    `SELECT devices, testDate FROM form_72
+     ORDER BY testDate DESC, createdAt DESC LIMIT ?`,
+    [EQUIPMENT_LOOKBACK_FORMS],
+  );
+  const bySerial = new Map<string, RememberedDevice>();
+  for (const row of rows) {
+    // readJsonArray warns and answers empty for a column it cannot parse, so
+    // one unreadable form costs its own equipment and not the list. That form
+    // still reports its own fault when somebody opens it.
+    for (const d of readJsonArray<TestDevice>(row.devices, 'Part C equipment')) {
+      const key = d.serialNumber?.trim().toUpperCase();
+      if (!key) continue;
+      // Rows come back newest first, so the first sighting of a serial is the
+      // most recent one and later ones are older.
+      if (bySerial.has(key)) continue;
+      const { slot: _slot, ...device } = d;
+      bySerial.set(key, { device, lastUsed: row.testDate ?? undefined });
+    }
+  }
+  return [...bySerial.values()].slice(0, limit);
+}
+
 /** What an issued form refuses, in the words the screen shows. */
 export const ISSUED_REFUSAL = 'This Form 72 has been issued. The occupier is holding a copy of it, '
   + 'so it cannot be edited — raise a new form for the corrected test.';

@@ -175,3 +175,26 @@ export function unusedDevicePresets(devices: readonly TestDevice[]): DevicePrese
   const held = new Set(devices.map((d) => d.serialNumber.trim().toUpperCase()).filter(Boolean));
   return DEVICE_PRESETS.filter((p) => !held.has(p.device.serialNumber.toUpperCase()));
 }
+
+/**
+ * Equipment worth offering on this form, out of what the phone remembers.
+ *
+ * Two things are filtered out and both matter. An instrument already on the
+ * form, matched by serial, because adding it twice puts one meter in two Part
+ * C columns and makes the form read as a test run with twice the equipment it
+ * had — the same rule unusedDevicePresets applies. And the presets themselves,
+ * because they have their own chips: offering the company's own flow meter in
+ * two places, once from its certificate and once from however it was typed
+ * last March, is two sources for one fact and they can disagree.
+ */
+export function offerableDevices<T extends { device: Omit<TestDevice, 'slot'> }>(
+  remembered: readonly T[],
+  onForm: readonly TestDevice[],
+): T[] {
+  const held = new Set(onForm.map((d) => d.serialNumber.trim().toUpperCase()).filter(Boolean));
+  const preset = new Set(DEVICE_PRESETS.map((p) => p.device.serialNumber.trim().toUpperCase()));
+  return remembered.filter((r) => {
+    const key = r.device.serialNumber?.trim().toUpperCase();
+    return !!key && !held.has(key) && !preset.has(key);
+  });
+}

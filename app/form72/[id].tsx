@@ -3,9 +3,9 @@ import { Pressable, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
-  ISSUED_REFUSAL, getForm72, issueForm72, linkForm72Job, recordForm72Attached,
+  ISSUED_REFUSAL, getForm72, issueForm72, linkForm72Job, recentTestDevices, recordForm72Attached,
   recordForm72DefectIds, recordOccupierCopy, updateForm72,
-  type Form72Patch, type StoredForm72,
+  type Form72Patch, type RememberedDevice, type StoredForm72,
 } from '@/db/form72Repo';
 import { listJobPage, type JobSummary } from '@/db/opsRepo';
 import { queueJobAttachment } from '@/simpro/sync';
@@ -43,7 +43,7 @@ import {
 import {
   guideSteps, nextGuideStep, outstandingParts, recordAnswered, type GuidePart,
 } from '@/domain/form72Guide';
-import { DEVICE_PRESETS, unusedDevicePresets } from '@/domain/form72Devices';
+import { DEVICE_PRESETS, offerableDevices, unusedDevicePresets } from '@/domain/form72Devices';
 import {
   deviceKindKey, getDeviceKinds, setDeviceKind, type DeviceKindAnswer,
 } from '@/db/deviceKindRepo';
@@ -1689,6 +1689,27 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
     devices: devices.map((d, n) => (n === i ? { ...d, ...p } : d)),
   });
 
+  /*
+   * The gauges this phone has recorded before.
+   *
+   * Part C is nine fields per instrument, and the company's two flow meters
+   * are chips because they are transcribed from their certificates. The
+   * pressure gauge never is: a technician's own, or a borrowed one, typed out
+   * in full at a booster on every single form. What is wanted is not a
+   * catalogue somebody maintains but what this technician typed last time, so
+   * it is read back off the forms already here.
+   */
+  const [remembered, setRemembered] = useState<RememberedDevice[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    // A failure is silent on purpose: this is a convenience beside a field
+    // that still works, and an alert about it would be the loudest thing on a
+    // part whose actual job is a calibration date.
+    void recentTestDevices().then((r) => { if (!cancelled) setRemembered(r); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  const offerable = offerableDevices(remembered, devices);
+
 
   return (
     <View style={{ gap: 12 }}>
@@ -2052,6 +2073,47 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
               Both of our meters are on this form. Anything else you used goes on by hand.
             </Txt>
           )}
+
+          {/*
+            * And the gauge, which is never a preset.
+            *
+            * Nine fields, retyped at a booster on every form, for an
+            * instrument that has not changed since the last one. Offered with
+            * the date it was last used on, so a technician can see at a glance
+            * whether its certificate has moved since — and offered rather than
+            * filled, because what comes back is a calibration date and the
+            * only person who can say whether it still holds is the one holding
+            * the certificate. deviceCalibration judges it either way.
+            */}
+          {offerable.length ? (
+            <>
+              <Label>Used before on this phone</Label>
+              <Txt size="sm" tone="muted">
+                Adds it with everything that was recorded last time. Check the calibration date
+                against the certificate in your hand — a serviced gauge has a new one.
+              </Txt>
+              <View style={{ gap: 8 }}>
+                {offerable.map((r) => (
+                  <View key={r.device.serialNumber} style={{ gap: 2 }}>
+                    <Chip
+                      label={`+ ${r.device.serialNumber}`}
+                      onPress={() => patch({
+                        devices: [...devices, { slot: deviceSlotName(devices), ...r.device }],
+                      })}
+                    />
+                    <Txt size="xs" tone="faint">
+                      {[
+                        r.device.kind === 'flow-meter' ? 'Flow meter' : 'Pressure gauge',
+                        r.device.dateCalibrated ? `calibrated ${formatAuDate(r.device.dateCalibrated)}` : 'no calibration date',
+                        r.lastUsed ? `last used ${formatAuDate(r.lastUsed)}` : undefined,
+                      ].filter(Boolean).join(' · ')}
+                    </Txt>
+                  </View>
+                ))}
+              </View>
+            </>
+          ) : null}
+
           <Button
             title="Add a device by hand"
             variant="secondary"
