@@ -364,6 +364,39 @@ describe('every screen that offers a site offers a way to search for it', () => 
     }
   });
 
+  /*
+   * The fallback is wired whole, or not at all.
+   *
+   * A module that has none of what was asked for says "the site below does —
+   * open it" and then has to draw one. The two halves were written inline on
+   * the job list and the quote list needed them next, which is how four site
+   * searches over four afternoons happened the first time; they are one
+   * component and one sentence now, and these hold a screen to using both.
+   */
+  it('every screen that promises a site below it draws one', () => {
+    for (const path of all) {
+      const source = readFileSync(path, 'utf8');
+      if (!source.includes('siteFallbackWords')) continue;
+      expect({ screen: named(path), draws: source.includes('SiteMissCards') })
+        .toEqual({ screen: named(path), draws: true });
+    }
+  });
+
+  it('and every screen that draws them looks for them', () => {
+    for (const path of all) {
+      const source = readFileSync(path, 'utf8');
+      if (!source.includes('SiteMissCards')) continue;
+      expect({ screen: named(path), looks: source.includes('useSiteMisses') })
+        .toEqual({ screen: named(path), looks: true });
+    }
+  });
+
+  it('is used by more than one screen, so this is not a guard over nothing', () => {
+    const using = all.filter((p) => readFileSync(p, 'utf8').includes('useSiteMisses')).map(named);
+    expect(using).toContain('app/work/jobs.tsx');
+    expect(using).toContain('app/quotes/index.tsx');
+  });
+
   it('searches what a person standing on site actually has', () => {
     /*
      * If the picker is the one way in, its search has to cover what a person

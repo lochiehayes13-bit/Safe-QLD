@@ -31,7 +31,20 @@ let db: NodeSqliteDb;
 
 beforeEach(async () => {
   db = openMigrated();
-  await createSite({ id: 'tower', name: 'Barren Heights Tower', suburb: 'Spring Hill' });
+  /*
+   * Enough of a site to prove the search reaches every column a site search
+   * reaches, not the two or three this query would have hand-picked. The
+   * client here is deliberately not the invoice's customer: a site held by a
+   * managing agent and billed to the body corporate is the ordinary case, and
+   * it is the only way to tell the site's client column being searched from
+   * the invoice's own.
+   */
+  await createSite({
+    id: 'tower', name: 'Barren Heights Tower', address: '14 Markwell Street',
+    suburb: 'Spring Hill', state: 'QLD', postcode: '4000',
+    clientName: 'Pelham Strata Management', siteRef: 'SIMPRO:8812', externalId: '8812',
+    externalSource: 'simpro',
+  });
   await upsertJob({
     id: 'j1', externalId: '43747', siteId: 'tower', siteName: 'Barren Heights Tower',
     title: 'Six-monthly routine', status: 'complete',
@@ -56,6 +69,23 @@ describe('finding an invoice by the building it is about', () => {
   it('finds it by the suburb, which only the site table knows', async () => {
     expect((await listInvoices({ query: 'Spring Hill' })).map((i) => i.externalId))
       .toEqual(['INV-900']);
+  });
+
+  it.each([
+    ['the address, which the invoice does not carry', 'Markwell'],
+    ['the postcode', '4000'],
+    ['the site’s own client, who is not the one billed', 'Pelham'],
+    ['the office’s site number, from the start', '8812'],
+  ])('finds it by %s', async (_what, q) => {
+    /*
+     * None of these is a column this query chose. It asks siteSearchClause
+     * what matching a site means, which is the same answer the sites tab, the
+     * picker, the map and the day planner get — this app's recurring fault is
+     * four searches each deciding that for themselves, and a fifth here would
+     * have covered a name and a suburb and quietly missed the rest.
+     */
+    expect({ q, found: (await listInvoices({ query: q })).map((i) => i.externalId) })
+      .toEqual({ q, found: ['INV-900'] });
   });
 
   it('still finds it by everything it always did', async () => {

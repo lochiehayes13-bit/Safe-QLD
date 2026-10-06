@@ -168,3 +168,35 @@ export function siteMissLine(input: SiteMissInput): string {
   const words = siteSearchMiss(input);
   return words.lines.join(' ');
 }
+
+/**
+ * What to say when the module has nothing but the building is on the phone.
+ *
+ * The other half of "every site appears in every module". A technician types a
+ * building into the job list, the quote list or the invoice list, the module
+ * has no row for it, and the module answers "Nothing matches" — which a person
+ * reads as "that site is not on this phone". It is: the same words find it on
+ * the sites tab, and the module they are standing in offered no way through.
+ *
+ * A site with nothing attached is the ordinary case, not an error. The office
+ * has not raised work against it yet, or every job it had is closed and
+ * purged, and the technician standing at it still wants its register, its
+ * history and its documents. So the module says what it has none of, and then
+ * offers the building.
+ *
+ * Shared, and the module's own word for its rows is the only thing that
+ * varies, because this sentence being written separately on each screen is how
+ * four modules came to disagree about what searching for a site means.
+ *
+ * `what` is that word in the plural — "jobs", "quotes", "invoices" — because
+ * both sentences read as plurals and a singular one puts "No job match that"
+ * on the screen.
+ */
+export function siteFallbackWords(count: number, what: string): { title: string; body: string } {
+  return {
+    title: `No ${what} match that`,
+    body: `No ${what} on this phone match those words. ${count === 1
+      ? 'The site below does — open it for its register, its history and its documents.'
+      : 'The sites below do — open one for its register, its history and its documents.'}`,
+  };
+}

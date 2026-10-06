@@ -5,6 +5,7 @@ import {
   type QuoteStatus, type UnpriceableDefect,
 } from '@/domain/quote';
 import { GST } from '@/domain/rates';
+import { escapeLike, siteSearchClause } from '@/domain/siteSearch';
 
 /**
  * Storing quotes and their lines.
@@ -298,21 +299,141 @@ export async function listQuoteLines(quoteId: string): Promise<QuoteLine[]> {
 }
 
 /**
- * Quotes for a site, or every quote.
+ * How many quotes one page draws.
+ *
+ * These are raised by hand on the device, so a phone holds tens rather than
+ * the four and a half thousand jobs the office has — enough that no real list
+ * is ever cut, and a bound so a device that has been in service for years does
+ * not read every quote it ever raised to draw a screenful. Where it does cut,
+ * the screen says so and the search reaches past it, because the search runs
+ * in the database and not over the drawn rows.
+ */
+const QUOTE_PAGE = 300;
+
+/**
+ * A page of quotes, with how many the search matched.
+ *
+ * The count is taken before the cut, not from the rows: a number over a list
+ * that is the length of what was drawn says "that is all of them" about a page.
+ */
+export interface QuotePage {
+  rows: Quote[];
+  /**
+   * How many quotes this phone holds within the filter, before the search.
+   *
+   * So a screen can tell "nothing was typed and there are no quotes" from
+   * "something was typed and nothing matched". They want opposite sentences,
+   * and a screen with only the match count says "No quotes raised yet" to
+   * somebody who has two hundred and mistyped a suburb.
+   */
+  total: number;
+  /** How many quotes the filter and the search match, whether or not they fit. */
+  matching: number;
+  capped: boolean;
+}
+
+/**
+ * Quotes for a site, or the ones matching what was typed.
  *
  * Newest first by issue date, then by creation, so the drafts a technician is
  * part way through sit at the top with the quote they issued this morning.
+ *
+ * **Searched in the database, over every quote, not over the page.** The
+ * screen had no search box at all — the owner's "every site appears in every
+ * single module when searching a site" had nothing to appear in here, and a
+ * phone holding a few hundred quotes offered scrolling and a guess. The words
+ * match the quote's own reference, the job reference, the client and the site
+ * as it was written onto the quote, and then the site row itself through
+ * siteSearchClause, so this module reaches a building by the same columns as
+ * every other: its address, its suburb, its postcode, its client, the office's
+ * reference and the office's site number. A quote raised before a site was
+ * renamed is still findable by the name it has now.
+ *
+ * **And the lines come back in one read.** This looped the quotes and awaited
+ * `listQuoteLines` per quote — one query per quote, in series, on every focus
+ * of the screen, with nothing bounding how many. A hundred quotes was a
+ * hundred and one round trips before anything drew.
  */
-export async function listQuotes(siteId?: string): Promise<Quote[]> {
+export async function listQuotes(
+  options: { siteId?: string; status?: QuoteStatus; query?: string; limit?: number } = {},
+): Promise<QuotePage> {
   const db = await getDb();
-  const rows = siteId
-    ? await db.getAllAsync<QuoteRow>(
-      'SELECT * FROM quote WHERE siteId = ? ORDER BY COALESCE(issuedAt, createdAt) DESC', [siteId],
-    )
-    : await db.getAllAsync<QuoteRow>('SELECT * FROM quote ORDER BY COALESCE(issuedAt, createdAt) DESC');
-  const out: Quote[] = [];
-  for (const row of rows) out.push(toQuote(row, await listQuoteLines(row.id)));
-  return out;
+  /*
+   * The filter and the search are kept apart, so `total` can be counted
+   * within the filter and before the words.
+   */
+  const filter: string[] = [];
+  const filterArgs: (string | number)[] = [];
+  if (options.siteId) { filter.push('q.siteId = ?'); filterArgs.push(options.siteId); }
+  if (options.status) { filter.push('q.status = ?'); filterArgs.push(options.status); }
+
+  const where = [...filter];
+  const args = [...filterArgs];
+
+  /*
+   * Every word somewhere, which is how a person searches: "barren draft" and
+   * "pelham 2026" both narrow rather than widen. One word that lands nowhere
+   * means no row, because a search that quietly ignores a word a person typed
+   * tells them something is there that is not.
+   */
+  for (const word of (options.query ?? '').trim().split(/\s+/).filter(Boolean)) {
+    const like = `%${escapeLike(word)}%`;
+    const site = siteSearchClause(word, 's');
+    where.push(`(q.reference LIKE ? ESCAPE '\\' OR q.jobReference LIKE ? ESCAPE '\\'
+      OR q.clientName LIKE ? ESCAPE '\\' OR q.siteName LIKE ? ESCAPE '\\'
+      OR q.siteAddress LIKE ? ESCAPE '\\'${site ? ` OR ${site.where}` : ''})`);
+    args.push(like, like, like, like, like, ...(site?.args ?? []));
+  }
+
+  const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const from = 'FROM quote q LEFT JOIN site s ON s.id = q.siteId';
+  const [counted, held] = await Promise.all([
+    db.getFirstAsync<{ n: number }>(`SELECT COUNT(*) AS n ${from} ${clause}`, ...args),
+    where.length === filter.length
+      ? Promise.resolve(null)
+      : db.getFirstAsync<{ n: number }>(
+        `SELECT COUNT(*) AS n ${from} ${filter.length ? `WHERE ${filter.join(' AND ')}` : ''}`, ...filterArgs,
+      ),
+  ]);
+  const matching = counted?.n ?? 0;
+
+  const limit = options.limit ?? QUOTE_PAGE;
+  const rows = await db.getAllAsync<QuoteRow>(
+    `SELECT q.* ${from} ${clause} ORDER BY COALESCE(q.issuedAt, q.createdAt) DESC LIMIT ?`,
+    ...args, limit,
+  );
+
+  /*
+   * Every line for every quote on this page, in one query, grouped here.
+   *
+   * listQuoteLines strips the quote-id prefix off each line's own key; the
+   * same rule has to hold here or the domain sees two different line ids
+   * depending on which function fetched them, and the quote builder writes
+   * back a line the quote does not have.
+   */
+  const byQuote = new Map<string, QuoteLine[]>();
+  if (rows.length) {
+    const lines = await db.getAllAsync<QuoteLineRow & { quoteId: string }>(
+      `SELECT * FROM quote_line WHERE quoteId IN (${rows.map(() => '?').join(',')})
+       ORDER BY CASE section WHEN 'materials' THEN 0 ELSE 1 END, sortIndex`,
+      ...rows.map((r) => r.id),
+    );
+    for (const line of lines) {
+      const prefix = `${line.quoteId}:`;
+      const held = byQuote.get(line.quoteId) ?? [];
+      held.push(toLine({ ...line, id: line.id.startsWith(prefix) ? line.id.slice(prefix.length) : line.id }));
+      byQuote.set(line.quoteId, held);
+    }
+  }
+
+  return {
+    rows: rows.map((row) => toQuote(row, byQuote.get(row.id) ?? [])),
+    // Without a search the two counts are the same thing, and counting it
+    // twice would be a second query for an answer already in hand.
+    total: held ? held.n : matching,
+    matching,
+    capped: matching > rows.length,
+  };
 }
 
 /**

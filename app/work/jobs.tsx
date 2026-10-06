@@ -5,15 +5,17 @@ import { loadPrefs } from '@/app-prefs';
 import { nowIso } from '@/db';
 import { listJobPage, type JobPage, type JobSummary } from '@/db/opsRepo';
 import { getCustomer, scheduledJobExternalIds } from '@/db/mirrorRepo';
-import { getSite, listSiteSummaries, type SiteSummary } from '@/db/repo';
+import { getSite } from '@/db/repo';
 import {
   jobStatusWord, localStateWord, stageLabel, statusSwatch, type JobListFilter,
 } from '@/domain/jobPresentation';
 import { whoseSchedule } from '@/domain/myDay';
+import { siteFallbackWords } from '@/domain/siteMiss';
 import { qldIsoDay } from '@/domain/qldTime';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
 import { Reveal } from '@/components/motion';
+import { SiteMissCards, useSiteMisses } from '@/components/SiteMisses';
 import { Card, Chip, EmptyState, Rowed, Screen, SearchBox, Segmented, Txt } from '@/components/ui';
 
 /**
@@ -109,21 +111,7 @@ export default function JobsScreen() {
    * Only looked for when the jobs came back empty, so the ordinary search
    * costs nothing extra.
    */
-  const [siteHits, setSiteHits] = useState<SiteSummary[]>([]);
-  useEffect(() => {
-    let live = true;
-    const term = query.trim();
-    const worth = !!term && !shown.length && page !== null;
-    // Every write goes through the promise, including the clear: a setState in
-    // the effect body is a cascading render for a list that is usually empty.
-    void (async () => {
-      const rows = worth
-        ? await listSiteSummaries({ query: term, limit: 5 }).then((f) => f.rows).catch(() => [])
-        : [];
-      if (live) setSiteHits(rows);
-    })();
-    return () => { live = false; };
-  }, [query, shown.length, page]);
+  const siteHits = useSiteMisses(query, !shown.length && page !== null);
 
   const empty = (() => {
     if (page === null) return null;
@@ -135,12 +123,7 @@ export default function JobsScreen() {
     }
     if (query.trim()) {
       return siteHits.length
-        ? {
-          title: 'No jobs match that',
-          body: `No job on this phone matches those words. ${siteHits.length === 1
-            ? 'The site below does — open it for its register, its history and its documents.'
-            : 'The sites below do — open one for its register, its history and its documents.'}`,
-        }
+        ? siteFallbackWords(siteHits.length, 'jobs')
         : { title: 'Nothing matches', body: 'Try the job number on its own, or part of the site or customer name.' };
     }
     if (filter === 'mine' && !whoLabel) {
@@ -195,17 +178,7 @@ export default function JobsScreen() {
                 * has not raised one yet — and the technician standing at it
                 * still wants its register and its history.
                 */}
-              {siteHits.map((site) => (
-                <Card
-                  key={site.id}
-                  onPress={() => router.push({ pathname: '/site/[id]', params: { id: site.id } })}
-                >
-                  <Txt weight="700">{site.name}</Txt>
-                  <Txt size="sm" tone="muted">
-                    {[site.suburb, site.clientName].filter(Boolean).join(' · ') || 'No suburb recorded'}
-                  </Txt>
-                </Card>
-              ))}
+              <SiteMissCards sites={siteHits} />
             </View>
           ) : null}
           renderItem={({ item, index }) => {

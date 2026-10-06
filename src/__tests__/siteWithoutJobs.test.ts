@@ -15,6 +15,7 @@
  * — in two modules where the site table was never consulted.
  */
 import { createSite, listSiteSummaries } from '@/db/repo';
+import { siteFallbackWords } from '@/domain/siteMiss';
 import { searchJobPicks, upsertJob } from '@/db/opsRepo';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -53,21 +54,58 @@ describe('what the job search can and cannot answer', () => {
   });
 });
 
-describe('the Jobs list offers the site it could not find a job for', () => {
-  const source = readFileSync(join(__dirname, '..', '..', 'app', 'work', 'jobs.tsx'), 'utf8');
+describe('the way out of a module that has no row for the building', () => {
+  /*
+   * This was written inline on the job list and asserted as that screen's own
+   * source text. The quote list needed the same thing, which is the moment
+   * this app's recurring fault starts — four site searches over four
+   * afternoons, each covering a different set of columns. So the hook, the
+   * cards and the sentence are shared, and what is asserted is the shared
+   * definition plus the fact that each module uses it.
+   */
+  const shared = readFileSync(join(__dirname, '..', 'components', 'SiteMisses.tsx'), 'utf8');
 
-  it('asks the site table when the jobs came back empty', () => {
-    expect(source).toContain("listSiteSummaries({ query: term, limit: 5 })");
-    // Only then: the ordinary search must not pay for this.
-    expect(source).toContain('const worth = !!term && !shown.length && page !== null;');
+  it('asks the site table on the words that found no rows', () => {
+    expect(shared).toContain('listSiteSummaries({ query: typed, limit })');
   });
 
-  it('says no job matched rather than nothing matched', () => {
-    expect(source).toContain("title: 'No jobs match that'");
+  it('asks only where the module came back empty, so an ordinary search pays nothing', () => {
+    // `worth` is the module's own judgement, and the hook does nothing without
+    // it — a lookup on every keystroke of every search is a second query for
+    // an answer nobody is waiting for.
+    expect(shared).toContain('const rows = typed && worth');
   });
 
   it('opens the site, which is the way through', () => {
-    expect(source).toMatch(/pathname: '\/site\/\[id\]', params: \{ id: site\.id \}/);
+    expect(shared).toMatch(/pathname: '\/site\/\[id\]', params: \{ id: site\.id \}/);
+  });
+
+  it('says no jobs matched rather than nothing matched', () => {
+    // The sentence is a function now, so this asserts the words themselves
+    // rather than a line of source that could be reworded around the test.
+    expect(siteFallbackWords(1, 'jobs')).toEqual({
+      title: 'No jobs match that',
+      body: 'No jobs on this phone match those words. The site below does — open it for its '
+        + 'register, its history and its documents.',
+    });
+  });
+
+  it('and names the module it is speaking for, in the plural it was given', () => {
+    expect(siteFallbackWords(2, 'quotes').title).toBe('No quotes match that');
+    expect(siteFallbackWords(2, 'quotes').body).toContain('The sites below do');
+    expect(siteFallbackWords(1, 'quotes').body).toContain('The site below does');
+  });
+
+  it.each([
+    ['the job list', join('app', 'work', 'jobs.tsx')],
+    ['the quote list', join('app', 'quotes', 'index.tsx')],
+  ])('%s uses it, both halves of it', (_what, rel) => {
+    const source = readFileSync(join(__dirname, '..', '..', rel), 'utf8');
+    expect({
+      looks: source.includes('useSiteMisses'),
+      draws: source.includes('SiteMissCards'),
+      says: source.includes('siteFallbackWords'),
+    }).toEqual({ looks: true, draws: true, says: true });
   });
 });
 

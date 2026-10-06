@@ -1,6 +1,7 @@
 import { getDb, inTransaction, nowIso } from './index';
 import { JOB_IS_OPEN, type JobRecord } from './opsRepo';
 import type { QuoteListFilter } from '@/domain/jobPresentation';
+import { siteSearchClause } from '@/domain/siteSearch';
 import type {
   SimproAddress, SimproAttachment, SimproContact, SimproContract, SimproCostCenter, SimproCustomer,
   SimproInvoice, SimproInvoiceJob, SimproItem, SimproItemKind, SimproJob, SimproJobDetail, SimproNote,
@@ -1265,18 +1266,23 @@ export async function listInvoices(filter: {
      * module simply had no site search.
      *
      * The module already knows the path. The siteId filter above walks
-     * invoice_job to job to reach it; this walks the same join and matches the
-     * site's own name and the one denormalised onto the job, so an invoice is
-     * findable by the building whether or not the job row carries its name.
+     * invoice_job to job to reach it; this walks the same join. What counts as
+     * matching a site is siteSearchClause's to decide, not this query's —
+     * hand-picking a name and a suburb here is how this app came to have four
+     * site searches covering four different sets of columns, and the postcode
+     * and the office's own site number would have been missing from this one.
+     * The job's denormalised siteName is matched as well, so an invoice is
+     * findable by the building even where the site row has gone.
      */
+    const site = siteSearchClause(word, 's');
     where.push(`(externalId LIKE ? OR customerName LIKE ? OR orderNo LIKE ? OR descriptionText LIKE ?
       OR externalId IN (SELECT invoiceExternalId FROM invoice_job WHERE jobExternalId LIKE ?)
       OR externalId IN (
         SELECT ij.invoiceExternalId FROM invoice_job ij
         JOIN job j ON j.externalId = ij.jobExternalId
         LEFT JOIN site s ON s.id = j.siteId
-        WHERE j.siteName LIKE ? OR s.name LIKE ? OR s.suburb LIKE ?))`);
-    args.push(like, like, like, like, like, like, like, like);
+        WHERE j.siteName LIKE ?${site ? ` OR ${site.where}` : ''}))`);
+    args.push(like, like, like, like, like, like, ...(site?.args ?? []));
   }
   args.push(filter.limit ?? 200);
   const rows = await db.getAllAsync<InvoiceRow>(
