@@ -14,7 +14,7 @@ import {
   occupierCopyBody, occupierCopyRecipient, occupierCopySubject, rankJobsForForm,
 } from '@/domain/form72Link';
 import type { Site } from '@/domain/types';
-import { qldIsoDay, qldMoment } from '@/domain/qldTime';
+import { qldIsoDay, qldMoment, typedClock, typedDay } from '@/domain/qldTime';
 import { attachmentContentKey } from '@/domain/outboundWork';
 import { describeActionFailure } from '@/domain/loadFailure';
 import { router } from 'expo-router';
@@ -1262,7 +1262,7 @@ function PartA({ form, locked, patch }: PartProps) {
         value={form.systemLabel}
         onChangeText={(v) => patch({ systemLabel: v })}
         placeholder="Towns Main System"
-        hint="Printed across the top of the form, beside the company name. Without it, two forms for this site on the same day are indistinguishable."
+        hint="Ours, not one of the department's Part A fields — it prints across the top beside the company name. Without it, two forms for this site on the same day are indistinguishable."
         editable={!locked}
       />
       <Field
@@ -1273,22 +1273,27 @@ function PartA({ form, locked, patch }: PartProps) {
       />
       <Rowed gap={2}>
         <View style={{ flex: 2 }}>
-          <Field
+          <TypedField
             label="Test date"
-            value={form.testDate ?? ''}
-            onChangeText={(v) => patch({ testDate: v })}
-            placeholder="2026-07-03"
-            hint="Prints as d/m/yyyy"
-            editable={!locked}
+            value={form.testDate}
+            read={typedDay}
+            show={formatAuDate}
+            placeholder="3/7/2026"
+            hint="Type the digits — 03072026"
+            locked={locked}
+            onChange={(v) => patch({ testDate: v })}
           />
         </View>
         <View style={{ flex: 1 }}>
-          <Field
+          <TypedField
             label="Time"
-            value={form.testTime ?? ''}
-            onChangeText={(v) => patch({ testTime: v })}
+            value={form.testTime}
+            read={typedClock}
+            show={(v) => v}
             placeholder="09:30"
-            editable={!locked}
+            hint="0930"
+            locked={locked}
+            onChange={(v) => patch({ testTime: v })}
           />
         </View>
       </Rowed>
@@ -1362,6 +1367,78 @@ function toggleNamed(value: string, name: string): string {
   if (at >= 0) parts.splice(at, 1);
   else parts.push(name);
   return parts.join(', ');
+}
+
+/**
+ * A date or a time typed on a phone, stored only once it is a date or a time.
+ *
+ * Both of these were plain text boxes holding the stored string, which asked a
+ * technician standing at a booster to type "2026-10-02" — eleven characters in
+ * a format nobody in Australia writes, two of them hyphens from the symbol
+ * layer, on a document whose retention and notice clocks run from that date.
+ * The placeholder was the format.
+ *
+ * Now the keypad is numeric and eight digits typed straight through are the
+ * order we write them in. What was typed stays on screen whether or not it
+ * resolves yet, and the line underneath echoes the date it understood back in
+ * full — because the one thing worse than a fiddly date box is one that
+ * silently understood something else. Nothing is stored until it resolves, so
+ * a half-typed date never becomes a stored one.
+ */
+function TypedField({
+  label, value, placeholder, hint, read, show, locked, onChange,
+}: {
+  label: string;
+  /** The stored value, which is what this field is about. */
+  value: string | undefined;
+  placeholder: string;
+  hint?: string;
+  /** What the typed text means, or nothing if it is not there yet. */
+  read: (text: string) => string | undefined;
+  /** The stored value as a person reads it. */
+  show: (stored: string) => string;
+  locked: boolean;
+  onChange: (stored: string | undefined) => void;
+}) {
+  const t = useTheme();
+  /*
+   * The box holds what was typed; the form holds what it resolved to. They are
+   * different things while somebody is part way through, and a box that
+   * reverted to the stored value on every keystroke could not be typed into.
+   */
+  const [text, setText] = useState(() => (value ? show(value) : ''));
+  const resolved = read(text);
+  const typing = text.trim() !== '' && resolved === undefined;
+
+  return (
+    <View style={{ gap: 4 }}>
+      <Field
+        label={label}
+        value={text}
+        keyboardType="numeric"
+        placeholder={placeholder}
+        hint={hint}
+        editable={!locked}
+        onChangeText={(v) => {
+          setText(v);
+          const next = read(v);
+          // Clearing the box clears the stored value; a half-typed one leaves
+          // whatever was stored alone rather than wiping it mid-keystroke.
+          if (!v.trim()) onChange(undefined);
+          else if (next !== undefined) onChange(next);
+        }}
+      />
+      {typing ? (
+        <Txt size="xs" style={{ color: t.color.textFaint }}>
+          {`Not a ${label.toLowerCase()} yet — nothing is stored until it is.`}
+        </Txt>
+      ) : resolved && show(resolved) !== text.trim() ? (
+        // What it understood, where that is not character for character what
+        // was typed. Two digits of a year are the case this exists for.
+        <Txt size="xs" style={{ color: t.color.textFaint }}>{`Read as ${show(resolved)}`}</Txt>
+      ) : null}
+    </View>
+  );
 }
 
 /** The column the next device occupies, in the department's own words. */
@@ -1745,6 +1822,28 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
         </Card>
         );
       })}
+
+      {/*
+        * How many of the department's four columns this fills.
+        *
+        * Part C on the paper is a four-column table — Device/gauge 1 to 4 —
+        * and the page prints all four whatever is on the form. The screen
+        * showed nothing at all until a chip was tapped, so a technician had no
+        * way to know the table existed, how many columns it had, or that
+        * leaving one empty prints six rows of red "Not recorded" against it.
+        * Part D's eight rows and Part G's two test points already lay the
+        * department's table over what is stored; this says the same thing in a
+        * line, because four empty device cards would be worse than the problem.
+        */}
+      <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+        {devices.length === 0
+          ? 'The form prints a four-column equipment table. With nothing on it, every row of all '
+            + 'four columns prints as not recorded.'
+          : `${devices.length} of the department's four columns filled. The other ${
+            DEPARTMENT_DEVICE_SLOTS.length - devices.length} print${
+            DEPARTMENT_DEVICE_SLOTS.length - devices.length === 1 ? 's' : ''} as not used, which is `
+            + 'an answer — a column you meant to fill is not.'}
+      </Txt>
 
       {!locked ? (
         <Card>

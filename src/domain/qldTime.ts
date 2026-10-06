@@ -125,3 +125,81 @@ export function qldMoment(iso: string | undefined): string | undefined {
   const mm = String(shifted.getUTCMinutes()).padStart(2, '0');
   return `${day} ${hh}:${mm} (Qld)`;
 }
+
+/**
+ * A date somebody typed, as an ISO day — or nothing, if it is not one yet.
+ *
+ * Form 72's test date was a plain text box holding an ISO string, on a phone
+ * keyboard. That asks a technician standing at a booster to type
+ * "2026-10-02": eleven characters in a format nobody in Australia writes,
+ * two of them hyphens that need the symbol layer, and a wrong one is a date
+ * on a statutory document. The field's own placeholder was the format.
+ *
+ * So it takes what a person actually types on a numeric keypad. Eight bare
+ * digits are the AU order, because that is what somebody typing a date without
+ * separators means by it; with separators, either order is read from the
+ * position of the four-digit year. A two-digit year is this century, which is
+ * wrong in 2103 and right for the working life of this app.
+ *
+ * It returns nothing rather than a guess for anything it cannot read, so a
+ * half-typed date never becomes a stored one: the caller keeps what was typed
+ * on screen and stores only when it resolves.
+ */
+export function typedDay(text: string): string | undefined {
+  const s = (text ?? '').trim();
+  if (!s) return undefined;
+
+  const digits = s.replace(/\D/g, '');
+  let y: number | undefined; let m: number | undefined; let d: number | undefined;
+
+  const iso = s.match(/^(\d{4})[-/. ](\d{1,2})[-/. ](\d{1,2})$/);
+  const au = s.match(/^(\d{1,2})[-/. ](\d{1,2})[-/. ](\d{2}|\d{4})$/);
+  if (iso) {
+    [y, m, d] = [Number(iso[1]), Number(iso[2]), Number(iso[3])];
+  } else if (au) {
+    const yy = Number(au[3]);
+    [y, m, d] = [au[3]!.length === 2 ? 2000 + yy : yy, Number(au[2]), Number(au[1])];
+  } else if (digits.length === 8 && digits === s) {
+    // Typed straight through on a keypad: ddmmyyyy, the order it is written in.
+    [y, m, d] = [Number(digits.slice(4)), Number(digits.slice(2, 4)), Number(digits.slice(0, 2))];
+  } else if (digits.length === 6 && digits === s) {
+    [y, m, d] = [2000 + Number(digits.slice(4)), Number(digits.slice(2, 4)), Number(digits.slice(0, 2))];
+  } else {
+    return undefined;
+  }
+
+  if (m < 1 || m > 12 || d < 1 || d > 31) return undefined;
+  // The calendar, not the ranges: 31/02 passes the ranges and is not a day.
+  const at = new Date(Date.UTC(y, m - 1, d));
+  if (at.getUTCFullYear() !== y || at.getUTCMonth() !== m - 1 || at.getUTCDate() !== d) {
+    return undefined;
+  }
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+/**
+ * A time somebody typed, as HH:MM on the 24-hour clock, or nothing.
+ *
+ * Same problem as the date and the same answer. "09:30" on a phone is four
+ * digits and a colon from the symbol layer; "0930" is four digits. Three
+ * digits are read as h:mm, because somebody typing 930 means half past nine
+ * and there is no other reading of it.
+ */
+export function typedClock(text: string): string | undefined {
+  const s = (text ?? '').trim();
+  if (!s) return undefined;
+
+  const parts = s.match(/^(\d{1,2})[:.](\d{2})$/);
+  const digits = s.replace(/\D/g, '');
+  let h: number; let min: number;
+  if (parts) {
+    [h, min] = [Number(parts[1]), Number(parts[2])];
+  } else if (digits === s && (digits.length === 3 || digits.length === 4)) {
+    [h, min] = [Number(digits.slice(0, digits.length - 2)), Number(digits.slice(-2))];
+  } else {
+    return undefined;
+  }
+
+  if (h > 23 || min > 59) return undefined;
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
