@@ -23,6 +23,9 @@ import {
   createSite, getSite, listSitePicks, listSiteSummaries, listSites,
 } from '@/db/repo';
 import { getSiteByExternalId, searchEverything, searchKind } from '@/db/searchRepo';
+import {
+  SITE_SEARCH_PREFIX_COLUMNS, SITE_SEARCH_TEXT_COLUMNS, siteMatches,
+} from '@/domain/siteSearch';
 import { parseQuery } from '@/domain/search';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -317,15 +320,68 @@ describe('every screen that offers a site offers a way to search for it', () => 
     },
   );
 
-  it('searches the five things somebody knows about a site', () => {
-    // If the picker is the one way in, its search has to cover what a person
-    // actually has: what it is called, where it is, who the client is, and the
-    // office's own reference.
-    const picker = readFileSync(
-      join(__dirname, '..', 'components', 'SitePicker.tsx'), 'utf8',
-    );
-    for (const field of ['s.name', 's.suburb', 's.clientName', 's.siteRef', 's.address']) {
-      expect({ field, searched: picker.includes(field) }).toEqual({ field, searched: true });
+  it('searches what a person standing on site actually has', () => {
+    /*
+     * If the picker is the one way in, its search has to cover what a person
+     * has in their hand or hears over the phone. The columns are decided in
+     * one place now — this used to assert the literals in SitePicker's own
+     * filter, which went stale the moment the filter was shared.
+     */
+    for (const column of ['name', 'address', 'suburb', 'postcode', 'clientName', 'siteRef']) {
+      expect({ column, searched: SITE_SEARCH_TEXT_COLUMNS.includes(column as never) })
+        .toEqual({ column, searched: true });
+    }
+    // The office's own number is matched from the start, not anywhere inside:
+    // a substring match on a bare number turns every digit into a hunt.
+    expect([...SITE_SEARCH_PREFIX_COLUMNS]).toEqual(['externalId']);
+  });
+
+  it('is the same definition in every search, which is the whole point', () => {
+    /*
+     * Four searches each had their own column list and the differences were
+     * the bug: the sites tab missed the postcode and the office's number, the
+     * planner missed the client and the reference. A search that writes its
+     * own LIKE clause is how they drifted, so none of them may.
+     */
+    const files = [
+      ['src/db/repo.ts', 'listSiteSummaries'],
+      ['src/db/siteHistoryRepo.ts', 'planCandidates'],
+      ['src/db/searchRepo.ts', 'the global search'],
+      ['src/components/SitePicker.tsx', 'the picker'],
+    ] as const;
+    for (const [file, what] of files) {
+      const source = readFileSync(join(__dirname, '..', '..', file), 'utf8');
+      expect({ what, usesTheOneDefinition: source.includes('@/domain/siteSearch') })
+        .toEqual({ what, usesTheOneDefinition: true });
+    }
+  });
+
+  it('matches a site by its postcode and by the office’s number', async () => {
+    // The owner's own complaint: "the number read out over the phone finds
+    // nothing". Both are run through the real SQL rather than the helper.
+    expect((await listSiteSummaries({ query: '4610' })).rows.map((r) => r.id)).toContain(BARE.id);
+    expect((await listSiteSummaries({ query: '8812' })).rows.map((r) => r.id)).toContain(BUSY.id);
+  });
+
+  it('matches the office’s number from the start and not from the middle', async () => {
+    // 8812: "88" finds it, "81" does not. A substring match on a bare number
+    // turns a search containing digits into a hunt through three thousand ids.
+    expect((await listSiteSummaries({ query: '88' })).rows.map((r) => r.id)).toContain(BUSY.id);
+    expect((await listSiteSummaries({ query: '81' })).rows.map((r) => r.id)).not.toContain(BUSY.id);
+  });
+
+  it('matches in memory exactly as it matches in SQL', () => {
+    // A picker filtering rows it already holds must not disagree with the
+    // screen that fetched them.
+    const site = {
+      name: 'Kingaroy Fire Station', suburb: 'Kingaroy', postcode: '4610',
+      clientName: 'South Burnett Regional Council', siteRef: 'SB-014', externalId: '8812',
+    };
+    for (const term of ['kingaroy', '4610', 'South Burnett', 'SB-014', '88']) {
+      expect({ term, matched: siteMatches(site, term) }).toEqual({ term, matched: true });
+    }
+    for (const term of ['Toowoomba', '81', 'XX-999']) {
+      expect({ term, matched: siteMatches(site, term) }).toEqual({ term, matched: false });
     }
   });
 });

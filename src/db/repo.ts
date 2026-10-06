@@ -1,5 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { getDb, inTransaction, newId, nowIso } from './index';
+import { siteSearchClause } from '@/domain/siteSearch';
 import {
   addAssetEvent, clearTestSheetEvents, TEST_SHEET_EVENT, updateAsset, type AssetEventKind,
 } from './assetRepo';
@@ -32,8 +33,18 @@ export async function listSites(): Promise<Site[]> {
   return db.getAllAsync<Site>('SELECT * FROM site ORDER BY name COLLATE NOCASE');
 }
 
-/** The little a picker or a name map needs off a site. */
-export type SitePick = Pick<Site, 'id' | 'name' | 'suburb' | 'address' | 'clientName' | 'siteRef'>;
+/**
+ * The little a picker or a name map needs off a site.
+ *
+ * Every column a site search matches is here, plus the id. It used to stop at
+ * siteRef, so the picker could not match a postcode or the office's own site
+ * number even once the search definition covered them — a picker that cannot
+ * find what the search says it searches is worse than one that admits a
+ * narrower search.
+ */
+export type SitePick = Pick<
+  Site, 'id' | 'name' | 'suburb' | 'address' | 'postcode' | 'clientName' | 'siteRef' | 'externalId'
+>;
 
 /**
  * Sites as a picker shows them, and nothing else.
@@ -47,7 +58,8 @@ export type SitePick = Pick<Site, 'id' | 'name' | 'suburb' | 'address' | 'client
 export async function listSitePicks(): Promise<SitePick[]> {
   const db = await getDb();
   return db.getAllAsync<SitePick>(
-    'SELECT id, name, suburb, address, clientName, siteRef FROM site ORDER BY name COLLATE NOCASE',
+    `SELECT id, name, suburb, address, postcode, clientName, siteRef, externalId
+     FROM site ORDER BY name COLLATE NOCASE`,
   );
 }
 
@@ -161,11 +173,17 @@ export async function listSiteSummaries(options: { query?: string; limit?: numbe
   const term = (options.query ?? '').trim();
   const args: (string | number)[] = [];
   let where = '';
-  if (term) {
-    const like = `%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-    where = `WHERE (s.name LIKE ? ESCAPE '\\' OR s.address LIKE ? ESCAPE '\\' OR s.suburb LIKE ? ESCAPE '\\'
-                    OR s.clientName LIKE ? ESCAPE '\\' OR s.siteRef LIKE ? ESCAPE '\\')`;
-    args.push(like, like, like, like, like);
+  /*
+   * The columns a site search looks at come from src/domain/siteSearch.ts,
+   * because four searches in this app each had their own list and the
+   * differences were the bug. This one was missing the postcode and the
+   * office's own site number — the number somebody reads out over the phone
+   * found nothing.
+   */
+  const clause = siteSearchClause(term, 's');
+  if (clause) {
+    where = `WHERE ${clause.where}`;
+    args.push(...clause.args);
   }
   const [rows, counts] = await Promise.all([
     /*

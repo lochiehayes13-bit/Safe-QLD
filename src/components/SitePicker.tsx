@@ -3,6 +3,19 @@ import { View } from 'react-native';
 import type { SitePick } from '@/db/repo';
 import { useTheme } from '@/theme';
 import { Card, Chip, Rowed, SearchBox, Txt } from '@/components/ui';
+import { siteMatches } from '@/domain/siteSearch';
+
+/**
+ * How many matches the picker draws, and how many it offers before anything is
+ * typed.
+ *
+ * Named, and said on screen when it bites. Thirty rows cut silently from a
+ * search is the same fault as a list with no search: somebody types a client
+ * name, sees thirty of their forty sites, and has no way of knowing the other
+ * ten exist.
+ */
+const PICKER_MATCHES = 30;
+const PICKER_SUGGESTIONS = 8;
 
 /**
  * Picking one site out of three thousand.
@@ -14,11 +27,14 @@ import { Card, Chip, Rowed, SearchBox, Txt } from '@/components/ui';
  * query that returns every column of every row — contacts, notes, timestamps
  * — to draw a name.
  *
- * So it is a search box over the four things a person actually knows about a
- * site: what it is called, the suburb, the client, and the office's own
- * reference. Nothing is listed until something is typed except the handful
- * already in front of them, because a list of three thousand is not an
- * answer either.
+ * So it is a search box over what a person actually has: what the building is
+ * called, its address, suburb and postcode, the client, the office's reference
+ * and the office's own site number. Which columns those are is decided in
+ * src/domain/siteSearch.ts and not here, because four searches in this app
+ * each had their own list and the differences were the bug.
+ *
+ * Nothing is listed until something is typed except the handful already in
+ * front of them, because a list of three thousand is not an answer either.
  */
 export function SitePicker({
   sites,
@@ -45,13 +61,15 @@ export function SitePicker({
       const first = suggested
         .map((id) => sites.find((s) => s.id === id))
         .filter((s): s is SitePick => Boolean(s));
-      return first.length ? first : sites.slice(0, 8);
+      return first.length ? first : sites.slice(0, PICKER_SUGGESTIONS);
     }
-    return sites
-      .filter((s) => [s.name, s.suburb, s.clientName, s.siteRef, s.address]
-        .filter(Boolean)
-        .some((field) => String(field).toLowerCase().includes(q)))
-      .slice(0, 30);
+    /*
+     * The same columns, and the same prefix rule for the office's number, as
+     * the SQL searches use — src/domain/siteSearch.ts holds both. A picker
+     * filtering rows it already has must not disagree with the screen that
+     * fetched them.
+     */
+    return sites.filter((s) => siteMatches(s, query)).slice(0, PICKER_MATCHES);
   }, [sites, query, suggested]);
 
   return (
@@ -74,6 +92,17 @@ export function SitePicker({
       {matches.length === 0 ? (
         <Txt size="sm" tone="muted">
           {sites.length ? 'Nothing matched. Try fewer letters, or the suburb.' : 'No sites on this phone yet — sync first.'}
+        </Txt>
+      ) : null}
+
+      {/*
+        * Said when it bites, because a silent cut is the same fault as no
+        * search: somebody types a client name, sees thirty of their forty
+        * sites, and has no way of knowing the other ten are there.
+        */}
+      {matches.length === PICKER_MATCHES ? (
+        <Txt size="xs" tone="faint">
+          First {PICKER_MATCHES} matches. Add the suburb or the client to narrow it.
         </Txt>
       ) : null}
 

@@ -1,4 +1,5 @@
 import { getDb } from './index';
+import { siteSearchClause } from '@/domain/siteSearch';
 import { assetCountsBySystem } from './assetRepo';
 import { dueAtSite } from './routineRunRepo';
 import { routineById } from '@/seed/serviceRoutines';
@@ -249,7 +250,6 @@ export interface PlanCandidate {
 export async function planCandidates(today: string, query = '', limit = 60): Promise<PlanCandidate[]> {
   const db = await getDb();
   const term = query.trim();
-  const like = `%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
   const openJobs = await db.getAllAsync<{ siteId: string; externalId: string; title: string }>(
     `SELECT siteId, externalId, title FROM job
@@ -259,11 +259,18 @@ export async function planCandidates(today: string, query = '', limit = 60): Pro
   const jobBySite = new Map<string, { externalId: string; title: string }>();
   for (const j of openJobs) if (!jobBySite.has(j.siteId)) jobBySite.set(j.siteId, { externalId: j.externalId, title: j.title });
 
+  /*
+   * The same columns every other site search uses. This one matched name,
+   * suburb and address only, so a planner searching for a client or for the
+   * office's reference got nothing from a search box that answers both
+   * everywhere else in the app.
+   */
+  const clause = siteSearchClause(term);
   const sites = await db.getAllAsync<{ id: string; name: string; suburb: string | null }>(
-    term
-      ? "SELECT id, name, suburb FROM site WHERE name LIKE ? ESCAPE '\\' OR suburb LIKE ? ESCAPE '\\' OR address LIKE ? ESCAPE '\\' ORDER BY name COLLATE NOCASE LIMIT ?"
+    clause
+      ? `SELECT id, name, suburb FROM site WHERE ${clause.where} ORDER BY name COLLATE NOCASE LIMIT ?`
       : 'SELECT id, name, suburb FROM site ORDER BY name COLLATE NOCASE',
-    ...(term ? [like, like, like, limit] : []),
+    ...(clause ? [...clause.args, limit] : []),
   );
 
   const out: PlanCandidate[] = [];

@@ -1,4 +1,7 @@
 import { getDb } from './index';
+import {
+  SITE_SEARCH_PREFIX_COLUMNS, SITE_SEARCH_TEXT_COLUMNS,
+} from '@/domain/siteSearch';
 import type { Site } from '@/domain/types';
 import { jobStatusWord } from '@/domain/jobPresentation';
 import {
@@ -79,8 +82,12 @@ const COLUMNS: Record<SearchKind, KindColumns> = {
     order: `CASE WHEN status = 'complete' THEN 1 ELSE 0 END, COALESCE(dateModified, scheduledFor, '') DESC`,
   },
   site: {
-    table: 'site', ids: ['externalId'],
-    text: ['name', 'address', 'suburb', 'siteRef', 'clientName'],
+    // The text columns come from src/domain/siteSearch.ts, which is the one
+    // place that decides what searching for a site matches. This list was
+    // missing the postcode, which is four digits off a work order and the
+    // fastest thing to type on a phone.
+    table: 'site', ids: [...SITE_SEARCH_PREFIX_COLUMNS],
+    text: [...SITE_SEARCH_TEXT_COLUMNS],
     phones: ['contactWorkPhone', 'contactMobile'], emails: ['contactEmail'],
     order: 'name COLLATE NOCASE',
   },
