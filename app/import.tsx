@@ -13,8 +13,9 @@ import { parseAssetRegister } from '@/parsers';
 import { importAssetRegister } from '@/db/registerRepo';
 import { probeFile, type FileProbe } from '@/parsers/probe';
 import { fromBase64 } from '@/export/zip';
-import { createSite, importParsedConfig, listSites } from '@/db/repo';
-import type { PanelBrand, ParsedConfig, Site } from '@/domain/types';
+import { createSite, importParsedConfig, listSitePicks, type SitePick } from '@/db/repo';
+import { SitePicker } from '@/components/SitePicker';
+import type { PanelBrand, ParsedConfig } from '@/domain/types';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
 import { describeActionFailure } from '@/domain/loadFailure';
@@ -60,14 +61,14 @@ export default function ImportScreen() {
   const [text, setText] = useState<string>();
   const [panelName, setPanelName] = useState('');
   const [brand, setBrand] = useState<PanelBrand>('other');
-  const [sites, setSites] = useState<Site[]>([]);
+  const [sites, setSites] = useState<SitePick[]>([]);
   const [siteId, setSiteId] = useState<string | undefined>(params.siteId);
   const [newSiteName, setNewSiteName] = useState('');
   const [busy, setBusy] = useState(false);
   const [unknown, setUnknown] = useState<{ name: string; probe: FileProbe } | null>(null);
 
   React.useEffect(() => {
-    void listSites().then((s) => {
+    void listSitePicks().then((s) => {
       setSites(s);
       if (!siteId && s.length === 1) setSiteId(s[0]!.id);
     });
@@ -350,13 +351,25 @@ export default function ImportScreen() {
             </Card>
 
             <H2>Where does it go?</H2>
+            {/*
+              * The same picker the rest of the app uses, rather than a
+              * horizontal strip of every site on the phone — which with the
+              * office's whole book synced down is a minute of scrolling and
+              * then a guess, and is the thing SitePicker's own note says it
+              * replaced.
+              *
+              * "New site" stays above it, because importing a panel for a site
+              * the phone has never heard of is the common case here and it
+              * must not be something to search for and fail to find.
+              */}
+            <Chip label="New site" selected={!siteId} onPress={() => setSiteId(undefined)} />
             {sites.length ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2) }}>
-                <Chip label="New site" selected={!siteId} onPress={() => setSiteId(undefined)} />
-                {sites.map((s) => (
-                  <Chip key={s.id} label={s.name} selected={siteId === s.id} onPress={() => setSiteId(s.id)} />
-                ))}
-              </ScrollView>
+              <SitePicker
+                sites={sites}
+                value={siteId}
+                onChange={(id: string) => setSiteId(id)}
+                label="Or an existing site"
+              />
             ) : null}
             {!siteId ? (
               <Field label="New site name" value={newSiteName} onChangeText={setNewSiteName} autoCapitalize="words" />

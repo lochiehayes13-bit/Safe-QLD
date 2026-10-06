@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { createAsset, nextAssetCode } from '@/db/assetRepo';
-import { getSite, listSites } from '@/db/repo';
+import { getSite, listSitePicks, type SitePick } from '@/db/repo';
+import { SitePicker } from '@/components/SitePicker';
 import { nextChangeNo, queueAssetChange } from '@/db/assetChangeRepo';
 import { listOfficeAssetTypes } from '@/db/assetTypeRepo';
 import {
@@ -42,7 +43,7 @@ import { showAlert } from '@/components/alert';
 export default function NewAssetScreen() {
   const t = useTheme();
   const params = useLocalSearchParams<{ siteId?: string; parentAssetId?: string; system?: string }>();
-  const [sites, setSites] = useState<Site[]>([]);
+  const [sites, setSites] = useState<SitePick[]>([]);
   const [site, setSite] = useState<Site | null>(null);
   const [code, setCode] = useState('');
   const [saving, setSaving] = useState(false);
@@ -73,7 +74,7 @@ export default function NewAssetScreen() {
   const set = (patch: Partial<typeof d>) => draft.setValue((p) => ({ ...p, ...patch }));
 
   useEffect(() => {
-    void listSites().then((list) => {
+    void listSitePicks().then((list) => {
       setSites(list);
       if (!d.siteId && list.length === 1) set({ siteId: list[0]!.id });
     });
@@ -217,15 +218,19 @@ export default function NewAssetScreen() {
           <Banner tone="info" title="Picked up where you left off" body="This asset was still being entered when the app last closed." />
         ) : null}
 
+        {/*
+          * Picking the site, through the picker built for it.
+          *
+          * This was a horizontal strip of every site the phone holds —
+          * which is the thing SitePicker's own note says it exists to replace:
+          * with the office's whole book synced down, a site that is not near
+          * the left of the alphabet is a minute of scrolling and then a guess.
+          * Two screens were converted when the picker was written and this one
+          * was missed, so the screen where a technician adds an asset was the
+          * one place a site could not be searched for.
+          */}
         {sites.length > 1 ? (
-          <>
-            <Label>Site</Label>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2), paddingTop: t.space(1.5) }}>
-              {sites.map((s) => (
-                <Chip key={s.id} label={s.name} selected={d.siteId === s.id} onPress={() => set({ siteId: s.id })} />
-              ))}
-            </ScrollView>
-          </>
+          <SitePicker sites={sites} value={d.siteId} onChange={(id: string) => set({ siteId: id })} />
         ) : null}
 
         <Label>System</Label>

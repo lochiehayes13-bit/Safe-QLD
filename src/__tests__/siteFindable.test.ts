@@ -24,6 +24,8 @@ import {
 } from '@/db/repo';
 import { getSiteByExternalId, searchEverything, searchKind } from '@/db/searchRepo';
 import { parseQuery } from '@/domain/search';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { openMigrated, type NodeSqliteDb } from './support/nodeSqlite';
 
 jest.mock('@/db/index', () => jest.requireActual('./support/nodeSqlite'));
@@ -235,5 +237,80 @@ describe('what the queries are allowed to touch', () => {
     const statements = db.statements.map((st) => st.sql).filter((s) => /FROM site/i.test(s));
     expect(statements.length).toBe(1);
     expect(/\bjob\b/i.test(statements[0]!)).toBe(false);
+  });
+});
+
+describe('every screen that offers a site offers a way to search for it', () => {
+  /*
+   * The other half of "every site appears in every module": a list is only a
+   * list if the site can be reached in it. Three thousand sites as a
+   * horizontal strip of chips is a minute of scrolling and then a guess, and
+   * the site a technician wants is rarely near the left of the alphabet — the
+   * SitePicker component exists because of exactly that, and says so in its
+   * own note.
+   *
+   * It was written, two screens were converted to it, and two more were
+   * missed: adding an asset, and importing a panel. So this is the guard that
+   * a third one cannot be written. A screen that renders the whole site list
+   * itself has to go through the picker.
+   */
+  const screens = (dir: string): string[] => readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) return screens(path);
+    return name.endsWith('.tsx') ? [path] : [];
+  });
+
+  const all = screens(join(__dirname, '..', '..', 'app'));
+
+  it('finds the app’s screens, so this test is not passing on an empty list', () => {
+    expect(all.length).toBeGreaterThan(60);
+  });
+
+  it.each(all.map((f) => [f.slice(f.indexOf('/app/') + 1), f] as const))(
+    '%s renders no site list of its own',
+    (_name, path) => {
+      const source = readFileSync(path, 'utf8');
+      /*
+       * The shape that goes wrong is a screen that holds every site and then
+       * RENDERS them. Two other uses of the same expression are fine and have
+       * to stay fine: `new Map(sites.map(…))` builds an id-to-name lookup, and
+       * `sites.map(…)` feeding a domain function is a data transform — the
+       * portfolio screen reshapes all three thousand into buildPortfolio's
+       * input and never draws one. So the test is whether the mapped body
+       * opens a component.
+       */
+      const listsEverySite = /\bconst \[sites[\s\S]*?(listSites\(\)|listSitePicks\(\))/.test(source);
+      if (!listsEverySite) return;
+
+      const renders = [...source.matchAll(/\bsites\.map\(/g)];
+      for (const hit of renders) {
+        const before = source.slice(Math.max(0, hit.index - 40), hit.index);
+        if (before.includes('new Map(')) continue;
+        // A rendered row opens a capitalised element within the arrow body.
+        const body = source.slice(hit.index, hit.index + 240);
+        if (!/=>\s*\(?\s*<[A-Z]/.test(body)) continue;
+        expect({
+          screen: path.slice(path.indexOf('/app/') + 1),
+          rendersWholeList: true,
+          note: 'use SitePicker, which searches name, suburb, client, reference and address',
+        }).toEqual({
+          screen: path.slice(path.indexOf('/app/') + 1),
+          rendersWholeList: false,
+          note: 'use SitePicker, which searches name, suburb, client, reference and address',
+        });
+      }
+    },
+  );
+
+  it('searches the five things somebody knows about a site', () => {
+    // If the picker is the one way in, its search has to cover what a person
+    // actually has: what it is called, where it is, who the client is, and the
+    // office's own reference.
+    const picker = readFileSync(
+      join(__dirname, '..', 'components', 'SitePicker.tsx'), 'utf8',
+    );
+    for (const field of ['s.name', 's.suburb', 's.clientName', 's.siteRef', 's.address']) {
+      expect({ field, searched: picker.includes(field) }).toEqual({ field, searched: true });
+    }
   });
 });
