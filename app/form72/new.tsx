@@ -4,7 +4,8 @@ import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { createForm72 } from '@/db/form72Repo';
 import { listJobPage, type JobSummary } from '@/db/opsRepo';
-import { getSite } from '@/db/repo';
+import { getSite, listSitePicks, type SitePick } from '@/db/repo';
+import { SitePicker } from '@/components/SitePicker';
 import { queryAssets } from '@/db/assetRepo';
 import { nowIso } from '@/db';
 import { qldIsoDay } from '@/domain/qldTime';
@@ -54,6 +55,24 @@ export default function NewForm72Screen() {
   const [mode, setMode] = useState<Mode>('today');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [capped, setCapped] = useState(false);
+  /*
+   * Starting from a site instead of a job.
+   *
+   * This screen is where /site/form72 redirects when it is opened with no
+   * site — from the home screen, or a pinned tile — and it was a job picker
+   * and nothing else. So a site with no job could not start a Form 72 from
+   * the one screen that exists to start them, and plenty of this work is
+   * done before the office books anything. The empty state even said so and
+   * offered no way to do it.
+   *
+   * It routes to /site/form72 rather than creating the form here, because
+   * that screen already does it properly — the register prefill, the address
+   * as the form prints it, and the job auto-link where the site happens to
+   * have exactly one open job. A second create path would be a second thing
+   * to keep right.
+   */
+  const [bySite, setBySite] = useState(false);
+  const [sites, setSites] = useState<SitePick[]>([]);
   const [creating, setCreating] = useState<string | null>(null);
   /*
    * The job, and the mapping the technician was shown for it.
@@ -122,6 +141,16 @@ export default function NewForm72Screen() {
   }, [today, params.siteId, params.jobId, describeJob]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+
+  const openBySite = useCallback(async () => {
+    setBySite(true);
+    if (sites.length) return;
+    try {
+      setSites(await listSitePicks());
+    } catch (e) {
+      showAlert('Could not read the site list', describeActionFailure(e, 'read the site list'));
+    }
+  }, [sites.length]);
 
   const shown = useMemo(() => {
     if (!jobs) return [];
@@ -259,7 +288,27 @@ export default function NewForm72Screen() {
             + 'Search by job number or site if yours is not here.'}
       </Txt>
 
-      {preview ? (
+      {bySite ? (
+        <Card>
+          <Rowed gap={2}>
+            <View style={{ flex: 1 }}>
+              <H2>Which site?</H2>
+              <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+                The form opens with the site&rsquo;s register already on it. A job can be linked to it
+                afterwards.
+              </Txt>
+            </View>
+          </Rowed>
+          <SitePicker
+            sites={sites}
+            onChange={(id: string) => {
+              setBySite(false);
+              router.push({ pathname: '/site/form72', params: { siteId: id } });
+            }}
+          />
+          <Button title="Back to the job list" variant="ghost" onPress={() => setBySite(false)} />
+        </Card>
+      ) : preview ? (
         <Card>
           <H2>{preview.job.siteName || preview.job.title}</H2>
           <Txt size="sm" tone="muted">{preview.job.title}</Txt>
@@ -309,12 +358,17 @@ export default function NewForm72Screen() {
           {jobs === null ? (
             <Card><Txt size="sm" tone="muted">Reading the job list…</Txt></Card>
           ) : !shown.length ? (
-            <EmptyState
-              icon="clipboard-text-off-outline"
-              title={typed ? 'No job matches that' : 'No job on this filter'}
-              body={'A form can also be raised against a site with no job on it — plenty of this work '
-                + 'is done before the office books one.'}
-            />
+            <>
+              <EmptyState
+                icon="clipboard-text-off-outline"
+                title={typed ? 'No job matches that' : 'No job on this filter'}
+                body={'A form can also be raised against a site with no job on it — plenty of this '
+                  + 'work is done before the office books one.'}
+              />
+              {/* It said that and offered no way to do it, which is the dead
+                  end this button is. */}
+              <Button title="Pick a site instead" onPress={() => { void openBySite(); }} />
+            </>
           ) : (
             shown.map((j) => {
               const fire = looksLikeHydrantWork(toJobForForm(j));

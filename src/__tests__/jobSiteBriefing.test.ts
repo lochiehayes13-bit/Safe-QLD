@@ -159,3 +159,42 @@ describe('a site the map cannot place', () => {
     expect(map).toContain('!placed.has(site.id)');
   });
 });
+
+describe('starting a Form 72 for a site with no job', () => {
+  /*
+   * /site/form72 redirects to /form72/new when it is opened with no site —
+   * from the home screen, or a pinned tile — and that screen was a job picker
+   * and nothing else. So a site with no job could not start a Form 72 from the
+   * one screen that exists to start them, and plenty of this work is done
+   * before the office books anything. The empty state even said that, and
+   * offered no way to do it: it named the capability and withheld it.
+   */
+  const screen = readFileSync(
+    join(__dirname, '..', '..', 'app', 'form72', 'new.tsx'), 'utf8',
+  );
+
+  it('offers a site as well as a job', () => {
+    expect(screen).toContain('title="Pick a site instead"');
+    expect(screen).toContain('<SitePicker');
+  });
+
+  it('routes to the screen that already creates it properly', () => {
+    /*
+     * Rather than a second create path. /site/form72 does the register
+     * prefill, writes the address as the form prints it, and auto-links the
+     * job where the site has exactly one open — a second copy of that would
+     * be a second thing to keep right.
+     */
+    expect(screen).toContain("router.push({ pathname: '/site/form72', params: { siteId: id } })");
+  });
+
+  it('reads the site list only when the site route is opened', () => {
+    // Three thousand rows that most visits to this screen never need.
+    expect(screen).toContain('if (sites.length) return;');
+    expect(screen).toContain('setSites(await listSitePicks());');
+  });
+
+  it('says so if the site list cannot be read, rather than showing an empty picker', () => {
+    expect(screen).toContain("showAlert('Could not read the site list'");
+  });
+});
