@@ -19,11 +19,12 @@ import { attachmentContentKey } from '@/domain/outboundWork';
 import { describeActionFailure } from '@/domain/loadFailure';
 import { router } from 'expo-router';
 import {
-  CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, FLOW_DEVICE_LABEL, PART_D_ROWS,
+  CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, FLOW_DEVICE_LABEL,
   PART_RESULT_LABEL, SYSTEM_TYPE_LABEL, TEST_INTERVAL_LABEL,
   PART_G_PRINTED_TEST_POINTS,
   deviceCalibration, dutyToCarry, elevationHeadKpa, flowRowDevices, flowRowKey, flowRowLongLabel,
   flowKindsAfterAnswer, flowRowRead, flowRowUntouched, form72DefectForRegister,
+  partDLines,
   provedDuty, provedDutyDisagrees,
   intervalsTested, maintenanceTestFromAxes, overloadCheck, overloadRun, resolveFrictionalLoss,
   toggleMaintenanceAxes,
@@ -2318,17 +2319,10 @@ function PartD({ form, locked, patch }: PartProps) {
   // The eight printed lines, laid over whatever this form has stored. A line
   // the form holds keeps its readings and its index; a line it does not is
   // shown empty and only becomes a stored row once something is typed into it.
-  const stored = new Map(f.rows.map((r, i) => [flowRowKey(r), i]));
-  const lines: { row: FlowRow; index: number | undefined; printed: boolean }[] = [
-    ...PART_D_ROWS.map((template) => {
-      const index = stored.get(flowRowKey(template));
-      const held = index === undefined ? undefined : f.rows[index];
-      return { row: held ?? template, index, printed: true };
-    }),
-    ...f.rows
-      .map((row, index) => ({ row, index, printed: false }))
-      .filter(({ row }) => !PART_D_ROWS.some((t) => flowRowKey(t) === flowRowKey(row))),
-  ];
+  // Laid out in the domain, so this and the printed page claim the same stored
+  // row for each of the department's lines — see partDLines for what went
+  // wrong when they disagreed.
+  const lines = partDLines(f.rows);
 
   /*
    * Which untouched rows the technician has opened by hand.
@@ -2343,7 +2337,7 @@ function PartD({ form, locked, patch }: PartProps) {
   const inUseCount = lines.filter((l) => l.printed && !flowRowUntouched(l.row)).length;
 
   const setLine = (
-    line: { row: FlowRow; index: number | undefined },
+    line: { row: FlowRow; index?: number },
     p: Partial<FlowRow>,
   ) => set({
     rows: line.index === undefined

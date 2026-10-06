@@ -774,6 +774,50 @@ export function unTickedAnsweredKinds(
   return [...new Set(known)].filter((k) => !ticked.includes(k));
 }
 
+/** One line of Part D as the screen lays it out: what to draw, and where it is stored. */
+export interface PartDLine {
+  row: FlowRow;
+  /** Where in form.flowTest.rows it lives, or absent for a printed line nobody has used. */
+  index?: number;
+  /** One of the department's eight, rather than a row somebody added. */
+  printed: boolean;
+}
+
+/**
+ * The department's eight printed lines laid over what a form actually holds,
+ * with everything left over after them.
+ *
+ * The screen built this with a Map keyed on the row's duty, so two stored rows
+ * at the same duty collapsed to one and the LAST of them won. The printed page
+ * takes the FIRST (flowTableRows splices it out of the list and prints what
+ * remains as added rows). So on a form carrying a duplicate — and they arrive
+ * from earlier builds of this screen, from the hydrant tool and from the sync,
+ * even though the screen does not make them now — the technician edited one
+ * reading while the page put the other on the department's line, and the one
+ * they could not see could not be removed either. A row nobody can reach is a
+ * reading nobody can take, which is what the fold above this promises cannot
+ * happen.
+ *
+ * So: first match claimed for each printed line, exactly as the renderer does
+ * it, and every unclaimed row surfaced as an added one — where the screen
+ * draws it with a Remove button. A test holds the two to claiming the same
+ * rows.
+ */
+export function partDLines(rows: readonly FlowRow[]): PartDLine[] {
+  const claimed = new Set<number>();
+  const printed = PART_D_ROWS.map((template) => {
+    const key = flowRowKey(template);
+    const index = rows.findIndex((r, i) => !claimed.has(i) && flowRowKey(r) === key);
+    if (index < 0) return { row: template, printed: true };
+    claimed.add(index);
+    return { row: rows[index]!, index, printed: true };
+  });
+  const extra = rows
+    .map((row, index) => ({ row, index, printed: false }))
+    .filter(({ index }) => !claimed.has(index));
+  return [...printed, ...extra];
+}
+
 /**
  * Part C's ticks after a technician corrects what kind a meter is.
  *
