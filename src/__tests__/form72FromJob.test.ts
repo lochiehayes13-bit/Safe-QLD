@@ -27,7 +27,7 @@ const job = (over: Partial<JobForForm> = {}): JobForForm => ({
   jobType: 'Service',
   technician: 'C. Whitmore',
   status: 'scheduled',
-  scheduledFor: `${TODAY}T07:30:00.000Z`,
+  issuedOn: `${TODAY}T07:30:00.000Z`,
   ...over,
 });
 
@@ -114,7 +114,7 @@ describe('what the job fills in', () => {
 
 describe('the date a test is recorded under', () => {
   it('is the completion date of a job the office has closed', () => {
-    const done = job({ status: 'complete', scheduledFor: '2026-09-28T07:00:00.000Z', completedDate: '2026-09-29' });
+    const done = job({ status: 'complete', issuedOn: '2026-09-28T07:00:00.000Z', completedDate: '2026-09-29' });
     expect(testDateFromJob(done, TODAY)).toBe('2026-09-29');
     expect(testDateSource(done, TODAY)).toContain('completion date');
   });
@@ -124,22 +124,34 @@ describe('the date a test is recorded under', () => {
     expect(testDateFromJob(done, TODAY)).toBe('2026-09-29');
   });
 
-  it('is the scheduled day for a job scheduled today or already past', () => {
+  it('is today for a job that is not finished, whatever date the job carries', () => {
+    /*
+     * This used to take the job's `scheduledFor` where that was not in the
+     * future — and that field holds the job's ISSUE date, filled from Simpro's
+     * `issuedAt` (src/db/mirrorRepo.ts). So a job raised in August and tested
+     * in October produced a Form 72 dated August: the day somebody in the
+     * office typed the job up, on a document whose ten-business-day notice to
+     * the occupier and five-year retention both run from the test date.
+     */
     expect(testDateFromJob(job(), TODAY)).toBe(TODAY);
-    expect(testDateFromJob(job({ scheduledFor: '2026-10-02T07:00:00.000Z' }), TODAY)).toBe('2026-10-02');
+    expect(testDateFromJob(job({ issuedOn: '2026-08-11T07:00:00.000Z' }), TODAY)).toBe(TODAY);
   });
 
   it('never dates a test forward to a job that has not happened', () => {
-    // The occupier's ten-day deadline and the five-year retention are both
-    // counted from this date. A job booked for Friday, opened on Wednesday,
-    // would stamp Friday on a record of a test nobody has done.
-    const future = job({ scheduledFor: '2026-10-30T07:00:00.000Z' });
+    const future = job({ issuedOn: '2026-10-30T07:00:00.000Z' });
     expect(testDateFromJob(future, TODAY)).toBe(TODAY);
-    expect(testDateSource(future, TODAY)).toContain('cannot be dated forward');
+  });
+
+  it('says today is today, and that it is the technician’s to change', () => {
+    // It used to report the source as "the day the job was scheduled", which
+    // is a claim about a field that has never held a schedule.
+    expect(testDateSource(job({ issuedOn: '2026-08-11T07:00:00.000Z' }), TODAY)).toBe(
+      'today — change it if the test was done on another day',
+    );
   });
 
   it('falls back to today where the job has no dates at all', () => {
-    expect(testDateFromJob(job({ scheduledFor: undefined }), TODAY)).toBe(TODAY);
+    expect(testDateFromJob(job({ issuedOn: undefined }), TODAY)).toBe(TODAY);
   });
 });
 
@@ -214,8 +226,8 @@ describe('reading the maintenance test out of the job’s own words', () => {
 });
 
 describe('which job to put in front of somebody raising a form', () => {
-  const j = (id: string, scheduledFor?: string, siteName = `Site ${id}`): JobForForm =>
-    job({ externalId: id, siteName, scheduledFor });
+  const j = (id: string, issuedOn?: string, siteName = `Site ${id}`): JobForForm =>
+    job({ externalId: id, siteName, issuedOn });
 
   it('puts today first, then the recent past, then the undated, then the future', () => {
     const ranked = rankJobsForNewForm([

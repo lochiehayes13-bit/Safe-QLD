@@ -53,6 +53,7 @@ export default function NewForm72Screen() {
   const [typed, setTyped] = useState('');
   const [mode, setMode] = useState<Mode>('today');
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [capped, setCapped] = useState(false);
   const [creating, setCreating] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ job: JobSummary; lines: string[]; gaps: string[] } | null>(null);
 
@@ -87,6 +88,11 @@ export default function NewForm72Screen() {
         filter: 'all', today, siteId: params.siteId || undefined, limit: 400,
       });
       setJobs(page.rows);
+      // Whether there are more jobs than the window took. The repository has
+      // always said so and this screen threw it away, so a technician
+      // searching for a job past the four-hundredth got an empty list with
+      // nothing to say the list had ended rather than the job not existing.
+      setCapped(page.capped);
       setLoadError(null);
 
       // The job we arrived from, chosen once. Done here rather than in an
@@ -116,8 +122,9 @@ export default function NewForm72Screen() {
       const day = j.scheduledFor?.slice(0, 10);
       if (mode === 'all') return true;
       if (mode === 'today') return day === today;
-      // "Recent" is the write-up case: work done in the last fortnight that
-      // somebody is turning into a document now.
+      // The write-up case: a job raised in the last fortnight that somebody is
+      // turning into a document now. Raised, not done — see the note by the
+      // tabs. The job list has no date for when work happened.
       return !!day && day < today && day >= shiftDays(today, -14);
     };
 
@@ -221,11 +228,28 @@ export default function NewForm72Screen() {
         value={mode}
         onChange={setMode}
         options={[
-          { value: 'today' as const, label: 'Today' },
+          { value: 'today' as const, label: 'Raised today' },
           { value: 'recent' as const, label: 'Last fortnight' },
           { value: 'all' as const, label: 'All' },
         ]}
       />
+      {/*
+        * "Raised", not "scheduled" — because the date these filter on is the
+        * date the office raised the job in Simpro, and Simpro's job payload
+        * carries no schedule at all (the bookings are their own resource). The
+        * tab said "Today", so a technician standing on site looking for the
+        * job they are there to do found it only if the office happened to
+        * raise it that morning, and had no way to know why it was missing.
+        * Honest labels and the search box are a better answer than a filter
+        * that quietly means something else.
+        */}
+      <Txt size="xs" tone="faint">
+        {mode === 'all'
+          ? `${shown.length} job${shown.length === 1 ? '' : 's'}${
+            capped ? ' — the list is windowed, so search if yours is not here' : ''}`
+          : 'By the date the office raised the job, which is the only date Simpro gives us. '
+            + 'Search by job number or site if yours is not here.'}
+      </Txt>
 
       {preview ? (
         <Card>
@@ -337,7 +361,7 @@ function toJobForForm(j: JobSummary): JobForForm {
     jobTypeRaw: j.jobTypeRaw,
     technician: j.technician,
     status: j.status,
-    scheduledFor: j.scheduledFor,
+    issuedOn: j.scheduledFor,
     completedDate: j.completedDate,
     completedAt: j.completedAt,
   };

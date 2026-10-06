@@ -41,7 +41,17 @@ export interface JobForForm {
   jobTypeRaw?: string;
   technician?: string;
   status: 'scheduled' | 'in-progress' | 'complete' | 'blocked';
-  scheduledFor?: string;
+  /**
+   * When the job was raised in Simpro — its issue date, not its schedule.
+   *
+   * Named for what it holds, because it was not: the mirror fills this from
+   * `job.issuedAt` (src/db/mirrorRepo.ts), the job list sorts and groups by it,
+   * and a field called `scheduledFor` invited exactly the mistake that was
+   * here — a Form 72 dated the day the job was raised rather than the day the
+   * test was done. Simpro's job payload carries no schedule; the bookings live
+   * in their own resource.
+   */
+  issuedOn?: string;
   completedDate?: string;
   completedAt?: string;
 }
@@ -87,12 +97,28 @@ export interface Form72FromJob {
  */
 export function testDateFromJob(job: JobForForm, today: string): string {
   const day = (v: string | undefined): string | undefined => v?.slice(0, 10) || undefined;
+  /*
+   * A completed job was done on the day it says it was done. Anything else is
+   * being filled in now, so the test date is today.
+   *
+   * There used to be a middle branch taking the job's `scheduledFor` where
+   * that was not in the future — and `scheduledFor` is the job's ISSUE date,
+   * filled from Simpro's `issuedAt`. So a job raised in August and tested in
+   * October produced a Form 72 dated August: the day somebody in the office
+   * typed the job up. On a document whose ten-business-day notice to the
+   * occupier and five-year retention both run from the test date, and which a
+   * licensee signs. The screen compounded it by reporting the source as "the
+   * day the job was scheduled", which the field has never held.
+   *
+   * There is a real schedule in the bookings resource, and reading it would
+   * mean an async lookup this function cannot do and should not: a test is
+   * dated by when it happened, and only the person doing it knows that. Today,
+   * which the technician can see and change, is the honest default.
+   */
   if (job.status === 'complete') {
     const done = day(job.completedDate) ?? day(job.completedAt);
     if (done) return done;
   }
-  const scheduled = day(job.scheduledFor);
-  if (scheduled && scheduled <= today) return scheduled;
   return today;
 }
 
@@ -100,12 +126,7 @@ export function testDateFromJob(job: JobForForm, today: string): string {
 export function testDateSource(job: JobForForm, today: string): string {
   const chosen = testDateFromJob(job, today);
   if (job.status === 'complete' && chosen !== today) return 'the job’s completion date';
-  if (chosen !== today) return 'the day the job was scheduled';
-  const scheduled = job.scheduledFor?.slice(0, 10);
-  if (scheduled && scheduled > today) {
-    return 'today — the job is booked for later, and a test nobody has done yet cannot be dated forward';
-  }
-  return 'today';
+  return 'today — change it if the test was done on another day';
 }
 
 /*
@@ -255,7 +276,7 @@ export function form72FromJob(
  * a form, and the alternative is a technician who cannot find their work.
  */
 export function rankJobsForNewForm<T extends JobForForm>(jobs: readonly T[], today: string): T[] {
-  const day = (j: T): string => j.scheduledFor?.slice(0, 10) ?? '';
+  const day = (j: T): string => j.issuedOn?.slice(0, 10) ?? '';
   const bucket = (j: T): number => {
     const d = day(j);
     if (d === today) return 0;
@@ -277,5 +298,15 @@ export function rankJobsForNewForm<T extends JobForForm>(jobs: readonly T[], tod
 /** Which of those jobs look like water-based fire work, for the shortlist. */
 export function looksLikeHydrantWork(job: JobForForm): boolean {
   const text = [job.jobTypeRaw, job.jobType, job.title].filter(Boolean).join(' ');
-  return /\bhydrant|sprinkler|booster|fire\s*main|combined\b/i.test(text);
+  /*
+   * A leading \b on every alternative, not on the ends of the expression.
+   *
+   * Alternation binds looser than anything else in a regex, so
+   * /\bhydrant|sprinkler|.../ anchored only "hydrant" at its start and only
+   * the last alternative at its end — the middle ones matched anywhere inside
+   * a word. The stems stay deliberately open at the trailing edge so
+   * "hydrants", "sprinklers" and "boostered" still match, which is the point
+   * of matching on job titles at all.
+   */
+  return /\b(?:hydrant|sprinkler|booster|fire\s*main|combined)/i.test(text);
 }
