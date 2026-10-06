@@ -2105,6 +2105,7 @@ function Outstanding({
  * what the block plan asked for — and is kept, marked, below the eight.
  */
 function PartD({ form, locked, patch }: PartProps) {
+  const t = useTheme();
   const f = form.flowTest;
   const set = (p: Partial<typeof f>) => patch({ flowTest: { ...f, ...p } });
 
@@ -2122,6 +2123,18 @@ function PartD({ form, locked, patch }: PartProps) {
       .map((row, index) => ({ row, index, printed: false }))
       .filter(({ row }) => !PART_D_ROWS.some((t) => flowRowKey(t) === flowRowKey(row))),
   ];
+
+  /*
+   * Which untouched rows the technician has opened by hand.
+   *
+   * Held here rather than per row so it survives a row being stored — the
+   * first keystroke moves a row from untouched to in use, and a state inside
+   * the row would be lost at exactly the wrong moment. A row never closes once
+   * opened: closing one somebody opened on purpose, because they had not typed
+   * into it yet, is the app arguing with them.
+   */
+  const [opened, setOpened] = useState<Set<string>>(new Set());
+  const inUseCount = lines.filter((l) => l.printed && !flowRowUntouched(l.row)).length;
 
   const setLine = (
     line: { row: FlowRow; index: number | undefined },
@@ -2216,9 +2229,61 @@ function PartD({ form, locked, patch }: PartProps) {
         />
       </Card>
 
+      {/*
+        * Eight rows, three of them usually in use.
+        *
+        * The department's table prints three nozzle bores and five metered
+        * rates whatever the job did, so all eight have to be here and all
+        * eight have to stay answerable — a row nobody can reach is a reading
+        * nobody can take. But a typical annual hydrant test runs three of
+        * them, and eight full cards made the other five a scroll between the
+        * technician and the next one they wanted.
+        *
+        * So a row in use opens itself and a row nobody has touched is one line
+        * high, saying what it will print, opening on a tap. Nothing is hidden
+        * and nothing is decided: the fold follows what is on the row, never
+        * what the app guesses the job was. It is the shape the timesheet
+        * already uses for a weekend.
+        */}
+      <Txt size="sm" tone="muted">
+        {inUseCount
+          ? `${inUseCount} of the department's eight rows in use. The rest print as not run — tap one to read it.`
+          : 'The department prints eight rows. Tap the one you ran — the rest print as not run, which is not a fault.'}
+      </Txt>
+
       {lines.map((line) => {
         const r = line.row;
         const untouched = flowRowUntouched(r);
+        const rowKey = line.printed ? flowRowKey(r) : `extra-${line.index}`;
+        /*
+         * In use, so open: anything on the row at all, and any row that is not
+         * one of the department's eight — an extra row only exists because
+         * somebody put a reading on it.
+         */
+        const inUse = !untouched || !line.printed;
+        if (!inUse && !opened.has(rowKey)) {
+          return (
+            <Pressable
+              key={rowKey}
+              onPress={() => setOpened((prev) => new Set(prev).add(rowKey))}
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${flowRowLongLabel(r)} — nothing read yet`}
+              style={{
+                minHeight: 44,
+                justifyContent: 'center',
+                paddingHorizontal: t.space(4),
+                borderRadius: t.radius.md,
+                backgroundColor: t.color.surfaceAlt,
+              }}
+            >
+              <Rowed gap={2}>
+                <Txt weight="700" tone="muted" style={{ flex: 1 }}>{flowRowLongLabel(r)}</Txt>
+                <Txt size="xs" tone="faint">Not run</Txt>
+                <MaterialCommunityIcons name="chevron-down" size={18} color={t.color.textFaint} />
+              </Rowed>
+            </Pressable>
+          );
+        }
         return (
           /*
            * Keyed by which row of the department's table it is, not by whether

@@ -1552,6 +1552,39 @@ describe('Part A as the two questions it really is', () => {
   });
 });
 
+describe('folding a Part D row away on screen changes nothing on the page', () => {
+  /*
+   * The screen now shows a row nobody has touched as one line instead of a
+   * full card, because the department prints eight rows whatever the job did
+   * and a typical annual test runs three. That is a screen concern and it must
+   * not reach the document: a row nobody ran prints "Not run" in grey — not
+   * red, which would say somebody failed to take a reading — whether or not
+   * its card was open when the form was generated.
+   */
+  it('prints an untouched row as not run, not as a missing reading', () => {
+    const html = form72Html(doc({
+      form: issuable({
+        flowTest: {
+          result: 'pass', hydrantLocations: [], rows: [{ nozzleMm: 19, devices: '', hydrant1Kpa: 600 }],
+        },
+      }),
+    }));
+    const untouched = between(html, '22 mm', '25 mm');
+    expect(untouched).not.toContain('<span class="missing">');
+    expect(flat(untouched)).toContain('Not run');
+  });
+
+  it('prints all eight of the department’s rows on a form with none of them run', () => {
+    const html = form72Html(doc({
+      form: issuable({ flowTest: { result: 'pass', hydrantLocations: [], rows: [] } }),
+    }));
+    for (const r of PART_D_ROWS) {
+      expect({ row: flowRowLabel(r), printed: flat(html).includes(flowRowLabel(r)) })
+        .toEqual({ row: flowRowLabel(r), printed: true });
+    }
+  });
+});
+
 describe('a Part D row with a meter named and nothing read', () => {
   /*
    * Naming the meter is what turns the page's quiet "Not run" into red "Not

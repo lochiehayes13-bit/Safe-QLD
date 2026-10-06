@@ -19,7 +19,10 @@ import {
   GUIDE_ORDER, guideSteps, nextGuideStep, outstandingParts, partAnswered, recordAnswered,
   type Applicability, type GuidePart,
 } from '@/domain/form72Guide';
-import { emptyForm72, validateForm72, type Form72, type MaintenanceTest } from '@/domain/form72';
+import {
+  PART_D_ROWS, emptyForm72, flowRowUntouched, validateForm72,
+  type FlowRow, type Form72, type MaintenanceTest,
+} from '@/domain/form72';
 
 const NOW = '2026-10-06T00:00:00.000Z';
 
@@ -299,6 +302,44 @@ describe('recording that a part was answered', () => {
     expect(recordAnswered(f, 'D')).toBeUndefined();
     expect(recordAnswered(f, 'E')!.answeredParts).toEqual(['B', 'D', 'E']);
   });
+});
+
+describe('Part D’s eight rows, folded', () => {
+  /*
+   * The department's table prints three nozzle bores and five metered rates
+   * whatever the job did, so all eight have to be on the screen and all eight
+   * have to stay answerable — a row nobody can reach is a reading nobody can
+   * take. A typical annual hydrant test runs three, and eight full cards put
+   * five of them between the technician and the next one they want.
+   *
+   * The fold follows what is ON the row and never what the app guesses the job
+   * was, which is the property worth pinning. These are the predicates the
+   * screen folds on; form72.test.ts holds the other half — that folding a row
+   * away changes nothing about what the page prints.
+   */
+  const row = (over: Partial<FlowRow> = {}): FlowRow => ({ nozzleMm: 19, devices: '', ...over });
+
+  it('treats a row with nothing on it as not in use', () => {
+    expect(flowRowUntouched(row())).toBe(true);
+  });
+
+  it('treats a row with one reading as in use, from the first keystroke', () => {
+    expect(flowRowUntouched(row({ hydrant1Kpa: 540 }))).toBe(false);
+  });
+
+  it('treats a row with only a meter named as in use, because that is a gap', () => {
+    // Naming the meter is what turns the page's "Not run" into "Not recorded",
+    // so the row has to be open where the technician can see it.
+    expect(flowRowUntouched(row({ devices: 'SQF-001' }))).toBe(false);
+  });
+
+  it('counts the department’s eight rows by what is on them', () => {
+    const lines = PART_D_ROWS.map((r) => ({ ...r }));
+    expect(lines.filter((r) => !flowRowUntouched(r))).toHaveLength(0);
+    const run = [{ ...lines[0]!, hydrant1Kpa: 600 }, { ...lines[3]!, hydrant1Kpa: 580 }];
+    expect(run.filter((r) => !flowRowUntouched(r))).toHaveLength(2);
+  });
+
 });
 
 describe('what this module must never do', () => {
