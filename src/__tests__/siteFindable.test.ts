@@ -282,13 +282,28 @@ describe('every screen that offers a site offers a way to search for it', () => 
       const listsEverySite = /\bconst \[sites[\s\S]*?(listSites\(\)|listSitePicks\(\))/.test(source);
       if (!listsEverySite) return;
 
-      const renders = [...source.matchAll(/\bsites\.map\(/g)];
+      /*
+       * Two shapes, because the first version of this guard looked only for
+       * `sites.map(` and missed the one screen that mattered: app/work/labels
+       * .tsx drew all three thousand through `<FlatList data={sites}>`. A
+       * guard narrower than its own claim is worse than no guard, so it now
+       * covers both ways of rendering a list.
+       */
+      const renders = [
+        ...source.matchAll(/\bsites\.map\(/g),
+        ...source.matchAll(/\bdata=\{\s*sites\b/g),
+      ];
       for (const hit of renders) {
         const before = source.slice(Math.max(0, hit.index - 40), hit.index);
         if (before.includes('new Map(')) continue;
-        // A rendered row opens a capitalised element within the arrow body.
+        /*
+         * A rendered row opens a capitalised element in the arrow body. A
+         * FlatList's `data=` needs no such check — handing it the list IS
+         * rendering the list.
+         */
         const body = source.slice(hit.index, hit.index + 240);
-        if (!/=>\s*\(?\s*<[A-Z]/.test(body)) continue;
+        const isList = /^\bdata=/.test(source.slice(hit.index, hit.index + 5));
+        if (!isList && !/=>\s*\(?\s*<[A-Z]/.test(body)) continue;
         expect({
           screen: path.slice(path.indexOf('/app/') + 1),
           rendersWholeList: true,

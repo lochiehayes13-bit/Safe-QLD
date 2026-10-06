@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FlatList, View } from 'react-native';
+import { FlatList, TextInput, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { nextAssetCode, queryAssets, updateAsset, type AssetRecord } from '@/db/assetRepo';
-import { listSites } from '@/db/repo';
+import {
+  getSite, listSiteSummaries, type SiteSummary, type SiteSummaryPage,
+} from '@/db/repo';
 import {
   auditTags, parseAssetCode, planTagAssignments, serialsInUse, typeCodeEntry,
   type TaggableAsset,
@@ -69,9 +71,33 @@ const locationOf = (a: AssetRecord | undefined): string =>
  */
 const nudgeMm = (typed: string): number => (typed.trim() ? Number(typed.trim()) : 0);
 
+/**
+ * How many sites the picker draws before it asks for a search.
+ *
+ * The same figure the sites tab uses, for the same reason: three hundred rows
+ * is more than anybody scrolls and few enough to draw quickly, and past it the
+ * search is the way through rather than patience.
+ */
+const SITE_PAGE = 300;
+
 export default function LabelsScreen() {
   const t = useTheme();
-  const [sites, setSites] = useState<Site[]>([]);
+  /*
+   * The sites to choose from, searched in SQL rather than held in full.
+   *
+   * This screen read every site the phone has and drew them all in a
+   * FlatList — three thousand rows with nothing to type into, so a building
+   * that is not near the top of the alphabet is a long scroll and then a
+   * guess. It is the same fault SitePicker was written for and the same fault
+   * that was just fixed on two other screens; this one renders through a
+   * FlatList rather than a map, which is why it was missed.
+   *
+   * It follows the sites tab rather than SitePicker, because this is a
+   * full-screen list: the search runs in the statement, the cap is disclosed,
+   * and the FlatList keeps its virtualisation.
+   */
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState<SiteSummaryPage | null>(null);
   const [site, setSite] = useState<Site | null>(null);
   const [assets, setAssets] = useState<AssetRecord[]>([]);
   const [filter, setFilter] = useState<Filter>('needs');
@@ -84,7 +110,22 @@ export default function LabelsScreen() {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
-  useEffect(() => { void listSites().then(setSites); }, []);
+  useEffect(() => {
+    let live = true;
+    const run = async () => {
+      try {
+        const found = await listSiteSummaries({ query: search, limit: SITE_PAGE });
+        if (live) setPage(found);
+      } catch {
+        // A read that failed is not an empty book. Saying "no sites yet" to
+        // somebody whose phone has three thousand of them sends them off to
+        // add one.
+        if (live) setPage(null);
+      }
+    };
+    void run();
+    return () => { live = false; };
+  }, [search]);
 
   const openSite = useCallback(async (s: Site) => {
     setBusy(true);
@@ -103,6 +144,24 @@ export default function LabelsScreen() {
       setBusy(false);
     }
   }, []);
+
+  /*
+   * A summary row is six columns; this screen's audit needs the whole site. So
+   * the row reads it before opening, and says so if it cannot — rather than
+   * opening a screen with a half-built site on it.
+   */
+  const openSummary = useCallback(async (s: SiteSummary) => {
+    try {
+      const full = await getSite(s.id);
+      if (!full) {
+        showAlert('That site is gone', 'It was in the list a moment ago and is not in the database now.');
+        return;
+      }
+      await openSite(full);
+    } catch (e) {
+      showAlert('Could not open that site', describeActionFailure(e, 'open that site'));
+    }
+  }, [openSite]);
 
   const reload = useCallback(async () => {
     if (!site) return;
@@ -246,24 +305,76 @@ export default function LabelsScreen() {
         <Stack.Screen options={{ title: 'Asset labels' }} />
         <Screen scroll={false} padded={false}>
           <FlatList
-            data={sites}
+            data={page?.rows ?? []}
             keyExtractor={(s) => s.id}
+            keyboardShouldPersistTaps="handled"
             contentContainerStyle={{ padding: t.space(4), gap: t.space(3), paddingBottom: t.space(20) }}
             ListHeaderComponent={
-              <Txt size="sm" tone="muted" style={{ lineHeight: 19, marginBottom: t.space(1) }}>
-                Pick a building. Tags are issued per asset type across the whole company, so the numbers
-                stay unique no matter which site they were printed from.
-              </Txt>
+              <View style={{ gap: t.space(2), marginBottom: t.space(1) }}>
+                <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+                  Pick a building. Tags are issued per asset type across the whole company, so the numbers
+                  stay unique no matter which site they were printed from.
+                </Txt>
+                {/*
+                  * In the header, so it renders when the list is empty — which
+                  * is exactly when somebody needs it. A search box below an
+                  * empty list is a search box nobody can reach.
+                  */}
+                <View
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', gap: t.space(2),
+                    backgroundColor: t.color.surfaceAlt, borderRadius: t.radius.md,
+                    borderWidth: 1, borderColor: t.color.border,
+                    paddingHorizontal: t.space(3), minHeight: t.touch,
+                  }}
+                >
+                  <MaterialCommunityIcons name="magnify" size={20} color={t.color.textFaint} />
+                  <TextInput
+                    value={search}
+                    onChangeText={setSearch}
+                    placeholder="Search sites, clients, references"
+                    placeholderTextColor={t.color.textFaint}
+                    autoCapitalize="none"
+                    style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md }}
+                  />
+                </View>
+                {page?.capped ? (
+                  <Txt size="xs" tone="faint">
+                    {`First ${SITE_PAGE} of ${page.matching.toLocaleString()} sites. Search to narrow.`}
+                  </Txt>
+                ) : null}
+              </View>
             }
             ListEmptyComponent={
-              <EmptyState
-          icon="map-marker-off-outline"
-                title="No sites yet"
-                body="Add a site and its assets first. There is nothing to label until there is a register."
-              />
+              /*
+               * Three states, not one. A search that matched nothing, a phone
+               * with no sites on it, and a read that failed are different
+               * things, and telling somebody with three thousand sites to "add
+               * a site" because a query threw sends them off to make a
+               * duplicate.
+               */
+              page === null ? (
+                <EmptyState
+                  icon="database-off-outline"
+                  title="Could not read the site list"
+                  body="Pull down to try again. Nothing is wrong with your sites — this phone could not read them just now."
+                />
+              ) : search.trim() ? (
+                <EmptyState
+                  icon="magnify-close"
+                  title="Nothing matched"
+                  body="Try fewer letters, the suburb, or the client's name."
+                />
+              ) : (
+                <EmptyState
+                  icon="map-marker-off-outline"
+                  title="No sites yet"
+                  body="Add a site and its assets first. There is nothing to label until there is a register."
+                />
+              )
             }
             renderItem={({ item }) => (
-              <Card onPress={() => void openSite(item)}>
+              <Card onPress={() => void openSummary(item)}>
                 <Rowed>
                   <View style={{ flex: 1 }}>
                     <Txt weight="700" numberOfLines={1}>{item.name}</Txt>
