@@ -45,9 +45,19 @@ export default function ConfigCompareScreen() {
   const [mismatches, setMismatches] = useState<SiteMismatch[]>([]);
   const [busy, setBusy] = useState(false);
   const [readFailed, setReadFailed] = useState<string | null>(null);
+  /** Why the site list would not read, where it would not. */
+  const [sitesFailed, setSitesFailed] = useState<string | null>(null);
 
   useEffect(() => {
-    void listSitePicks().then(setSites).catch(() => setSites([]));
+    /*
+     * A read that threw used to store an empty list, which on screen is a
+     * phone with no sites on it: the picker under "Which site is this?" came
+     * up empty for ever and there was nothing to compare against, with no
+     * reason given. A database locked by a sync is the realistic case.
+     */
+    void listSitePicks()
+      .then((rows) => { setSites(rows); setSitesFailed(null); })
+      .catch((e: unknown) => { setSites([]); setSitesFailed(describeLoadFailure(e, 'the site list')); });
   }, []);
 
   const siteId = opened?.record.siteId;
@@ -165,6 +175,9 @@ export default function ConfigCompareScreen() {
             body="Pick the building this configuration belongs to and the comparison reads its register. Nothing is written either way."
           />
           <Card>
+            {sitesFailed ? (
+              <Banner tone="fail" title="The site list could not be read" body={sitesFailed} />
+            ) : null}
             <SitePicker sites={sites} onChange={tie} label="Compare against" />
           </Card>
         </>

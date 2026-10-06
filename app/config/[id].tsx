@@ -17,7 +17,7 @@ import {
 import { ContextGate } from '@/components/ContextGate';
 import { RecordGate } from '@/components/RecordGate';
 import { SitePicker } from '@/components/SitePicker';
-import { describeActionFailure } from '@/domain/loadFailure';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { showAlert } from '@/components/alert';
 
 /**
@@ -38,13 +38,32 @@ export default function ConfigScreen() {
   const [sites, setSites] = useState<SitePick[]>([]);
   const [tying, setTying] = useState(false);
   const [busy, setBusy] = useState(false);
-  /** Panels already on the tied site. Writing this file in adds to them. */
-  const [panelsOnSite, setPanelsOnSite] = useState<number | null>(null);
+  /**
+   * Panels already on the tied site. Writing this file in adds to them.
+   *
+   * Three answers, not two. `null` is "not counted yet", a number is the
+   * count, and 'failed' is a read that threw — which used to be stored as
+   * null, so the confirmation below told somebody the site had nothing on it
+   * when it had not been able to look. See confirmImport.
+   */
+  const [panelsOnSite, setPanelsOnSite] = useState<number | 'failed' | null>(null);
+  /** Why the site list would not read, where it would not. */
+  const [sitesFailed, setSitesFailed] = useState<string | null>(null);
 
   useEffect(() => {
-    // A failure here costs the site picker and nothing else, so it is reported
-    // where the picker would have been rather than over the whole screen.
-    void listSitePicks().then(setSites).catch(() => setSites([]));
+    /*
+     * A failure here costs the site picker and nothing else, so it is said
+     * where the picker would have been rather than over the whole screen.
+     *
+     * That sentence was in this comment and nowhere else: the catch stored an
+     * empty list, which on screen is a phone with no sites on it. So a
+     * database locked by a sync — the realistic case — offered an empty picker
+     * beside "Create one from the file", and the technician made a second site
+     * for a building the phone already held.
+     */
+    void listSitePicks()
+      .then((rows) => { setSites(rows); setSitesFailed(null); })
+      .catch((e: unknown) => { setSites([]); setSitesFailed(describeLoadFailure(e, 'the site list')); });
   }, []);
 
   const parsed = opened?.parsed;
@@ -58,9 +77,9 @@ export default function ConfigScreen() {
      * same way — through the promise rather than straight out of the effect —
      * so untying a site cannot set the count twice in one render.
      */
-    void (tiedSiteId ? listPanels(tiedSiteId).then((p) => p.length) : Promise.resolve(null))
+    void (tiedSiteId ? listPanels(tiedSiteId).then((p): number | 'failed' | null => p.length) : Promise.resolve(null))
       .then(setPanelsOnSite)
-      .catch(() => setPanelsOnSite(null));
+      .catch(() => setPanelsOnSite('failed'));
   }, [tiedSiteId]);
 
   const panels = useMemo(() => (parsed?.panels ?? []).map((panel) => ({
@@ -127,17 +146,33 @@ export default function ConfigScreen() {
      * afterwards counts the building twice. Nothing in the app undoes that
      * except deleting the panels by hand.
      */
-    const already = panelsOnSite ?? 0;
+    /*
+     * What the site already holds, or the fact that it could not be read.
+     *
+     * A failed count used to be stored as null and read as zero here, so the
+     * alert printed the reassuring half — "This adds panels rather than
+     * replacing anything" — about a site it had not managed to look at. Doing
+     * it anyway is the one mistake on this screen that nothing in the app
+     * undoes: importParsedConfig inserts panels and never replaces them, so
+     * the site holds the building twice and the only remedy is deleting the
+     * panels by hand.
+     */
+    const already = typeof panelsOnSite === 'number' ? panelsOnSite : 0;
     showAlert(
       `Write into ${siteName}?`,
       `${record.summary.points.toLocaleString()} devices and ${record.summary.zones.toLocaleString()} zones `
       + `will be added to that site's register.\n\n`
-      + (already > 0
-        ? `${siteName} already has ${already} panel${already === 1 ? '' : 's'} on it, and this adds to them `
-          + 'rather than replacing them. If this file is a newer version of what is already there, delete the '
-          + 'old panel first — otherwise the site holds the building twice.'
-        : 'This adds panels to the site rather than replacing anything, so writing the same file in twice '
-          + 'would hold the building twice.'),
+      + (panelsOnSite === 'failed'
+        ? `What ${siteName} already holds could not be read, so this cannot say whether the building is `
+          + 'already on it. Writing adds panels rather than replacing them, so if it is, the site ends up '
+          + 'holding the building twice and only deleting the old panel by hand undoes that. Open the site '
+          + 'and check first.'
+        : already > 0
+          ? `${siteName} already has ${already} panel${already === 1 ? '' : 's'} on it, and this adds to them `
+            + 'rather than replacing them. If this file is a newer version of what is already there, delete the '
+            + 'old panel first — otherwise the site holds the building twice.'
+          : 'This adds panels to the site rather than replacing anything, so writing the same file in twice '
+            + 'would hold the building twice.'),
       [
         { text: 'Not now', style: 'cancel' },
         { text: 'Write it in', onPress: () => { void runImport(siteId, siteName); } },
@@ -374,6 +409,11 @@ export default function ConfigScreen() {
 
       {tying ? (
         <Card>
+          {/* Said where the picker would have been, which is what the read's
+              own comment always claimed and never did. */}
+          {sitesFailed ? (
+            <Banner tone="fail" title="The site list could not be read" body={sitesFailed} />
+          ) : null}
           <SitePicker
             sites={sites}
             value={record?.siteId}

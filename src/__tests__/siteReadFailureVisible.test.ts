@@ -19,6 +19,21 @@
  * Pick the site the system belongs to", pointing at a control that was not on
  * the page. impairment.siteId is NOT NULL REFERENCES site(id): there is no
  * saving it without one.
+ *
+ * The two panel-configuration screens failed the third way: both wrote an
+ * empty list on a read that threw, which on screen is a phone with no sites on
+ * it. One of them carried a comment saying the failure "is reported where the
+ * picker would have been", and it was reported nowhere — so a database locked
+ * by a sync offered an empty picker beside "Create one from the file", and the
+ * technician made a second site for a building the phone already held.
+ *
+ * Worse on the same screen: the count of what the tied site already holds
+ * stored a failed read as null and then read null as zero, so the
+ * confirmation printed the reassuring half — "this adds panels rather than
+ * replacing anything" — about a site it had not managed to look at. That is
+ * the one mistake on that screen nothing in the app undoes: importing inserts
+ * panels and never replaces them, so the site ends up holding the building
+ * twice and the only remedy is deleting the panels by hand.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -74,5 +89,72 @@ describe('declaring an impairment', () => {
 
   it('and the picker it shows is the shared one, which says what it searched', () => {
     expect(source).toContain("import { SitePicker } from '@/components/SitePicker';");
+  });
+});
+
+describe('opening a panel configuration', () => {
+  const source = read('app/config/[id].tsx');
+
+  it('says why the site list is empty instead of looking like a phone with no sites', () => {
+    expect(source).toContain("setSitesFailed(describeLoadFailure(e, 'the site list'))");
+    expect(source).toContain('title="The site list could not be read"');
+  });
+
+  it('puts that where the picker would have been, which its own comment claimed', () => {
+    const at = source.indexOf('{tying ? (');
+    expect(at).toBeGreaterThan(-1);
+    const block = source.slice(at, at + 700);
+    expect(block).toContain('sitesFailed ?');
+    expect(block.indexOf('sitesFailed')).toBeLessThan(block.indexOf('<SitePicker'));
+  });
+
+  it('tells a failed panel count apart from a site with no panels', () => {
+    // Two answers were stored as one, and one of them is "nothing is there".
+    expect(source).toContain("useState<number | 'failed' | null>(null)");
+    expect(source).toContain("setPanelsOnSite('failed')");
+  });
+
+  it('and refuses to claim the site is empty when it could not look', () => {
+    const at = source.indexOf('showAlert(\n      `Write into ${siteName}?`');
+    expect(at).toBeGreaterThan(-1);
+    const alert = source.slice(at, at + 1400);
+    expect(alert).toContain("panelsOnSite === 'failed'");
+    expect(alert).toContain('could not be read');
+    expect(alert).toContain('Open the site');
+    // The count is only read as a count where it is one.
+    expect(source).toContain("typeof panelsOnSite === 'number' ? panelsOnSite : 0");
+  });
+});
+
+describe('comparing a configuration against a site', () => {
+  const source = read('app/config/compare.tsx');
+
+  it('says why there is nothing to compare against', () => {
+    expect(source).toContain("setSitesFailed(describeLoadFailure(e, 'the site list'))");
+    expect(source).toContain('title="The site list could not be read"');
+  });
+
+  it('shows it above the picker it replaces', () => {
+    const at = source.indexOf('Which site is this?');
+    expect(at).toBeGreaterThan(-1);
+    const block = source.slice(at);
+    const picker = block.indexOf('<SitePicker');
+    const said = block.indexOf('sitesFailed');
+    expect({ picker: picker > -1, said: said > -1 }).toEqual({ picker: true, said: true });
+    expect(said).toBeLessThan(picker);
+  });
+});
+
+describe('no screen swallows a site list read', () => {
+  it('nothing left storing an empty list for a read that threw', () => {
+    /*
+     * The shape that produced three of these: a catch that writes the empty
+     * answer. An empty list and a failed read look the same on screen and have
+     * different remedies — one is a sync, the other is a retry.
+     */
+    for (const file of ['app/config/[id].tsx', 'app/config/compare.tsx', 'app/impairment/new.tsx']) {
+      expect({ file, swallows: /listSitePicks\(\)\s*\.then\(setSites\)\s*\.catch\(\(\) => setSites\(\[\]\)\)/.test(read(file)) })
+        .toEqual({ file, swallows: false });
+    }
   });
 });
