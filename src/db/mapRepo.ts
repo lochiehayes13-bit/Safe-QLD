@@ -23,6 +23,8 @@ import { qldIsoDay } from '@/domain/qldTime';
  */
 
 export interface MapSiteRow extends MapSite {
+  /** The office's own reference for the site, free text or a stamped one. */
+  siteRef?: string;
   contactName?: string;
   contactMobile?: string;
   contactWorkPhone?: string;
@@ -58,6 +60,8 @@ interface SiteRow {
   state: string | null;
   postcode: string | null;
   clientName: string | null;
+  /** The office's own reference, so the map can be searched by it like everywhere else. */
+  siteRef: string | null;
   contactName: string | null;
   contactMobile: string | null;
   contactWorkPhone: string | null;
@@ -84,6 +88,7 @@ interface SiteRow {
  * distinct invoices so one that bills two jobs on the site is one invoice.
  */
 const SITES_SQL = `SELECT s.id, s.name, s.address, s.suburb, s.state, s.postcode, s.clientName,
+       s.siteRef,
        s.contactName, s.contactMobile, s.contactWorkPhone, s.externalId,
        c.customerExternalId, c.customerName,
        j.jobsTotal, j.lastJobAt,
@@ -209,6 +214,7 @@ export async function loadMapData(now: number = Date.now()): Promise<MapData> {
       state: orUndefined(r.state),
       postcode: orUndefined(r.postcode),
       clientName: orUndefined(r.clientName),
+      siteRef: orUndefined(r.siteRef),
       contactName: orUndefined(r.contactName),
       contactMobile: orUndefined(r.contactMobile),
       contactWorkPhone: orUndefined(r.contactWorkPhone),

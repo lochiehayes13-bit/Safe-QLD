@@ -86,6 +86,10 @@ export interface MapSite {
   state?: string | null;
   postcode?: string | null;
   clientName?: string | null;
+  /** The office's own number for the building, so the map can be searched by it. */
+  externalId?: string | null;
+  /** The office's reference, free text or stamped "SIMPRO:8812". */
+  siteRef?: string | null;
   /** The office's customer on the site's latest job, where the mirror knows it. */
   customerExternalId?: string | null;
   customerName?: string | null;
@@ -407,10 +411,35 @@ export function buildPins(input: BuildPinsInput): BuiltPins {
       lines.push(name ? `Quote ${quote.externalId} · ${name}` : `Quote ${quote.externalId}`);
     }
 
+    /*
+     * And the site's own number and reference, which were the two things this
+     * box could not match.
+     *
+     * The map searched a pin's name, address, client and the job and quote
+     * numbers on it — so the one number a technician is most likely to be
+     * holding, the office's number for the building itself, found nothing
+     * here even with the pin on screen. That is the owner's own complaint
+     * about the site list ("the number read out over the phone finds
+     * nothing"), still true in the one module that had not been brought
+     * across.
+     *
+     * The stamped prefix is dropped — SIMPRO:8812 is read out as 8812 — and
+     * the whole reference is kept too, for a site somebody typed their own
+     * reference onto.
+     *
+     * These sit in refs rather than going through siteSearch's prefix rule
+     * because this box is a free-text filter over the pins already drawn, and
+     * the job numbers beside them have always matched as substrings. One rule
+     * for the row, rather than two rules in one box.
+     */
+    const ref = (site.siteRef ?? '').trim();
     const refs = [
       ...classified.map((c) => (c.job.externalId ?? '').trim()).filter(Boolean),
       ...quotes.map((q) => q.externalId.trim()).filter(Boolean),
-    ];
+      (site.externalId ?? '').trim(),
+      ref,
+      ref.includes(':') ? ref.slice(ref.indexOf(':') + 1).trim() : '',
+    ].filter(Boolean);
 
     const client = (site.clientName ?? site.customerName ?? '').trim();
     pins.push({
