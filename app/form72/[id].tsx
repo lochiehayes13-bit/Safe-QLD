@@ -1191,7 +1191,7 @@ function MaintenanceGrid({ form, locked, patch }: PartProps) {
               tone={on ? 'accent' : 'default'}
               onPress={locked ? undefined : () => toggle(
                 on ? types.filter((x) => x !== type) : [...types, type],
-                intervals.length ? intervals : ['annual'],
+                intervals,
               )}
             />
           );
@@ -1209,7 +1209,7 @@ function MaintenanceGrid({ form, locked, patch }: PartProps) {
               selected={on}
               tone={on ? 'accent' : 'default'}
               onPress={locked ? undefined : () => toggle(
-                types.length ? types : ['hydrant'],
+                types,
                 on ? intervals.filter((x) => x !== interval) : [...intervals, interval],
               )}
             />
@@ -1217,10 +1217,26 @@ function MaintenanceGrid({ form, locked, patch }: PartProps) {
         })}
       </View>
 
+      {/*
+        * What the two questions amount to, and which of them is still waiting.
+        *
+        * It used to fill the other question in: tapping "Fire hydrant" with no
+        * interval chosen ticked Annual as well, and tapping "5 year" with no
+        * system chosen ticked fire hydrant. Both lit up a chip the technician
+        * had not tapped, on the one part of the form that says what the
+        * document is a record of — so a five-yearly could print as an annual
+        * because the app answered first and the technician never saw it
+        * happen. One tap answers one question now, and a question with no
+        * answer says so.
+        */}
       <Txt size="sm" tone="muted">
         {ticked.length
           ? `Prints as ${ticked.map((k) => k.label).join(', ')}.`
-          : 'No box is ticked yet. The form does not say which test this was.'}
+          : !types.length && !intervals.length
+            ? 'No box is ticked yet. The form does not say which test this was.'
+            : !types.length
+              ? 'Nothing is ticked yet — pick the system as well, and the two together tick the box.'
+              : 'Nothing is ticked yet — pick the interval as well, and the two together tick the box.'}
       </Txt>
     </>
   );
@@ -2853,14 +2869,31 @@ function PartH({ form, locked, patch }: PartProps) {
           body="The occupier has to be told in writing, and the notice is a separate document from this form."
         />
       ) : null}
+      {/*
+        * The department's question is about work already done.
+        *
+        * This asked "Repairs required", which is a different statement and
+        * very nearly its opposite: a technician who found a fault they had not
+        * fixed answered Yes, and the form printed a tick against
+        * "Repairs/corrective actions taken" beside "attach details including
+        * action and date taken" — claiming on a signed document that work had
+        * been carried out. A fault left for somebody else is a defect, which
+        * is Part H's first question and the attachment page's list, not this.
+        */}
       <TriState
-        label="Repairs required"
+        label="Repairs or corrective actions taken"
         value={form.repairsRequired}
         onChange={(v) => patch({ repairsRequired: v })}
         locked={locked}
         yes="Attach the details, including the action taken and the date, to the licensee's report"
         no="No action required in relation to repairs or corrective actions at this time"
       />
+      {form.repairsRequired === true ? (
+        <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
+          Yes means work was carried out on this visit. A fault you have left for somebody else is
+          a defect — the question above, and the list on the attachment page.
+        </Txt>
+      ) : null}
       <Divider />
       <ResultPicker value={form.systemResult} onChange={(v) => patch({ systemResult: v })} locked={locked} />
       <Field

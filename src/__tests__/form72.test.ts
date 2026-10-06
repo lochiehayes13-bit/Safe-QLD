@@ -1471,6 +1471,47 @@ describe('Part A as the two questions it really is', () => {
   });
 });
 
+describe('one tap answers one question', () => {
+  /*
+   * Part A's grid is two questions whose answers cross: a system and an
+   * interval tick one of six cells. The screen filled the other question in
+   * when only one had been answered — "Fire hydrant" on its own ticked Annual,
+   * "5 year" on its own ticked fire hydrant — and lit up a chip the technician
+   * had not tapped, on the one part of the form that says what the document is
+   * a record of. A five-yearly could print as an annual because the app
+   * answered first and nobody saw it happen.
+   *
+   * The helper is where that is provable: one axis alone must tick nothing.
+   */
+  it('ticks nothing from a system with no interval', () => {
+    const m = maintenanceTestFromAxes(['hydrant'], []);
+    expect(Object.values(m).some(Boolean)).toBe(false);
+  });
+
+  it('ticks nothing from an interval with no system', () => {
+    const m = maintenanceTestFromAxes([], ['fiveYear']);
+    expect(Object.values(m).some(Boolean)).toBe(false);
+  });
+
+  it('ticks the cell the two answers cross at', () => {
+    expect(maintenanceTestFromAxes(['hydrant'], ['fiveYear'])).toMatchObject({
+      hydrantFiveYear: true, hydrantAnnual: false, combinedFiveYear: false,
+    });
+  });
+
+  it('prints nothing ticked as not answered, which is what the form then says', () => {
+    const html = form72Html(doc({
+      form: issuable({
+        maintenanceTest: maintenanceTestFromAxes(['hydrant'], []),
+      }),
+    }));
+    // Whatever the page says, it must not say a test was carried out that
+    // nobody said was carried out.
+    const partA = between(html, 'Part A—Test details', 'Part B—Hydrant');
+    expect(partA).not.toContain('&#10007;');
+  });
+});
+
 describe('the columns the department’s form has no box for', () => {
   it('adds all six, nullable, so a form already on a phone reads back unchanged', () => {
     for (const column of [
