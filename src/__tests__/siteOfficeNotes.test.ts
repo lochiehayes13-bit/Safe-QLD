@@ -61,20 +61,42 @@ describe('the site record', () => {
 });
 
 describe('the site list read', () => {
-  const build = (refuseNotes: boolean) => {
-    const asked: string[] = [];
+  const VERIFIED = 'ID,Name,Address,Customers,PrimaryContact,Archived,DateModified';
+
+  /**
+   * `refuseArchived` is its own switch because the two refusals are different
+   * failures: a build that will not give the notes still lists every site,
+   * and a build that will not list the archived ones leaves buildings off the
+   * phone entirely.
+   */
+  const build = (opts: { refuseNotes?: boolean; refuseArchived?: boolean; archivedRow?: boolean } = {}) => {
+    const asked: Record<string, string | number>[] = [];
     const client = {
       listAllPaged: async <T,>(path: string, query: Record<string, string | number>) => {
-        asked.push(String(query.columns));
-        if (refuseNotes && String(query.columns).includes('PublicNotes')) {
+        asked.push(query);
+        if (opts.refuseNotes && String(query.columns).includes('PublicNotes')) {
           const e = new Error('Simpro returned HTTP 422 for sites/. Invalid columns found: PublicNotes') as Error & { status?: number };
           e.name = 'SimproError';
           e.status = 422;
           throw e;
         }
+        if (query.Archived !== undefined) {
+          if (opts.refuseArchived) {
+            const e = new Error('Simpro returned HTTP 400 for sites/. Unknown filter: Archived') as Error & { status?: number };
+            e.name = 'SimproError';
+            e.status = 400;
+            throw e;
+          }
+          return {
+            items: opts.archivedRow
+              ? [{ ID: 4471, Name: 'Storage Choice - Maroochydore', Archived: true } as T]
+              : [],
+            truncated: false,
+          };
+        }
         const row = {
           ID: 3021, Name: 'Harbourline Apartments', Customers: [{ ID: 812, Name: 'Harbourline Body Corporate' }],
-          ...(refuseNotes ? {} : { PublicNotes: '<p>Park in <b>visitor bay 3</b></p>' }),
+          ...(opts.refuseNotes ? {} : { PublicNotes: '<p>Park in <b>visitor bay 3</b></p>' }),
         };
         return { items: [row as T], truncated: false };
       },
@@ -82,23 +104,76 @@ describe('the site list read', () => {
     return { api: new SimproResources(client), asked };
   };
 
+  const columnsAsked = (asked: Record<string, string | number>[]) => asked.map((q) => String(q.columns));
+
   it('asks for the public notes with the verified columns and reads them as plain text', async () => {
-    const { api, asked } = build(false);
+    const { api, asked } = build();
     const read = await api.sitesPaged();
-    expect(asked).toEqual(['ID,Name,Address,Customers,PrimaryContact,Archived,DateModified,PublicNotes']);
+    expect(columnsAsked(asked)[0]).toBe(`${VERIFIED},PublicNotes`);
     expect(read.columnsRejected).toBeUndefined();
     expect(read.sites[0]).toMatchObject({ id: '3021', customerName: 'Harbourline Body Corporate', customerExternalId: '812', publicNotes: 'Park in visitor bay 3' });
   });
 
   it('asks again without the notes when the build refuses the column, and says so', async () => {
-    const { api, asked } = build(true);
+    const { api, asked } = build({ refuseNotes: true });
     const read = await api.sitesPaged();
-    expect(asked).toHaveLength(2);
-    expect(asked[1]).toBe('ID,Name,Address,Customers,PrimaryContact,Archived,DateModified');
+    const columns = columnsAsked(asked);
+    expect(columns[0]).toBe(`${VERIFIED},PublicNotes`);
+    expect(columns[1]).toBe(VERIFIED);
     expect(read.columnsRejected).toContain('Invalid columns found');
     // Absent, not blank: the sync must not clear what a record read wrote.
     expect(read.sites[0]!.publicNotes).toBeUndefined();
     expect(read.sites[0]!.customerExternalId).toBe('812');
+  });
+
+  /*
+   * The archived read. Simpro's site list returns current sites, so a building
+   * the office has archived is absent from it — which is how this app could
+   * hold three thousand sites and not the one a technician was standing
+   * outside, and tell him to try a shorter search.
+   */
+  it('asks for the archived sites as well, which the list does not return', async () => {
+    const { api, asked } = build({ archivedRow: true });
+    const read = await api.sitesPaged();
+    expect(asked.map((q) => q.Archived)).toEqual([undefined, 'true']);
+    expect(read.sites.map((s) => s.id)).toEqual(['3021', '4471']);
+    expect(read.sites.find((s) => s.id === '4471')!.archived).toBe(true);
+  });
+
+  it('asks for them with the columns the first read settled on', async () => {
+    // A build that refused PublicNotes refuses it on both reads; asking again
+    // with the column it just rejected spends a request to be told so twice.
+    const { api, asked } = build({ refuseNotes: true });
+    await api.sitesPaged();
+    expect(columnsAsked(asked)[2]).toBe(VERIFIED);
+  });
+
+  it('keeps the live list and says so when the build will not list the archived ones', async () => {
+    /*
+     * Three things can happen and all three have to be safe. This is the third:
+     * the live sites still arrive, nothing is lost, and the gap is named —
+     * because a building that cannot be found and no sentence explaining why
+     * is the fault this whole read exists to fix.
+     */
+    const { api } = build({ refuseArchived: true });
+    const read = await api.sitesPaged();
+    expect(read.sites.map((s) => s.id)).toEqual(['3021']);
+    expect(read.archivedRejected).toContain('Unknown filter');
+  });
+
+  it('merges by id, so a build that ignores the filter changes nothing', async () => {
+    // A server that does not understand a query parameter usually ignores it
+    // and returns the ordinary list again. Merging rather than concatenating
+    // is what makes that cost a few requests instead of doubling every site.
+    const { api } = build({ archivedRow: false });
+    const read = await api.sitesPaged();
+    expect(read.sites.map((s) => s.id)).toEqual(['3021']);
+  });
+
+  it('can be told not to bother, for a caller that only wants the live list', async () => {
+    const { api, asked } = build();
+    await api.sitesPaged(undefined, {}, { includeArchived: false });
+    expect(asked).toHaveLength(1);
   });
 });
 

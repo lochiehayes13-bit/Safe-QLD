@@ -1809,7 +1809,15 @@ describe('the columns the department’s form has no box for', () => {
     expect(MIGRATION_V37).toContain('ADD COLUMN answeredParts TEXT;');
     expect(MIGRATION_V37).not.toContain('NOT NULL');
     expect(MIGRATION_V37).not.toContain('DEFAULT');
-    expect(MIGRATIONS[MIGRATIONS.length - 1]).toBe(MIGRATION_V37);
+    /*
+     * Thirty-seventh, and it stays thirty-seventh. This asserted that v37 was
+     * the last migration, which was true the day it was written and says
+     * nothing anybody needs: what matters is that a shipped migration never
+     * moves. The runner replays from PRAGMA user_version by index, so a
+     * migration that changed position would be skipped on an upgrading phone
+     * and run twice on a new one.
+     */
+    expect(MIGRATIONS.indexOf(MIGRATION_V37)).toBe(36);
   });
 });
 

@@ -78,6 +78,15 @@ export interface Site {
   customerExternalId?: string;
   /** When the site's own office record was last read. Null until somebody opens it. */
   detailSyncedAt?: string;
+  /**
+   * Whether the office has archived the building.
+   *
+   * Three states, and the third matters: absent means nobody has asked —
+   * every site typed in on a phone, and every site held before the sync
+   * started asking. An archived site is still listed, still searchable and
+   * still opens; it is marked, not hidden. See src/db/schemaV38.ts.
+   */
+  archived?: boolean;
   createdAt: string;
   updatedAt: string;
 }

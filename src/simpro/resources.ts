@@ -272,11 +272,31 @@ export class SimproResources {
    * carries the refusal in the server's words, and the notes are then
    * absent from every row rather than blank — the sync must not clear what
    * a read of the site's own record put there.
+   *
+   * **And the archived ones are asked for separately.** Simpro's site list
+   * returns current sites; a building the office has archived is simply
+   * absent, which is why this app could hold 3,059 sites and not the one a
+   * technician was standing outside. This repository already knew it in one
+   * place — see `describeMissingSites` in ./sync, which exists because an
+   * archived site's fifteen assets came down with nowhere to live — and the
+   * conclusion drawn there was that nothing about pulling again changes it.
+   * Pulling again does not. Asking does.
+   *
+   * It is a second read rather than a flag on the first because the archived
+   * ones must not displace the live ones under the record ceiling, and
+   * because a build that does not understand the filter has to leave the
+   * ordinary read untouched. Three things can happen and all three are safe:
+   * the build honours it and the archived sites arrive; it ignores it and
+   * returns the same list, which merges to nothing new; it refuses outright
+   * and `archivedRejected` says so while the live list stands.
    */
   async sitesPaged(
     maxRecords = 20000,
     query: Record<string, string> = {},
-  ): Promise<{ sites: SimproSite[]; truncated: boolean; columnsRejected?: string }> {
+    options: { includeArchived?: boolean } = {},
+  ): Promise<{
+    sites: SimproSite[]; truncated: boolean; columnsRejected?: string; archivedRejected?: string;
+  }> {
     const verified = 'ID,Name,Address,Customers,PrimaryContact,Archived,DateModified';
     let columnsRejected: string | undefined;
     let read: { items: RawSite[]; truncated: boolean };
@@ -288,10 +308,35 @@ export class SimproResources {
       columnsRejected = e instanceof Error ? e.message : String(e);
       read = await this.client.listAllPaged<RawSite>('sites/', { columns: verified, ...query }, maxRecords);
     }
-    const { items, truncated } = read;
+    let { items } = read;
+    const { truncated } = read;
+    let archivedRejected: string | undefined;
+
+    if (options.includeArchived !== false) {
+      const columns = columnsRejected ? verified : `${verified},PublicNotes`;
+      try {
+        const extra = await this.client.listAllPaged<RawSite>(
+          'sites/',
+          { columns, ...query, Archived: 'true' },
+          maxRecords,
+        );
+        /*
+         * Merged by id, keeping the first of each. A build that ignores the
+         * parameter returns the live list again and every row is already
+         * here, so this costs a few requests and changes nothing — which is
+         * the point of merging rather than concatenating.
+         */
+        const held = new Set(items.map((s) => String(s.ID ?? '')));
+        items = [...items, ...extra.items.filter((s) => !held.has(String(s.ID ?? '')))];
+      } catch (e) {
+        archivedRejected = e instanceof Error ? e.message : String(e);
+      }
+    }
+
     return {
       truncated,
       columnsRejected,
+      archivedRejected,
       sites: items.map((s) => {
         const c = s.PrimaryContact;
         const contactName = [str(c?.GivenName), str(c?.FamilyName)].filter(Boolean).join(' ');

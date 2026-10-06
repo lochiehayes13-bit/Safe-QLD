@@ -36,6 +36,7 @@ import { MIGRATION_V34 } from './schemaV34';
 import { MIGRATION_V35 } from './schemaV35';
 import { MIGRATION_V36 } from './schemaV36';
 import { MIGRATION_V37 } from './schemaV37';
+import { MIGRATION_V38 } from './schemaV38';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -399,6 +400,10 @@ export const MIGRATIONS: string[] = [
   // v37 — which parts somebody actually answered, so "marked N/A" and "never
   // opened" stop being the same stored value
   MIGRATION_V37,
+
+  // v38 — whether the office has archived the building, because an archived
+  // site never comes down with Simpro's site list and nothing said so
+  MIGRATION_V38,
 ];
 
 /**

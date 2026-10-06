@@ -27,6 +27,22 @@ export interface NamedSite {
   suburb?: string;
 }
 
+/**
+ * Whether the office has archived this building.
+ *
+ * The column is an INTEGER with three meanings — see src/db/schemaV38.ts — and
+ * SQLite hands it back as 0, 1 or null however the TypeScript row type is
+ * written. `site.archived === true` is therefore false on an archived site,
+ * which is the kind of mistake that reads correctly and ships. One function,
+ * so it is made once.
+ *
+ * Absent is not "live". It means nobody has asked: a site typed in on a phone,
+ * or one held since before the sync started asking for the archived list.
+ */
+export function siteIsArchived(site: { archived?: boolean | number | null }): boolean {
+  return site.archived === true || site.archived === 1;
+}
+
 /** Names shared by more than one site, lowercased and trimmed for comparison. */
 export function ambiguousNames(sites: readonly NamedSite[]): Set<string> {
   const seen = new Map<string, number>();

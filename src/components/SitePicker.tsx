@@ -4,6 +4,7 @@ import type { SitePick } from '@/db/repo';
 import { useTheme } from '@/theme';
 import { Card, Chip, Rowed, SearchBox, Txt } from '@/components/ui';
 import { siteMatches } from '@/domain/siteSearch';
+import { siteIsArchived } from '@/domain/siteNames';
 
 /**
  * How many matches the picker draws, and how many it offers before anything is
@@ -112,6 +113,9 @@ export function SitePicker({
           <Txt size="sm" tone="muted">
             {[s.suburb, s.clientName, s.siteRef].filter(Boolean).join(' · ') || 'No suburb recorded'}
           </Txt>
+          {/* Offered like any other site, and said so, because work does get
+              done at a building after the office archives it. */}
+          {siteIsArchived(s) ? <Txt size="xs" tone="warn">Archived in the office system</Txt> : null}
         </Card>
       ))}
     </View>

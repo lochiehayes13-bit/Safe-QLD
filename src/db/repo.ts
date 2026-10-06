@@ -44,7 +44,15 @@ export async function listSites(): Promise<Site[]> {
  */
 export type SitePick = Pick<
   Site, 'id' | 'name' | 'suburb' | 'address' | 'postcode' | 'clientName' | 'siteRef' | 'externalId'
->;
+> & {
+  /**
+   * Whether the office has archived the building. Carried by the picker so an
+   * archived site can be chosen and be seen to be archived — it is marked,
+   * never filtered out. SQLite hands this back as 0, 1 or null; read it
+   * through siteIsArchived rather than comparing it to true.
+   */
+  archived?: boolean;
+};
 
 /**
  * Sites as a picker shows them, and nothing else.
@@ -58,7 +66,7 @@ export type SitePick = Pick<
 export async function listSitePicks(): Promise<SitePick[]> {
   const db = await getDb();
   return db.getAllAsync<SitePick>(
-    `SELECT id, name, suburb, address, postcode, clientName, siteRef, externalId
+    `SELECT id, name, suburb, address, postcode, clientName, siteRef, externalId, archived
      FROM site ORDER BY name COLLATE NOCASE`,
   );
 }
@@ -86,18 +94,21 @@ export async function createSite(input: Partial<Site> & { name: string }): Promi
     contactMobile: input.contactMobile,
     externalId: input.externalId,
     externalSource: input.externalSource,
+    archived: input.archived,
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
   await db.runAsync(
     `INSERT INTO site (id,name,address,suburb,state,postcode,clientName,siteRef,notes,
                        contactName,contactEmail,contactWorkPhone,contactMobile,
-                       externalId,externalSource,createdAt,updatedAt)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                       externalId,externalSource,archived,createdAt,updatedAt)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     site.id, site.name, site.address ?? null, site.suburb ?? null, site.state ?? null,
     site.postcode ?? null, site.clientName ?? null, site.siteRef ?? null, site.notes ?? null,
     site.contactName ?? null, site.contactEmail ?? null, site.contactWorkPhone ?? null,
     site.contactMobile ?? null, site.externalId ?? null, site.externalSource ?? null,
+    // Absent stays absent: "nobody has asked" is not "the office says it is live".
+    site.archived === undefined ? null : (site.archived ? 1 : 0),
     site.createdAt, site.updatedAt,
   );
   return site;
@@ -109,12 +120,19 @@ export async function updateSite(id: string, patch: Partial<Site>): Promise<void
     'contactName', 'contactEmail', 'contactWorkPhone', 'contactMobile',
     'externalId', 'externalSource'] as const;
   const sets: string[] = [];
-  const vals: (string | null)[] = [];
+  const vals: (string | number | null)[] = [];
   for (const f of fields) {
     if (patch[f] !== undefined) {
       sets.push(`${f} = ?`);
       vals.push((patch[f] as string | undefined) ?? null);
     }
+  }
+  // Stored as 0/1 rather than text, and left alone where the patch does not
+  // mention it — a sync that could not read the archived list must not write
+  // "live" over a site it knows nothing about.
+  if (patch.archived !== undefined) {
+    sets.push('archived = ?');
+    vals.push(patch.archived ? 1 : 0);
   }
   if (!sets.length) return;
   sets.push('updatedAt = ?');
@@ -194,7 +212,7 @@ export async function listSiteSummaries(options: { query?: string; limit?: numbe
      * order and stop at the page rather than sort three thousand sites first.
      */
     db.getAllAsync<Omit<SiteSummary, 'sharesName'> & { sharesName: number }>(`
-      SELECT s.id, s.name, s.address, s.suburb, s.state, s.clientName, s.siteRef,
+      SELECT s.id, s.name, s.address, s.suburb, s.state, s.clientName, s.siteRef, s.archived,
         (SELECT COUNT(*) FROM panel p WHERE p.siteId = s.id) AS panelCount,
         (SELECT COUNT(*) FROM point pt JOIN panel p2 ON pt.panelId = p2.id WHERE p2.siteId = s.id) AS pointCount,
         (SELECT COUNT(*) FROM defect d WHERE d.siteId = s.id AND d.status = 'open') AS openDefects,

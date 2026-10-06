@@ -6,10 +6,16 @@ import { listSiteSummaries, type SiteSummary, type SiteSummaryPage } from '@/db/
 import { useTheme } from '@/theme';
 import { Button, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
 import { Reveal, Skeleton } from '@/components/motion';
-import { disambiguator } from '@/domain/siteNames';
+import { disambiguator, siteIsArchived } from '@/domain/siteNames';
 import { officeEmptyState, type EmptyStateWords } from '@/domain/deviceData';
+import { siteSearchMiss, type SiteMissWords } from '@/domain/siteMiss';
 import { loadPrefs } from '@/app-prefs';
-import { everSynced } from '@/simpro/watermark';
+import { everSynced, readSyncState } from '@/simpro/watermark';
+import { type SyncState } from '@/simpro/incremental';
+import { simproConfigFromPrefs } from '@/simpro/config';
+import { pullFromSimpro } from '@/simpro/sync';
+import { showAlert } from '@/components/alert';
+import { describeActionFailure } from '@/domain/loadFailure';
 
 /**
  * Site list. A technician's mental model is "which job am I on", so sites lead.
@@ -34,6 +40,18 @@ export default function SitesScreen() {
   const [empty, setEmpty] = useState<EmptyStateWords>(
     { title: 'No sites yet', body: 'Add a site by hand, or import a device list exported from any panel programming tool. Both work offline.' },
   );
+  /*
+   * What a miss means, which this screen used to refuse to say.
+   *
+   * It said "Nothing matched / Try a shorter search." and nothing else, so a
+   * technician searching for a building the office has archived — which never
+   * comes down with the site list, however many times it is synced — was told
+   * they had mistyped. The owner hit exactly that and asked why a site he
+   * services was not there. src/domain/siteMiss.ts holds the words.
+   */
+  const [sitesState, setSitesState] = useState<SyncState | undefined>(undefined);
+  const [connected, setConnected] = useState(false);
+  const [pulling, setPulling] = useState(false);
 
   // The search is a query now, so it waits for the typing to stop.
   useEffect(() => {
@@ -44,17 +62,53 @@ export default function SitesScreen() {
   const load = useCallback(async () => {
     const found = await listSiteSummaries({ query, limit: PAGE });
     setPage(found);
-    if (!found.rows.length && !query.trim()) {
+    if (!found.rows.length) {
       const prefs = await loadPrefs();
-      setEmpty(officeEmptyState(
-        { held: 0, connected: Boolean(prefs.simproClientId && prefs.simproCompanyId), everSynced: await everSynced() },
-        'sites',
-      ));
+      const isConnected = Boolean(prefs.simproClientId && prefs.simproCompanyId);
+      setConnected(isConnected);
+      // Read only on a miss: it is one row, and only the empty state needs it.
+      setSitesState(await readSyncState('sites'));
+      if (!query.trim()) {
+        setEmpty(officeEmptyState({ held: 0, connected: isConnected, everSynced: await everSynced() }, 'sites'));
+      }
     }
     setLoading(false);
   }, [query]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+
+  /**
+   * Re-reads the office's whole site list, and nothing else.
+   *
+   * Settings already has "Fetch everything", and on this phone that is sites,
+   * jobs, assets, customers, quotes, invoices and the rest — minutes of
+   * waiting for somebody who wants to know whether one building is on the
+   * books. This asks for the sites in full and skips the detail prefetch, so
+   * it is the one read that answers the question in front of them.
+   */
+  const pullSites = useCallback(async () => {
+    setPulling(true);
+    try {
+      const prefs = await loadPrefs();
+      const result = await pullFromSimpro(simproConfigFromPrefs(prefs), undefined, {
+        fullResources: ['sites'],
+        prefetchDetails: false,
+      });
+      await load();
+      showAlert(
+        'Site list re-read',
+        [
+          `${result.sitesAdded} added, ${result.sitesUpdated} updated.`,
+          ...(result.notes.length ? ['', ...result.notes] : []),
+          ...(result.errors.length ? ['', ...result.errors.slice(0, 3)] : []),
+        ].join('\n'),
+      );
+    } catch (e) {
+      showAlert('Could not read the site list', describeActionFailure(e, 'read the office’s site list'));
+    } finally {
+      setPulling(false);
+    }
+  }, [load]);
 
   /*
    * Worked out across every site rather than across the page: a name is
@@ -136,12 +190,24 @@ export default function SitesScreen() {
             <View style={{ gap: t.space(3) }}>
               <Skeleton height={104} /><Skeleton height={104} /><Skeleton height={104} /><Skeleton height={104} />
             </View>
+          ) : search ? (
+            <SiteMiss
+              words={siteSearchMiss({
+                term: search,
+                held: page?.total ?? 0,
+                connected,
+                sites: sitesState,
+                now: new Date(),
+              })}
+              pulling={pulling}
+              onPull={pullSites}
+            />
           ) : (
             <EmptyState
-              icon={search ? 'map-search-outline' : 'office-building-marker-outline'}
-              title={search ? 'Nothing matched' : empty.title}
-              body={search ? 'Try a shorter search.' : empty.body}
-              action={search ? undefined : (
+              icon="office-building-marker-outline"
+              title={empty.title}
+              body={empty.body}
+              action={(
                 <Rowed gap={2} wrap>
                   {empty.action ? <Button title={empty.action.label} onPress={() => router.push(empty.action!.route)} /> : null}
                   <Button title="Add a site by hand" variant="ghost" onPress={() => router.push('/site/new')} />
@@ -186,6 +252,13 @@ function SiteCard({ site, apart }: { site: SiteSummary; apart?: string }) {
             </Rowed>
           ) : null}
           <Rowed gap={1.5} wrap style={{ marginTop: t.space(1.5) }}>
+            {/*
+              * Marked, not hidden. An archived building's logbook is still the
+              * record of work that happened and its assets are still in the
+              * wall; a technician sent there has to be able to find it. What
+              * they must not do is raise new work against it without knowing.
+              */}
+            {siteIsArchived(site) ? <Chip label="Archived in the office" tone="warn" /> : null}
             <Chip label={`${site.panelCount} panel${site.panelCount === 1 ? '' : 's'}`} />
             <Chip label={`${site.pointCount.toLocaleString()} points`} />
             {site.openDefects > 0 ? <Chip label={`${site.openDefects} open`} tone="fail" /> : null}
@@ -194,5 +267,45 @@ function SiteCard({ site, apart }: { site: SiteSummary; apart?: string }) {
         <MaterialCommunityIcons name="chevron-right" size={22} color={t.color.textFaint} />
       </Rowed>
     </Card>
+  );
+}
+
+/**
+ * What a site search that found nothing is allowed to say.
+ *
+ * Every line, rather than a title and one sentence, because the useful part is
+ * usually the third: the office's archived sites never come down with the list
+ * and no amount of syncing changes that. A technician who is not told cannot
+ * work it out, and will go on typing shorter and shorter searches.
+ */
+function SiteMiss({
+  words, pulling, onPull,
+}: { words: SiteMissWords; pulling: boolean; onPull: () => void }) {
+  const t = useTheme();
+  return (
+    <View style={{ alignItems: 'center', gap: t.space(3), paddingVertical: t.space(6) }}>
+      <MaterialCommunityIcons name="map-search-outline" size={40} color={t.color.textFaint} />
+      <Txt size="lg" weight="700" style={{ textAlign: 'center' }}>{words.title}</Txt>
+      <View style={{ gap: t.space(2), maxWidth: 420 }}>
+        {words.lines.map((line) => (
+          <Txt key={line} size="sm" tone="muted" style={{ textAlign: 'center', lineHeight: 20 }}>{line}</Txt>
+        ))}
+      </View>
+      <Rowed gap={2} wrap style={{ justifyContent: 'center' }}>
+        {words.offerPull ? (
+          <Button
+            title={pulling ? 'Reading the office…' : 'Pull every site from the office'}
+            onPress={onPull}
+            disabled={pulling}
+          />
+        ) : null}
+        {words.offerConnect ? (
+          <Button title="Connect to the office" onPress={() => router.push('/settings')} />
+        ) : null}
+        {words.offerAdd ? (
+          <Button title="Add it by hand" variant="ghost" onPress={() => router.push('/site/new')} />
+        ) : null}
+      </Rowed>
+    </View>
   );
 }

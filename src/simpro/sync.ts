@@ -445,6 +445,18 @@ export async function pullFromSimpro(
     if (read.columnsRejected) {
       result.notes.push(`Simpro refused the site public-notes column, so site notes were not read — it said: ${read.columnsRejected}`);
     }
+    /*
+     * Said out loud, because the consequence is a building that cannot be
+     * found and a technician who is told they mistyped it. The site list does
+     * not return archived sites; they are asked for separately, and if that
+     * ask fails the gap is real and silent unless somebody says so.
+     */
+    if (read.archivedRejected) {
+      result.notes.push(
+        'Simpro would not list the archived sites, so a site the office has archived is not on this '
+        + `device and cannot be searched for — it said: ${read.archivedRejected}`,
+      );
+    }
     if (read.truncated) {
       result.notes.push(
         `The site read stopped at ${remoteSites.length} records before reaching the end. `
@@ -502,6 +514,13 @@ export async function pullFromSimpro(
           patch.externalId = remote.id;
           patch.externalSource = SIMPRO_SOURCE;
         }
+        /*
+         * Whether the office has archived it. Written outright rather than
+         * only where blank, because unlike an address this is the office's
+         * fact and nobody corrects it on the doorstep — and because a site
+         * that comes back off the archive has to stop reading as archived.
+         */
+        if (!!match.archived !== remote.archived) patch.archived = remote.archived;
         if (Object.keys(patch).length) {
           await updateSite(match.id, patch);
           result.sitesUpdated++;
@@ -521,6 +540,7 @@ export async function pullFromSimpro(
           contactMobile: remote.contactMobile,
           externalId: remote.id,
           externalSource: SIMPRO_SOURCE,
+          archived: remote.archived,
         });
         localId = created.id;
         siteIdByExternal.set(remote.id, created.id);
