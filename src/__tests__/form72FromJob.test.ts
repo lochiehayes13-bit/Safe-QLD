@@ -112,6 +112,91 @@ describe('what the job fills in', () => {
   });
 });
 
+describe('where a prefilled value actually came from', () => {
+  /*
+   * The point of the filled list is that a technician sees where each
+   * prefilled value came from before consenting to it. A line that names the
+   * wrong source is worse than no line: it invites somebody to accept a value
+   * on the authority of a record that did not supply it.
+   */
+  it('names the site record when the site record supplied the address', () => {
+    const out = form72FromJob(job(), own, TODAY, site());
+    expect(out.filled).toContain('Site address from the site record — 12 Example Street Ipswich QLD 4305');
+  });
+
+  it('names the job when there is no site record', () => {
+    const out = form72FromJob(job(), own, TODAY, null);
+    expect(out.filled).toContain('Site address from the job — 12 Example Street, Ipswich');
+  });
+
+  it('falls back to the job where the site record holds no address', () => {
+    /*
+     * This branched on whether a site record existed, not on whether it
+     * supplied anything — so a site with every address field blank produced no
+     * address at all and never looked at the job's, on a statutory document
+     * that prints the address.
+     */
+    const bare = site({ address: '', suburb: '', state: '', postcode: '' });
+    const out = form72FromJob(job(), own, TODAY, bare);
+    expect(out.siteAddress).toBe('12 Example Street, Ipswich');
+    expect(out.filled).toContain('Site address from the job — 12 Example Street, Ipswich');
+  });
+
+  it('says so when neither holds an address', () => {
+    const out = form72FromJob(job({ address: undefined }), own, TODAY, site({
+      address: '', suburb: '', state: '', postcode: '',
+    }));
+    expect(out.siteAddress).toBeUndefined();
+    expect(out.notFilled.some((l) => l.startsWith('Site address.'))).toBe(true);
+  });
+
+  it('names the right source for the site name too', () => {
+    // It said "from the job" whichever source it came from.
+    expect(form72FromJob(job(), own, TODAY, site({ name: 'Baldwin Living' })).filled)
+      .toContain('Site name from the site record — Baldwin Living');
+    expect(form72FromJob(job(), own, TODAY, null).filled)
+      .toContain('Site name from the job — Baldwin Living');
+  });
+
+  it('falls back to the job where the site record has a blank name', () => {
+    const out = form72FromJob(job({ siteName: 'Baldwin Living' }), own, TODAY, site({ name: '  ' }));
+    expect(out.filled).toContain('Site name from the job — Baldwin Living');
+  });
+});
+
+describe('who carried out the work', () => {
+  it('fills it in from a job with one person booked', () => {
+    const out = form72FromJob(job({ technician: 'C. Whitmore' }), own, TODAY, null);
+    expect(out.technician).toBe('C. Whitmore');
+    expect(out.filled).toContain('Technician on the attachment from the job — C. Whitmore');
+  });
+
+  it('reports a job with several booked rather than claiming they all did it', () => {
+    /*
+     * job.technician is every person booked, joined with commas by the mirror.
+     * The attachment's field is singular on purpose — the licensee signs Part
+     * I and the person who climbed the roof is often somebody else, which is
+     * the only reason the field exists. Two booked and one attending printed
+     * as two who carried out the work.
+     */
+    const out = form72FromJob(job({ technician: 'C. Whitmore, D. McKee' }), own, TODAY, null);
+    expect(out.technician).toBeUndefined();
+    expect(out.notFilled.some((l) => l.includes('books 2 people'))).toBe(true);
+    expect(out.notFilled.some((l) => l.includes('C. Whitmore, D. McKee'))).toBe(true);
+  });
+
+  it('trims the separator the mirror writes, rather than testing for a comma', () => {
+    const out = form72FromJob(job({ technician: ' C. Whitmore ,  ' }), own, TODAY, null);
+    expect(out.technician).toBe('C. Whitmore');
+  });
+
+  it('leaves it alone on a job that books nobody', () => {
+    const out = form72FromJob(job({ technician: undefined }), own, TODAY, null);
+    expect(out.technician).toBeUndefined();
+    expect(out.notFilled.some((l) => l.includes('carried out the work'))).toBe(false);
+  });
+});
+
 describe('the date a test is recorded under', () => {
   it('is the completion date of a job the office has closed', () => {
     const done = job({ status: 'complete', issuedOn: '2026-09-28T07:00:00.000Z', completedDate: '2026-09-29' });

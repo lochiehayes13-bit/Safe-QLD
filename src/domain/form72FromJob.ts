@@ -204,21 +204,42 @@ export function form72FromJob(
   const filled: string[] = [];
   const notFilled: string[] = [];
 
-  const siteAddress = site
+  /*
+   * Which source actually supplied each value, not which record happened to
+   * exist.
+   *
+   * Both of these branched on `site` being present, which is a different
+   * question and got both of them wrong. A site record with every address
+   * field blank produced no address at all and never tried the job's, because
+   * the fallback was reached only when there was no site record. And the site
+   * name line said "from the job" whichever source it came from, so the one
+   * thing these lines exist for — letting a technician see where a prefilled
+   * value came from before consenting to it — was false half the time.
+   */
+  const fromSite = site
     ? [site.address, site.suburb, site.state, site.postcode].filter(Boolean).join(' ') || undefined
-    : job.address?.trim() || undefined;
+    : undefined;
+  const fromJob = job.address?.trim() || undefined;
+  const siteAddress = fromSite ?? fromJob;
 
   if (siteAddress) {
-    filled.push(site
+    filled.push(fromSite
       ? `Site address from the site record — ${siteAddress}`
       : `Site address from the job — ${siteAddress}`);
   } else {
     notFilled.push('Site address. Neither the job nor the site record holds one.');
   }
 
-  const siteName = site?.name?.trim() || job.siteName.trim();
-  if (siteName) filled.push(`Site name from the job — ${siteName}`);
-  else notFilled.push('Site name. The job does not name a site.');
+  const nameFromSite = site?.name?.trim() || undefined;
+  const nameFromJob = job.siteName.trim() || undefined;
+  const siteName = nameFromSite ?? nameFromJob ?? '';
+  if (siteName) {
+    filled.push(nameFromSite
+      ? `Site name from the site record — ${siteName}`
+      : `Site name from the job — ${siteName}`);
+  } else {
+    notFilled.push('Site name. Neither the job nor the site record names a site.');
+  }
 
   const testDate = testDateFromJob(job, today);
   filled.push(`Test date ${testDate}, from ${testDateSource(job, today)}`);
@@ -238,8 +259,29 @@ export function form72FromJob(
     notFilled.push('Licence number. The form is not valid without it — set yours in Settings.');
   }
 
-  if (job.technician?.trim()) {
-    filled.push(`Technician on the attachment from the job — ${job.technician.trim()}`);
+  /*
+   * One name is an answer. A list of names is a roster.
+   *
+   * `job.technician` is every person booked on the job, joined with commas by
+   * the mirror. The attachment page's field is "Technician who carried out the
+   * work", singular and deliberately so — the licensee signs Part I, and the
+   * person who climbed the roof is often somebody else, which is the only
+   * reason the field exists. Filling it with everyone booked answered a
+   * different question and defeated the field's purpose: two booked and one
+   * attending prints as two who did the work.
+   *
+   * So a single booked name goes on, and several are reported rather than
+   * merged. Split on the separator the mirror actually writes, not on whether
+   * the string contains a comma — a name with a comma in it is not two people.
+   */
+  const booked = (job.technician ?? '').split(/\s*,\s*/).map((n) => n.trim()).filter(Boolean);
+  if (booked.length === 1) {
+    filled.push(`Technician on the attachment from the job — ${booked[0]}`);
+  } else if (booked.length > 1) {
+    notFilled.push(
+      `Who carried out the work. The job books ${booked.length} people (${booked.join(', ')}), `
+      + 'and the attachment asks for whoever did it.',
+    );
   }
 
   notFilled.push(
@@ -256,7 +298,7 @@ export function form72FromJob(
     contractor: own.companyName,
     licenseeName: own.technicianName,
     licenceNumber: own.technicianLicence,
-    technician: job.technician?.trim() || undefined,
+    technician: booked.length === 1 ? booked[0] : undefined,
     testDate,
     maintenanceTest: guess.maintenanceTest,
     filled,

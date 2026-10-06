@@ -11,7 +11,7 @@ import { qldIsoDay } from '@/domain/qldTime';
 import { emptyForm72 } from '@/domain/form72';
 import {
   form72FromJob, looksLikeHydrantWork, rankJobsForNewForm,
-  type JobForForm,
+  type Form72FromJob, type JobForForm,
 } from '@/domain/form72FromJob';
 import { applyForm72Prefill, form72FromAssets } from '@/domain/formsFromAssets';
 import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
@@ -55,7 +55,19 @@ export default function NewForm72Screen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [capped, setCapped] = useState(false);
   const [creating, setCreating] = useState<string | null>(null);
-  const [preview, setPreview] = useState<{ job: JobSummary; lines: string[]; gaps: string[] } | null>(null);
+  /*
+   * The job, and the mapping the technician was shown for it.
+   *
+   * The mapping is held rather than recomputed when they tap Create, because
+   * the two computations could disagree and one of the ways they disagreed
+   * mattered: `today` below is read on every render, so a preview seen at
+   * 23:59 and created at 00:00 wrote a form dated the next day — a different
+   * test date from the one on screen, on a document whose notice and retention
+   * clocks run from it. What was consented to is what gets written.
+   */
+  const [preview, setPreview] = useState<{
+    job: JobSummary; mapped: Form72FromJob; lines: string[]; gaps: string[];
+  } | null>(null);
 
   const today = qldIsoDay(nowIso()) ?? '';
 
@@ -73,7 +85,7 @@ export default function NewForm72Screen() {
       const prefs = await loadPrefs();
       const site = job.siteId ? await getSite(job.siteId) : null;
       const mapped = form72FromJob(toJobForForm(job), ownFrom(prefs), today, site);
-      setPreview({ job, lines: mapped.filled, gaps: mapped.notFilled });
+      setPreview({ job, mapped, lines: mapped.filled, gaps: mapped.notFilled });
     } catch (e) {
       showAlert('Could not read the job', describeActionFailure(e, 'reading the job'));
     }
@@ -144,7 +156,7 @@ export default function NewForm72Screen() {
   }, [jobs, typed, mode, today]);
 
 
-  const create = useCallback(async (job: JobSummary) => {
+  const create = useCallback(async (job: JobSummary, mapped: Form72FromJob) => {
     /*
      * A form hangs off a site, not off a job.
      *
@@ -164,10 +176,6 @@ export default function NewForm72Screen() {
     }
     setCreating(job.id);
     try {
-      const prefs = await loadPrefs();
-      const site = job.siteId ? await getSite(job.siteId) : null;
-      const mapped = form72FromJob(toJobForForm(job), ownFrom(prefs), today, site);
-
       /*
        * The register's hydrants, boosters, pumps, tanks and valve sets, laid
        * over the blank form the same way the per-site flow does it. Nothing the
@@ -207,7 +215,7 @@ export default function NewForm72Screen() {
     } finally {
       setCreating(null);
     }
-  }, [today]);
+  }, []);
 
   return (
     <Screen>
@@ -291,7 +299,7 @@ export default function NewForm72Screen() {
               style={{ flex: 1 }}
               disabled={!preview.job.siteId}
               loading={creating === preview.job.id}
-              onPress={() => { void create(preview.job); }}
+              onPress={() => { void create(preview.job, preview.mapped); }}
             />
             <Button title="Back" variant="secondary" onPress={() => setPreview(null)} />
           </Rowed>
