@@ -4,7 +4,7 @@ import { Stack, router, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { loadPrefs } from '@/app-prefs';
 import { nowIso } from '@/db';
-import { listJobs } from '@/db/opsRepo';
+import { jobSummariesByExternalIds } from '@/db/opsRepo';
 import { listScheduleFor, scheduleSyncedAt } from '@/db/scheduleRepo';
 import {
   groupScheduleByDay, scheduleWindow, whoseSchedule, type MyDayGroups, type MyDayRow, type WhoseSchedule,
@@ -41,15 +41,34 @@ export default function MyDayScreen() {
       const now = nowIso();
       if (!w) { if (!cancelled) { setWho(null); setGroups(null); } return; }
       const window = scheduleWindow(now);
-      const [rows, jobs, synced] = await Promise.all([
+      const [rows, synced] = await Promise.all([
         listScheduleFor({
           staffId: w.by === 'id' ? w.staffId : undefined,
           staffName: w.by === 'name' ? w.staffName : undefined,
           from: window.from, to: window.to,
         }),
-        listJobs({ limit: 500 }),
         scheduleSyncedAt(),
       ]);
+      if (cancelled) return;
+      /*
+       * The jobs this schedule actually names, asked for by their ids.
+       *
+       * It used to read the first five hundred job rows and match the schedule
+       * against those. On this owner's phone there are four and a half
+       * thousand jobs and around seven hundred open, ordered open-first by the
+       * date the office raised them — so a block whose job sat past the five
+       * hundredth row found no match, and the row printed "Job 1515 is not on
+       * this phone yet — tap to sync" and offered a sync. The job was on the
+       * phone the whole time. Being told to fix something that is not broken,
+       * by a button that cannot fix it, is worse than being told nothing.
+       *
+       * The home screen has always done it this way
+       * (app/(tabs)/index.tsx, jobSummariesByExternalIds) and so does Today's
+       * run. This screen was the one reading a window.
+       */
+      const jobs = await jobSummariesByExternalIds(
+        rows.map((r) => r.jobId).filter((id): id is string => !!id),
+      );
       if (cancelled) return;
       setWho(w);
       setAsOf(synced);
