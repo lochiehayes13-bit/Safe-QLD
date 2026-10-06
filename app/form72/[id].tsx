@@ -492,10 +492,11 @@ export default function Form72Screen() {
       {locked ? <OccupierCopyCard form={form} onPress={onCopyGiven} /> : null}
 
       {!locked && blockers.length ? (
-        <Banner
+        <Outstanding
           tone="warn"
           title={`${blockers.length} thing${blockers.length === 1 ? '' : 's'} still to do before this can be issued`}
-          body={blockers.map((b) => `Part ${b.part} — ${b.message}`).join('\n')}
+          issues={blockers}
+          onGo={setPart}
         />
       ) : null}
 
@@ -504,10 +505,11 @@ export default function Form72Screen() {
       ) : null}
 
       {cautions.length ? (
-        <Banner
+        <Outstanding
           tone="fail"
           title="Worth a look before you sign"
-          body={cautions.map((c) => `Part ${c.part} — ${c.message}`).join('\n')}
+          issues={cautions}
+          onGo={setPart}
         />
       ) : null}
 
@@ -699,6 +701,12 @@ const TEST_KINDS: { key: keyof StoredForm72['maintenanceTest']; label: string }[
   { key: 'combinedAnnual', label: 'Combined — annual' },
   { key: 'combinedFiveYear', label: 'Combined — 5 yearly' },
 ];
+
+/** The three the department prints: "65/100/150 mm face". */
+const GAUGE_FACE_SIZES = ['65 mm', '100 mm', '150 mm'];
+
+/** What a hydrant test gauge is nearly always graduated in. */
+const GAUGE_INCREMENTS_KPA = [10, 20, 50, 100];
 
 const SYSTEM_TYPES: SystemType[] = ['hydrant', 'sprinkler', 'combined'];
 const INTERVALS: TestInterval[] = ['annual', 'fiveYear'];
@@ -1028,14 +1036,76 @@ function PartC({ form, locked, patch }: PartProps) {
             hint="Part C's note says this must be a kPa figure or a percentage. Every pressure read with this gauge carries it."
             editable={!locked}
           />
-          <Rowed gap={2}>
-            <View style={{ flex: 1 }}>
-              <Field label="Face size" value={d.faceSize ?? ''} onChangeText={(v) => setDevice(i, { faceSize: v })} placeholder="100 mm" editable={!locked} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <NumField label="Increments" suffix="kPa" value={d.incrementsKpa} onChange={(v) => setDevice(i, { incrementsKpa: v })} locked={locked} />
-            </View>
-          </Rowed>
+          {/*
+            * "65/100/150 mm face" is what the department prints, and it is a
+            * choice of three, not a sentence. Typed, it came out as "100mm",
+            * "100 mm", "100" and "4 inch" on four forms for the same gauge.
+            * Anything genuinely else is still typeable — the row below only
+            * appears once nothing on the list is picked, so the common case is
+            * one tap and the uncommon one is not shut out.
+            */}
+          <View style={{ gap: 6 }}>
+            <Label>Gauge face</Label>
+            <Rowed gap={2} wrap>
+              {GAUGE_FACE_SIZES.map((size) => (
+                <Chip
+                  key={size}
+                  label={size}
+                  selected={d.faceSize === size}
+                  tone={d.faceSize === size ? 'accent' : 'default'}
+                  onPress={locked ? undefined : () => setDevice(i, {
+                    faceSize: d.faceSize === size ? undefined : size,
+                  })}
+                />
+              ))}
+            </Rowed>
+            {d.faceSize && !GAUGE_FACE_SIZES.includes(d.faceSize) ? (
+              <Field
+                label="Face size, as written"
+                value={d.faceSize}
+                onChangeText={(v) => setDevice(i, { faceSize: v })}
+                editable={!locked}
+              />
+            ) : !d.faceSize && !locked ? (
+              <Field
+                label="Something else"
+                value=""
+                onChangeText={(v) => setDevice(i, { faceSize: v })}
+                placeholder="A face that is none of the three"
+                editable
+              />
+            ) : null}
+          </View>
+
+          {/*
+            * The dial's increments. Four values cover nearly every gauge on a
+            * hydrant, and the rest is typed.
+            */}
+          <View style={{ gap: 6 }}>
+            <Label>Increments</Label>
+            <Rowed gap={2} wrap>
+              {GAUGE_INCREMENTS_KPA.map((inc) => (
+                <Chip
+                  key={inc}
+                  label={`${inc} kPa`}
+                  selected={d.incrementsKpa === inc}
+                  tone={d.incrementsKpa === inc ? 'accent' : 'default'}
+                  onPress={locked ? undefined : () => setDevice(i, {
+                    incrementsKpa: d.incrementsKpa === inc ? undefined : inc,
+                  })}
+                />
+              ))}
+            </Rowed>
+            {d.incrementsKpa === undefined || !GAUGE_INCREMENTS_KPA.includes(d.incrementsKpa) ? (
+              <NumField
+                label="Increments, if not one of those"
+                suffix="kPa"
+                value={d.incrementsKpa}
+                onChange={(v) => setDevice(i, { incrementsKpa: v })}
+                locked={locked}
+              />
+            ) : null}
+          </View>
           <Chip
             label={d.digitalReader ? 'Digital reader' : 'Analogue'}
             onPress={locked ? undefined : () => setDevice(i, { digitalReader: !d.digitalReader })}
@@ -1115,6 +1185,67 @@ function setHydrantLocation(locations: string[], n: number, value: string): stri
   next[n - 1] = value;
   while (next.length && !next[next.length - 1]?.trim()) next.pop();
   return next;
+}
+
+/**
+ * What is outstanding, and a way straight to it.
+ *
+ * These were two banners of text. Each line named the part it was about and
+ * none of them could be pressed, so a technician reading "Part C — the gauge
+ * was last calibrated 19 months before the test" had to find Part C on the
+ * strip themselves. On a nine-part form with a list of six that is how a form
+ * gets issued with one of them still outstanding.
+ *
+ * A line whose part is not one of the nine — the attachment's own, which
+ * validateForm72 files under H because that is the part it contradicts — still
+ * prints, it just does not offer a jump it cannot make.
+ */
+function Outstanding({
+  tone, title, issues, onGo,
+}: {
+  tone: 'warn' | 'fail';
+  title: string;
+  issues: FormIssue[];
+  onGo: (p: PartKey) => void;
+}) {
+  const t = useTheme();
+  const colour = tone === 'warn' ? t.color.warn : t.color.fail;
+  const known = (part: string): PartKey | undefined =>
+    PARTS.find((p) => p.key === part)?.key;
+
+  return (
+    <Card style={{ borderLeftWidth: 3, borderLeftColor: colour }}>
+      <Txt weight="700">{title}</Txt>
+      {issues.map((issue, i) => {
+        const key = known(issue.part);
+        const body = (
+          <Rowed gap={2} align="flex-start">
+            <Txt size="sm" weight="700" style={{ color: colour, minWidth: 44 }}>
+              {`Part ${issue.part}`}
+            </Txt>
+            <Txt size="sm" tone="muted" style={{ flex: 1, lineHeight: 19 }}>{issue.message}</Txt>
+            {key ? (
+              <MaterialCommunityIcons name="chevron-right" size={18} color={t.color.textFaint} />
+            ) : null}
+          </Rowed>
+        );
+        return key ? (
+          <Pressable
+            key={`${issue.part}-${i}`}
+            onPress={() => onGo(key)}
+            accessibilityRole="button"
+            accessibilityLabel={`Go to Part ${issue.part}`}
+            // The 44dp floor: these are pressed with gloves on.
+            style={{ minHeight: 44, justifyContent: 'center', paddingVertical: 4 }}
+          >
+            {body}
+          </Pressable>
+        ) : (
+          <View key={`${issue.part}-${i}`} style={{ paddingVertical: 4 }}>{body}</View>
+        );
+      })}
+    </Card>
+  );
 }
 
 /**
@@ -1229,10 +1360,20 @@ function PartD({ form, locked, patch }: PartProps) {
             editable={!locked}
           />
         ))}
-        <Chip
-          label={f.onSitePumpSet ? 'On-site pump set' : 'No on-site pump set'}
-          tone={f.onSitePumpSet ? 'accent' : 'default'}
-          onPress={locked ? undefined : () => set({ onSitePumpSet: !f.onSitePumpSet })}
+        {/*
+          * Three states, as the form has.
+          *
+          * The printed Yes/No pair can be left unticked, and the page already
+          * printed "Not answered" for that — but the screen was a two-state
+          * chip, so once it had been tapped there was no way back to
+          * unanswered. A technician who tapped it by accident had to live with
+          * an answer on a signed document.
+          */}
+        <TriState
+          label="On-site pump set installed"
+          value={f.onSitePumpSet}
+          onChange={(v) => set({ onSitePumpSet: v })}
+          locked={locked}
         />
       </Card>
 
