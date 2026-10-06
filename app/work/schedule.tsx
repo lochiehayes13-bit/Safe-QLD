@@ -4,7 +4,7 @@ import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { loadPrefs, type Prefs } from '@/app-prefs';
 import { nowIso } from '@/db';
-import { jobCount, jobSummariesByExternalIds, searchJobPicks, type JobPick, type JobSummary } from '@/db/opsRepo';
+import { jobCount, jobSummariesByExternalIds, type JobPick, type JobSummary } from '@/db/opsRepo';
 import { listScheduleBetween, scheduleSyncedAt, type ScheduleRecord } from '@/db/scheduleRepo';
 import { listPendingScheduleChanges, queueScheduleChange, undoScheduleChange, type DuplicateState } from '@/db/scheduleChangeRepo';
 import { listEmployees, type EmployeeRecord } from '@/db/employeeRepo';
@@ -29,8 +29,9 @@ import { formatAuDate } from '@/export/sheets';
 import { showAlert } from '@/components/alert';
 import { useTheme } from '@/theme';
 import {
-  Banner, Button, Card, Chip, Field, H2, Rowed, Screen, SearchBox, Segmented, Txt,
+  Banner, Button, Card, Chip, Field, H2, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
+import { JobPicker } from '@/components/JobPicker';
 
 /**
  * The schedule.
@@ -573,8 +574,10 @@ export default function ScheduleScreen() {
 
         {picking ? (
           <JobPicker
-            scheduled={scheduledToday}
-            held={held}
+            suggested={scheduledToday}
+            suggestedLabel="Booked to you today"
+            emptyWhenNoneSuggested="Nothing booked to you today. Search for the job."
+            emptyWhenNothingOnDevice="No jobs on this phone yet. Run a sync in Settings first."
             busy={busy}
             onPick={(job) => { void chooseJob(job); }}
             onClose={() => { setPicking(false); setStep(null); }}
@@ -715,75 +718,3 @@ export default function ScheduleScreen() {
  * be right, and the moment one of them needs a different first line it
  * would be wrong again.
  */
-function JobPicker({
-  scheduled, held, busy, onPick, onClose,
-}: {
-  scheduled: JobPick[];
-  held: number;
-  busy: boolean;
-  onPick: (job: JobPick) => void;
-  onClose: () => void;
-}) {
-  const t = useTheme();
-  const [q, setQ] = useState('');
-  const [found, setFound] = useState<JobPick[] | null>(null);
-  const [searching, setSearching] = useState(false);
-  const [searchFailed, setSearchFailed] = useState<string | null>(null);
-
-  // A search per keystroke would fight the keyboard, and one that lands
-  // after the next would show the wrong answer: wait for a pause, drop a
-  // stale reply.
-  useEffect(() => {
-    const typed = q.trim();
-    if (!typed) { setFound(null); setSearching(false); setSearchFailed(null); return undefined; }
-    let current = true;
-    const timer = setTimeout(() => {
-      void (async () => {
-        setSearching(true);
-        setSearchFailed(null);
-        try {
-          const rows = await searchJobPicks(typed, 40);
-          if (current) setFound(rows.filter((r) => r.externalId));
-        } catch (e) {
-          if (current) { setFound([]); setSearchFailed(describeLoadFailure(e, 'the job search')); }
-        } finally {
-          if (current) setSearching(false);
-        }
-      })();
-    }, 250);
-    return () => { current = false; clearTimeout(timer); };
-  }, [q]);
-
-  const list = found ?? scheduled;
-  return (
-    <Card>
-      <Rowed gap={2} style={{ justifyContent: 'space-between' }}>
-        <Txt weight="700">Which job?</Txt>
-        <Button title="Close" variant="ghost" compact onPress={onClose} />
-      </Rowed>
-      <View style={{ marginTop: t.space(2), gap: t.space(2) }}>
-        <SearchBox value={q} onChange={setQ} placeholder="Job number, site or customer" />
-        {searching ? <Txt size="sm" tone="muted">Looking…</Txt> : null}
-        {searchFailed ? <Banner tone="fail" title="The search could not run" body={searchFailed} /> : null}
-        {!found && scheduled.length ? <Txt size="sm" tone="muted">Booked to you today</Txt> : null}
-        {!found && !scheduled.length ? (
-          <Txt size="sm" tone="muted">
-            {held ? 'Nothing booked to you today. Search for the job.' : 'No jobs on this phone yet. Run a sync in Settings first.'}
-          </Txt>
-        ) : null}
-        {found && !found.length && !searching && !searchFailed ? <Txt size="sm" tone="muted">No job matches that.</Txt> : null}
-        {list.map((job) => (
-          <Card key={job.externalId ?? job.siteName ?? ''} onPress={busy ? undefined : () => onPick(job)}>
-            <Rowed gap={2}>
-              <View style={{ flex: 1 }}>
-                <Txt weight="600">Job {job.externalId}{job.siteName ? ` · ${job.siteName}` : ''}</Txt>
-                <Txt size="sm" tone="muted" numberOfLines={1}>{[job.customerName, job.title].filter(Boolean).join(' · ')}</Txt>
-              </View>
-              <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
-            </Rowed>
-          </Card>
-        ))}
-      </View>
-    </Card>
-  );
-}

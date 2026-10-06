@@ -20,11 +20,20 @@ import { Banner, Button, Card, Rowed, SearchBox, Txt } from '@/components/ui';
  * so it is shared now. The two lines that differ between screens — the
  * heading, and what to say when the starting list is empty — are props.
  *
- * The three screens that hold their own copy are left alone for now. Two are
- * this component with different words and would collapse into it; the
- * timesheet's is a different thing, a full-screen sheet that merges the
- * device search with the jobs off recent timesheets, and folding that in here
- * would make this worse rather than better.
+ * Those two have since been collapsed onto this, which is what the paragraph
+ * above was waiting for. They had already drifted behind it in two ways a
+ * technician would feel: this one asks the database how many jobs the phone
+ * holds, so "no job matches that" and "no jobs on this phone yet" are told
+ * apart, where the copies inferred it from a count their screen happened to be
+ * keeping for another reason; and clearing the search box ran outside the
+ * debounce in the copies, so the list flashed back to the suggestions between
+ * two keystrokes.
+ *
+ * The timesheet's is deliberately still its own: a full-screen sheet that
+ * merges the device search with the jobs off recent timesheets, and folding
+ * that in here would make this worse rather than better.
+ * src/__tests__/jobPickerShared.test.ts names it as the one exception and
+ * fails any other screen that writes a fourth.
  */
 export function JobPicker({
   heading = 'Which job?',
