@@ -12,7 +12,7 @@ import { DEVICE_PRESETS, DEVICE_PRESET_SOURCE, unusedDevicePresets } from '@/dom
 import {
   CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, FLOW_ROW_COLUMNS,
   PART_G_PRINTED_TEST_POINTS, flowCellState, flowDeviceCalibrationFrom,
-  flowRowColumnsRun, flowRowLabel,
+  flowRowColumnsRun, flowRowDevices, flowRowLabel,
   sprinklerTestPointLines, sprinklerTestPointUntouched,
   PART_D_NOZZLE_SIZES_MM, PART_D_ROWS, deviceCalibration, emptyForm72, intervalsTested,
   maintenanceTestCell, maintenanceTestFromAxes, overloadCheck, resolveFrictionalLoss,
@@ -2431,5 +2431,81 @@ describe('the flow device’s calibration date, where the columns already say it
     }));
     const line = between(html, 'Part C not required for orifice testing', '</tr>');
     expect(line).toContain('Not recorded');
+  });
+});
+
+describe('Part D’s reference to a Part C device', () => {
+  const devices: TestDevice[] = [
+    { slot: 'Device/gauge 1', serialNumber: 'SQF-001', kind: 'flow-meter' },
+    { slot: 'Device/gauge 2', serialNumber: 'SQF-002', kind: 'flow-meter' },
+  ];
+
+  it('matches on the serial number or the slot, either case', () => {
+    const row = { rateLps: 20, devices: 'sqf-001, Device/gauge 2' };
+    const { known, unknown } = flowRowDevices(row, devices);
+    expect(known.map((d) => d.serialNumber)).toEqual(['SQF-001', 'SQF-002']);
+    expect(unknown).toEqual([]);
+  });
+
+  it('reports a name Part C does not hold rather than dropping it', () => {
+    // A technician who wrote something the list does not hold said something,
+    // and the page prints it either way.
+    const { known, unknown } = flowRowDevices({ rateLps: 20, devices: 'DG1, SQF-001' }, devices);
+    expect(known.map((d) => d.serialNumber)).toEqual(['SQF-001']);
+    expect(unknown).toEqual(['DG1']);
+  });
+
+  it('reads an empty cell as naming nothing', () => {
+    expect(flowRowDevices({ rateLps: 20, devices: '  ,  ' }, devices))
+      .toEqual({ known: [], unknown: [] });
+  });
+
+  it('cautions when the flow table cites equipment Part C does not list', () => {
+    /*
+     * The column is headed "Device/gauge no. (Part C)" — a cross-reference. A
+     * row citing "DG1" on a form whose equipment list holds SQF-001 points at
+     * nothing, and a year later nobody can tell whether the device was left
+     * off Part C or the reference was mistyped. Every pressure in that row was
+     * read with whichever it was.
+     */
+    const form = issuable({
+      devices,
+      flowTest: {
+        result: 'pass', hydrantLocations: ['Booster'],
+        rows: [{ rateLps: 20, devices: 'DG1', hydrant1Kpa: 320 }],
+      },
+    });
+    const issue = validateForm72(form).find((i) => i.message.includes('Part C does not list'));
+    expect(issue).toBeDefined();
+    expect(issue!.part).toBe('D');
+    // Not a blocker: writing down what was used beats leaving the cell empty.
+    expect(issue!.blocking).toBe(false);
+    expect(issue!.message).toContain('DG1');
+  });
+
+  it('says nothing where every reference resolves', () => {
+    const form = issuable({
+      devices,
+      flowTest: {
+        result: 'pass', hydrantLocations: ['Booster'],
+        rows: [{ rateLps: 20, devices: 'SQF-001, SQF-002', hydrant1Kpa: 320 }],
+      },
+    });
+    expect(validateForm72(form).some((i) => i.message.includes('Part C does not list'))).toBe(false);
+  });
+
+  it('names each unresolved reference once, however many rows cite it', () => {
+    const form = issuable({
+      devices,
+      flowTest: {
+        result: 'pass', hydrantLocations: ['Booster'],
+        rows: [
+          { rateLps: 10, devices: 'DG1', hydrant1Kpa: 480 },
+          { rateLps: 20, devices: 'DG1', hydrant1Kpa: 320 },
+        ],
+      },
+    });
+    const issue = validateForm72(form).find((i) => i.message.includes('Part C does not list'))!;
+    expect((issue.message.match(/DG1/g) ?? [])).toHaveLength(1);
   });
 });

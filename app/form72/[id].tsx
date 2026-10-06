@@ -20,7 +20,8 @@ import { router } from 'expo-router';
 import {
   CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, FLOW_DEVICE_LABEL, PART_D_ROWS,
   PART_RESULT_LABEL, SYSTEM_TYPE_LABEL, TEST_INTERVAL_LABEL,
-  deviceCalibration, elevationHeadKpa, flowRowKey, flowRowLongLabel, flowRowUntouched,
+  deviceCalibration, elevationHeadKpa, flowRowDevices, flowRowKey, flowRowLongLabel,
+  flowRowUntouched,
   PART_G_PRINTED_TEST_POINTS,
   intervalsTested, maintenanceTestFromAxes, overloadCheck, resolveFrictionalLoss,
   sprinklerTestPointLines, sprinklerTestPointUntouched, systemTypesTested, validateForm72,
@@ -1087,6 +1088,22 @@ function PartB({ form, locked, patch }: PartProps) {
  * page unusable, and it is the one thing a person reading the printed form
  * cannot check, because the paper does not carry the test date beside it.
  */
+/**
+ * Adds or removes one name from a comma-separated list, keeping the rest.
+ *
+ * Written over the stored string rather than over a parsed list, because the
+ * string is what the form prints and a technician may have written something
+ * in it that no device matches. Round-tripping through a list of known devices
+ * would silently drop that.
+ */
+function toggleNamed(value: string, name: string): string {
+  const parts = value.split(',').map((x) => x.trim()).filter(Boolean);
+  const at = parts.findIndex((x) => x.toLowerCase() === name.toLowerCase());
+  if (at >= 0) parts.splice(at, 1);
+  else parts.push(name);
+  return parts.join(', ');
+}
+
 /** The column the next device occupies, in the department's own words. */
 function deviceSlotName(index: number): string {
   return DEPARTMENT_DEVICE_SLOTS[index] ?? `Device/gauge ${index + 1}`;
@@ -1602,7 +1619,50 @@ function PartD({ form, locked, patch }: PartProps) {
                 />
               ) : null}
             </Rowed>
-            <Field label="Devices used" value={r.devices} onChangeText={(v) => setLine(line, { devices: v })} editable={!locked} />
+            {/*
+              * The column is headed "Device/gauge no. (Part C)" — a
+              * cross-reference, not a description — so the equipment on this
+              * form is offered as taps. Typed free, a row could cite "DG1" on
+              * a form whose Part C lists SQF-001, and nothing noticed that the
+              * reference pointed at nothing.
+              *
+              * The box stays, because a technician who used something not on
+              * the list has to be able to say so, and Part D cautions when a
+              * name is not one of Part C's.
+              */}
+            <View style={{ gap: 6 }}>
+              <Label>Device/gauge used (Part C)</Label>
+              {form.devices.some((d) => d.serialNumber.trim()) ? (
+                <Rowed gap={2} wrap>
+                  {form.devices.filter((d) => d.serialNumber.trim()).map((d) => {
+                    const name = d.serialNumber.trim();
+                    const on = flowRowDevices(r, form.devices).known.includes(d);
+                    return (
+                      <Chip
+                        key={`${d.slot}-${name}`}
+                        label={name}
+                        selected={on}
+                        tone={on ? 'accent' : 'default'}
+                        onPress={locked ? undefined : () => setLine(line, {
+                          devices: toggleNamed(r.devices, name),
+                        })}
+                      />
+                    );
+                  })}
+                </Rowed>
+              ) : (
+                <Txt size="sm" tone="muted">
+                  Nothing in Part C to pick from yet. Add your equipment there and it appears here.
+                </Txt>
+              )}
+              <Field
+                label=""
+                value={r.devices}
+                onChangeText={(v) => setLine(line, { devices: v })}
+                placeholder="Or type it"
+                editable={!locked}
+              />
+            </View>
             <Rowed gap={2}>
               <View style={{ flex: 1 }}>
                 <NumField label="1 hydrant" suffix="kPa" value={r.hydrant1Kpa} onChange={(v) => setLine(line, { hydrant1Kpa: v })} locked={locked} />

@@ -257,6 +257,40 @@ export function flowRowLongLabel(row: FlowRow): string {
   return 'Unlabelled row';
 }
 
+/**
+ * The Part C columns a Part D row names, and any name that is not one of them.
+ *
+ * The table's second column is headed "Device/gauge no. (Part C)" — it is a
+ * cross-reference, not a description — and the app stored it as free text. So
+ * a row could cite "DG1" on a form whose Part C lists SQF-001 and SQF-002, and
+ * nothing anywhere noticed that the reference pointed at nothing. A reader a
+ * year later cannot tell whether the device was omitted from Part C or the
+ * reference was mistyped, and the pressures in that row hang on which.
+ *
+ * Comma separated, matched against each device's slot and serial number, both
+ * ignoring case. Anything that matches neither comes back as unknown rather
+ * than being dropped — a technician who wrote something the list does not hold
+ * said something, and the page prints it.
+ */
+export function flowRowDevices(
+  row: FlowRow,
+  devices: readonly TestDevice[],
+): { known: TestDevice[]; unknown: string[] } {
+  const named = row.devices.split(',').map((x) => x.trim()).filter(Boolean);
+  const known: TestDevice[] = [];
+  const unknown: string[] = [];
+  for (const name of named) {
+    const found = devices.find((d) => {
+      const lower = name.toLowerCase();
+      return d.serialNumber.trim().toLowerCase() === lower
+        || d.slot.trim().toLowerCase() === lower;
+    });
+    if (found) known.push(found);
+    else unknown.push(name);
+  }
+  return { known, unknown };
+}
+
 /** True where the technician put nothing at all on this line. */
 export function flowRowUntouched(row: FlowRow): boolean {
   return !row.devices?.trim()
@@ -1030,6 +1064,34 @@ export function validateForm72(form: Form72): FormIssue[] {
           : 'does not answer the critical defect question'}. If a defect is critical the owner or `
         + 'occupier has to be given a notice.',
       blocking: true,
+    });
+  }
+
+  /*
+   * A Part D row citing equipment Part C does not list.
+   *
+   * The table's second column is a cross-reference to Part C, so a row naming
+   * "DG1" on a form whose equipment list holds SQF-001 points at nothing. A
+   * year later nobody can tell whether the device was left off Part C or the
+   * reference was mistyped, and every pressure in that row was read with
+   * whichever it was.
+   *
+   * A caution, not a blocker. A technician who used something genuinely not in
+   * the list wrote down what they used, which is better than leaving the cell
+   * empty, and the page prints it either way.
+   */
+  const citedUnknown = new Set<string>();
+  for (const row of form.flowTest.rows) {
+    for (const name of flowRowDevices(row, form.devices).unknown) citedUnknown.add(name);
+  }
+  if (citedUnknown.size) {
+    const list = [...citedUnknown];
+    issues.push({
+      part: 'D',
+      message: `The flow table names ${list.length === 1 ? 'equipment' : 'equipment'} Part C does `
+        + `not list: ${list.join(', ')}. Add ${list.length === 1 ? 'it' : 'them'} to the equipment `
+        + 'list, or correct the reference — the column asks for a Part C device.',
+      blocking: false,
     });
   }
 
