@@ -519,6 +519,25 @@ export interface Form72 {
   qualification?: string;
   defects: FormDefect[];
 
+  /**
+   * Which parts somebody has actually answered.
+   *
+   * Every part result starts as 'na', so "the technician marked this part not
+   * applicable" and "nobody ever opened this part" are the same stored value.
+   * The printed form cannot tell them apart either and does not need to — N/A
+   * is a legitimate answer. The screen does need to, because the question a
+   * technician asks before signing is whether anything on the form has not
+   * been looked at, and one value meaning both things cannot answer it.
+   *
+   * Recorded when a part is answered, N/A included. Nothing prints from it:
+   * the department's form has no field for it, and it exists so the screen can
+   * stop naming parts somebody has already dealt with.
+   *
+   * Absent on every form written before v37, which falls back to reading the
+   * parts themselves — no worse than before the column existed.
+   */
+  answeredParts?: string[];
+
   createdAt: string;
   updatedAt: string;
 }

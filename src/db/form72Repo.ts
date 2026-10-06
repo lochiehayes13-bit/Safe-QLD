@@ -60,6 +60,7 @@ interface Form72Row {
   hydrostatic: string;
   flowDeviceKinds: string;
   flowDeviceCalibrated: string | null;
+  answeredParts: string | null;
   devices: string;
   flowTest: string;
   booster: string;
@@ -171,6 +172,9 @@ function toForm(r: Form72Row): StoredForm72 {
     flowDeviceCalibrated: readJson<Partial<Record<FlowDeviceKind, string>>>(
       r.flowDeviceCalibrated ?? '', {}, 'Part C calibration dates',
     ),
+    // Which parts somebody answered. Absent on every form written before v37,
+    // which reads back as the empty list and falls back to the parts.
+    answeredParts: readJsonArray<string>(r.answeredParts ?? '', 'answered parts'),
     devices: readJsonArray<TestDevice>(r.devices, 'Part C equipment'),
     // The arrays inside a part are replaced wholesale rather than merged with
     // the empty shape's, which would leave a stale row behind after a deletion.
@@ -252,14 +256,14 @@ export async function createForm72(input: {
     `INSERT INTO form_72
        (id, siteId, siteName, siteAddress, contractor, systemLabel, testDate, testTime,
         maintenanceTest, hydrostatic, flowDeviceKinds, flowDeviceCalibrated, devices,
-        flowTest, booster,
+        flowTest, booster, answeredParts,
         sprinklerHydrostatic, sprinklerFlow, overloadFlowLps, overloadPressureKpa,
         criticalDefectsIdentified, repairsRequired, systemResult, systemNotes,
         licenseeName, licenceNumber, licenseeReportNumber, signature,
         owner, ownerContact, buildingClassification, technician, qualification, defects,
         status, issuedAt, copyGivenAt, jobExternalId, jobTitle, createdAt, updatedAt)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       record.id, record.siteId, record.siteName, record.siteAddress ?? '', record.contractor,
       record.systemLabel, record.testDate ?? null, record.testTime ?? null,
@@ -267,6 +271,7 @@ export async function createForm72(input: {
       JSON.stringify(record.flowDeviceKinds),
       JSON.stringify(record.flowDeviceCalibrated ?? {}), JSON.stringify(record.devices),
       JSON.stringify(record.flowTest), JSON.stringify(record.booster),
+      JSON.stringify(record.answeredParts ?? []),
       JSON.stringify(record.sprinklerHydrostatic), JSON.stringify(record.sprinklerFlow),
       record.overload?.flowLps ?? null, record.overload?.pressureKpa ?? null,
       writeTriState(record.criticalDefectsIdentified), writeTriState(record.repairsRequired),
@@ -414,6 +419,7 @@ export async function updateForm72(id: string, patch: Form72Patch): Promise<void
   if (patch.flowDeviceCalibrated !== undefined) {
     put('flowDeviceCalibrated', JSON.stringify(patch.flowDeviceCalibrated));
   }
+  if (patch.answeredParts !== undefined) put('answeredParts', JSON.stringify(patch.answeredParts));
   if (patch.devices !== undefined) put('devices', JSON.stringify(patch.devices));
   if (patch.flowTest !== undefined) put('flowTest', JSON.stringify(patch.flowTest));
   if (patch.booster !== undefined) put('booster', JSON.stringify(patch.booster));

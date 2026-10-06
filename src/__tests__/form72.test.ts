@@ -22,6 +22,7 @@ import {
 import { MIGRATIONS, SCHEMA_VERSION } from '@/db/schema';
 import { MIGRATION_V34 } from '@/db/schemaV34';
 import { MIGRATION_V35 } from '@/db/schemaV35';
+import { MIGRATION_V37 } from '@/db/schemaV37';
 
 /**
  * Form 72 as the document that gets handed over.
@@ -1506,6 +1507,19 @@ describe('the columns the department’s form has no box for', () => {
     expect(MIGRATION_V35).not.toContain('NOT NULL');
     expect(MIGRATION_V35).not.toContain('DEFAULT');
     expect(MIGRATIONS).toContain(MIGRATION_V35);
+  });
+
+  it('adds which parts were answered, nullable, because older forms never said', () => {
+    /*
+     * The column that lets a part marked N/A be told from a part nobody
+     * opened. Nullable and not defaulted, because an absent value is the
+     * honest answer for every form written before it: those forms never
+     * recorded it and no default could invent it.
+     */
+    expect(MIGRATION_V37).toContain('ADD COLUMN answeredParts TEXT;');
+    expect(MIGRATION_V37).not.toContain('NOT NULL');
+    expect(MIGRATION_V37).not.toContain('DEFAULT');
+    expect(MIGRATIONS[MIGRATIONS.length - 1]).toBe(MIGRATION_V37);
   });
 });
 

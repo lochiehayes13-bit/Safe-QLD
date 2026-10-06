@@ -35,6 +35,7 @@ import { MIGRATION_V33 } from './schemaV33';
 import { MIGRATION_V34 } from './schemaV34';
 import { MIGRATION_V35 } from './schemaV35';
 import { MIGRATION_V36 } from './schemaV36';
+import { MIGRATION_V37 } from './schemaV37';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -394,6 +395,10 @@ export const MIGRATIONS: string[] = [
   // v36 — which of Part C's three boxes a given meter belongs under, answered
   // once per instrument rather than once per form
   MIGRATION_V36,
+
+  // v37 — which parts somebody actually answered, so "marked N/A" and "never
+  // opened" stop being the same stored value
+  MIGRATION_V37,
 ];
 
 /**

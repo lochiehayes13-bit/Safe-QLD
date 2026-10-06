@@ -183,6 +183,40 @@ describe('the fields that ride inside the JSON parts', () => {
     expect(back!.flowDeviceCalibrated).toEqual({});
   });
 
+  /*
+   * Which parts somebody answered.
+   *
+   * The only way "the technician marked Part B not applicable" can be told
+   * from "nobody opened Part B": every part result starts as 'na', so the two
+   * are the same stored value and print the same. It has to survive storage or
+   * the outstanding list goes back to naming parts somebody already dealt with
+   * every time the form is reopened.
+   */
+  it('keeps which parts were answered', async () => {
+    const rec = await start();
+    await updateForm72(rec.id, { answeredParts: ['A', 'C', 'B'] });
+
+    const back = await getForm72(rec.id);
+    expect(back!.answeredParts).toEqual(['A', 'C', 'B']);
+  });
+
+  it('reads a form written before the column as nothing answered', async () => {
+    const rec = await start();
+    expect((await getForm72(rec.id))!.answeredParts).toEqual([]);
+  });
+
+  it('keeps a part recorded as answered where its result is still N/A', async () => {
+    // The case the whole column exists for.
+    const rec = await start();
+    await updateForm72(rec.id, {
+      hydrostatic: { result: 'na' }, answeredParts: ['B'],
+    });
+
+    const back = await getForm72(rec.id);
+    expect(back!.hydrostatic.result).toBe('na');
+    expect(back!.answeredParts).toEqual(['B']);
+  });
+
   it('keeps a device’s correction factor, calibration basis, kind and model', async () => {
     const rec = await start();
     const devices: TestDevice[] = DEVICE_PRESETS.map((p, i) => ({

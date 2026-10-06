@@ -39,6 +39,9 @@ import {
   frictionalLossGaps,
   occupierCopyDueBy, testPointOutcome, testerCopyKeepUntil,
 } from '@/export/form72';
+import {
+  guideSteps, nextGuideStep, outstandingParts, recordAnswered, type GuidePart,
+} from '@/domain/form72Guide';
 import { DEVICE_PRESETS, unusedDevicePresets } from '@/domain/form72Devices';
 import {
   deviceKindKey, getDeviceKinds, setDeviceKind, type DeviceKindAnswer,
@@ -89,7 +92,12 @@ import { showAlert } from '@/components/alert';
  * the occupier's copy is due within.
  */
 
-type PartKey = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'Attachment';
+/*
+ * The same union the guide keys its parts by, aliased rather than written out
+ * again. Two copies of this list would be two things to keep in step, and the
+ * one that fell behind would be the one deciding what the technician is shown.
+ */
+type PartKey = GuidePart;
 
 /**
  * The parts, as the strip along the top shows them.
@@ -722,6 +730,12 @@ export default function Form72Screen() {
         ))
         : <PartBody part={part} form={form} locked={!!locked} patch={patch} reload={() => { void load(); }} kinds={kinds} />}
 
+      {!whole && !locked ? (
+        <NextPart form={form} part={part} onGo={setPart} />
+      ) : null}
+
+      {!locked ? <WhatIsLeft form={form} onGo={(p) => { setPart(p); setWhole(false); }} /> : null}
+
       <Divider />
 
       <Rowed gap={2}>
@@ -751,6 +765,132 @@ export default function Form72Screen() {
 }
 
 /**
+ * Next, and where it goes.
+ *
+ * The owner asked for a click-through rather than ten chips and a judgement
+ * about which of them matter. This is the click: one button, which names the
+ * part it is about to open and says in a line why that part is next.
+ *
+ * It names the destination because a button that says only "Next" asks the
+ * technician to trust it, and the first time it sends them somewhere they did
+ * not expect they stop using it. Naming the part makes it checkable at a
+ * glance, and the strip is still there to override it.
+ *
+ * It warns and carries on. A part left unanswered is not a reason to refuse to
+ * move — the department's form allows a part to be left blank, the page prints
+ * what was left, and a technician who is about to do Part D before Part B
+ * knows something this screen does not.
+ */
+function NextPart({ form, part, onGo }: {
+  form: StoredForm72;
+  part: PartKey;
+  onGo: (p: PartKey) => void;
+}) {
+  const t = useTheme();
+  const next = nextGuideStep(form, part);
+  const here = guideSteps(form).find((s) => s.part === part);
+  /*
+   * "Done" is about this part only, and the list below is about the form. A
+   * single message covering both would have to be vague about which.
+   */
+  const leaving = here && !here.answered && here.applies !== 'optional'
+    && here.applies !== 'not-this-system';
+
+  if (!next) {
+    return leaving ? (
+      <Txt size="sm" tone="muted">
+        {`Nothing after Part ${part} is waiting — but nothing has been put on this part yet.`}
+      </Txt>
+    ) : null;
+  }
+
+  const label = next.part === 'Attachment' ? 'the attachment page' : `Part ${next.part}`;
+  const meta = PARTS.find((p) => p.key === next.part);
+  return (
+    <View style={{ gap: 6 }}>
+      {leaving ? (
+        <Txt size="xs" style={{ color: t.color.warn }}>
+          {`Nothing has been put on Part ${part} yet. It prints as not applicable if it stays that `
+            + 'way, which is a legitimate answer — so this will not stop you.'}
+        </Txt>
+      ) : null}
+      <Button
+        title={`Next: ${label}${meta ? ` — ${meta.title}` : ''}`}
+        onPress={() => onGo(next.part)}
+        icon={<MaterialCommunityIcons name="arrow-right" size={18} color={t.color.onAccent} />}
+      />
+      <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>{next.why}</Txt>
+    </View>
+  );
+}
+
+/**
+ * What is still waiting on this form.
+ *
+ * Not the same thing as the validation's list above it. That one names what
+ * would stop the form being issued or is worth knowing about what has been
+ * filled in; this names the parts that apply to this test and have nothing on
+ * them at all — which is the one thing a technician cannot see today, because
+ * a part nobody opened prints N/A exactly like a part somebody marked N/A on
+ * purpose.
+ *
+ * It names the parts this test needs and no others. On an annual hydrant test
+ * that is seven, not ten: Parts F and G are a sprinkler system's, and listing
+ * them would train somebody to ignore the list.
+ */
+function WhatIsLeft({ form, onGo }: {
+  form: StoredForm72;
+  onGo: (p: PartKey) => void;
+}) {
+  const t = useTheme();
+  const left = outstandingParts(form);
+  if (!left.length) {
+    return (
+      <Txt size="sm" tone="muted">
+        Every part this test needs has something on it.
+      </Txt>
+    );
+  }
+
+  return (
+    <Card style={{ borderLeftWidth: 3, borderLeftColor: t.color.textFaint }}>
+      <Txt weight="700">
+        {`${left.length} part${left.length === 1 ? '' : 's'} with nothing on ${
+          left.length === 1 ? 'it' : 'them'} yet`}
+      </Txt>
+      <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
+        Each of these prints as not applicable if it stays empty, which reads on the page exactly
+        like a part you marked not applicable on purpose. Answer it — N/A included — and it leaves
+        this list.
+      </Txt>
+      {left.map((step) => {
+        const meta = PARTS.find((p) => p.key === step.part);
+        return (
+          <Pressable
+            key={step.part}
+            onPress={() => onGo(step.part)}
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${step.part === 'Attachment' ? 'the attachment page' : `Part ${step.part}`}`}
+            style={{ minHeight: 44, justifyContent: 'center' }}
+          >
+            <Rowed gap={2} align="flex-start">
+              <Txt size="sm" weight="700" style={{ minWidth: 44 }}>
+                {step.part === 'Attachment' ? '+' : `Part ${step.part}`}
+              </Txt>
+              <View style={{ flex: 1 }}>
+                <Txt size="sm">{meta?.title ?? step.part}</Txt>
+                <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>{step.why}</Txt>
+              </View>
+              <MaterialCommunityIcons name="chevron-right" size={18} color={t.color.textFaint} />
+            </Rowed>
+          </Pressable>
+        );
+      })}
+    </Card>
+  );
+}
+
+/**
  * The part strip.
  *
  * A part with a blocker is marked; a part left at 'na' is dimmed rather than
@@ -766,26 +906,34 @@ function PartStrip({
   onChange: (p: PartKey) => void;
 }) {
   const t = useTheme();
-  const answered: Record<PartKey, boolean> = {
-    A: !!form.testDate && !!form.contractor.trim(),
-    B: form.hydrostatic.result !== 'na',
-    C: form.devices.length > 0,
-    D: form.flowTest.result !== 'na',
-    E: form.booster.result !== 'na',
-    F: form.sprinklerHydrostatic.result !== 'na',
-    G: form.sprinklerFlow.result !== 'na',
-    H: form.systemResult !== 'na' || form.criticalDefectsIdentified !== undefined,
-    I: !!form.licenceNumber.trim() && !!form.signature,
-    // Not a part of the department's form, so nothing on it can be outstanding
-    // — it reads as answered once anything has been put on it.
-    Attachment: !!form.owner?.trim() || !!form.technician?.trim() || form.defects.length > 0,
-  };
+  /*
+   * Answered, and ruled in or out, from the guide rather than from a second
+   * copy of the same judgement. The strip used to decide this itself, which
+   * meant two answers to "has this part been dealt with" — and the one here,
+   * being the one a technician actually looks at, was the one that would drift.
+   */
+  const steps = guideSteps(form);
+  const stepFor = (key: PartKey) => steps.find((st) => st.part === key);
 
   return (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.space(1.5) }}>
       {PARTS.map((p) => {
         const blocked = issues.some((i) => i.part === p.key && i.blocking);
         const on = value === p.key;
+        const step = stepFor(p.key);
+        /*
+         * Three weights, for three different things. Bold is a part with an
+         * answer on it; faint is a part this test does not need — the one
+         * state Part A's own answer rules out — and normal is a part that
+         * applies and is still waiting. The strip said "answered or not" and
+         * so put two parts of empty sprinkler boxes in front of a technician
+         * doing a hydrant test with the same prominence as Part D.
+         *
+         * Faint, never hidden. A technician who disagrees with Part A, or who
+         * took a reading anyway, has to be able to get there.
+         */
+        const aside = step?.applies === 'not-this-system';
+        const answered = !!step?.answered;
         return (
           <Pressable
             key={p.key}
@@ -811,9 +959,19 @@ function PartStrip({
             >
               {p.tag}
             </Txt>
-            <Txt size="sm" style={{ color: on ? t.color.onAccent : answered[p.key] ? t.color.text : t.color.textFaint }}>
+            <Txt
+              size="sm"
+              style={{
+                color: on ? t.color.onAccent
+                  : answered ? t.color.text
+                    : aside ? t.color.textFaint : t.color.textMuted,
+              }}
+            >
               {p.title}
             </Txt>
+            {aside && !on && !answered ? (
+              <Txt size="xs" style={{ color: t.color.textFaint }}>· n/a</Txt>
+            ) : null}
             {blocked ? (
               <MaterialCommunityIcons
                 name="alert-circle"
@@ -847,23 +1005,36 @@ function PartBody({
   kinds: DeviceKinds;
 }) {
   const meta = PARTS.find((p) => p.key === part)!;
+
+  /*
+   * Anything written from inside a part is somebody answering that part.
+   *
+   * Recorded here, in the one place every part's writes pass through, rather
+   * than in ten components that would each have to remember. It is what lets
+   * the outstanding list below tell a part marked N/A on purpose from a part
+   * nobody opened — the stored result is 'na' for both, and a list that kept
+   * naming parts the technician had already dealt with is a list they would
+   * stop reading.
+   */
+  const answer = (p: Form72Patch) => patch({ ...p, ...recordAnswered(form, part) });
+
   return (
     <View style={{ gap: 12 }}>
       <View>
         <H2>{part === 'Attachment' ? meta.title : `Part ${part} — ${meta.title}`}</H2>
         <Txt size="sm" tone="muted">{meta.blurb}</Txt>
       </View>
-      {part === 'A' ? <PartA form={form} locked={locked} patch={patch} /> : null}
-      {part === 'B' ? <PartB form={form} locked={locked} patch={patch} /> : null}
-      {part === 'C' ? <PartC form={form} locked={locked} patch={patch} kinds={kinds} /> : null}
-      {part === 'D' ? <PartD form={form} locked={locked} patch={patch} /> : null}
-      {part === 'E' ? <PartE form={form} locked={locked} patch={patch} /> : null}
-      {part === 'F' ? <PartF form={form} locked={locked} patch={patch} /> : null}
-      {part === 'G' ? <PartG form={form} locked={locked} patch={patch} /> : null}
-      {part === 'H' ? <PartH form={form} locked={locked} patch={patch} /> : null}
-      {part === 'I' ? <PartI form={form} locked={locked} patch={patch} /> : null}
+      {part === 'A' ? <PartA form={form} locked={locked} patch={answer} /> : null}
+      {part === 'B' ? <PartB form={form} locked={locked} patch={answer} /> : null}
+      {part === 'C' ? <PartC form={form} locked={locked} patch={answer} kinds={kinds} /> : null}
+      {part === 'D' ? <PartD form={form} locked={locked} patch={answer} /> : null}
+      {part === 'E' ? <PartE form={form} locked={locked} patch={answer} /> : null}
+      {part === 'F' ? <PartF form={form} locked={locked} patch={answer} /> : null}
+      {part === 'G' ? <PartG form={form} locked={locked} patch={answer} /> : null}
+      {part === 'H' ? <PartH form={form} locked={locked} patch={answer} /> : null}
+      {part === 'I' ? <PartI form={form} locked={locked} patch={answer} /> : null}
       {part === 'Attachment' ? (
-        <PartAttachment form={form} locked={locked} patch={patch} onRaised={reload} />
+        <PartAttachment form={form} locked={locked} patch={answer} onRaised={reload} />
       ) : null}
     </View>
   );
