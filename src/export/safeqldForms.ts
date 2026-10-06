@@ -7,6 +7,7 @@ import {
 import {
   LEAVE_LABEL,
   dayName,
+  entryDescription,
   entryHours,
   groupByDate,
   leaveOf,
@@ -346,7 +347,7 @@ export function timesheetSheet(sheet: Timesheet): Sheet {
       const n = push([
         field(dateCell),
         { v: e.jobNumber, style: 'cell' },
-        { v: e.siteName, style: 'cell' },
+        { v: entryDescription(e), style: 'cell' },
         { v: e.serviceReportNumber, style: 'cell' },
         timeCell(e.startTime),
         timeCell(e.finishTime),

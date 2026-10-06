@@ -1,7 +1,7 @@
 import { buildXlsx, type Cell, type CellValue, type FormulaCell, type Row, type Sheet } from '@/export/xlsx';
 import { timesheetGeometry, timesheetSheet, timesheetSummarySheet } from '@/export/safeqldForms';
 import { readZip } from '@/parsers/zipRead';
-import type { Timesheet, TimesheetEntry } from '@/domain/timesheet';
+import { setLeave, type Timesheet, type TimesheetEntry } from '@/domain/timesheet';
 
 /**
  * The workbook payroll is emailed, as a document rather than as a set of values.
@@ -422,5 +422,38 @@ describe('a workbook that contains numbers', () => {
     const xml = part([{ name: 'X', rows: [[{ f: 'NOW()' } as FormulaCell]] }], 'xl/worksheets/sheet1.xml');
     expect(xml).toContain('<f>NOW()</f></c>');
     expect(xml).not.toContain('<v></v>');
+  });
+});
+
+describe('a day off on the sheet payroll reads', () => {
+  const dataRows = (sheet: Timesheet) => timesheetSheet(sheet).rows
+    .filter((r) => String(value(r[0])).match(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) /));
+
+  it('names the kind of day off in the description column, which used to be blank', () => {
+    // Payroll read a date, an empty description and a number in one of five
+    // leave columns, and had to count across to find out which kind it was.
+    const off = timesheet([setLeave(entry({ siteName: '' }), 'publicHoliday', 8)]);
+    const row = dataRows(off)[0]!;
+    expect(value(row[2])).toBe('Public holiday');
+    expect(value(row[13])).toBe(8);
+  });
+
+  it('names each kind by its own words', () => {
+    for (const [kind, label] of [
+      ['annual', 'Annual leave'], ['sick', 'Sick'], ['rdo', 'RDO'], ['lwop', 'Unpaid leave'],
+    ] as const) {
+      const off = timesheet([setLeave(entry({ siteName: '' }), kind, 8)]);
+      expect({ kind, named: value(dataRows(off)[0]![2]) }).toEqual({ kind, named: label });
+    }
+  });
+
+  it('leaves a worked row saying the site, not the kind of day', () => {
+    const worked = timesheet([entry({ siteName: 'BRIC Housing Emsworth St' })]);
+    expect(value(dataRows(worked)[0]![2])).toBe('BRIC Housing Emsworth St');
+  });
+
+  it('keeps a site somebody typed onto a leave row, because their words beat ours', () => {
+    const odd = timesheet([setLeave(entry({ siteName: 'Half day, Baldwin Living' }), 'annual', 4)]);
+    expect(value(dataRows(odd)[0]![2])).toBe('Half day, Baldwin Living');
   });
 });

@@ -332,8 +332,26 @@ export const LEAVE_LABEL: Record<LeaveKind, string> = {
 
 export const LEAVE_KINDS: readonly LeaveKind[] = ['annual', 'sick', 'rdo', 'publicHoliday', 'lwop'];
 
-/** A standard day, for a day off. */
-export const STANDARD_DAY_HOURS = 7.6;
+/**
+ * A standard day, for a day off.
+ *
+ * Eight hours, because that is what Safe QLD pays a day off at. The award's
+ * 7.6 is the ordinary-hours figure a 38-hour week divides into over five days,
+ * and using it here meant a day of annual leave came out at 7.6 while the day
+ * either side of it was 8 — a difference nobody intended, that the office then
+ * reconciled by hand every time somebody took leave.
+ */
+export const STANDARD_DAY_HOURS = 8;
+
+/**
+ * A standard week, which is five standard days.
+ *
+ * Derived rather than typed, because the two were typed separately and
+ * disagreed: a day was 7.6 and the week was 38, then the day became 8 and the
+ * week stayed 38, which puts the ring at 100% after four and three-quarter
+ * days. Whatever a day is, a week is five of them.
+ */
+export const STANDARD_WEEK_HOURS = STANDARD_DAY_HOURS * 5;
 
 /** The leave on an entry, if it is a day off rather than a job. */
 export function leaveOf(entry: TimesheetEntry): { kind: LeaveKind; hours: number } | null {
@@ -353,6 +371,26 @@ export function setLeave(entry: TimesheetEntry, kind: LeaveKind, hours: number):
   };
   next[kind] = hours > 0 ? String(hours) : '';
   return next;
+}
+
+/**
+ * What goes in the sheet's description column for one row.
+ *
+ * A worked row is the site. A day off had no site, so the column came out
+ * blank: payroll read a date, nothing, and a number in one of five leave
+ * columns, and had to count across the columns to find out which kind of day it
+ * was. Naming it is the whole fix — the number is still in its own column, and
+ * now the row says what it is beside the date.
+ *
+ * The site name wins where a row somehow has both, because that is a row
+ * somebody typed a site onto and the words they typed are worth more than the
+ * ones here.
+ */
+export function entryDescription(entry: TimesheetEntry): string {
+  const site = entry.siteName.trim();
+  if (site) return site;
+  const leave = leaveOf(entry);
+  return leave ? LEAVE_LABEL[leave.kind] : '';
 }
 
 /** A blank entry for a date, shaped so every text field is a string. */

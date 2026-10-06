@@ -1,4 +1,6 @@
 import {
+  STANDARD_DAY_HOURS,
+  STANDARD_WEEK_HOURS,
   blankEntry,
   copyDay,
   dayName,
@@ -496,7 +498,7 @@ describe('the week, a row per day', () => {
 describe('what the day bars are drawn against', () => {
   it('is a standard day, so a week of short days does not look full', () => {
     const week = weekSummary(sheet([entry({ date: '2026-08-12', startTime: '08:00', finishTime: '10:00' })]));
-    expect(weekPeak(week)).toBe(7.6);
+    expect(weekPeak(week)).toBe(STANDARD_DAY_HOURS);
   });
 
   it('stretches to the longest day rather than clipping it', () => {
@@ -506,5 +508,24 @@ describe('what the day bars are drawn against', () => {
 
   it('is never zero, so an empty week cannot divide by it', () => {
     expect(weekPeak(weekSummary(sheet([])))).toBeGreaterThan(0);
+  });
+});
+
+describe('a day off is a full day', () => {
+  it('is eight hours, because that is what the office pays it at', () => {
+    // The award's 7.6 is a 38-hour week divided over five days, and using it
+    // here made a day of leave come out shorter than the day either side of it.
+    expect(STANDARD_DAY_HOURS).toBe(8);
+  });
+
+  it('makes a week five of those, so the two cannot disagree', () => {
+    expect(STANDARD_WEEK_HOURS).toBe(STANDARD_DAY_HOURS * 5);
+    expect(STANDARD_WEEK_HOURS).toBe(40);
+  });
+
+  it('writes a full day of leave at eight hours on the entry', () => {
+    const off = setLeave(blankEntry('x', '2026-09-07'), 'annual', STANDARD_DAY_HOURS);
+    expect(off.annual).toBe('8');
+    expect(leaveOf(off)).toEqual({ kind: 'annual', hours: 8 });
   });
 });

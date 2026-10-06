@@ -13,7 +13,7 @@ import {
 } from '@/domain/leaveBooking';
 import { loadPrefs } from '@/app-prefs';
 import {
-  DEFAULT_EXTRAS, LEAVE_KINDS, LEAVE_LABEL, STANDARD_DAY_HOURS,
+  DEFAULT_EXTRAS, LEAVE_KINDS, LEAVE_LABEL, STANDARD_DAY_HOURS, STANDARD_WEEK_HOURS,
   blankEntry, copyDay, dayName, dayWorkedHours, entryHours, filterJobOptions, jobOptions, mergeJobOptions,
   isWeekendDay, leaveOf, nextTimesFor, previousDayWithEntries, setLeave, timesheetTotals, toggleExtra, usualTimes,
   weekDates, weekPeak, weekSummary,
@@ -398,12 +398,12 @@ export default function TimesheetScreen() {
     // leaving a band of background under the shorter one.
     <Card variant="raised" style={[{ gap: t.space(1) }, spread ? { flex: 1 } : null]}>
       <Rowed gap={3}>
-        <ProgressRing fraction={totals.grand / 38} size={72} stroke={8}>
-          <Txt size="xs" weight="800" mono>{Math.round((totals.grand / 38) * 100)}%</Txt>
+        <ProgressRing fraction={totals.grand / STANDARD_WEEK_HOURS} size={72} stroke={8}>
+          <Txt size="xs" weight="800" mono>{Math.round((totals.grand / STANDARD_WEEK_HOURS) * 100)}%</Txt>
         </ProgressRing>
         <View style={{ flex: 1 }}>
           <Txt size="display" weight="800" style={{ letterSpacing: -1.4 }}>{totals.grand}<Txt size="lg" tone="muted" weight="700"> h</Txt></Txt>
-          <Txt size="xs" tone="faint">of a 38 hour week</Txt>
+          <Txt size="xs" tone="faint">{`of a ${STANDARD_WEEK_HOURS} hour week`}</Txt>
         </View>
         <Chip label={sheet.status === 'submitted' ? 'Submitted' : 'Draft'} tone={sheet.status === 'submitted' ? 'pass' : 'warn'} />
       </Rowed>
