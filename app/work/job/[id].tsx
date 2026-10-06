@@ -10,6 +10,7 @@ import { distinctJobStatuses, enqueueSync, setJobStatus, listKnowledge, type Kno
 import { getCustomer, getJobFull, type AttachmentRecord, type CustomerRecord, type JobFull } from '@/db/mirrorRepo';
 import { listVendorOrdersForJob, searchCatalogItems, type CatalogItemRecord, type VendorOrderRecord } from '@/db/moreRepo';
 import { getSite, listDefects } from '@/db/repo';
+import { getSiteByExternalId } from '@/db/searchRepo';
 import { assetCountsBySystem } from '@/db/assetRepo';
 import { listRoutineRuns } from '@/db/routineRunRepo';
 import { JOB_RECORDS_PRIVACY_NOTE, draftJobBrief, type JobBrief } from '@/ai/jobBrief';
@@ -128,6 +129,12 @@ export default function JobScreen() {
    * the sync may land before the queue has gone.
    */
   const [queuedLines, setQueuedLines] = useState<JobMaterialPayload[]>([]);
+  /*
+   * The site this job turned out to be for, including the one resolved from
+   * the office's id. Held so the buttons below cannot disagree with the
+   * briefing above them about whether there is a site.
+   */
+  const [resolvedSiteId, setResolvedSiteId] = useState<string | undefined>(undefined);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -136,16 +143,39 @@ export default function JobScreen() {
       const f = await getJobFull(id);
       setFull(f);
       setMissing(!f);
-      if (f?.job.siteId) {
+      /*
+       * Which site this job is for, and nobody else's.
+       *
+       * Two faults lived in this block. It only ran when `job.siteId` was
+       * set and had no else, so opening a job with no site left the PREVIOUS
+       * job's site on screen — its open defects, its asset count, its notes —
+       * under the new job's name. A briefing that confidently shows another
+       * building's faults is worse than one that shows none.
+       *
+       * And a job synced from the office carries the office's site id in
+       * `siteExternalId` even when the phone has not matched it to a local
+       * site row. That match exists; nothing looked for it. So a site the
+       * phone HAS was unreachable from the job that was for it.
+       */
+      const siteId = f?.job.siteId
+        || (f?.job.siteExternalId
+          ? (await getSiteByExternalId(f.job.siteExternalId))?.id
+          : undefined);
+      if (siteId) {
         const [s, d, a, k] = await Promise.all([
-          getSite(f.job.siteId),
-          listDefects(f.job.siteId, 'open'),
+          getSite(siteId),
+          listDefects(siteId, 'open'),
           // A count, not the rows: the briefing wants a number.
-          assetCountsBySystem(f.job.siteId),
-          listKnowledge({ siteId: f.job.siteId }),
+          assetCountsBySystem(siteId),
+          listKnowledge({ siteId }),
         ]);
         setSite(s); setDefects(d); setAssetCount(a.reduce((n, x) => n + x.count, 0)); setKnowledge(k);
+      } else {
+        // Cleared, not left. There is no site, so there is nothing to say
+        // about one.
+        setSite(null); setDefects([]); setAssetCount(0); setKnowledge([]);
       }
+      setResolvedSiteId(siteId);
       if (f?.job.externalId) {
         const [c, o, st] = await Promise.all([
           f.job.customerExternalId ? getCustomer(f.job.customerExternalId) : Promise.resolve(null),
@@ -960,13 +990,21 @@ export default function JobScreen() {
         ) : null}
 
         <Rowed gap={2}>
+          {/*
+            * An empty siteId is not "no site", it is a key — the defect screen
+            * keys its draft on it, so every defect raised from a job with no
+            * site shared one draft and overwrote each other. Omitted now, so
+            * that screen asks which site rather than being handed a blank one.
+            */}
           <Button
             title="Raise defect"
             variant="secondary"
             style={{ flex: 1 }}
-            onPress={() => router.push({ pathname: '/work/defect/new', params: { siteId: job.siteId ?? '' } })}
+            onPress={() => router.push(resolvedSiteId
+              ? { pathname: '/work/defect/new', params: { siteId: resolvedSiteId } }
+              : { pathname: '/work/defect/new' })}
           />
-          {job.siteId ? (
+          {resolvedSiteId ? (
             <Button
               title="Open site"
               variant="secondary"
