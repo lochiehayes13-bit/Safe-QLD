@@ -1081,6 +1081,17 @@ interface InvoiceRow {
 interface InvoiceJobRow {
   invoiceExternalId: string; jobExternalId: string; jobType: string | null; description: string | null;
   totalExTaxCents: number | null; totalIncTaxCents: number | null;
+  /**
+   * The building the billed job is at, joined rather than stored.
+   *
+   * The invoice list could not be searched by it and could not show it, while
+   * the detail screen fetched it separately and printed "Job 43747 · Barren
+   * Heights Tower". One LEFT JOIN on a query that was already reading these
+   * rows, so the list, its search and its own in-memory filter all see the
+   * same thing — three places that each decided this for themselves is how
+   * they came to disagree.
+   */
+  siteName: string | null;
 }
 
 const hydrateInvoice = (r: InvoiceRow, jobs: InvoiceJobRow[]): InvoiceRecord => ({
@@ -1112,6 +1123,7 @@ const hydrateInvoice = (r: InvoiceRow, jobs: InvoiceJobRow[]): InvoiceRecord => 
     description: j.description ?? undefined,
     totalExTaxCents: j.totalExTaxCents ?? undefined,
     totalIncTaxCents: j.totalIncTaxCents ?? undefined,
+    siteName: j.siteName ?? undefined,
   })),
 });
 
@@ -1217,9 +1229,10 @@ export async function listInvoices(filter: {
   since?: string;
   /**
    * Words typed into the search, matched against the invoice number, the
-   * customer, the order number, the description and the numbers of the jobs
-   * it bills — every word somewhere. Lets a search reach the invoices the
-   * screen's page did not, without reading two years of them to look.
+   * customer, the order number, the description, the numbers of the jobs it
+   * bills and the building those jobs are at — every word somewhere. Lets a
+   * search reach the invoices the screen's page did not, without reading two
+   * years of them to look.
    */
   query?: string;
   limit?: number;
@@ -1241,9 +1254,29 @@ export async function listInvoices(filter: {
   if (filter.since) { where.push('dateIssued >= ?'); args.push(filter.since); }
   for (const word of invoiceSearchWords(filter.query)) {
     const like = `%${word}%`;
+    /*
+     * And the building the invoice is about.
+     *
+     * The clause reached the invoice number, the customer, the order number,
+     * the description and the numbers of the jobs billed, and never the site —
+     * so a technician looking at an invoice whose own detail screen prints
+     * "Job 43747 · Barren Heights Tower" could not find that invoice again by
+     * typing the building. For any site, not only a jobless one: the Invoices
+     * module simply had no site search.
+     *
+     * The module already knows the path. The siteId filter above walks
+     * invoice_job to job to reach it; this walks the same join and matches the
+     * site's own name and the one denormalised onto the job, so an invoice is
+     * findable by the building whether or not the job row carries its name.
+     */
     where.push(`(externalId LIKE ? OR customerName LIKE ? OR orderNo LIKE ? OR descriptionText LIKE ?
-      OR externalId IN (SELECT invoiceExternalId FROM invoice_job WHERE jobExternalId LIKE ?))`);
-    args.push(like, like, like, like, like);
+      OR externalId IN (SELECT invoiceExternalId FROM invoice_job WHERE jobExternalId LIKE ?)
+      OR externalId IN (
+        SELECT ij.invoiceExternalId FROM invoice_job ij
+        JOIN job j ON j.externalId = ij.jobExternalId
+        LEFT JOIN site s ON s.id = j.siteId
+        WHERE j.siteName LIKE ? OR s.name LIKE ? OR s.suburb LIKE ?))`);
+    args.push(like, like, like, like, like, like, like, like);
   }
   args.push(filter.limit ?? 200);
   const rows = await db.getAllAsync<InvoiceRow>(
@@ -1253,7 +1286,11 @@ export async function listInvoices(filter: {
   );
   if (!rows.length) return [];
   const links = await db.getAllAsync<InvoiceJobRow>(
-    `SELECT * FROM invoice_job WHERE invoiceExternalId IN (${rows.map(() => '?').join(',')})`,
+    `SELECT ij.*, COALESCE(s.name, j.siteName) AS siteName
+     FROM invoice_job ij
+     LEFT JOIN job j ON j.externalId = ij.jobExternalId
+     LEFT JOIN site s ON s.id = j.siteId
+     WHERE ij.invoiceExternalId IN (${rows.map(() => '?').join(',')})`,
     ...rows.map((r) => r.externalId),
   );
   const byInvoice = new Map<string, InvoiceJobRow[]>();

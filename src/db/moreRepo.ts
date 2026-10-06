@@ -598,8 +598,25 @@ export async function searchContacts(query: string, options: { siteExternalId?: 
   if (options.customerExternalId) { where.push('customersJson LIKE ?'); args.push(refMarker(options.customerExternalId)); }
   for (const word of searchWords(query)) {
     const like = `%${word}%`;
-    where.push('(name LIKE ? OR email LIKE ? OR workPhone LIKE ? OR cellPhone LIKE ? OR altPhone LIKE ? OR position LIKE ? OR department LIKE ? OR externalId = ?)');
-    args.push(like, like, like, like, like, like, like, word);
+    /*
+     * The sites and customers a person belongs to, which every row on the
+     * contacts screen prints and this box could not match.
+     *
+     * A technician reading "Barren Heights Tower" under somebody's name typed
+     * it and got "Nobody matched". The global Find-anything box has never had
+     * this gap — src/db/searchRepo.ts lists sitesJson and customersJson among
+     * the contact kind's text columns, so the same words find the same person
+     * there. Two search boxes over one table, disagreeing, is what a person
+     * experiences as the Contacts module not knowing about sites.
+     *
+     * They are JSON arrays of {id, name}, so a LIKE over the column matches
+     * the name inside them — the same way the global search does it, and for
+     * the same reason: a join would be a second definition of what a contact's
+     * site is.
+     */
+    where.push('(name LIKE ? OR email LIKE ? OR workPhone LIKE ? OR cellPhone LIKE ? OR altPhone LIKE ? '
+      + 'OR position LIKE ? OR department LIKE ? OR sitesJson LIKE ? OR customersJson LIKE ? OR externalId = ?)');
+    args.push(like, like, like, like, like, like, like, like, like, word);
   }
   const term = query.trim();
   args.push(`${term}%`, options.limit ?? 50);

@@ -417,6 +417,12 @@ export interface SimproInvoiceJob {
   description?: string;
   totalExTaxCents?: number;
   totalIncTaxCents?: number;
+  /**
+   * The building the job is at, where this phone holds it. Not from Simpro's
+   * invoice payload — joined on the way out of the mirror, so the invoice list
+   * can be searched by the site it is about and can show it.
+   */
+  siteName?: string;
 }
 
 export interface SimproInvoice {

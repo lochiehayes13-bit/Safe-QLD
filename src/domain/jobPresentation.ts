@@ -535,13 +535,27 @@ export function orderInvoices<T extends { isPaid: boolean; dueDate?: string; dat
 
 /** "Invoice 12345 — Harbourline" matches on number, customer, order number or description. */
 export function invoiceMatchesQuery(
-  inv: { externalId: string; customerName?: string; orderNo?: string; description?: string; jobs: { id: string }[] },
+  inv: {
+    externalId: string; customerName?: string; orderNo?: string; description?: string;
+    jobs: { id: string; siteName?: string }[];
+  },
   query: string,
 ): boolean {
   const words = query.trim().toLowerCase().split(/\s+/).map((w) => w.replace(/^#/, '')).filter(Boolean);
   if (!words.length) return true;
-  const hay = [inv.externalId, inv.customerName, inv.orderNo, inv.description, ...inv.jobs.map((j) => j.id)]
-    .filter(Boolean).join(' ').toLowerCase();
+  /*
+   * The building, as well as the numbers.
+   *
+   * This ran over the rows the SQL search had already narrowed, so once that
+   * search learned to match a site this one would have thrown the rows away
+   * again — and on the unpaid tab, which is read without the words, it is the
+   * only search there is. Two filters over one list disagreeing is the fault
+   * this app keeps finding in itself.
+   */
+  const hay = [
+    inv.externalId, inv.customerName, inv.orderNo, inv.description,
+    ...inv.jobs.map((j) => j.id), ...inv.jobs.map((j) => j.siteName),
+  ].filter(Boolean).join(' ').toLowerCase();
   return words.every((w) => hay.includes(w));
 }
 
