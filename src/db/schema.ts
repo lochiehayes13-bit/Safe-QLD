@@ -34,6 +34,7 @@ import { MIGRATION_V32 } from './schemaV32';
 import { MIGRATION_V33 } from './schemaV33';
 import { MIGRATION_V34 } from './schemaV34';
 import { MIGRATION_V35 } from './schemaV35';
+import { MIGRATION_V36 } from './schemaV36';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -389,6 +390,10 @@ export const MIGRATIONS: string[] = [
   // v35 — Part C's two "Calibrated:" dates, which the screen collected and the
   // renderer printed and nothing ever stored
   MIGRATION_V35,
+
+  // v36 — which of Part C's three boxes a given meter belongs under, answered
+  // once per instrument rather than once per form
+  MIGRATION_V36,
 ];
 
 /**

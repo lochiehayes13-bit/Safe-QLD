@@ -609,6 +609,33 @@ export const FLOW_DEVICE_LABEL: Record<FlowDeviceKind, string> = {
 };
 
 /**
+ * The Part C ticks a form should carry, given what somebody has already
+ * answered for the meters on it.
+ *
+ * Carried forward rather than asked again, because the question is about the
+ * instrument and not about the test: the same meter is the same kind of meter
+ * on every form it appears on. Nothing here infers anything — `answered` holds
+ * only answers a technician gave, keyed by serial number, and this returns the
+ * ticks missing from a form that those answers account for.
+ *
+ * Additive, never subtractive. A kind ticked on the form and not accounted for
+ * by any stored answer is a technician's own tick for a device that is not in
+ * Part C's four columns — the department's own note says to put extra devices
+ * in the Notes section — and removing it would erase an answer somebody gave.
+ */
+export function unTickedAnsweredKinds(
+  devices: readonly TestDevice[],
+  ticked: readonly FlowDeviceKind[],
+  answered: ReadonlyMap<string, FlowDeviceKind>,
+): FlowDeviceKind[] {
+  const known = devices
+    .filter((d) => d.kind === 'flow-meter')
+    .map((d) => answered.get(d.serialNumber.trim().toUpperCase()))
+    .filter((k): k is FlowDeviceKind => !!k);
+  return [...new Set(known)].filter((k) => !ticked.includes(k));
+}
+
+/**
  * A Form 72 defect, as the defect register wants it.
  *
  * The register carries the Queensland statutory apparatus — the two limbs, the

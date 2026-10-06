@@ -1505,7 +1505,7 @@ describe('the columns the department’s form has no box for', () => {
     expect(MIGRATION_V35).toContain('ADD COLUMN flowDeviceCalibrated TEXT;');
     expect(MIGRATION_V35).not.toContain('NOT NULL');
     expect(MIGRATION_V35).not.toContain('DEFAULT');
-    expect(MIGRATIONS[MIGRATIONS.length - 1]).toBe(MIGRATION_V35);
+    expect(MIGRATIONS).toContain(MIGRATION_V35);
   });
 });
 
@@ -1569,7 +1569,9 @@ describe('the company’s own test equipment', () => {
     // about the instrument on a document somebody signs.
     for (const preset of DEVICE_PRESETS) {
       expect(preset.flowDeviceKind).toBeUndefined();
-      expect(preset.flowDeviceKindNote).toContain('yours to make');
+      // What the note says, and that it says enough to act on, is asserted in
+      // deviceKind.test.ts beside the store that answers it.
+      expect(preset.flowDeviceKindNote).toContain('tick is yours');
     }
   });
 

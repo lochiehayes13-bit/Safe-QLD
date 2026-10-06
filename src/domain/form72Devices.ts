@@ -21,27 +21,36 @@ import type { FlowDeviceKind, TestDevice } from '@/domain/form72';
  */
 
 /** A device somebody can add to Part C in one tap. */
-export interface DevicePreset {
+export type DevicePreset = DeviceKindClaim & {
   id: string;
   /** What the chip says: short enough for a phone, specific enough to pick. */
   label: string;
   /** One line under the chip, so two similar meters are distinguishable. */
   detail: string;
-  /**
-   * The Part C flow-measuring-device tick this one belongs under, where the
-   * certificate establishes it. Absent where it does not — the three ticks are
-   * a claim about how the device measures, and a tick put on by guesswork is
-   * worse than a blank the technician fills in knowingly.
-   */
-  flowDeviceKind?: FlowDeviceKind;
-  /**
-   * Why the kind is absent, where it is. Shown on the screen, so the technician
-   * knows it is theirs to answer rather than something the app forgot.
-   */
-  flowDeviceKindNote?: string;
   /** The device as it goes onto the form, minus the slot the form gives it. */
   device: Omit<TestDevice, 'slot'>;
-}
+};
+
+/**
+ * What a preset says about Part C's three ticks, which is one of two things.
+ *
+ * A union rather than two optional fields, so a preset cannot be added with
+ * neither. The silent case is the dangerous one: a kind left off and no reason
+ * given looks on the screen exactly like a question the app forgot to ask, and
+ * the technician scrolls past it.
+ */
+export type DeviceKindClaim =
+  /**
+   * The documents establish which tick it is, so the form can carry it.
+   */
+  | { flowDeviceKind: FlowDeviceKind; flowDeviceKindNote?: string }
+  /**
+   * They do not. The three ticks are a claim about how the instrument
+   * measures, and a tick put on by inference is worse than a blank somebody
+   * fills in knowingly — so the note says what is known and what is not, and
+   * the technician answers it once for that meter.
+   */
+  | { flowDeviceKind?: undefined; flowDeviceKindNote: string };
 
 /**
  * The transcription source, named so the next person can check it.
@@ -78,16 +87,43 @@ const flowtech = (serial: string, report: string): DevicePreset => ({
   label: `Inline meter ${serial}`,
   detail: 'Flowtech Omega Series DN80 · certified 18/07/2026 · +0.35%',
   /*
-   * No tick. The certificate calls the device "microprocessor based" and says
-   * it handles slurries, salt water and aggregate to 15 mm without affecting
-   * its accuracy, which rules out a mechanical impeller and points at an
-   * electromagnetic element — but it never says electromagnetic, and the three
-   * Part C ticks are a statement about the instrument on a document somebody
-   * signs. An inference is not good enough for that, so the technician ticks
-   * it and the screen says why it is being asked.
+   * No tick, and the documents are the reason rather than an oversight.
+   *
+   * Two readings of the same papers reach opposite answers, which is how I
+   * know neither is established:
+   *
+   * FOR Electro magnetic — the certificate warrants "Council quarry slurries",
+   * "bedding sand and aggregate to 15 mm" and "ice debris and suspended
+   * solids" "without causing any damage to the device internal parts, or
+   * variation in the metering accuracy". Nothing with a rotor in the bore
+   * survives that, and a magnetic element's output is independent of density
+   * and viscosity, which is what lets one accuracy claim cover media from
+   * potable water to effluent.
+   *
+   * FOR Mechanical — the manufacturer's own service document says "the MSP
+   * mechanical parts, have a design life of up to 20+ years service" and that
+   * the one service it ever needs is a battery in the "electronic metering
+   * module". A ten-year battery driving an LCD is not a magnetic meter's power
+   * budget; its excitation coils are the reason those are mains or
+   * short-life-battery instruments. The certificate's accuracy is stated as
+   * "near equivalence of a Class 2 Water Meter", which is cold-water-meter
+   * language, and the whole assembly is rated intrinsically safe Ex i.m.n.
+   *
+   * Neither document names the measuring element. Not one of the words
+   * electromagnetic, magnetic, ultrasonic, turbine, rotor, impeller or orifice
+   * appears anywhere in either of them, which I checked rather than assumed.
+   *
+   * So the app does not tick it. Part C's three boxes are a statement about
+   * the instrument on a page a licensee signs, and a tick the app inferred
+   * prints identically to one a technician made knowingly. The technician
+   * answers it once for this meter — see src/db/deviceKindRepo.ts — and is
+   * never asked again.
    */
-  flowDeviceKindNote: 'The certificate does not name the measuring element, so the Orifice / '
-    + 'Mechanical / Electro magnetic tick is yours to make.',
+  flowDeviceKindNote: 'Neither the certificate nor Flowtech\u2019s service document names the '
+    + 'measuring element, and they point different ways: the warranted media (quarry slurry, '
+    + 'aggregate to 15 mm) suit an electromagnetic meter, while "mechanical parts" with a 20-year '
+    + 'life, a 10-year battery and Class 2 Water Meter accuracy suit a mechanical one. So this '
+    + 'tick is yours. Answer it once and every later form with this serial fills it in.',
   device: {
     serialNumber: serial,
     kind: 'flow-meter',

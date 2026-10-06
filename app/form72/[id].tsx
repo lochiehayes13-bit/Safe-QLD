@@ -27,6 +27,7 @@ import {
   intervalsTested, maintenanceTestFromAxes, overloadCheck, overloadRun, resolveFrictionalLoss,
   sprinklerTestPointLines, sprinklerTestPointUntouched, systemTypesTested, unraisedDefects,
   validateForm72,
+  unTickedAnsweredKinds,
   type BoosterTest, type FlowDeviceKind, type FlowRow, type FormDefect, type FormIssue,
   type HydrostaticTest, type PartResult, type SprinklerFlowTest, type SprinklerHydrostatic,
   type SprinklerTestPoint, type SystemType, type TestDevice, type TestInterval,
@@ -38,7 +39,10 @@ import {
   frictionalLossGaps,
   occupierCopyDueBy, testPointOutcome, testerCopyKeepUntil,
 } from '@/export/form72';
-import { unusedDevicePresets } from '@/domain/form72Devices';
+import { DEVICE_PRESETS, unusedDevicePresets } from '@/domain/form72Devices';
+import {
+  deviceKindKey, getDeviceKinds, setDeviceKind, type DeviceKindAnswer,
+} from '@/db/deviceKindRepo';
 import { shareFile, writePdf } from '@/export/files';
 import { sendMail } from '@/export/mail';
 import { notSharedNotice } from '@/export/shareOutcome';
@@ -161,6 +165,28 @@ export default function Form72Screen() {
   const [siteJobs, setSiteJobs] = useState<JobSummary[]>([]);
   const [typedJob, setTypedJob] = useState('');
 
+  /*
+   * What has been answered about the meters on this form.
+   *
+   * Filled by the same read that loads the form, because the read that ticks
+   * Part C's boxes and the read that shows whose answer each tick is have to
+   * be one read. `remember` keeps an answer the technician has just given, so
+   * Part C shows it with their name on without going back to the table.
+   */
+  const [deviceKinds, setDeviceKinds] = useState<{
+    answers: ReadonlyMap<string, DeviceKindAnswer>; failed: boolean;
+  }>({ answers: new Map(), failed: false });
+  const remember = useCallback((answer: DeviceKindAnswer) => {
+    setDeviceKinds((prev) => ({
+      answers: new Map(prev.answers).set(answer.serialNumber, answer),
+      failed: false,
+    }));
+  }, []);
+  const kinds = useMemo<DeviceKinds>(
+    () => ({ answers: deviceKinds.answers, failed: deviceKinds.failed, remember }),
+    [deviceKinds.answers, deviceKinds.failed, remember],
+  );
+
   const load = useCallback(async () => {
     if (!id) return;
     setFailed(null);
@@ -182,6 +208,38 @@ export default function Form72Screen() {
           setSite(null);
         }
       }
+      /*
+       * Part C's Orifice / Mechanical / Electro magnetic ticks, from what
+       * somebody already answered for the meters on this form.
+       *
+       * Read here, with the form, for two reasons. It is part of preparing the
+       * form rather than something a render should notice and correct; and the
+       * read that ticks the boxes and the read that shows whose answer each
+       * tick is have to be one read, or they will disagree.
+       *
+       * The carry-forward only ever adds, and only on a draft: ticking a box
+       * on a form already issued would change a signed document.
+       */
+      if (f) {
+        try {
+          const answers = await getDeviceKinds(f.devices.map((d) => d.serialNumber));
+          setDeviceKinds({ answers, failed: false });
+          const add = f.status === 'issued' ? [] : unTickedAnsweredKinds(
+            f.devices, f.flowDeviceKinds,
+            new Map([...answers].map(([serial, a]) => [serial, a.kind])),
+          );
+          if (add.length) {
+            const flowDeviceKinds = [...f.flowDeviceKinds, ...add];
+            await updateForm72(f.id, { flowDeviceKinds });
+            setForm({ ...f, flowDeviceKinds });
+          }
+        } catch {
+          // A table that cannot be read leaves the boxes to the technician,
+          // which is where they were. Part C says so rather than reporting it
+          // as nobody having answered, and the form still opens.
+          setDeviceKinds({ answers: new Map(), failed: true });
+        }
+      }
     } catch (e) {
       setFailed(describeLoadFailure(e, 'this Form 72'));
     }
@@ -190,6 +248,7 @@ export default function Form72Screen() {
   useEffect(() => { void load(); }, [load]);
 
   const locked = form?.status === 'issued';
+
 
   /*
    * Writes land immediately rather than on a save button. The patch is the
@@ -658,10 +717,10 @@ export default function Form72Screen() {
         ? PARTS.map((p) => (
           <View key={p.key} style={{ gap: t.space(3) }}>
             <Divider />
-            <PartBody part={p.key} form={form} locked={!!locked} patch={patch} reload={() => { void load(); }} />
+            <PartBody part={p.key} form={form} locked={!!locked} patch={patch} reload={() => { void load(); }} kinds={kinds} />
           </View>
         ))
-        : <PartBody part={part} form={form} locked={!!locked} patch={patch} reload={() => { void load(); }} />}
+        : <PartBody part={part} form={form} locked={!!locked} patch={patch} reload={() => { void load(); }} kinds={kinds} />}
 
       <Divider />
 
@@ -770,7 +829,7 @@ function PartStrip({
 }
 
 function PartBody({
-  part, form, locked, patch, reload,
+  part, form, locked, patch, reload, kinds,
 }: {
   part: PartKey;
   form: StoredForm72;
@@ -785,6 +844,7 @@ function PartBody({
    * again.
    */
   reload: () => void;
+  kinds: DeviceKinds;
 }) {
   const meta = PARTS.find((p) => p.key === part)!;
   return (
@@ -795,7 +855,7 @@ function PartBody({
       </View>
       {part === 'A' ? <PartA form={form} locked={locked} patch={patch} /> : null}
       {part === 'B' ? <PartB form={form} locked={locked} patch={patch} /> : null}
-      {part === 'C' ? <PartC form={form} locked={locked} patch={patch} /> : null}
+      {part === 'C' ? <PartC form={form} locked={locked} patch={patch} kinds={kinds} /> : null}
       {part === 'D' ? <PartD form={form} locked={locked} patch={patch} /> : null}
       {part === 'E' ? <PartE form={form} locked={locked} patch={patch} /> : null}
       {part === 'F' ? <PartF form={form} locked={locked} patch={patch} /> : null}
@@ -1122,7 +1182,143 @@ function deviceSlotName(index: number): string {
   return DEPARTMENT_DEVICE_SLOTS[index] ?? `Device/gauge ${index + 1}`;
 }
 
-function PartC({ form, locked, patch }: PartProps) {
+/**
+ * What the screen knows about the meters on this form, and how to add to it.
+ *
+ * One read, done where the form is read, used both to tick Part C's boxes and
+ * to show whose answer each tick is. `failed` is a third state and not an
+ * empty map: a table that could not be read is not the same as nobody having
+ * answered, and telling a technician to answer again and then failing to store
+ * it is the worst of the three outcomes.
+ */
+interface DeviceKinds {
+  answers: ReadonlyMap<string, DeviceKindAnswer>;
+  failed: boolean;
+  /** Keeps an answer just given, so the screen shows it without re-reading. */
+  remember: (answer: DeviceKindAnswer) => void;
+}
+
+/**
+ * Part C's Orifice / Mechanical / Electro magnetic question, asked once per
+ * meter instead of once per form.
+ *
+ * It is a fact about the instrument, not about the test: the same meter is the
+ * same kind of meter on every form it ever appears on. Asked per form, it was
+ * a hundred chances to answer it differently on documents a licensee signs —
+ * and it was asked in the one place that disappeared the moment both of our
+ * meters were on the form, which is a question nobody is ever going to answer.
+ *
+ * So it lives here, beside the three boxes it fills in, for as long as any
+ * flow meter on the form has no answer on file. One tap answers it, the answer
+ * is stored against the serial number, and every later form with that meter
+ * fills itself in.
+ *
+ * A carried-forward answer is shown as somebody's answer, with their name and
+ * the date — never as a tick that simply appeared. The app will not decide
+ * this box: our own certificates do not name the measuring element, and the
+ * manufacturer's service document names only "mechanical parts" and an
+ * "electronic metering module", so the papers support more than one of the
+ * three and settle none. A tick the app inferred prints identically to one a
+ * technician made knowingly.
+ */
+function FlowDeviceKindQuestion({ form, locked, patch, kinds }: PartProps & {
+  /**
+   * What has been answered for these serials, read once by the screen that
+   * loaded the form. Passed in rather than fetched here, so the read that
+   * ticks the boxes and the read that shows who ticked them are one read —
+   * two would be two routes to one fact, and two routes drift.
+   */
+  kinds: DeviceKinds;
+}) {
+  const t = useTheme();
+  /** The flow meters on this form, which are the only devices this asks about. */
+  const meters = form.devices.filter((d) => d.kind === 'flow-meter' && d.serialNumber.trim());
+
+  const answer = async (serialNumber: string, kind: FlowDeviceKind) => {
+    try {
+      const stored = await setDeviceKind({
+        serialNumber,
+        kind,
+        // Who is answering. The licensee is the name this form already has on
+        // it and the person who signs Part I; a stored claim with nobody
+        // attached to it is indistinguishable from a guess.
+        answeredBy: form.licenseeName?.trim() || undefined,
+      });
+      if (stored) kinds.remember(stored);
+    } catch (e) {
+      showAlert('Not remembered', e instanceof Error ? e.message
+        : 'The tick is on this form, but the next form will ask again.');
+    }
+    // The tick goes on the form either way. Failing to remember the answer for
+    // next time is a nuisance; failing to record it on the form in front of
+    // the technician would lose the answer they just gave.
+    if (!form.flowDeviceKinds.includes(kind)) {
+      patch({ flowDeviceKinds: [...form.flowDeviceKinds, kind] });
+    }
+  };
+
+  if (!meters.length) return null;
+  const { answers, failed } = kinds;
+
+  return (
+    <>
+      {failed ? (
+        <Txt size="xs" tone="faint">
+          Could not read what was answered for these meters before. Tick the boxes above by hand.
+        </Txt>
+      ) : null}
+      {meters.map((d) => {
+        const held = answers.get(deviceKindKey(d.serialNumber));
+        const preset = DEVICE_PRESETS.find(
+          (pr) => pr.device.serialNumber.toUpperCase() === deviceKindKey(d.serialNumber),
+        );
+        return (
+          <View key={d.serialNumber} style={{ gap: 6, marginTop: 4 }}>
+            <Rowed>
+              <Txt size="sm" weight="700" style={{ flex: 1 }}>
+                {d.serialNumber}
+                {held ? ` — ${FLOW_DEVICE_LABEL[held.kind]}` : ' — which kind of meter?'}
+              </Txt>
+            </Rowed>
+            {held ? (
+              <Txt size="xs" tone="faint">
+                Answered{held.answeredBy ? ` by ${held.answeredBy}` : ''} on{' '}
+                {formatAuDate(qldIsoDay(held.answeredAt))}
+                {held.basis ? ` · ${held.basis}` : ''}. Every form with this meter uses it.
+              </Txt>
+            ) : (
+              <Txt size="xs" tone="faint">
+                {preset?.flowDeviceKindNote
+                  ?? 'Answer it once and every later form with this serial fills it in.'}
+              </Txt>
+            )}
+            {!locked ? (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                {(['orifice', 'mechanical', 'electromagnetic'] as FlowDeviceKind[]).map((k) => (
+                  <Chip
+                    key={k}
+                    label={FLOW_DEVICE_LABEL[k]}
+                    selected={held?.kind === k}
+                    tone={held?.kind === k ? 'accent' : 'default'}
+                    onPress={() => { void answer(d.serialNumber, k); }}
+                  />
+                ))}
+              </View>
+            ) : null}
+            {held && !locked ? (
+              <Txt size="xs" style={{ color: t.color.textFaint }}>
+                Tap another to correct it — a meter does not change what it is, so a different
+                answer replaces this one rather than sitting beside it.
+              </Txt>
+            ) : null}
+          </View>
+        );
+      })}
+    </>
+  );
+}
+
+function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds }) {
   const devices = form.devices;
   const unused = unusedDevicePresets(devices);
   const setDevice = (i: number, p: Partial<TestDevice>) => patch({
@@ -1156,6 +1352,16 @@ function PartC({ form, locked, patch }: PartProps) {
             Nothing ticked yet, and the form prints that as not answered.
           </Txt>
         ) : null}
+
+        {/*
+          * The question, beside the boxes it answers.
+          *
+          * It used to sit under the "our test equipment" chips, which vanish
+          * the moment both of our meters are on the form — so on the commonest
+          * Part C this company fills in, the one place that asked this
+          * question was gone before anybody could answer it.
+          */}
+        <FlowDeviceKindQuestion form={form} locked={locked} patch={patch} kinds={kinds} />
 
         {/*
           * The two "Calibrated: __/__/__" dates the department prints on this
@@ -1403,7 +1609,7 @@ function PartC({ form, locked, patch }: PartProps) {
               </View>
               {unused.some((p) => p.flowDeviceKindNote) ? (
                 <Txt size="xs" tone="faint">
-                  {unused.find((p) => p.flowDeviceKindNote)!.flowDeviceKindNote}
+                  The Orifice / Mechanical / Electro magnetic tick is asked above, once per meter.
                 </Txt>
               ) : null}
             </>
