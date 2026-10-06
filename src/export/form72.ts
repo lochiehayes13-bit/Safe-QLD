@@ -123,9 +123,9 @@ export const FORM_SUBTITLE = 'periodic testing and maintenance';
 export const FORM_INTRO = 'This form is to be used for the purposes of maintenance to water based '
   + 'fire safety installations, as required by the Queensland Development Code – Mandatory Part '
   + '(MP) 6.1, which is a building assessment provision under the Building Act 1975, section 30. '
-  + "This form is also to be used in accordance with the 'Fire hydrant and sprinkler system "
-  + "commissioning and periodic maintenance procedure', defined in MP 6.1 as the 'Relevant "
-  + "procedure'. Please note that this form does not comprise all maintenance requirements—this "
+  + 'This form is also to be used in accordance with the \u2018Fire hydrant and sprinkler system '
+  + 'commissioning and periodic maintenance procedure\u2019, defined in MP 6.1 as the \u2018Relevant '
+  + 'procedure\u2019. Please note that this form does not comprise all maintenance requirements—this '
   + 'form is only for collecting results for maintenance for some sections of the Australian '
   + 'Standards referred to and in each case, further testing is required.';
 
@@ -171,15 +171,26 @@ export const DECLARATION = 'By signing this Form 72, I confirm that the informat
   + 'herein is correct to the best of my knowledge given the information available and that this '
   + 'Form 72 has been completed in accordance with the relevant standards, codes and regulations.';
 
-/** The department's footer note and its two definitions, verbatim. */
+/** The department's footer note, verbatim. */
 export const DEPARTMENT_NOTE = 'Note: Building owners/occupiers are responsible for ensuring their '
   + 'buildings continuously meet fire safety standards. Where a building owner/occupier becomes '
   + 'aware that their building does not meet the minimum requirements for water pressure required '
   + 'by any standard applicable under the Queensland Development Code Mandatory Part 6.1 '
   + '(Maintenance of fire safety installations) the building owner/occupier should contact the '
-  + 'Queensland Fire and Emergency Service. Definitions → \u201cMaintenance test\u201d means a test '
-  + 'that is required under a maintenance standard such as AS1851. \u201cRunning test\u201d means a '
-  + 'two inch waste test installed at the sprinkler control valve on older systems.';
+  + 'Queensland Fire and Emergency Service.';
+
+/**
+ * The department's two definitions, verbatim.
+ *
+ * Their own paragraph on the published form, under its own arrow, rather than
+ * a sentence tacked onto the end of the note above it. The two say different
+ * things — one is an obligation on the owner, the other is what two words on
+ * the form mean — and running them together made the second read as part of
+ * the first.
+ */
+export const DEPARTMENT_DEFINITIONS = 'Definitions → \u201cMaintenance test\u201d means a test that '
+  + 'is required under a maintenance standard such as AS1851. \u201cRunning test\u201d means a two '
+  + 'inch waste test installed at the sprinkler control valve on older systems.';
 
 /**
  * The privacy and right-to-information notices, and the Crown copyright line.
@@ -194,7 +205,7 @@ export const DEPARTMENT_PRIVACY = 'Privacy: The information on this form is coll
   + 'related to monitoring compliance under the Plumbing and Drainage Act 2002, the Building Act '
   + '1975 and the Building Fire Safety Regulation 2008 (\u201clegislation\u201d). This information '
   + 'may be '
-  + "stored in the department's database and may be used for statistical research, information "
+  + 'stored in the department\u2019s database and may be used for statistical research, information '
   + 'provision and evaluation of Plumbing Industry Council and state government services. Your '
   + 'personal information may be disclosed to other government agencies, local government '
   + 'authorities and third parties for purposes related to this application. Except for these '
@@ -808,12 +819,24 @@ function partD(form: Form72): string {
    * reader has to know that "19 mm" is a nozzle bore and "100 mm" on the page
    * above was a gauge face.
    */
-  const groupSpans: { group: FlowRowGroup; from: number; count: number }[] = [];
-  rows.forEach(({ row }, i) => {
+  const groupSpans: { group: FlowRowGroup; from: number; count: number; standard: boolean }[] = [];
+  rows.forEach(({ row, standard }, i) => {
     const group = flowRowGroup(row);
     const last = groupSpans[groupSpans.length - 1];
-    if (last && last.group === group && last.from + last.count === i) last.count += 1;
-    else groupSpans.push({ group, from: i, count: 1 });
+    /*
+     * A row the department does not print gets its own group cell.
+     *
+     * Merged into the span above it, a 25 L/s reading sat under "Other portable
+     * testing devices" as though the department printed a 25 L/s line — the
+     * "added" marker on the row label was the only thing saying otherwise, and
+     * it is three columns away from the heading doing the implying.
+     */
+    const joins = last
+      && last.group === group
+      && last.standard === standard
+      && last.from + last.count === i;
+    if (joins) last.count += 1;
+    else groupSpans.push({ group, from: i, count: 1, standard });
   });
   const spanAt = new Map(groupSpans.map((sp) => [sp.from, sp]));
 
@@ -830,7 +853,9 @@ function partD(form: Form72): string {
     // leave most of them alone — flagging those in red would train a reader to
     // ignore the flag on the row that matters.
     const untouched = flowRowUntouched(row);
-    const devicesCell = untouched ? '<span class="na">Not run</span>' : cell(row.devices, r);
+    const devicesCell = untouched
+      ? (r === 'na' ? '<span class="na">N/A</span>' : '<span class="na">Not run</span>')
+      : cell(row.devices, r);
 
     /*
      * Three states per cell, not two.
@@ -856,7 +881,8 @@ function partD(form: Form72): string {
 
     const sp = spanAt.get(i);
     return `<tr>
-      ${sp ? `<td class="grp" rowspan="${sp.count}">${esc(FLOW_ROW_GROUP_LABEL[sp.group])}</td>` : ''}
+      ${sp ? `<td class="grp" rowspan="${sp.count}">${esc(FLOW_ROW_GROUP_LABEL[sp.group])}${
+  sp.standard ? '' : ' <span class="extra">added</span>'}</td>` : ''}
       <td class="k">${esc(flowRowLabel(row))}${standard ? '' : ' <span class="extra">added</span>'}</td>
       <td class="v">${devicesCell}</td>
       <td class="v">${pressure('hydrant1Kpa')}</td>
@@ -1449,7 +1475,14 @@ export function form72Html(input: Form72DocumentInput): string {
       <div class="sub">${esc(FORM_SUBTITLE)}</div>
     </div>
     <div class="right">${esc(FORM_VERSION)}${
-  input.systemLabel?.trim() ? `<br />${esc(input.systemLabel)}` : ''}</div>
+  /*
+   * The system descriptor is not on the department's form, and it is the one
+   * thing that tells two forms for the same site on the same day apart — so it
+   * prints, up here where a reader finds it, and says it is ours.
+   */
+  input.systemLabel?.trim()
+    ? `<br />${esc(input.systemLabel)} <span class="extra">added</span>`
+    : ''}</div>
   </div>
   <div class="intro">${esc(FORM_INTRO)}</div>
 
@@ -1484,9 +1517,17 @@ export function form72Html(input: Form72DocumentInput): string {
 
   <div class="subnote">${esc(ADDED_BOX_NOTE)}</div>
   <div class="deptnote">${esc(DEPARTMENT_NOTE)}</div>
+  <div class="deptnote">${esc(DEPARTMENT_DEFINITIONS)}</div>
   <div class="deptfine">${esc(DEPARTMENT_PRIVACY)}</div>
   <div class="deptfine">${esc(DEPARTMENT_RTI)}</div>
-  <div class="imprint">${esc(DEPARTMENT_IMPRINT).replace(/\n/g, '<br />')}</div>
+  ${/*
+     * The department prints the version at the foot of the page above its own
+     * imprint, not at the head. It is in our header too, because the header is
+     * where somebody looks for which form this is — but the published position
+     * is the one a side-by-side comparison checks.
+     */''}
+  <div class="imprint">${esc(FORM_VERSION)}<br />${
+  esc(DEPARTMENT_IMPRINT).replace(/\n/g, '<br />')}</div>
 
   <div class="ours">
     <b>Not part of the department's form.</b>

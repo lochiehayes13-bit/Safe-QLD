@@ -1,6 +1,7 @@
 import {
   ADDED_BOX_NOTE,
-  DECLARATION, DEPARTMENT_DEVICE_SLOTS, DEPARTMENT_NOTE, DEPARTMENT_PRIVACY, DEPARTMENT_RTI,
+  DECLARATION, DEPARTMENT_DEFINITIONS, DEPARTMENT_DEVICE_SLOTS, DEPARTMENT_NOTE,
+  DEPARTMENT_PRIVACY, DEPARTMENT_RTI,
   FORM_72_SOURCES, FORM_SUBTITLE, FORM_TITLE, PART_D_LOCATION_SLOTS, STANDARD_FLOW_RATES_LPS,
   flowTableRows, form72Html, frictionalLossGaps, hydrantLocationsNeeded, occupierCopyDue,
   occupierCopyDueBy, qldCalendarDate, testPointOutcome, testerCopyKeepUntil,
@@ -2067,5 +2068,81 @@ describe('Part G in the department’s column order', () => {
     }));
     expect(flat(html)).toContain('Test point 3 <span class="extra">added</span>');
     expect(flat(html)).not.toContain('Test point 1 <span class="extra">added</span>');
+  });
+});
+
+describe('a Part D row the department does not print', () => {
+  const extra = (html: string) => between(html, 'Size/flow rate', 'System achieved');
+
+  it('gets its own group cell, rather than sitting under the department’s heading', () => {
+    // Merged into the span above it, a 25 L/s reading sat under "Other
+    // portable testing devices" as though the department printed a 25 L/s
+    // line, with the row's own "added" marker three columns away from the
+    // heading doing the implying.
+    const html = form72Html(doc({
+      form: issuable({
+        flowTest: {
+          result: 'pass', hydrantLocations: ['Booster'],
+          rows: [{ rateLps: 25, devices: 'DG1', hydrant1Kpa: 280 }],
+        },
+      }),
+    }));
+    const partD = extra(html);
+    // Two group cells for the metered rows: the department's five, then ours.
+    expect((partD.match(/Other portable testing devices/g) ?? [])).toHaveLength(2);
+    expect(flat(partD)).toContain('Other portable testing devices <span class="extra">added</span>');
+  });
+
+  it('leaves the department’s own eight under one heading each', () => {
+    const html = form72Html(doc());
+    const partD = extra(html);
+    expect((partD.match(/Nozzles/g) ?? [])).toHaveLength(1);
+    expect((partD.match(/Other portable testing devices/g) ?? [])).toHaveLength(1);
+    expect(flat(partD)).not.toContain('Nozzles <span class="extra">added</span>');
+  });
+
+  it('answers every cell of an N/A Part D with N/A, the device column included', () => {
+    const html = form72Html(doc({
+      form: issuable({ flowTest: { result: 'na', hydrantLocations: [], rows: [] } }),
+    }));
+    const partD = extra(html);
+    expect(partD).not.toContain('Not run');
+    expect(partD).not.toContain('Not recorded');
+    expect(partD).toContain('N/A');
+  });
+});
+
+describe('the department’s footer, as two paragraphs and an imprint', () => {
+  const html = form72Html(doc());
+
+  it('keeps the Note and the Definitions apart, as the published form does', () => {
+    // One is an obligation on the owner; the other is what two words on the
+    // form mean. Run together, the second read as part of the first.
+    expect(flat(html)).toContain(flat(DEPARTMENT_NOTE));
+    expect(flat(html)).toContain(flat(DEPARTMENT_DEFINITIONS));
+    expect(DEPARTMENT_NOTE).not.toContain('Definitions');
+    expect(DEPARTMENT_DEFINITIONS).toContain('Maintenance test');
+    expect(DEPARTMENT_DEFINITIONS).toContain('Running test');
+    expect(html.indexOf('Definitions')).toBeGreaterThan(html.indexOf('Queensland Fire and Emergency Service'));
+  });
+
+  it('prints the version at the foot above the imprint, where they print it', () => {
+    const imprint = between(html, '<div class="imprint">', '</div>');
+    expect(imprint).toContain('Version 1 – July 2014');
+    expect(imprint).toContain('Building Codes Queensland');
+  });
+
+  it('writes the department’s sentences with the department’s own quote marks', () => {
+    expect(html).toContain('‘Fire hydrant and sprinkler system');
+    expect(html).toContain('‘Relevant procedure’');
+    expect(html).toContain('the department’s database');
+    // Straight quotes would have been escaped to &quot;/&#39; on the page.
+    expect(html).not.toContain('&#39;Relevant');
+  });
+
+  it('says the system descriptor in the header is ours, because it is', () => {
+    // It is the one thing that tells two forms for the same site on the same
+    // day apart, so it prints — up where a reader finds it, marked.
+    expect(flat(html)).toContain('Towns Main System <span class="extra">added</span>');
   });
 });
