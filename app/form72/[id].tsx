@@ -22,8 +22,9 @@ import {
   CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, FLOW_DEVICE_LABEL, PART_D_ROWS,
   PART_RESULT_LABEL, SYSTEM_TYPE_LABEL, TEST_INTERVAL_LABEL,
   PART_G_PRINTED_TEST_POINTS,
-  deviceCalibration, elevationHeadKpa, flowRowDevices, flowRowKey, flowRowLongLabel,
+  deviceCalibration, dutyToCarry, elevationHeadKpa, flowRowDevices, flowRowKey, flowRowLongLabel,
   flowRowRead, flowRowUntouched, form72DefectForRegister,
+  provedDuty, provedDutyDisagrees,
   intervalsTested, maintenanceTestFromAxes, overloadCheck, overloadRun, resolveFrictionalLoss,
   sprinklerTestPointLines, sprinklerTestPointUntouched, systemTypesTested, unraisedDefects,
   validateForm72,
@@ -2126,6 +2127,9 @@ function PartD({ form, locked, patch }: PartProps) {
   const t = useTheme();
   const f = form.flowTest;
   const set = (p: Partial<typeof f>) => patch({ flowTest: { ...f, ...p } });
+  // What the table proves, and whether the pair typed under it says otherwise.
+  const proved = provedDuty(f);
+  const provedGap = provedDutyDisagrees(f);
 
   // The eight printed lines, laid over whatever this form has stored. A line
   // the form holds keeps its readings and its index; a line it does not is
@@ -2426,6 +2430,28 @@ function PartD({ form, locked, patch }: PartProps) {
           </View>
         </Rowed>
         {/*
+          * The table above already holds this. It was typed again underneath,
+          * so a technician who ran 10 L/s and read 350 kPa at three hydrants
+          * entered both twice and the pair could end up disagreeing with the
+          * readings on a signed form. Offered on a chip with its working, and
+          * never written without the tap — see provedDuty, which reads it off
+          * the metered rows rather than calculating anything.
+          */}
+        {!locked && proved && (f.achievedLps !== proved.lps || f.achievedKpa !== proved.kpa) ? (
+          <Chip
+            label={`Take ${proved.lps} L/s at ${proved.kpa} kPa from ${proved.from}`}
+            onPress={() => set({ achievedLps: proved.lps, achievedKpa: proved.kpa })}
+          />
+        ) : null}
+        {provedGap ? (
+          <Banner
+            tone="warn"
+            title={`The table shows ${provedGap.lps} L/s at ${provedGap.kpa} kPa`}
+            body={`Read off ${provedGap.from}. What is typed here is what prints, so if the table is `
+              + 'right this pair is not — and if this pair is right, say why in the comment.'}
+          />
+        ) : null}
+        {/*
           * Kept, and shown only where a form already holds one. Forms signed
           * before the pair existed said it in a sentence, and their printed
           * page has to keep saying what it said.
@@ -2456,6 +2482,7 @@ function PartD({ form, locked, patch }: PartProps) {
 function PartE({ form, locked, patch }: PartProps) {
   const b = form.booster;
   const set = (p: Partial<BoosterTest>) => patch({ booster: { ...b, ...p } });
+  const carry = dutyToCarry(form);
   const head = b.highestHydrantAboveBoosterM !== undefined
     ? elevationHeadKpa(b.highestHydrantAboveBoosterM)
     : undefined;
@@ -2529,6 +2556,20 @@ function PartE({ form, locked, patch }: PartProps) {
         ) : null}
         <NumField label="Required flow" suffix="L/s" value={b.requiredLps} onChange={(v) => set({ requiredLps: v })} locked={locked} />
         <NumField label="Required pressure" suffix="kPa" value={b.requiredKpa} onChange={(v) => set({ requiredKpa: v })} locked={locked} />
+        {/*
+          * Part D's requirement, offered rather than retyped — the same idiom
+          * as the hydrant locations above, and for the same reason. On most
+          * systems it is one design figure written into two parts, and it was
+          * typed twice. Not shared: Part E's requirement is at the booster and
+          * Part D's at the hydrant, and a system can be specified differently
+          * at each, so the tap is the technician saying they are the same here.
+          */}
+        {!locked && carry ? (
+          <Chip
+            label={`Same as Part D — ${carry.lps} L/s at ${carry.kpa} kPa`}
+            onPress={() => set({ requiredLps: carry.lps, requiredKpa: carry.kpa })}
+          />
+        ) : null}
       </Card>
 
       <Card>

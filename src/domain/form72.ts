@@ -352,6 +352,113 @@ export function flowRowColumnsRun(row: FlowRow): number {
  */
 export type FlowCellState = 'read' | 'not-run' | 'missing';
 
+/**
+ * What each pressure column is called, for a sentence about one of them.
+ *
+ * The screen and the printed page each had these words of their own. A chip
+ * that says where a figure came from has to use the same ones, or it names a
+ * column the technician cannot find.
+ */
+export const FLOW_ROW_COLUMN_LABEL: Record<FlowRowColumn, string> = {
+  hydrant1Kpa: '1 hydrant',
+  hydrants12Kpa: '1 & 2',
+  hydrants123Kpa: '1, 2 & 3',
+  hydrants1234Kpa: '1, 2, 3 & 4',
+};
+
+/** What Part D's table proves the system delivered, read off rather than worked out. */
+export interface ProvedDuty {
+  lps: number;
+  kpa: number;
+  /** Which row and column it was read off, so the technician can check it. */
+  from: string;
+}
+
+/**
+ * The duty Part D's table actually proves, for the "System achieved" pair.
+ *
+ * Those two boxes sit under a table that already holds the answer and were
+ * typed by hand anyway — so a technician who ran 10 L/s and read 350 kPa at
+ * three hydrants typed "10" and "350" again underneath, and the two could
+ * disagree with the table on a signed form with nothing to catch it.
+ *
+ * Read off, not calculated. On a metered row the litres per second IS the duty
+ * that was proved — that is what the row is — and the pressure is the reading
+ * in the rightmost column that has one, because running more hydrants is the
+ * harder case and the form asks what the system managed, not what it managed
+ * easily. Where two metered rows were run the higher flow is the one proved.
+ *
+ * **Nozzle rows are deliberately excluded.** A nozzle row records a pitot
+ * pressure against a bore, and turning that into litres per second needs a
+ * discharge coefficient that depends on the nozzle in the technician's hand.
+ * This app does not know which nozzle that was, and a flow figure invented
+ * from an assumed coefficient would go onto a statutory form looking exactly
+ * like a measurement. A technician who proved the system on a nozzle types the
+ * pair, as now.
+ *
+ * Offered, never written. The screen puts it on a chip with its working on it;
+ * nothing here fills a box.
+ */
+export function provedDuty(flow: Pick<FlowTest, 'rows'>): ProvedDuty | undefined {
+  let best: ProvedDuty | undefined;
+  let bestRun = 0;
+  for (const row of flow.rows) {
+    if (row.rateLps === undefined) continue;
+    const run = flowRowColumnsRun(row);
+    if (!run) continue;
+    const column: FlowRowColumn | undefined = FLOW_ROW_COLUMNS[run - 1];
+    const kpa = column && row[column];
+    if (!column || kpa === undefined) continue;
+    // The higher duty wins; between two rows at the same duty, the one run on
+    // more hydrants, because that is the harder case and the one worth stating.
+    if (best && (row.rateLps < best.lps || (row.rateLps === best.lps && run <= bestRun))) continue;
+    best = { lps: row.rateLps, kpa, from: `the ${row.rateLps} L/s row at ${FLOW_ROW_COLUMN_LABEL[column]}` };
+    bestRun = run;
+  }
+  return best;
+}
+
+/**
+ * Whether the pair typed under Part D's table agrees with the table.
+ *
+ * Absent where there is nothing to compare, or where they agree. This is not a
+ * rule that blocks anything — a technician may have good reason to state a
+ * figure the table does not show — it is the disagreement being said out loud
+ * rather than reaching a signature unmentioned.
+ */
+export function provedDutyDisagrees(
+  flow: Pick<FlowTest, 'rows' | 'achievedLps' | 'achievedKpa'>,
+): ProvedDuty | undefined {
+  const proved = provedDuty(flow);
+  if (!proved) return undefined;
+  if (flow.achievedLps === undefined && flow.achievedKpa === undefined) return undefined;
+  const same = flow.achievedLps === proved.lps && flow.achievedKpa === proved.kpa;
+  return same ? undefined : proved;
+}
+
+/**
+ * The duty Part D was judged against, offered to Part E rather than retyped.
+ *
+ * Both parts ask for a required flow and a required pressure, and on most
+ * systems they are the same design figure written twice — so it was typed
+ * twice, and the two could disagree on a signed form.
+ *
+ * Offered rather than shared, like the hydrant locations beside them, because
+ * they are not always the same: Part E's requirement is at the booster and
+ * Part D's at the hydrant, and a system can be specified differently at each.
+ * One tap, and nothing happens without it.
+ *
+ * Absent where Part D has not been given the pair, and where Part E already
+ * holds exactly it.
+ */
+export function dutyToCarry(form: Pick<Form72, 'flowTest' | 'booster'>): { lps: number; kpa: number } | undefined {
+  const { requiredLps, requiredKpa } = form.flowTest;
+  if (requiredLps === undefined || requiredKpa === undefined) return undefined;
+  const b = form.booster;
+  if (b.requiredLps === requiredLps && b.requiredKpa === requiredKpa) return undefined;
+  return { lps: requiredLps, kpa: requiredKpa };
+}
+
 export function flowCellState(row: FlowRow, column: FlowRowColumn): FlowCellState {
   if (row[column] !== undefined) return 'read';
   if (flowRowUntouched(row)) return 'not-run';
