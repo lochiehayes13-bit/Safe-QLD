@@ -150,6 +150,102 @@ export function form72AttachmentSubject(form: Pick<Form72, 'siteName' | 'testDat
   return `Form 72 — ${form.siteName}${form.systemLabel ? `, ${form.systemLabel}` : ''}${form.testDate ? `, tested ${form.testDate}` : ''}`;
 }
 
+/**
+ * Where the occupier's copy goes, and whose address it is.
+ *
+ * MP 6.1 acceptable solution A4(b) obliges the licensee to give the occupier a
+ * copy within ten business days of the work. The app already counts those days,
+ * prints the deadline on the form and asks afterwards whether the copy was
+ * handed over — and had no way to send one. The whole obligation was measured
+ * and not served.
+ *
+ * Three places an address can come from, in this order, and the reason for the
+ * order is who the obligation runs to:
+ *
+ *  1. The owner contact typed onto this form's attachment. It is the most
+ *     recent thing anybody wrote down about who to tell, and it was typed by
+ *     the person standing on the site on the day.
+ *  2. The site's own contact email, as the office holds it.
+ *  3. Nothing, which is said plainly rather than defaulted to the office — a
+ *     copy sent to ourselves is not a copy given to an occupier, and the app
+ *     recording it as one would make the deadline it tracks a fiction.
+ *
+ * The owner contact is a free-text field that often holds a phone number, so
+ * it only counts where it looks like an address.
+ */
+export interface OccupierCopyRecipient {
+  email?: string;
+  /** Where the address came from, for the line the screen shows before sending. */
+  source?: 'form' | 'site';
+  /** Why there is no address. Present exactly when email is absent. */
+  reason?: string;
+}
+
+/**
+ * Deliberately strict rather than clever.
+ *
+ * It has to reject a phone number typed into the owner contact box, and the
+ * cost of a false positive is a statutory document sent to an address that
+ * does not exist — or worse, to one that does and is not theirs.
+ */
+const LOOKS_LIKE_EMAIL = /^[^\s@,;]+@[^\s@,;.]+(\.[^\s@,;.]+)+$/;
+
+export function occupierCopyRecipient(
+  form: Pick<Form72, 'ownerContact'>,
+  site?: { contactEmail?: string } | null,
+): OccupierCopyRecipient {
+  const typed = form.ownerContact?.trim();
+  if (typed && LOOKS_LIKE_EMAIL.test(typed)) return { email: typed, source: 'form' };
+
+  const onSite = site?.contactEmail?.trim();
+  if (onSite && LOOKS_LIKE_EMAIL.test(onSite)) return { email: onSite, source: 'site' };
+
+  return {
+    reason: typed
+      ? `The owner contact on this form ("${typed}") is not an email address, and the site record `
+        + 'holds none. Type one on the attachment, or hand the copy over another way and record it.'
+      : 'Neither this form nor the site record holds an email address for the occupier. Type one on '
+        + 'the attachment, or hand the copy over another way and record it.',
+  };
+}
+
+/** The subject on the occupier's own copy, which is not the office's. */
+export function occupierCopySubject(
+  form: Pick<Form72, 'siteName' | 'testDate'> & { systemLabel?: string },
+): string {
+  return `Your Form 72 — ${form.siteName}${form.systemLabel ? `, ${form.systemLabel}` : ''}${
+    form.testDate ? `, tested ${form.testDate}` : ''}`;
+}
+
+/**
+ * The body of the occupier's copy.
+ *
+ * Written for the building owner or occupier rather than for the office: it
+ * says what the attachment is, which obligation it discharges, and — where the
+ * form records a critical defect — that a separate notice is coming, because
+ * that is the one thing in the envelope they have to act on.
+ */
+export function occupierCopyBody(
+  form: Pick<Form72, 'siteName' | 'testDate' | 'licenseeName' | 'criticalDefectsIdentified'>
+  & { systemLabel?: string },
+  companyName: string,
+): string {
+  return [
+    `Attached is the Form 72 for ${form.siteName}${form.systemLabel ? ` (${form.systemLabel})` : ''}${
+      form.testDate ? `, tested ${form.testDate}` : ''}.`,
+    '',
+    'This is the record of periodic testing and maintenance of the water-based fire safety '
+    + 'installations at the above address, required under the Queensland Development Code '
+    + 'Mandatory Part 6.1. Please keep it with the building\'s fire safety records.',
+    form.criticalDefectsIdentified
+      ? '\nThe form records that critical defects were identified. A critical defect notice will '
+        + 'follow separately; it is a different document from this one and it needs your attention.'
+      : '',
+    form.licenseeName ? `\nTested and signed by ${form.licenseeName}.` : '',
+    `\n${companyName}`,
+  ].filter((line, i, all) => line !== '' || i === 1 || i === all.length - 1).join('\n');
+}
+
 export function form72EmailBody(form: Pick<Form72, 'siteName' | 'testDate' | 'licenseeName'> & { systemLabel?: string }, jobNo?: string): string {
   return [
     `Form 72 for ${form.siteName}${form.systemLabel ? ` (${form.systemLabel})` : ''}${form.testDate ? `, tested ${form.testDate}` : ''}.`,

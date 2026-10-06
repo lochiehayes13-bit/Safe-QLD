@@ -9,8 +9,10 @@ import {
 import { listJobPage, type JobSummary } from '@/db/opsRepo';
 import { queueJobAttachment } from '@/simpro/sync';
 import {
-  FORM72_INBOX, form72AttachmentName, form72AttachmentSubject, form72EmailBody, rankJobsForForm,
+  FORM72_INBOX, form72AttachmentName, form72AttachmentSubject, form72EmailBody,
+  occupierCopyBody, occupierCopyRecipient, occupierCopySubject, rankJobsForForm,
 } from '@/domain/form72Link';
+import type { Site } from '@/domain/types';
 import { qldIsoDay, qldMoment } from '@/domain/qldTime';
 import { attachmentContentKey } from '@/domain/outboundWork';
 import { describeActionFailure } from '@/domain/loadFailure';
@@ -37,6 +39,7 @@ import { sendMail } from '@/export/mail';
 import { notSharedNotice } from '@/export/shareOutcome';
 import { formatAuDate } from '@/export/sheets';
 import { queryAssets } from '@/db/assetRepo';
+import { getSite } from '@/db/repo';
 import { applyForm72Prefill, form72FromAssets } from '@/domain/formsFromAssets';
 import { loadPrefs } from '@/app-prefs';
 import { nowIso } from '@/db';
@@ -146,6 +149,12 @@ export default function Form72Screen() {
    * strip above still marks which parts are answered either way.
    */
   const [whole, setWhole] = useState(false);
+  /*
+   * The site record, for the one thing the form does not hold: the occupier's
+   * email. Loaded beside the form rather than on demand, because the card that
+   * needs it is the first thing an issued form shows.
+   */
+  const [site, setSite] = useState<Site | null>(null);
   const [companyName, setCompanyName] = useState('');
   const [busy, setBusy] = useState(false);
   const [attaching, setAttaching] = useState(false);
@@ -161,6 +170,19 @@ export default function Form72Screen() {
       setForm(f);
       setMissing(!f);
       setCompanyName(prefs.companyName);
+      /*
+       * The site, for its contact email. A failure here costs the offer to
+       * email the occupier and nothing else — the form is already loaded, and
+       * refusing to open a signed document because a contact lookup failed
+       * would be the wrong trade.
+       */
+      if (f?.siteId) {
+        try {
+          setSite(await getSite(f.siteId));
+        } catch {
+          setSite(null);
+        }
+      }
     } catch (e) {
       setFailed(describeLoadFailure(e, 'this Form 72'));
     }
@@ -275,6 +297,82 @@ export default function Form72Screen() {
       setAttaching(false);
     }
   }, [form, companyName]);
+
+  /**
+   * The occupier's copy, sent.
+   *
+   * MP 6.1 A4(b) obliges it within ten business days of the work. The app
+   * counted those days, printed the deadline on the form and asked afterwards
+   * whether the copy had been handed over — and had no way to send one, so the
+   * whole obligation was measured and not served.
+   *
+   * It asks first, with the address on screen. This is a statutory document
+   * going to a third party, and one sent to the wrong address cannot be taken
+   * back. And copyGivenAt is stamped only on a confirmed send: a draft handed
+   * to somebody's mail app has not reached an occupier, and recording it as if
+   * it had would turn the date the app tracks into a fiction.
+   */
+  const emailOccupier = useCallback(async () => {
+    if (!form) return;
+    const to = occupierCopyRecipient(form, site);
+    if (!to.email) {
+      showAlert('No address for the occupier', to.reason ?? '');
+      return;
+    }
+    showAlert(
+      'Send the occupier their copy?',
+      `The Form 72 goes to ${to.email}${to.source === 'site' ? ", from the site's contact details" : ''}.`
+      + ` That is the copy MP 6.1 requires within ${OCCUPIER_COPY_BUSINESS_DAYS} business days, and it `
+      + 'cannot be unsent.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send it',
+          onPress: async () => {
+            setAttaching(true);
+            try {
+              const html = form72Html({
+                form, systemLabel: form.systemLabel, companyName, generatedAt: nowIso(),
+                status: form.status, issuedAt: form.issuedAt, overload: form.overload,
+              });
+              const file = await writePdf(form72AttachmentName(form).replace(/\.pdf$/i, ''), html);
+              const outcome = await sendMail({
+                to: to.email!,
+                subject: occupierCopySubject(form),
+                body: occupierCopyBody(form, companyName),
+              }, [file]);
+
+              if (outcome === 'sent') {
+                const at = nowIso();
+                await recordOccupierCopy(form.id, at);
+                setForm({ ...form, copyGivenAt: at });
+                showAlert('Sent, and recorded', `Their copy went to ${to.email}, and the form now says so.`);
+              } else if (outcome === 'handed-over') {
+                showAlert(
+                  'Draft opened — send it, then record it',
+                  `An email to ${to.email} is open${file.printed ? '' : ` and ${file.name} has downloaded`}.`
+                  + ' Attach the form if it is not already on it and send it. This app cannot tell'
+                  + ' whether it went, so tap "They have their copy" afterwards.',
+                );
+              } else if (outcome === 'no-mail-app') {
+                showAlert(
+                  'No mail app set up',
+                  'This phone has no email account configured. Use Produce PDF and send it from '
+                  + 'wherever you can, then record that they have it.',
+                );
+              } else {
+                showAlert('Not sent', 'The email was not sent, so nothing has been recorded.');
+              }
+            } catch (e) {
+              showAlert('Could not send it', describeActionFailure(e, "emailing the occupier's copy"));
+            } finally {
+              setAttaching(false);
+            }
+          },
+        },
+      ],
+    );
+  }, [form, site, companyName]);
 
   const openJobPicker = useCallback(async () => {
     if (!form) return;
@@ -499,7 +597,15 @@ export default function Form72Screen() {
         <Banner tone="info" title="Issued — no longer editable" body={ISSUED_REFUSAL} />
       ) : null}
 
-      {locked ? <OccupierCopyCard form={form} onPress={onCopyGiven} /> : null}
+      {locked ? (
+        <OccupierCopyCard
+          form={form}
+          site={site}
+          busy={attaching}
+          onPress={onCopyGiven}
+          onEmail={() => { void emailOccupier(); }}
+        />
+      ) : null}
 
       {!locked && blockers.length ? (
         <Outstanding
@@ -2052,9 +2158,18 @@ function TriState({
  * Producing the PDF is not the same event as handing it over, so the app asks
  * separately and counts from the answer.
  */
-function OccupierCopyCard({ form, onPress }: { form: StoredForm72; onPress: () => void }) {
+function OccupierCopyCard({
+  form, site, busy, onPress, onEmail,
+}: {
+  form: StoredForm72;
+  site: Site | null;
+  busy: boolean;
+  onPress: () => void;
+  onEmail: () => void;
+}) {
   const due = occupierCopyDueBy(form.testDate);
   const keep = testerCopyKeepUntil(form.testDate);
+  const to = occupierCopyRecipient(form, site);
 
   if (form.copyGivenAt) {
     return (
@@ -2081,6 +2196,22 @@ function OccupierCopyCard({ form, onPress }: { form: StoredForm72; onPress: () =
         {due ? `, so by ${formatAuDate(due)}` : ''}. You keep yours for {TESTER_RETENTION_YEARS} years
         {keep ? `, until ${formatAuDate(keep)}` : ''}.
       </Txt>
+      {to.email ? (
+        <>
+          <Button
+            title={`Email it to ${to.email}`}
+            loading={busy}
+            onPress={onEmail}
+          />
+          <Txt size="xs" tone="faint">
+            {to.source === 'site'
+              ? "From the site's contact details. Put a different address on the attachment to use that instead."
+              : 'The owner contact on this form\'s attachment.'}
+          </Txt>
+        </>
+      ) : (
+        <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{to.reason}</Txt>
+      )}
       <Button title="They have their copy" variant="secondary" onPress={onPress} />
     </Card>
   );

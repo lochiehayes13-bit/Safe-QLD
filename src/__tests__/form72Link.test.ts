@@ -1,6 +1,7 @@
 import {
   FORM72_INBOX, autoLinkJob, form72AttachmentName, form72AttachmentSubject, form72EmailBody,
-  hasHydrantInputs, hydrantInputsFrom, rankJobsForForm,
+  hasHydrantInputs, hydrantInputsFrom, occupierCopyBody, occupierCopyRecipient,
+  occupierCopySubject, rankJobsForForm,
 } from '@/domain/form72Link';
 import { emptyForm72 } from '@/domain/form72';
 
@@ -90,5 +91,83 @@ describe('the PDF on the job', () => {
     expect(body).toContain('Licensee: D. Smith.');
     expect(form72EmailBody({ siteName: 'Tower', licenseeName: '' })).toContain('Not yet linked');
     expect(FORM72_INBOX).toBe('lachlan@safeqld.com.au');
+  });
+});
+
+describe('the occupier’s copy, and where it goes', () => {
+  /*
+   * MP 6.1 A4(b) obliges a copy within ten business days. The app counted those
+   * days, printed the deadline on the form and asked afterwards whether the
+   * copy was handed over — and had no way to send one. The obligation was
+   * measured and not served.
+   */
+  it('prefers the owner contact typed on this form, which somebody wrote on the day', () => {
+    expect(occupierCopyRecipient(
+      { ownerContact: 'manager@baldwinliving.com.au' },
+      { contactEmail: 'office@example.com' },
+    )).toEqual({ email: 'manager@baldwinliving.com.au', source: 'form' });
+  });
+
+  it('falls back to the site’s contact email as the office holds it', () => {
+    expect(occupierCopyRecipient({ ownerContact: undefined }, { contactEmail: 'office@example.com' }))
+      .toEqual({ email: 'office@example.com', source: 'site' });
+  });
+
+  it('rejects a phone number typed into the owner contact box, and says so', () => {
+    // That box takes free text and usually holds a phone number. A statutory
+    // document sent to an address that does not exist is the cheap failure;
+    // one sent to an address that does and is not theirs is the expensive one.
+    const out = occupierCopyRecipient({ ownerContact: '07 3000 0000' }, null);
+    expect(out.email).toBeUndefined();
+    expect(out.reason).toContain('is not an email address');
+    expect(out.reason).toContain('07 3000 0000');
+  });
+
+  it('rejects the near-misses too, rather than being clever about them', () => {
+    for (const typed of ['manager@baldwinliving', 'manager at example.com', 'a@b', '@example.com', 'a@@b.com']) {
+      expect({ typed, email: occupierCopyRecipient({ ownerContact: typed }, null).email })
+        .toEqual({ typed, email: undefined });
+    }
+  });
+
+  it('never falls back to our own inbox, which would make the deadline a fiction', () => {
+    // A copy sent to ourselves is not a copy given to an occupier, and
+    // recording it as one would turn the date the app tracks into a lie.
+    const out = occupierCopyRecipient({ ownerContact: undefined }, null);
+    expect(out.email).toBeUndefined();
+    expect(out.reason).toContain('hand the copy over another way');
+    expect(JSON.stringify(out)).not.toContain(FORM72_INBOX);
+  });
+
+  it('subjects the occupier’s copy as theirs, not as the office’s filing', () => {
+    const subject = occupierCopySubject({
+      siteName: 'Baldwin Living', testDate: '2026-10-02', systemLabel: 'Towns Main System',
+    });
+    expect(subject).toBe('Your Form 72 — Baldwin Living, Towns Main System, tested 2026-10-02');
+  });
+
+  it('writes the body for the occupier, naming the obligation it discharges', () => {
+    const body = occupierCopyBody({
+      siteName: 'Baldwin Living', testDate: '2026-10-02', licenseeName: 'D. McKee',
+      criticalDefectsIdentified: false, systemLabel: 'Towns Main System',
+    }, 'Safe QLD Fire Protection');
+    expect(body).toContain('Baldwin Living');
+    expect(body).toContain('Queensland Development Code Mandatory Part 6.1');
+    expect(body).toContain("keep it with the building's fire safety records");
+    expect(body).toContain('D. McKee');
+    expect(body).toContain('Safe QLD Fire Protection');
+  });
+
+  it('tells the occupier a critical defect notice is coming, because that is the part to act on', () => {
+    const withDefect = occupierCopyBody({
+      siteName: 'Baldwin Living', licenseeName: 'D. McKee', criticalDefectsIdentified: true,
+    }, 'Safe QLD');
+    expect(withDefect).toContain('critical defect notice will follow separately');
+    expect(withDefect).toContain('different document');
+
+    const without = occupierCopyBody({
+      siteName: 'Baldwin Living', licenseeName: 'D. McKee', criticalDefectsIdentified: false,
+    }, 'Safe QLD');
+    expect(without).not.toContain('critical defect notice');
   });
 });
