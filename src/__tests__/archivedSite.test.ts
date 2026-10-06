@@ -18,7 +18,9 @@
  * to be able to find it. It is marked, never hidden — a search that silently
  * drops rows is the exact fault this is fixing.
  */
-import { createSite, getSite, listSitePicks, listSiteSummaries, listSites, updateSite } from '@/db/repo';
+import {
+  createSite, getSite, listSitePicks, listSiteSummaries, listSites, siteIdsByExternalIds, updateSite,
+} from '@/db/repo';
 import { searchKind } from '@/db/searchRepo';
 import { parseQuery } from '@/domain/search';
 import { siteIsArchived } from '@/domain/siteNames';
@@ -142,5 +144,42 @@ describe('every way of finding a site finds an archived one', () => {
   it('the office’s own site number, read out over the phone', async () => {
     const page = await listSiteSummaries({ query: '4471' });
     expect(page.rows.map((r) => r.id)).toContain(ARCHIVED.id);
+  });
+});
+
+/**
+ * And the customer's own list of the office's sites.
+ *
+ * A customer record carries the office's site numbers. The screen that draws
+ * them read every column of every site on the phone to turn those numbers into
+ * ids it could open — nearly nine hundred rows, on every focus, for a customer
+ * with four. Asked about the numbers the customer actually has instead.
+ */
+describe('the office’s site numbers, resolved to this phone’s ids', () => {
+  it('answers for the numbers asked about and leaves the rest out', async () => {
+    const map = await siteIdsByExternalIds([LIVE.externalId!, ARCHIVED.externalId!, '99999']);
+    expect(map.get(LIVE.externalId!)).toBe(LIVE.id);
+    // An archived site the office still lists under the customer IS on this
+    // phone, because the sync asks for the archived ones now. This is the row
+    // that used to be absent from every module.
+    expect(map.get(ARCHIVED.externalId!)).toBe(ARCHIVED.id);
+    expect(map.has('99999')).toBe(false);
+  });
+
+  it('asks nothing at all for an empty list', async () => {
+    db.statements.length = 0;
+    expect(await siteIdsByExternalIds([])).toEqual(new Map());
+    expect(await siteIdsByExternalIds(['', '  '])).toEqual(new Map());
+    expect(db.statements.filter((st) => /FROM site/i.test(st.sql))).toEqual([]);
+  });
+
+  it('reads once however many numbers are asked about, and never the whole table', async () => {
+    db.statements.length = 0;
+    await siteIdsByExternalIds([LIVE.externalId!, ARCHIVED.externalId!, '99999', LIVE.externalId!]);
+    const reads = db.statements.filter((st) => /FROM site/i.test(st.sql));
+    expect(reads).toHaveLength(1);
+    // Narrowed in the query, not after it: the fault was reading every row.
+    expect(reads[0]!.sql).toMatch(/externalId IN \(\?,\?,\?\)/);
+    expect(reads[0]!.sql).not.toMatch(/SELECT \* FROM site/);
   });
 });

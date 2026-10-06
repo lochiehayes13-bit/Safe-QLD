@@ -6,7 +6,7 @@ import { nowIso } from '@/db';
 import { listDefects, listSites } from '@/db/repo';
 import { listRoutineRuns } from '@/db/routineRunRepo';
 import { queryAssets } from '@/db/assetRepo';
-import { listOccupierStatements } from '@/db/occupierRepo';
+import { latestSignedStatementBySite } from '@/db/occupierRepo';
 import {
   STANDING_LABEL, STATUTORY_LABEL, buildPortfolio, foldRuns, percentOf, scoreAddsUp,
   type ConcentrationRow, type Portfolio, type SiteRisk, type StatutoryItem,
@@ -75,22 +75,23 @@ export default function PortfolioScreen() {
     setLoading(true);
     setFailed(null);
     try {
-      const [sites, runs, defects, assets, statements] = await Promise.all([
+      const [sites, runs, defects, assets, lastStatement] = await Promise.all([
         listSites(),
         listRoutineRuns(undefined, RUN_LIMIT),
         listDefects(),
         queryAssets({ limit: ASSET_LIMIT }),
-        listOccupierStatements(),
+        /*
+         * One date per site: when the occupier last signed.
+         *
+         * This read every statement the phone holds — each carrying its
+         * installation rows as JSON along for the ride — and folded them down
+         * to exactly this map. Asked of the database instead, where the rule
+         * that only a signed statement counts also lives: a draft sitting in
+         * the app is not one the occupier has made, and counting it would
+         * restart the year.
+         */
+        latestSignedStatementBySite(),
       ]);
-
-      // Only a signed statement is a statement. A draft sitting in the app is
-      // not one the occupier has made, and counting it would restart the year.
-      const lastStatement = new Map<string, string>();
-      for (const s of statements) {
-        if (!s.signedAt) continue;
-        const prev = lastStatement.get(s.siteId);
-        if (!prev || s.signedAt > prev) lastStatement.set(s.siteId, s.signedAt);
-      }
 
       const folded = foldRuns(runs.map((r) => ({
         siteId: r.siteId,

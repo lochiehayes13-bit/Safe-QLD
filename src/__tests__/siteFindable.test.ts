@@ -30,6 +30,7 @@ import {
 import { parseQuery } from '@/domain/search';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { codeOf } from './support/sourceCode';
 import { openMigrated, type NodeSqliteDb } from './support/nodeSqlite';
 
 jest.mock('@/db/index', () => jest.requireActual('./support/nodeSqlite'));
@@ -297,8 +298,6 @@ describe('every screen that offers a site offers a way to search for it', () => 
    * draws none of it.
    */
   const ALLOWED: Record<string, string> = {
-    'app/customer/[id].tsx': 'maps the office’s site numbers onto this phone’s ids, to open this customer’s own sites',
-    'app/occupier/index.tsx': 'an id-to-site lookup, to put a name under each statement',
     'app/work/defects.tsx': 'an id-to-name lookup, to put a site under each defect',
     'app/work/outbound.tsx': 'an id-to-site lookup, for the rows already on screen',
     'app/work/portfolio.tsx': 'hands every site to buildPortfolio, which draws none of them',
@@ -324,7 +323,7 @@ describe('every screen that offers a site offers a way to search for it', () => 
     '%s reads the whole site list only through the picker',
     (name, path) => {
       const source = readFileSync(path, 'utf8');
-      const readsEverySite = /\blistSites\s*\(|\blistSitePicks\s*\(/.test(source);
+      const readsEverySite = /\blistSites\s*\(|\blistSitePicks\s*\(/.test(codeOf(source));
       if (!readsEverySite || ALLOWED[name]) return;
       expect({
         screen: name,
@@ -345,7 +344,7 @@ describe('every screen that offers a site offers a way to search for it', () => 
       const path = all.find((f) => named(f) === name);
       expect({ name, present: !!path }).toEqual({ name, present: true });
       const source = readFileSync(path!, 'utf8');
-      expect({ name, reads: /\blistSites\s*\(|\blistSitePicks\s*\(/.test(source) })
+      expect({ name, reads: /\blistSites\s*\(|\blistSitePicks\s*\(/.test(codeOf(source)) })
         .toEqual({ name, reads: true });
     }
   });

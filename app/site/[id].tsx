@@ -328,7 +328,7 @@ export default function SiteScreen() {
           })),
         });
       } else if (kind === 'occupier') {
-        const rows = await listOccupierStatements(site.id);
+        const { rows } = await listOccupierStatements({ siteId: site.id });
         setChooser({
           kind,
           rows: rows.map((r) => ({

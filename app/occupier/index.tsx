@@ -1,20 +1,20 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { qldIsoDay } from '@/domain/qldTime';
 import { View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { listOccupierStatements, type OccupierStatement } from '@/db/occupierRepo';
-import { listSites } from '@/db/repo';
 import {
   COMMISSIONER_COPY_BUSINESS_DAYS, STATEMENT_INTERVAL_YEARS, STATEMENT_RETENTION_YEARS,
   commissionerCopyDeadline, nextStatementDue, qldBusinessDaysBetween,
 } from '@/domain/occupierForm';
 import { formatAuDate } from '@/export/sheets';
 import { nowIso } from '@/db';
-import type { Site } from '@/domain/types';
+import { siteFallbackWords } from '@/domain/siteMiss';
 import { useTheme } from '@/theme';
+import { SiteMissCards, useSiteMisses } from '@/components/SiteMisses';
 import {
-  Banner, Card, Chip, EmptyState, Rowed, Screen, StatTile, Txt,
+  Banner, Card, Chip, EmptyState, Rowed, Screen, SearchBox, StatTile, Txt,
 } from '@/components/ui';
 
 /**
@@ -35,52 +35,93 @@ import {
  * Those are the same date only for an occupier who signs on their anniversary,
  * and counting from the signature shows a comfortable deadline for one that has
  * already run.
+ *
+ * ---
+ *
+ * **Searchable by the building.** There was nothing to type into. Every
+ * statement the phone holds and every site the phone holds, read on each
+ * focus, ordered by what is closest to being late — and no way to ask about
+ * one building. This is the module where a building is the only thing anybody
+ * looks a statement up by, because the statement is the occupier's and the
+ * occupier is a building.
+ *
+ * The three tiles are deliberately read apart from the search. They are the
+ * state of the duty across the whole book, which is not a question about what
+ * somebody has typed into a box.
  */
 
 type Row = {
   statement: OccupierStatement;
-  site?: Site;
   due?: string;
   daysLeft?: number;
   state: 'sent' | 'overdue' | 'due' | 'unsigned';
+};
+
+/**
+ * How many unsent statements the tiles are counted over.
+ *
+ * A statement the commissioner has had is settled and counts toward none of
+ * the three, so only the unsent ones are read. That is the actionable backlog
+ * and it is small; where it somehow is not, the caption says the numbers are a
+ * floor rather than quietly understating how late the company is.
+ */
+const DUTY_COUNTED = 500;
+
+/** The state of one statement, which is what all three tiles are counting. */
+const stateOf = (statement: OccupierStatement, today: string): Row => {
+  if (statement.sentToCommissionerAt) return { statement, state: 'sent' };
+  if (!statement.signedAt) return { statement, state: 'unsigned' };
+  const deadline = commissionerCopyDeadline({
+    requiredPreparationDate: statement.periodEnd || undefined,
+    signedDate: qldIsoDay(statement.signedAt),
+  });
+  const daysLeft = deadline.due ? qldBusinessDaysBetween(today, deadline.due).days : undefined;
+  return {
+    statement,
+    due: deadline.due,
+    daysLeft,
+    state: daysLeft !== undefined && daysLeft < 0 ? 'overdue' : 'due',
+  };
 };
 
 
 export default function OccupierIndexScreen() {
   const t = useTheme();
   const [rows, setRows] = useState<Row[]>([]);
+  const [page, setPage] = useState<{ total: number; matching: number; capped: boolean } | null>(null);
+  const [duty, setDuty] = useState<Row[]>([]);
+  const [dutyCapped, setDutyCapped] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [query, setQuery] = useState('');
+
+  // The search is a query, so it waits for the typing to stop — the same 200ms
+  // every other list in this app settles at.
+  useEffect(() => {
+    const h = setTimeout(() => setQuery(typed), 200);
+    return () => clearTimeout(h);
+  }, [typed]);
 
   const load = useCallback(async () => {
-    const [statements, sites] = await Promise.all([listOccupierStatements(), listSites()]);
-    const bySite = new Map(sites.map((s) => [s.id, s]));
     const today = qldIsoDay(nowIso()) ?? '';
-
-    setRows(statements.map((statement) => {
-      const site = bySite.get(statement.siteId);
-      if (statement.sentToCommissionerAt) {
-        return { statement, site, state: 'sent' as const };
-      }
-      if (!statement.signedAt) {
-        return { statement, site, state: 'unsigned' as const };
-      }
-      const deadline = commissionerCopyDeadline({
-        requiredPreparationDate: statement.periodEnd || undefined,
-        signedDate: qldIsoDay(statement.signedAt),
-      });
-      const daysLeft = deadline.due
-        ? qldBusinessDaysBetween(today, deadline.due).days
-        : undefined;
-      return {
-        statement,
-        site,
-        due: deadline.due,
-        daysLeft,
-        state: daysLeft !== undefined && daysLeft < 0 ? ('overdue' as const) : ('due' as const),
-      };
-    }));
-  }, []);
+    const [found, unsent] = await Promise.all([
+      listOccupierStatements({ query }),
+      listOccupierStatements({ unsentOnly: true, limit: DUTY_COUNTED }),
+    ]);
+    setPage({ total: found.total, matching: found.matching, capped: found.capped });
+    setRows(found.rows.map((statement) => stateOf(statement, today)));
+    setDuty(unsent.rows.map((statement) => stateOf(statement, today)));
+    setDutyCapped(unsent.capped);
+  }, [query]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+
+  /*
+   * The buildings the words match, for the dead end this box would otherwise
+   * have. A site with no statement is the ordinary case — the occupier has
+   * never been asked for one — and that is the site somebody is most likely
+   * hunting for in this module.
+   */
+  const siteHits = useSiteMisses(query, !rows.length && page !== null);
 
   /*
    * Ordered by how close each is to being late. Overdue first, then the ones
@@ -91,12 +132,15 @@ export default function OccupierIndexScreen() {
     return [...rows].sort((a, b) =>
       rank[a.state] - rank[b.state]
       || (a.daysLeft ?? Number.POSITIVE_INFINITY) - (b.daysLeft ?? Number.POSITIVE_INFINITY)
-      || (a.site?.name ?? '').localeCompare(b.site?.name ?? ''));
+      || (a.statement.siteName ?? '').localeCompare(b.statement.siteName ?? ''));
   }, [rows]);
 
-  const overdue = rows.filter((r) => r.state === 'overdue').length;
-  const outstanding = rows.filter((r) => r.state === 'due').length;
-  const unsigned = rows.filter((r) => r.state === 'unsigned').length;
+  // Counted over the unsent statements, not over the search: these three are
+  // the state of the duty across the book, and a number that moved while
+  // somebody typed a suburb would be answering a different question.
+  const overdue = duty.filter((r) => r.state === 'overdue').length;
+  const outstanding = duty.filter((r) => r.state === 'due').length;
+  const unsigned = duty.filter((r) => r.state === 'unsigned').length;
 
   return (
     <Screen>
@@ -128,14 +172,51 @@ export default function OccupierIndexScreen() {
           <StatTile label="Unsigned" value={unsigned} tone="muted" />
         </View>
       </Rowed>
+      {dutyCapped ? (
+        <Txt size="xs" tone="faint">
+          Counted over the first {DUTY_COUNTED.toLocaleString()} statements the commissioner has not had, so these are at
+          least this many.
+        </Txt>
+      ) : null}
 
-      {!rows.length ? (
-        <EmptyState
-          icon="file-document-outline"
-          title="No occupier statements yet"
-          body={'One is raised from a site — open the site and choose Occupier statement. It fills '
-            + "in from that site's own register and defect history."}
-        />
+      <SearchBox value={typed} onChange={setTyped} placeholder="A building, a suburb, the occupier or who signed" />
+      {page && page.total ? (
+        <Txt size="xs" tone="faint">
+          {page.matching.toLocaleString()} of {page.total.toLocaleString()} statement{page.total === 1 ? '' : 's'}
+          {/* Said out loud where the list is cut: a number over a list that
+              does not match the rows under it is worse than no number. The
+              search still reaches every statement — it runs in the database,
+              not over the rows on screen. */}
+          {page.capped ? ` · first ${rows.length} shown, search to narrow` : ''}
+        </Txt>
+      ) : null}
+
+      {/*
+        * Three different pieces of news, which used to be one sentence.
+        *
+        * "No occupier statements yet" was shown whenever the list was empty,
+        * and with a search box that would say it to somebody holding four
+        * hundred who typed a suburb two ways.
+        */}
+      {page && !rows.length ? (
+        <>
+          <EmptyState
+            icon="file-document-outline"
+            {...(!page.total
+              ? {
+                title: 'No occupier statements yet',
+                body: 'One is raised from a site — open the site and choose Occupier statement. It fills '
+                  + "in from that site's own register and defect history.",
+              }
+              : siteHits.length
+                ? siteFallbackWords(siteHits.length, 'statements')
+                : {
+                  title: 'Nothing matches',
+                  body: 'Try part of the building’s name, the suburb, or the occupier’s own name.',
+                })}
+          />
+          <SiteMissCards sites={siteHits} />
+        </>
       ) : null}
 
       {ordered.map((row) => (
@@ -145,7 +226,7 @@ export default function OccupierIndexScreen() {
         >
           <Rowed>
             <View style={{ flex: 1 }}>
-              <Txt weight="700">{row.site?.name ?? (row.statement.premisesName || 'Unnamed premises')}</Txt>
+              <Txt weight="700">{row.statement.siteName ?? (row.statement.premisesName || 'Unnamed premises')}</Txt>
               <Txt size="sm" tone="muted">
                 {row.statement.periodStart ? `${formatAuDate(row.statement.periodStart)} – ` : ''}
                 {formatAuDate(row.statement.periodEnd) || 'period not set'}

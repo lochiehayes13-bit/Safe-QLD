@@ -19,7 +19,9 @@
  * it down. A technician who is not told that will go on typing shorter and
  * shorter searches for a building they have stood inside.
  */
-import { siteSearchMiss, siteMissLine, SITE_COLUMN_WORDS } from '@/domain/siteMiss';
+import {
+  SITE_COLUMN_WORDS, siteFallbackWords, siteMissLine, siteNotHereNote, siteSearchMiss,
+} from '@/domain/siteMiss';
 import { SITE_SEARCH_COLUMNS } from '@/domain/siteSearch';
 import type { SyncState } from '@/simpro/incremental';
 
@@ -116,5 +118,40 @@ describe('the one-line form, for a picker inside a form', () => {
       term: 'Maroochydore', held: 3059, connected: true,
       sites: SYNCED('2026-10-06T06:00:00+10:00'), now: NOW,
     })).toMatch(/archive/i);
+  });
+});
+
+/**
+ * And the sentence about one named site the office says it has.
+ *
+ * The customer screen lists the office's sites for a customer and has to say
+ * something about any it cannot find on this phone. It said "Not on this phone
+ * yet — it comes with the next site sync", which for an archived site is false
+ * and stays false however many times it is synced: that is the one case where
+ * the answer is to ring the office rather than press a button, and the one the
+ * empty-search words already exist to explain.
+ */
+describe('a named site the phone does not hold', () => {
+  it('does not promise a sync that will not bring it', () => {
+    expect(siteNotHereNote()).not.toMatch(/next site sync|comes with/i);
+  });
+
+  it('says the thing a technician cannot work out alone', () => {
+    expect(siteNotHereNote()).toContain('archived');
+    expect(siteNotHereNote()).toMatch(/never comes down with the site list/);
+  });
+
+  it('is the same words the empty search uses, not a second sentence about one fact', () => {
+    // Two sentences about one fact drift apart, and this app's recurring bug
+    // is exactly that. The archived note is shared.
+    const miss = siteSearchMiss({ term: 'Maroochydore', held: 900, connected: true, now: new Date('2026-10-06T00:00:00Z') });
+    const note = siteNotHereNote();
+    const shared = miss.lines.find((l) => l.includes('archived'));
+    expect(shared).toBeTruthy();
+    expect(note).toContain(shared!);
+  });
+
+  it('leads with where the site is not, because that is the news', () => {
+    expect(siteNotHereNote().startsWith('Not on this phone.')).toBe(true);
   });
 });

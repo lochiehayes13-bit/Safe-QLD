@@ -9,7 +9,8 @@ import {
 } from '@/db/mirrorRepo';
 import type { JobRecord } from '@/db/opsRepo';
 import { listContactsForCustomer, type ContactRecord } from '@/db/moreRepo';
-import { listSites } from '@/db/repo';
+import { siteIdsByExternalIds } from '@/db/repo';
+import { siteNotHereNote } from '@/domain/siteMiss';
 import { smsHref } from '@/domain/search';
 import {
   contactActions, customerKindLabel, formatAddress, invoiceState, jobStatusWord, mailHref, mapHref, quoteState, telHref,
@@ -64,9 +65,16 @@ export default function CustomerScreen() {
         setCustomer(c);
         setMissing(!c);
         if (!c) return;
-        const [s, sites, j, q, inv, ppl] = await Promise.all([
+        const [s, siteIdsHere, j, q, inv, ppl] = await Promise.all([
           customerStats(id),
-          listSites(),
+          /*
+           * The office's site number to the phone's site id, for the sites
+           * list below — asked about the numbers this customer actually has.
+           *
+           * It used to read listSites(): every column of every one of nearly
+           * nine hundred sites, on every focus of a customer with four.
+           */
+          siteIdsByExternalIds(c.sites.map((x) => x.id)),
           listJobsFor({ customerExternalId: id, limit: 6 }),
           listQuotes({ customerExternalId: id, limit: 6 }),
           listInvoices({ customerExternalId: id, limit: 6 }),
@@ -75,8 +83,7 @@ export default function CustomerScreen() {
         if (cancelled) return;
         setStats(s);
         setPeople(ppl);
-        // The office's site number to the phone's site id, for the sites list.
-        setSiteIds(new Map(sites.filter((x) => x.externalId).map((x) => [x.externalId!, x.id])));
+        setSiteIds(siteIdsHere);
         setJobs(j); setQuotes(q); setInvoices(inv);
       } catch (e) {
         if (!cancelled) setFailed(describeLoadFailure(e, 'this customer'));
@@ -269,7 +276,13 @@ export default function CustomerScreen() {
                   <MaterialCommunityIcons name="office-building-outline" size={22} color={local ? t.color.accentText : t.color.textFaint} />
                   <View style={{ flex: 1 }}>
                     <Txt weight="600">{s.name}</Txt>
-                    {!local ? <Txt size="xs" tone="faint">Not on this phone yet — it comes with the next site sync.</Txt> : null}
+                    {/*
+                      * It used to say "it comes with the next site sync",
+                      * which for an archived site is false and stays false
+                      * however many times it is synced. One sentence, shared
+                      * with the empty search, rather than two about one fact.
+                      */}
+                    {!local ? <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>{siteNotHereNote()}</Txt> : null}
                   </View>
                   {local ? <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} /> : null}
                 </Rowed>

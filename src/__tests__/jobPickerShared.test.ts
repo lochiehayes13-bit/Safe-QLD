@@ -42,6 +42,7 @@
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { codeOf } from './support/sourceCode';
 
 const root = join(__dirname, '..', '..');
 const read = (file: string) => readFileSync(join(root, file), 'utf8');
@@ -128,7 +129,7 @@ describe('nothing writes another one', () => {
   it('every file that reads a job list offers it through the shared picker', () => {
     const offenders = all
       .filter((f) => !ALLOWED[f])
-      .filter((f) => READS_A_JOB_LIST.test(read(f)))
+      .filter((f) => READS_A_JOB_LIST.test(codeOf(read(f))))
       .filter((f) => !read(f).includes("import { JobPicker } from '@/components/JobPicker';"));
     expect(offenders).toEqual([]);
   });
@@ -138,7 +139,7 @@ describe('nothing writes another one', () => {
     // nobody would notice: the next file to take that path is exempt.
     for (const name of Object.keys(ALLOWED)) {
       expect({ name, present: all.includes(name) }).toEqual({ name, present: true });
-      expect({ name, reads: READS_A_JOB_LIST.test(read(name)) }).toEqual({ name, reads: true });
+      expect({ name, reads: READS_A_JOB_LIST.test(codeOf(read(name))) }).toEqual({ name, reads: true });
     }
   });
 

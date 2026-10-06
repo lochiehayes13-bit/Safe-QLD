@@ -71,6 +71,32 @@ export async function listSitePicks(): Promise<SitePick[]> {
   );
 }
 
+/**
+ * The phone's own ids for a handful of the office's site numbers.
+ *
+ * A customer's record carries the office's site numbers, and the screen that
+ * draws them needs this phone's id to open one. It built this map by reading
+ * `listSites()` — every column of every one of nearly nine hundred sites, on
+ * every focus — to resolve at most a few dozen numbers. One query over the
+ * numbers actually asked about instead, which is how jobSummariesByExternalIds
+ * already answers the same shape of question about jobs.
+ *
+ * A number the phone holds no site for is simply absent, which is the caller's
+ * to say something true about: a site the office has archived never comes down
+ * with the site list, so "it arrives with the next sync" is the one thing that
+ * is certainly wrong.
+ */
+export async function siteIdsByExternalIds(externalIds: readonly string[]): Promise<Map<string, string>> {
+  const wanted = [...new Set(externalIds.map((v) => v.trim()).filter(Boolean))];
+  if (!wanted.length) return new Map();
+  const db = await getDb();
+  const rows = await db.getAllAsync<{ id: string; externalId: string }>(
+    `SELECT id, externalId FROM site WHERE externalId IN (${wanted.map(() => '?').join(',')})`,
+    ...wanted,
+  );
+  return new Map(rows.map((r) => [r.externalId, r.id]));
+}
+
 export async function getSite(id: string): Promise<Site | null> {
   const db = await getDb();
   return (await db.getFirstAsync<Site>('SELECT * FROM site WHERE id = ?', id)) ?? null;

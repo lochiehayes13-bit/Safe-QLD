@@ -98,8 +98,22 @@ const SEARCHED = SEARCH_ORDER.map((c) => SITE_COLUMN_WORDS[c])
  * a sync cannot fix, and the only one where the right next step is to ring the
  * office rather than to press a button.
  */
-const ARCHIVED_NOTE = 'A site the office has archived never comes down with the site list, '
+export const ARCHIVED_NOTE = 'A site the office has archived never comes down with the site list, '
   + 'however many times it is synced — if the office has it and this does not, that is usually why.';
+
+/**
+ * Why one named site is not here, where the office says it exists.
+ *
+ * The customer screen listed the office's sites for a customer and said, of
+ * any it could not find on the phone, "Not on this phone yet — it comes with
+ * the next site sync." For an archived site that is false and will stay false
+ * however many times it is synced, which is the one case where somebody needs
+ * to ring the office rather than press a button. Said in the same words as the
+ * empty search, because two sentences about one fact drift apart.
+ */
+export function siteNotHereNote(): string {
+  return `Not on this phone. ${ARCHIVED_NOTE}`;
+}
 
 export function siteSearchMiss(input: SiteMissInput): SiteMissWords {
   const term = input.term.trim();
