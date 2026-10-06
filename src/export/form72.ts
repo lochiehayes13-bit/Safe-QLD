@@ -1,8 +1,10 @@
 import {
-  FRICTIONAL_LOSS_TOLERANCE_KPA, PART_D_DEVICE_RATES_LPS, PART_D_ROWS, canIssue, elevationHeadKpa,
-  flowRowKey, flowRowLabel, flowRowUntouched, overloadCheck, resolveFrictionalLoss, validateForm72,
-  type BoosterTest, type FlowRow, type FlowTest, type Form72, type FormDefect, type FormIssue,
-  type PartResult, type SprinklerTestPoint, type TestDevice,
+  CALIBRATION_MONTHS,
+  FLOW_ROW_GROUP_LABEL, FRICTIONAL_LOSS_TOLERANCE_KPA, PART_D_DEVICE_RATES_LPS, PART_D_ROWS,
+  canIssue, elevationHeadKpa, flowRowGroup, flowRowKey, flowRowLabel, flowRowLongLabel,
+  flowRowUntouched, overloadCheck, resolveFrictionalLoss, validateForm72,
+  type BoosterTest, type FlowRow, type FlowRowGroup, type FlowTest, type Form72, type FormDefect,
+  type FormIssue, type PartResult, type SprinklerTestPoint, type TestDevice,
 } from '@/domain/form72';
 import { addQldBusinessDays } from '@/domain/occupierForm';
 import { qldIsoDay } from '@/domain/qldTime';
@@ -114,15 +116,17 @@ export const FORM_72_SOURCES = [
 
 export const FORM_VERSION = 'Version 1 – July 2014';
 
-export const FORM_TITLE = 'Form 72 — Fire Hydrant and Sprinkler System';
-export const FORM_SUBTITLE = 'Periodic Testing and Maintenance';
+export const FORM_TITLE = 'Form 72 — fire hydrant and sprinkler system';
+export const FORM_SUBTITLE = 'periodic testing and maintenance';
 
-export const FORM_INTRO = 'This form is to be used for the purposes of maintenance to water-based '
+export const FORM_INTRO = 'This form is to be used for the purposes of maintenance to water based '
   + 'fire safety installations, as required by the Queensland Development Code – Mandatory Part '
-  + '(MP) 6.1, a building assessment provision under the Building Act 1975, s.30, and in accordance '
-  + "with the 'Fire hydrant and sprinkler system commissioning and periodic maintenance procedure' "
-  + '(the Relevant procedure). This form does not comprise all maintenance requirements; further '
-  + 'testing is required in each case.';
+  + '(MP) 6.1, which is a building assessment provision under the Building Act 1975, section 30. '
+  + "This form is also to be used in accordance with the 'Fire hydrant and sprinkler system "
+  + "commissioning and periodic maintenance procedure', defined in MP 6.1 as the 'Relevant "
+  + "procedure'. Please note that this form does not comprise all maintenance requirements—this "
+  + 'form is only for collecting results for maintenance for some sections of the Australian '
+  + 'Standards referred to and in each case, further testing is required.';
 
 export const PART_B_NOTE = 'Refer to the required pressure specification for periodic testing (as '
   + 'applicable) as per AS2419.1 or AS1851.';
@@ -132,19 +136,25 @@ export const PART_C_NOTE = 'If using more devices, provide details in the Notes 
 
 export const PART_D_NOTE = 'This part relates to tests under Section 4 of AS1851. If pressure/flow '
   + 'rates do not meet the fire system design criteria and there are no on-site problems, contact '
-  + 'the relevant water service provider. Record the pressure readings obtained during the hydrant '
-  + 'system flow test below.';
+  + 'the relevant water service provider to ascertain if there are any problems with the water '
+  + 'system network. In the table below, please record the pressure readings obtained during the '
+  + 'hydrant system flow test.';
 
-export const PART_E_NOTE = 'This part relates to sections 10.4 and 10.5 of AS2419.1 and tests under '
-  + 'Section 4 of AS1851. Record the pressure readings obtained during the pump appliance booster '
-  + 'test below.';
+export const PART_E_NOTE = 'This part relates to sections 10.4 and 10.5 of AS2419.1 and for tests '
+  + 'under Section 4 of AS1851. If pressure/flow rates do not meet the fire system design criteria '
+  + 'and there are no on-site problems, contact the relevant water service provider to ascertain if '
+  + 'there are any problems with the water system network. In the table below, please record the '
+  + 'pressure readings obtained during the pump appliance booster test.';
 
 export const PART_F_NOTE = 'Relevant required pressure specification in AS2118.1, AS2118.4 and AS2118.6.';
 
-export const PART_G_NOTE = 'For sections 4.14 of AS2118.1-1999, 4 of AS2118.6-2012, 6.2 of '
-  + 'AS2118.4-2012 and section 2 of AS1851. (1) For AS2118.1 and AS2118.6 systems, multiple testing '
-  + 'points may be required. (2) For AS2118.4, a simulated running test may be required for systems '
-  + 'without a flow measuring device. System test points shall be noted for each different system.';
+export const PART_G_NOTE = 'This section is to be used for sections 4.14 of AS2118.1-1999, 4 of '
+  + 'AS2118.6-2012 and 6.2 of AS2118.4-2012 and section 2 of AS1851. Notes: (1) For AS2118.1 and '
+  + 'AS2118.6 systems, multiple testing points may be required. (2) For AS2118.4, a simulated '
+  + 'running test may be required for systems without a flow measuring device, in which the test '
+  + 'involves opening a valve to discharge a volume of water that is accepted as being in excess of '
+  + 'the design flow. System test points shall be noted for each different system and its location '
+  + 'and descriptor.';
 
 /**
  * The Part I declaration.
@@ -160,15 +170,46 @@ export const DECLARATION = 'By signing this Form 72, I confirm that the informat
   + 'herein is correct to the best of my knowledge given the information available and that this '
   + 'Form 72 has been completed in accordance with the relevant standards, codes and regulations.';
 
-/** The department's footer, verbatim, including the Crown copyright line. */
+/** The department's footer note and its two definitions, verbatim. */
 export const DEPARTMENT_NOTE = 'Note: Building owners/occupiers are responsible for ensuring their '
   + 'buildings continuously meet fire safety standards. Where a building owner/occupier becomes '
   + 'aware that their building does not meet the minimum requirements for water pressure required '
-  + 'by any applicable standard under QDC MP 6.1, they should contact the Queensland Fire and '
-  + "Emergency Service. Definitions: 'Maintenance test' means a test required under a maintenance "
-  + "standard such as AS1851. 'Running test' means a two-inch waste test installed at the sprinkler "
-  + 'control valve on older systems. © The State of Queensland (Department of Housing and Public '
-  + 'Works) 2014.';
+  + 'by any standard applicable under the Queensland Development Code Mandatory Part 6.1 '
+  + '(Maintenance of fire safety installations) the building owner/occupier should contact the '
+  + 'Queensland Fire and Emergency Service. Definitions → \u201cMaintenance test\u201d means a test '
+  + 'that is required under a maintenance standard such as AS1851. \u201cRunning test\u201d means a '
+  + 'two inch waste test installed at the sprinkler control valve on older systems.';
+
+/**
+ * The privacy and right-to-information notices, and the Crown copyright line.
+ *
+ * Printed because they are part of the published form, and because they are the
+ * part an occupier is entitled to read: they say what the information on the
+ * page may be used for and who it may be given to. A reproduction that drops
+ * them hands somebody a document that collects their details and does not tell
+ * them that.
+ */
+export const DEPARTMENT_PRIVACY = 'Privacy: The information on this form is collected for purposes '
+  + 'related to monitoring compliance under the Plumbing and Drainage Act 2002, the Building Act '
+  + '1975 and the Building Fire Safety Regulation 2008 (\u201clegislation\u201d). This information '
+  + 'may be '
+  + "stored in the department's database and may be used for statistical research, information "
+  + 'provision and evaluation of Plumbing Industry Council and state government services. Your '
+  + 'personal information may be disclosed to other government agencies, local government '
+  + 'authorities and third parties for purposes related to this application. Except for these '
+  + 'circumstances, personal information will only be disclosed to third parties with your consent '
+  + 'or in accordance with the Information Privacy Act 2009.';
+
+export const DEPARTMENT_RTI = 'RTI: The information collected on this form will be retained as '
+  + 'required by the Public Records Act 2002 and other relevant Acts and regulations, and is '
+  + 'subject to the Right to Information regime established by the Right to Information Act 2009. '
+  + 'If you have any further questions regarding your privacy, please email Building Codes '
+  + 'Queensland on buildingcodes@qld.gov.au. © The State of Queensland (Department of Housing and '
+  + 'Public Works) 2014. Published by the Queensland Government July 2014, 41 George Street, '
+  + 'Brisbane QLD 4000.';
+
+/** The department's own imprint, bottom left of each printed page. */
+export const DEPARTMENT_IMPRINT = 'Building Codes Queensland\nDepartment of Housing and Public Works';
 
 /** MP 6.1 A4(b) — business days, so weekends do not count. */
 export const OCCUPIER_COPY_BUSINESS_DAYS = 10;
@@ -416,8 +457,6 @@ function cell(value: string | number | undefined | null, part: PartResult | 'ref
   return esc(value);
 }
 
-const kpa = (v: number | undefined): string | undefined => (v === undefined ? undefined : `${v} kPa`);
-
 /** One tick box with its label beside it, as the form prints them. */
 function tick(label: string, on: boolean): string {
   return `<span class="tick"><span class="cb${on ? ' on' : ''}">${on ? '&#10007;' : ''}</span>${esc(label)}</span>`;
@@ -460,8 +499,15 @@ function pair(a: [string, string], b?: [string, string]): string {
     + `<td class="k">${esc(b[0])}</td><td class="v">${b[1]}</td></tr>`;
 }
 
+/**
+ * A label across the first column and its value across the rest.
+ *
+ * The label is markup rather than escaped text, so a row the app added can
+ * carry its "added" marker. Every label passed here is written in this file;
+ * none of them comes off a form.
+ */
 function wide(label: string, value: string): string {
-  return `<tr><td class="k">${esc(label)}</td><td class="v" colspan="3">${value}</td></tr>`;
+  return `<tr><td class="k">${label}</td><td class="v" colspan="3">${value}</td></tr>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -470,72 +516,129 @@ function partA(form: Form72): string {
   const m = form.maintenanceTest;
   const grid = `<table class="mt">
     <tr><td></td><td class="mth">Annual</td><td class="mth">5 year</td></tr>
-    <tr><td class="mtl">Fire Hydrant</td><td>${tick('', m.hydrantAnnual)}</td><td>${tick('', m.hydrantFiveYear)}</td></tr>
-    <tr><td class="mtl">Fire Sprinkler</td><td>${tick('', m.sprinklerAnnual)}</td><td>${tick('', m.sprinklerFiveYear)}</td></tr>
-    <tr><td class="mtl">Combined</td><td>${tick('', m.combinedAnnual)}</td><td>${tick('', m.combinedFiveYear)}</td></tr>
+    <tr><td class="mtl">fire hydrant</td><td>${tick('', m.hydrantAnnual)}</td><td>${tick('', m.hydrantFiveYear)}</td></tr>
+    <tr><td class="mtl">fire sprinkler</td><td>${tick('', m.sprinklerAnnual)}</td><td>${tick('', m.sprinklerFiveYear)}</td></tr>
+    <tr><td class="mtl">combined</td><td>${tick('', m.combinedAnnual)}</td><td>${tick('', m.combinedFiveYear)}</td></tr>
   </table>`;
 
   return `${band('Part A — Test details')}
   <table class="grid">
-    ${wide('Site Name', cell(form.siteName, 'pass'))}
-    ${wide('Site Address', cell(form.siteAddress, 'pass'))}
+    ${wide('Site name', cell(form.siteName, 'pass'))}
+    ${wide('Site address', cell(form.siteAddress, 'pass'))}
     ${wide('Contractor', cell(form.contractor, 'pass'))}
-    ${pair(['Test Date', cell(formatAuDate(form.testDate), 'pass')], ['Time', cell(form.testTime, 'pass')])}
-    ${wide('Maintenance Test', grid)}
+    ${pair(['Test date', cell(formatAuDate(form.testDate), 'pass')], ['Time', cell(form.testTime, 'pass')])}
+    ${wide('Maintenance test', grid)}
   </table>`;
 }
 
 function partB(form: Form72): string {
   const h = form.hydrostatic;
   const r = h.result;
-  return `${band('Part B — Hydrant Hydrostatic Test', resultBoxes(r, RESULT_OPTIONS))}
+  return `${band('Part B — Hydrant hydrostatic test', resultBoxes(r, RESULT_OPTIONS))}
   ${note(PART_B_NOTE)}
   <table class="grid">
-    ${pair(['Boost Pressure (kPa)', cell(h.boostPressureKpa, r)], ['Test Pressure (kPa)', cell(h.testPressureKpa, r)])}
-    ${pair(['Duration of Test (mins)', cell(h.durationMinutes, r)], ['End of Test Pressure (kPa)', cell(h.endPressureKpa, r)])}
+    ${pair(['Boost pressure (kPa)', cell(h.boostPressureKpa, r)], ['Test pressure (kPa)', cell(h.testPressureKpa, r)])}
+    ${pair(['Duration of test (mins)', cell(h.durationMinutes, r)], ['End of test pressure (kPa)', cell(h.endPressureKpa, r)])}
     ${wide('Loss (if any) (L/min)', cell(h.lossLpm, r))}
     ${wide('Comments', comment(h.comments, r))}
   </table>`;
 }
 
-/** The four columns the department's form prints, used when none are recorded. */
-const DEFAULT_DEVICE_SLOTS = ['Device 1', 'Device 2', 'Gauge 1', 'Gauge 2'];
+/**
+ * The four column heads the department prints across Part C.
+ *
+ * "Device/gauge 1" through "Device/gauge 4", in those words. The app used to
+ * print "Device 1, Device 2, Gauge 1, Gauge 2", which reads as a form with two
+ * device columns and two gauge columns — a shape the department's form does not
+ * have, and one that tells a technician with three gauges that the third has
+ * nowhere to go.
+ */
+export const DEPARTMENT_DEVICE_SLOTS = [
+  'Device/gauge 1', 'Device/gauge 2', 'Device/gauge 3', 'Device/gauge 4',
+] as const;
 
 function partC(form: Form72, issues: FormIssue[]): string {
-  const devices: TestDevice[] = form.devices.length
-    ? form.devices
-    : DEFAULT_DEVICE_SLOTS.map((slot) => ({ slot, serialNumber: '' }));
+  // The department's four columns, filled by whatever the form holds. A column
+  // nobody used prints as the department's empty column rather than being
+  // dropped, and a fifth device the technician really did use is appended — the
+  // part's own note says to describe further devices rather than leaving them
+  // off, and a column is a better place for one than a sentence.
+  const held = form.devices;
+  const columns: { head: string; named?: string; device: TestDevice }[] = [
+    ...DEPARTMENT_DEVICE_SLOTS.map((head, i) => {
+      const device = held[i] ?? { slot: head, serialNumber: '' };
+      // The department's head always prints. A slot the technician named
+      // something else prints under it rather than replacing it — the head is
+      // the department's label and the name is theirs, and a reader has to be
+      // able to tell which is which.
+      const own = device.slot?.trim();
+      return { head, named: own && own !== head ? own : undefined, device };
+    }),
+    ...held.slice(DEPARTMENT_DEVICE_SLOTS.length).map((device) => ({
+      head: device.slot?.trim() || 'Further device',
+      named: undefined,
+      device,
+    })),
+  ];
+  const devices: TestDevice[] = columns.map((c2) => c2.device);
 
   // Every pressure on this form was read with this equipment, so the part is
   // rendered against the live result rather than N/A: a blank here is never
   // "not applicable".
   const c: PartResult = 'pass';
+  // The label is markup rather than text, because one row carries an "added"
+  // marker. Every label here is written in this file, none comes from a form.
   const row = (label: string, get: (d: TestDevice) => string | number | undefined): string =>
-    `<tr><td class="k">${esc(label)}</td>${devices
+    `<tr><td class="k">${label}</td>${devices
       .map((d) => `<td class="v">${cell(get(d), c)}</td>`).join('')}</tr>`;
 
   const kinds = form.flowDeviceKinds;
   const partCIssues = issues.filter((i) => i.part === 'C');
 
-  return `${band('Part C — Hydrant Test Equipment / Pressure Gauges')}
+  return `${band('Part C — Hydrant test equipment/pressure gauges')}
   ${note(PART_C_NOTE)}
   <table class="grid">
-    <tr><td class="k">Flow Measuring Device</td><td class="v" colspan="3">
+    <tr><td class="k">Flow measuring device</td><td class="v" colspan="3">
       ${tick('Orifice', kinds.includes('orifice'))}
       ${tick('Mechanical', kinds.includes('mechanical'))}
-      ${tick('Electromagnetic', kinds.includes('electromagnetic'))}
+      ${tick('Electro magnetic', kinds.includes('electromagnetic'))}
     </td></tr>
   </table>
   <div class="subnote">Part C not required for orifice testing.</div>
   <table class="grid devices">
-    <tr><td class="k"></td>${devices.map((d) => `<td class="dh">${esc(d.slot)}</td>`).join('')}</tr>
+    <tr><td class="k"></td>${columns.map((col, i) => `<td class="dh">${esc(col.head)}${
+  i >= DEPARTMENT_DEVICE_SLOTS.length ? ' <span class="extra">added</span>' : ''}${
+  col.named ? `<br /><span class="extra">${esc(col.named)}</span>` : ''}</td>`).join('')}</tr>
     ${row('Serial number', (d) => d.serialNumber)}
     ${row('Date calibrated', (d) => formatAuDate(d.dateCalibrated))}
-    ${row('Calibration Certificate', (d) => d.calibrationCertificate)}
-    ${row('Correction factor (kPa or %)', (d) => d.correctionFactor)}
+    ${row('Correction certificate', (d) => d.calibrationCertificate)}
+    ${/*
+       * Not one of the department's six rows.
+       *
+       * Part C's own note says the correction factor must be kPa or a
+       * percentage, and the printed grid has nowhere to put one — it has a
+       * "Correction certificate" row and that is a document reference, not a
+       * figure. So the row exists, because every pressure on the page is wrong
+       * by that factor until it is applied, and it is marked as ours so a
+       * reader is never shown an added row as the department's.
+       */
+  row('Correction factor (kPa or %) <span class="extra">added</span>', (d) => d.correctionFactor)}
     ${row('65/100/150 mm face', (d) => d.faceSize)}
     ${row('Digital reader', (d) => (d.digitalReader === undefined ? undefined : d.digitalReader ? 'Yes' : 'No'))}
     ${row('Increments (kPa)', (d) => d.incrementsKpa)}
+    ${/*
+       * Also ours. The department's grid prints a calibration date and leaves
+       * the reader to know the interval; one of Safe QLD's two flow meters is
+       * certified for its service life rather than for twelve months, and a
+       * reader comparing that date with the test date would otherwise conclude
+       * the meter was a year out. So the basis each device was accepted on
+       * prints beside the date that was accepted.
+       */
+  row('Calibration basis <span class="extra">added</span>',
+    (d) => (!d.serialNumber.trim() ? undefined
+      : d.calibrationBasis === 'service-life'
+        ? `Manufacturer certifies for the device's service life`
+        : `${CALIBRATION_MONTHS} month interval`))}
   </table>
   ${partCIssues.length
     ? `<div class="issues"><b>Test equipment</b><ul>${partCIssues
@@ -584,20 +687,49 @@ function partD(form: Form72): string {
   };
   const rows = flowTableRows(d);
 
+  /*
+   * "System requirements ___ L/s at ___ kPa" is one field on the department's
+   * form, so it prints as one — and half of it filled in prints as half of it
+   * filled in, rather than as a pair somebody could read as complete.
+   */
+  const requirement = d.requiredLps !== undefined || d.requiredKpa !== undefined
+    ? `${d.requiredLps !== undefined ? `${d.requiredLps} L/s` : '<span class="missing">flow not recorded</span>'}`
+      + ` at ${d.requiredKpa !== undefined ? `${d.requiredKpa} kPa` : '<span class="missing">pressure not recorded</span>'}`
+    : r === 'na' ? '<span class="na">N/A</span>' : '<span class="missing">Not recorded</span>';
+
   // The achieved pair, with the free-text line kept for forms signed before
   // the two numbers existed.
   const achieved = d.achievedLps !== undefined || d.achievedKpa !== undefined
     ? `${d.achievedLps !== undefined ? `${d.achievedLps} L/s` : '<span class="missing">flow not recorded</span>'}`
-      + ` @ ${d.achievedKpa !== undefined ? `${d.achievedKpa} kPa` : '<span class="missing">pressure not recorded</span>'}`
+      + ` at ${d.achievedKpa !== undefined ? `${d.achievedKpa} kPa` : '<span class="missing">pressure not recorded</span>'}`
     : cell(d.systemAchieved, r);
+
+  /*
+   * The department's grouped first column.
+   *
+   * Two headings down the left — "Nozzles" over the three bores, "Other
+   * portable testing devices" over the five metered rates — each spanning its
+   * rows, with the size in the column beside it. Printed flat, with the group
+   * repeated on every row, the table reads as eight unrelated lines and a
+   * reader has to know that "19 mm" is a nozzle bore and "100 mm" on the page
+   * above was a gauge face.
+   */
+  const groupSpans: { group: FlowRowGroup; from: number; count: number }[] = [];
+  rows.forEach(({ row }, i) => {
+    const group = flowRowGroup(row);
+    const last = groupSpans[groupSpans.length - 1];
+    if (last && last.group === group && last.from + last.count === i) last.count += 1;
+    else groupSpans.push({ group, from: i, count: 1 });
+  });
+  const spanAt = new Map(groupSpans.map((sp) => [sp.from, sp]));
 
   const table = `<table class="grid flow">
     <tr>
-      <td class="dh">Size/flow rate</td><td class="dh">Device/gauge no.</td>
-      <td class="dh">Hydrant 1 only (kPa)</td><td class="dh">Hydrants 1 &amp; 2 (kPa)</td>
-      <td class="dh">Hydrants 1, 2 &amp; 3 (kPa)</td><td class="dh">Hydrants 1, 2, 3 &amp; 4 (kPa)</td>
+      <td class="dh" colspan="2">Size/flow rate</td><td class="dh">Device/gauge no. (Part C)</td>
+      <td class="dh">Hydrant 1 only</td><td class="dh">Hydrants 1 and 2</td>
+      <td class="dh">Hydrants 1, 2 and 3</td><td class="dh">Hydrants 1, 2, 3 and 4</td>
     </tr>
-    ${rows.map(({ row, standard }) => {
+    ${rows.map(({ row, standard }, i) => {
     // A line with nothing against it was not run, which is not the same thing
     // as a reading somebody forgot to write down. The department prints all
     // eight lines whether or not the job needs them, so most forms legitimately
@@ -606,16 +738,18 @@ function partD(form: Form72): string {
     const untouched = flowRowUntouched(row);
     const c = (v: string | number | undefined): string =>
       (untouched ? '<span class="na">Not run</span>' : cell(v, r));
+    const sp = spanAt.get(i);
     return `<tr>
+      ${sp ? `<td class="grp" rowspan="${sp.count}">${esc(FLOW_ROW_GROUP_LABEL[sp.group])}</td>` : ''}
       <td class="k">${esc(flowRowLabel(row))}${standard ? '' : ' <span class="extra">added</span>'}</td>
       <td class="v">${c(row.devices)}</td>
-      <td class="v">${c(row.hydrant1Kpa)}</td>
-      <td class="v">${c(row.hydrants12Kpa)}</td>
-      <td class="v">${c(row.hydrants123Kpa)}</td>
-      <td class="v">${c(row.hydrants1234Kpa)}</td>
+      <td class="v">${c(row.hydrant1Kpa)} ${untouched ? '' : '<span class="u">kPa</span>'}</td>
+      <td class="v">${c(row.hydrants12Kpa)} ${untouched ? '' : '<span class="u">kPa</span>'}</td>
+      <td class="v">${c(row.hydrants123Kpa)} ${untouched ? '' : '<span class="u">kPa</span>'}</td>
+      <td class="v">${c(row.hydrants1234Kpa)} ${untouched ? '' : '<span class="u">kPa</span>'}</td>
     </tr>`;
   }).join('')}
-    <tr><td class="k">System achieved</td><td class="v" colspan="5">${achieved}</td></tr>
+    <tr><td class="k" colspan="2">System achieved (L/s at kPa)</td><td class="v" colspan="5">${achieved}</td></tr>
   </table>`;
 
   const extras = rows.filter((x) => !x.standard);
@@ -629,7 +763,7 @@ function partD(form: Form72): string {
     .slice(PART_D_LOCATION_SLOTS)
     .filter((x) => x.trim());
 
-  return `${band('Part D — Hydrant System Flow Test', resultBoxes(r, FLOW_RESULT_OPTIONS))}
+  return `${band('Part D — Hydrant system flow test', resultBoxes(r, FLOW_RESULT_OPTIONS))}
   ${note(PART_D_NOTE)}
   ${r === 'na'
     // The department's Part D has no N/A box. Leaving all three unticked would
@@ -638,15 +772,24 @@ function partD(form: Form72): string {
       + 'N/A box, so none of the three boxes above is ticked; this line says why.</div>'
     : ''}
   <table class="grid">
-    ${pair(['Hydrant 1 Location', loc(1)], ['Hydrant 2 Location', loc(2)])}
-    ${pair(['Hydrant 3 Location', loc(3)], ['Hydrant 4 Location', loc(4)])}
+    ${/*
+       * One and three on the first line, two and four on the second.
+       *
+       * That is how the department lays them out — the four fields run down the
+       * two columns rather than across the rows — and somebody comparing our
+       * page against theirs field by field should find them in the same places.
+       */''}
+    ${pair(['Hydrant 1 location', loc(1)], ['Hydrant 3 location', loc(3)])}
+    ${pair(['Hydrant 2 location', loc(2)], ['Hydrant 4 location', loc(4)])}
     ${pair(
-    ['System requirement — flow rate (L/s)', cell(d.requiredLps, r)],
-    ['at pressure (kPa)', cell(d.requiredKpa, r)],
+    ['System requirements (L/s at kPa)', requirement],
+    ['Static pressure (kPa)', cell(d.staticPressureKpa, r)],
   )}
-    ${pair(['Static Pressure', cell(kpa(d.staticPressureKpa), r)], ['Pressure Zone Number', cell(d.pressureZone, r)])}
-    ${wide('On-site pump set installed', `${tick('Yes', d.onSitePumpSet === true)}${tick('No', d.onSitePumpSet === false)}${
-  d.onSitePumpSet === undefined ? ' <span class="missing">Not answered</span>' : ''}`)}
+    ${pair(
+    ['On-site pump set installed', `${tick('Yes', d.onSitePumpSet === true)}${tick('No', d.onSitePumpSet === false)}${
+      d.onSitePumpSet === undefined ? ' <span class="missing">Not answered</span>' : ''}`],
+    ['Pressure zone number', cell(d.pressureZone, r)],
+  )}
     ${wide('Comment', comment(d.comment, r))}
   </table>
   ${table}
@@ -660,7 +803,7 @@ function partD(form: Form72): string {
   ${extras.length
     ? `<div class="stated">${extras.length} flow rate${extras.length === 1 ? ' was' : 's were'} recorded `
       + `that the department's table does not print `
-      + `(${esc(extras.map((x) => flowRowLabel(x.row)).join(', '))}). `
+      + `(${esc(extras.map((x) => flowRowLongLabel(x.row)).join(', '))}). `
       + `${extras.length === 1 ? 'It is' : 'They are'} shown above marked "added" rather than `
       + 'dropped to fit the printed layout.</div>'
     : ''}`;
@@ -707,7 +850,7 @@ function partE(form: Form72, input: Form72DocumentInput): string {
     : '';
 
   const req = b.requiredLps !== undefined && b.requiredKpa !== undefined
-    ? `${b.requiredLps} L/s @ ${b.requiredKpa} kPa`
+    ? `${b.requiredLps} L/s at ${b.requiredKpa} kPa`
     : undefined;
 
   const check = b.requiredLps !== undefined && b.requiredKpa !== undefined
@@ -740,12 +883,12 @@ function partE(form: Form72, input: Form72DocumentInput): string {
     }
   }
 
-  return `${band('Part E — Pump Appliance Booster Test', resultBoxes(r, RESULT_OPTIONS))}
+  return `${band('Part E — Pump appliance booster test', resultBoxes(r, RESULT_OPTIONS))}
   ${note(PART_E_NOTE)}
   <table class="grid">
     ${pair(['Hydrant locations', cell(b.hydrantLocations, r)],
     ['Height of highest hydrant above booster (m)', cell(b.highestHydrantAboveBoosterM, r)])}
-    ${pair(['System requirements (L/s @ kPa)', cell(req, r)], ['Static pressure (kPa)', cell(b.staticPressureKpa, r)])}
+    ${pair(['System requirements (L/s at kPa)', cell(req, r)], ['Static pressure (kPa)', cell(b.staticPressureKpa, r)])}
     ${pair(['Pump inlet pressure (kPa)', cell(b.pumpInletKpa, r)], ['Pump discharge pressure (kPa)', cell(b.pumpDischargeKpa, r)])}
     ${pair(['Boost pressure (kPa)', cell(b.boostPressureKpa, r)], ['Calculated frictional loss (kPa)', lossCell])}
     ${wide('Comments', comment(b.comments, r))}
@@ -758,7 +901,7 @@ function partE(form: Form72, input: Form72DocumentInput): string {
 function partF(form: Form72): string {
   const f = form.sprinklerHydrostatic;
   const r = f.result;
-  return `${band('Part F — Sprinkler Hydrostatic Test', resultBoxes(r, RESULT_OPTIONS))}
+  return `${band('Part F — Sprinkler hydrostatic test', resultBoxes(r, RESULT_OPTIONS))}
   ${note(PART_F_NOTE)}
   <table class="grid">
     ${pair(['Pressure (kPa)', cell(f.pressureKpa, r)], ['Time held (mins)', cell(f.timeHeldMinutes, r)])}
@@ -804,7 +947,7 @@ function partG(form: Form72): string {
       const derived = testPointOutcome(required, result);
       if (typed !== undefined && derived !== undefined && typed !== derived) {
         disagreements.push(
-          `Test Point ${n} ${what} is ticked ${typed === 'pass' ? 'Pass' : 'Fail'} against `
+          `Test point ${n} ${what} is ticked ${typed === 'pass' ? 'Pass' : 'Fail'} against `
           + `${result} of ${required} required, which reads ${derived === 'pass' ? 'Pass' : 'Fail'} `
           + 'on the figures alone.',
         );
@@ -815,7 +958,7 @@ function partG(form: Form72): string {
         typed === undefined && derived !== undefined ? ' <span class="extra">from the figures</span>' : ''}`;
     };
     return `
-    <tr><td class="sub" colspan="4">Test Point ${n}</td></tr>
+    <tr><td class="sub" colspan="4">Test point ${n}</td></tr>
     ${wide('Location', c(p?.location))}
     <tr>
       <td class="k">Required flow rate (L/min)</td><td class="v">${c(p?.requiredFlowLpm)}</td>
@@ -846,12 +989,12 @@ function partG(form: Form72): string {
     ${point(2, g.testPoints[1])}
     ${extra.map((p, i) => point(3 + i, p)).join('')}`;
 
-  return `${band('Part G — Sprinkler System Flow Test', resultBoxes(r, RESULT_OPTIONS))}
+  return `${band('Part G — Sprinkler system flow test', resultBoxes(r, RESULT_OPTIONS))}
   ${note(PART_G_NOTE)}
   <table class="grid">
-    ${pair(['System Specs (block plan) l/m@kPa', cell(g.systemSpec, r)], ['Test Results l/m@kPa', cell(achieved, r)])}
+    ${pair(['System specifications (block plan)', cell(g.systemSpec, r)], ['Test results', cell(achieved, r)])}
     ${rows}
-    ${wide('Running Test — Installation gauge pressure (kPa)', cell(g.runningTestGaugeKpa, r))}
+    ${wide('Running test — installation gauge pressure (kPa)', cell(g.runningTestGaugeKpa, r))}
     ${wide('Comments', comment(g.comments, r))}
   </table>
   ${disagreements.length
@@ -880,15 +1023,20 @@ function partH(form: Form72): string {
 
   return `${band('Part H — Compliance')}
   <table class="grid">
-    <tr><td class="k">Critical Defects Identified</td><td class="v" colspan="3">${
+    <tr><td class="k">Critical defects identified</td><td class="v" colspan="3">${
   yesNo(critical, 'Give owner/occupier a critical defect notice',
     'No action required in relation to critical defects at this time')}</td></tr>
-    <tr><td class="k">Repairs/Corrective Actions</td><td class="v" colspan="3">${
-  yesNo(repairs, "Attach details (incl. action and date taken) in Licensee's report",
+    <tr><td class="k">Repairs/corrective actions taken</td><td class="v" colspan="3">${
+  yesNo(repairs, "Attach details (including action and date taken) as part of Licensee's report",
     'No action required in relation to repairs/corrective actions at this time')}</td></tr>
     <tr><td class="k">System</td><td class="v" colspan="3">${
   tick('Pass', form.systemResult === 'pass')}${tick('Fail', form.systemResult === 'fail')}</td></tr>
-    ${wide('System Notes', comment(form.systemNotes, form.systemResult))}
+    ${/*
+       * Not one of the department's rows. Part H prints the System Pass/Fail
+       * pair and nothing else; the note is where the app keeps what the
+       * technician wrote about the result, so it says it is ours.
+       */''}
+    ${wide('System notes <span class="extra">added</span>', comment(form.systemNotes, form.systemResult))}
   </table>
   ${form.systemResult === 'na'
     // The department's System row carries Pass and Fail and nothing else. An
@@ -905,10 +1053,10 @@ function partI(form: Form72): string {
   return `${band('Part I — Signature')}
   <div class="decl">${esc(DECLARATION)}</div>
   <table class="grid sig">
-    ${pair(['Licensee Name', cell(form.licenseeName, 'pass')], ['Licensee Signature', cell(form.signature, 'pass')])}
-    ${pair(['Licence No. (QBCC/PIC)', cell(form.licenceNumber, 'pass')],
+    ${pair(['Licensee name', cell(form.licenseeName, 'pass')], ['Licensee signature', cell(form.signature, 'pass')])}
+    ${pair(['Licence no. (QBCC/PIC)', cell(form.licenceNumber, 'pass')],
     // Not every job has one, so its absence is answered rather than flagged.
-    ['Licensee Report No.', form.licenseeReportNumber?.trim()
+    ['Licensee report no.', form.licenseeReportNumber?.trim()
       ? esc(form.licenseeReportNumber) : '<span class="na">None</span>'])}
   </table>`;
 }
@@ -1057,6 +1205,11 @@ const CSS = `
           font-size: 7.5px; line-height: 1.55; color: #444; }
   .ours b { color: #1b1b1b; }
   .attachpage { page-break-before: always; break-before: page; }
+  td.grp { background: #F2F2F2; font-weight: 700; width: 11%; vertical-align: middle; }
+  .u { color: #666; font-size: 7px; }
+  .deptfine { border: 1px solid #D5D8E4; background: #FAFAFC; padding: 5px 9px; margin-top: 5px;
+              font-size: 6.5px; line-height: 1.5; color: #333; }
+  .imprint { margin-top: 6px; font-size: 7.5px; font-weight: 700; line-height: 1.4; color: #1F3864; }
 `;
 
 /**
@@ -1146,6 +1299,9 @@ export function form72Html(input: Form72DocumentInput): string {
   ${attachment(form)}
 
   <div class="deptnote">${esc(DEPARTMENT_NOTE)}</div>
+  <div class="deptfine">${esc(DEPARTMENT_PRIVACY)}</div>
+  <div class="deptfine">${esc(DEPARTMENT_RTI)}</div>
+  <div class="imprint">${esc(DEPARTMENT_IMPRINT).replace(/\n/g, '<br />')}</div>
 
   <div class="ours">
     <b>Not part of the department's form.</b>

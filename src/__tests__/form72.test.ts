@@ -1,11 +1,14 @@
 import {
-  DECLARATION, DEPARTMENT_NOTE, FORM_72_SOURCES, PART_D_LOCATION_SLOTS, STANDARD_FLOW_RATES_LPS,
+  DECLARATION, DEPARTMENT_DEVICE_SLOTS, DEPARTMENT_NOTE, DEPARTMENT_PRIVACY, DEPARTMENT_RTI,
+  FORM_72_SOURCES, FORM_SUBTITLE, FORM_TITLE, PART_D_LOCATION_SLOTS, STANDARD_FLOW_RATES_LPS,
   flowTableRows, form72Html, frictionalLossGaps, hydrantLocationsNeeded, occupierCopyDue,
   occupierCopyDueBy, qldCalendarDate, testPointOutcome, testerCopyKeepUntil,
   type Form72DocumentInput,
 } from '@/export/form72';
 import { MIGRATION_V12 } from '@/db/schemaForm72';
+import { DEVICE_PRESETS, DEVICE_PRESET_SOURCE, unusedDevicePresets } from '@/domain/form72Devices';
 import {
+  CALIBRATION_MONTHS,
   PART_D_NOZZLE_SIZES_MM, PART_D_ROWS, deviceCalibration, emptyForm72, intervalsTested,
   maintenanceTestCell, maintenanceTestFromAxes, overloadCheck, resolveFrictionalLoss,
   systemTypesTested, validateForm72,
@@ -85,12 +88,12 @@ describe('the form reproduces the department’s document', () => {
   it('prints all nine parts, in the order the department prints them', () => {
     const parts = [
       'Part A — Test details',
-      'Part B — Hydrant Hydrostatic Test',
-      'Part C — Hydrant Test Equipment / Pressure Gauges',
-      'Part D — Hydrant System Flow Test',
-      'Part E — Pump Appliance Booster Test',
-      'Part F — Sprinkler Hydrostatic Test',
-      'Part G — Sprinkler System Flow Test',
+      'Part B — Hydrant hydrostatic test',
+      'Part C — Hydrant test equipment/pressure gauges',
+      'Part D — Hydrant system flow test',
+      'Part E — Pump appliance booster test',
+      'Part F — Sprinkler hydrostatic test',
+      'Part G — Sprinkler system flow test',
       'Part H — Compliance',
       'Part I — Signature',
     ];
@@ -110,8 +113,8 @@ describe('the form reproduces the department’s document', () => {
 
   it('states the statutory basis in the department’s own words rather than summarising it', () => {
     expect(flat(html)).toContain('Queensland Development Code – Mandatory Part (MP) 6.1');
-    expect(flat(html)).toContain('Building Act 1975, s.30');
-    expect(flat(html)).toContain('This form does not comprise all maintenance requirements');
+    expect(flat(html)).toContain('Building Act 1975, section 30');
+    expect(flat(html)).toContain('this form does not comprise all maintenance requirements');
   });
 
   it('prints the department’s closing note and its Crown copyright line', () => {
@@ -147,14 +150,14 @@ describe('the form reproduces the department’s document', () => {
 describe('N/A is a real answer and a blank is not', () => {
   it('ticks the N/A box of a part the job did not use', () => {
     const html = form72Html(doc());
-    const partF = between(html, 'Part F — Sprinkler Hydrostatic Test', 'Part G —');
+    const partF = between(html, 'Part F — Sprinkler hydrostatic test', 'Part G —');
     expect(partF).toContain('<span class="rl">N/A</span><span class="rb on">');
     expect(partF).not.toContain('<span class="rl">PASS</span><span class="rb on">');
   });
 
   it('prints N/A in the boxes of an N/A part instead of leaving them empty', () => {
     const html = form72Html(doc());
-    const partF = between(html, 'Part F — Sprinkler Hydrostatic Test', 'Part G —');
+    const partF = between(html, 'Part F — Sprinkler hydrostatic test', 'Part G —');
     expect(partF).toContain('<span class="na">N/A</span>');
     expect(partF).not.toContain('Not recorded');
   });
@@ -163,7 +166,7 @@ describe('N/A is a real answer and a blank is not', () => {
     const html = form72Html(doc({
       form: issuable({ hydrostatic: { result: 'pass', testPressureKpa: 1700, durationMinutes: 120 } }),
     }));
-    const partB = between(html, 'Part B — Hydrant Hydrostatic Test', 'Part C —');
+    const partB = between(html, 'Part B — Hydrant hydrostatic test', 'Part C —');
     expect(partB).toContain('1700');
     // Boost pressure, end of test pressure and loss were never written down.
     expect(partB).toContain('<span class="missing">Not recorded</span>');
@@ -172,7 +175,7 @@ describe('N/A is a real answer and a blank is not', () => {
 
   it('says why Part D has nothing ticked, because the department prints no N/A box there', () => {
     const html = form72Html(doc());
-    const partD = between(html, 'Part D — Hydrant System Flow Test', 'Part E —');
+    const partD = between(html, 'Part D — Hydrant system flow test', 'Part E —');
     expect(flat(partD)).toContain(
       "Recorded as not applicable. Part D of the department's form carries no N/A box",
     );
@@ -183,10 +186,10 @@ describe('N/A is a real answer and a blank is not', () => {
     // here would be Safe QLD's, printed inside the department's part, where a
     // reader has no way to tell whose it is.
     const html = form72Html(doc({ form: issuable({ systemResult: 'na' }) }));
-    const system = between(html, '<td class="k">System</td>', 'System Notes');
+    const system = between(html, '<td class="k">System</td>', 'System notes');
     expect(system).toContain('Pass');
     expect(system).toContain('Fail');
-    // The empty System Notes box still says N/A, which is the department's own
+    // The empty System notes box still says N/A, which is the department's own
     // box answered. What must not appear is a third tick box beside Pass/Fail.
     expect(system).not.toContain('N/A');
     const partH = between(html, 'Part H — Compliance', 'Part I —');
@@ -197,7 +200,7 @@ describe('N/A is a real answer and a blank is not', () => {
 
   it('marks an unanswered Part H question as unanswered rather than as a No', () => {
     const html = form72Html(doc({ form: issuable({ criticalDefectsIdentified: undefined }) }));
-    const partH = between(html, 'Critical Defects Identified', 'Repairs/Corrective Actions');
+    const partH = between(html, 'Critical defects identified', 'Repairs/corrective actions taken');
     expect(partH).toContain('Not answered');
     expect(partH).not.toContain('<span class="cb on">&#10007;</span>No');
   });
@@ -226,7 +229,7 @@ describe('the gauge nobody reading the paper can check', () => {
   });
 
   it('repeats the finding beside Part C, where the equipment is listed', () => {
-    const partC = between(stale, 'Part C — Hydrant Test Equipment', 'Part D —');
+    const partC = between(stale, 'Part C — Hydrant test equipment', 'Part D —');
     expect(partC).toContain('<li class="blocking">');
     expect(partC).toContain('was last calibrated');
   });
@@ -365,10 +368,10 @@ describe('Part D — the flow table', () => {
       }),
     }));
     const partD = between(html, 'Size/flow rate', 'System achieved');
-    const twenty = between(partD, '20 L/s', '30 L/s');
+    const twenty = between(partD, '>20 L/s<', '>30 L/s<');
     expect(twenty).toContain('Not recorded');
     expect(twenty).not.toContain('Not run');
-    const thirty = between(partD, '30 L/s', 'System achieved');
+    const thirty = between(partD, '>30 L/s<', 'System achieved');
     expect(thirty).toContain('Not run');
     expect(thirty).not.toContain('Not recorded');
   });
@@ -384,6 +387,8 @@ describe('Part D — the flow table', () => {
     }));
     expect(html).toContain('25 L/s');
     expect(flat(html)).toContain("that the department's table does not print (25 L/s device)");
+    // Its row prints under "Other", not under one of the department's two groups.
+    expect(flat(html)).toContain('<span class="extra">added</span>');
     expect(flat(html)).toContain('rather than dropped to fit the printed layout');
   });
 
@@ -413,7 +418,7 @@ describe('Part D — the flow table', () => {
         },
       }),
     }));
-    const locations = between(twoProved, 'Hydrant 1 Location', 'System requirement');
+    const locations = between(twoProved, 'Hydrant 1 location', 'System requirements');
     expect(locations).toContain('Main entry');
     expect(locations).not.toContain('Not recorded');
     expect(locations).toContain('Not used');
@@ -426,7 +431,7 @@ describe('Part D — the flow table', () => {
         },
       }),
     }));
-    const three = between(threeProved, 'Hydrant 3 Location', 'Hydrant 4 Location');
+    const three = between(threeProved, 'Hydrant 3 location', 'Hydrant 2 location');
     expect(three).toContain('Not recorded');
     expect(hydrantLocationsNeeded({ result: 'pass', hydrantLocations: [], rows: [] })).toBe(0);
   });
@@ -545,7 +550,7 @@ describe('Part G — the sprinkler test points', () => {
     const html = form72Html(doc({ form: issuable({ sprinklerFlow }) }));
     const flow = between(html, 'Required flow rate (L/min)', 'Required pressure (kPa)');
     expect(flow).toContain('<span class="cb on">&#10007;</span>Pass');
-    const pressure = between(html, 'Required pressure (kPa)', 'Test Point 2');
+    const pressure = between(html, 'Required pressure (kPa)', 'Test point 2');
     expect(pressure).toContain('<span class="cb on">&#10007;</span>Fail');
   });
 
@@ -573,7 +578,7 @@ describe('Part G — the sprinkler test points', () => {
 
   it('says a second test point was not used, rather than flagging four missing readings', () => {
     const html = form72Html(doc({ form: issuable({ sprinklerFlow }) }));
-    const second = between(html, 'Test Point 2', 'Running Test');
+    const second = between(html, 'Test point 2', 'Running test');
     expect(second).toContain('Not used');
     expect(second).not.toContain('Not recorded');
     expect(second).not.toContain('Not decided');
@@ -590,7 +595,7 @@ describe('Part G — the sprinkler test points', () => {
         },
       }),
     }));
-    expect(html).toContain('Test Point 3');
+    expect(html).toContain('Test point 3');
     expect(html).toContain('Roof tank');
     expect(flat(html)).toContain("The department's form prints two; the rest are added above rather than left off.");
   });
@@ -709,7 +714,7 @@ describe('the storage the form lives in', () => {
 describe('the page itself', () => {
   it('answers a missing licensee report number instead of flagging it, because not every job has one', () => {
     const html = form72Html(doc());
-    const partI = between(html, 'Licence No. (QBCC/PIC)', '</table>');
+    const partI = between(html, 'Licence no. (QBCC/PIC)', '</table>');
     expect(partI).toContain('<span class="na">None</span>');
     expect(partI).not.toContain('Not recorded');
   });
@@ -1019,7 +1024,10 @@ describe('Part D — the nozzle rows and the fourth hydrant', () => {
   it('prints the three nozzle bores the department prints, which the table used to drop', () => {
     const html = form72Html(doc());
     const partD = between(html, 'Size/flow rate', 'System achieved');
-    for (const mm of PART_D_NOZZLE_SIZES_MM) expect(partD).toContain(`${mm} mm nozzle`);
+    // The department groups them: "Nozzles" in its own cell, the bore beside it.
+    expect(partD).toContain('Nozzles');
+    expect(partD).toContain('Other portable testing devices');
+    for (const mm of PART_D_NOZZLE_SIZES_MM) expect(partD).toContain(`${mm} mm`);
     // Eight printed lines, three of them nozzles: a table that showed only the
     // five metered rates looked complete with three of its rows missing.
     expect(PART_D_ROWS).toHaveLength(PART_D_NOZZLE_SIZES_MM.length + STANDARD_FLOW_RATES_LPS.length);
@@ -1038,8 +1046,8 @@ describe('Part D — the nozzle rows and the fourth hydrant', () => {
         },
       }),
     }));
-    expect(flat(html)).toContain('Hydrants 1, 2, 3 &amp; 4 (kPa)');
-    const row = between(html, '20 L/s device', '30 L/s device');
+    expect(flat(html)).toContain('Hydrants 1, 2, 3 and 4');
+    const row = between(html, '>20 L/s<', '>30 L/s<');
     expect(row).toContain('240');
     expect(row).toContain('190');
     // Four pressures proved means four locations are wanted, not three.
@@ -1057,7 +1065,7 @@ describe('Part D — the nozzle rows and the fourth hydrant', () => {
         },
       }),
     }));
-    const row = between(html, '22 mm nozzle', '25 mm nozzle');
+    const row = between(html, '>22 mm<', '>25 mm<');
     expect(row).toContain('Pitot 1');
     expect(row).toContain('310');
     // Not flagged as a rate the department does not print — it is one of its own.
@@ -1073,11 +1081,10 @@ describe('Part D — the nozzle rows and the fourth hydrant', () => {
         },
       }),
     }));
-    expect(flat(html)).toContain('System requirement — flow rate (L/s)');
-    const partD = between(html, 'System requirement', 'Static Pressure');
-    expect(partD).toContain('20');
-    expect(partD).toContain('250');
-    expect(html).toContain('21 L/s @ 260 kPa');
+    expect(flat(html)).toContain('System requirements (L/s at kPa)');
+    const partD = between(html, 'System requirements', 'Static pressure');
+    expect(partD).toContain('20 L/s at 250 kPa');
+    expect(html).toContain('21 L/s at 260 kPa');
   });
 });
 
@@ -1176,10 +1183,10 @@ describe('Part G — the tick and the subtraction', () => {
     }));
     expect(flat(html)).toContain('Ticked result against the figures');
     expect(flat(html)).toContain(
-      'Test Point 1 flow is ticked Pass against 538 of 540 required, which reads Fail on the figures alone',
+      'Test point 1 flow is ticked Pass against 538 of 540 required, which reads Fail on the figures alone',
     );
     // The pressure line agrees, so it is not reported.
-    expect(flat(html)).not.toContain('Test Point 1 pressure is ticked');
+    expect(flat(html)).not.toContain('Test point 1 pressure is ticked');
   });
 
   it('marks a box it filled in itself, so a tick is never attributed to the technician', () => {
@@ -1404,5 +1411,241 @@ describe('a site with more hydrants than the form has fields', () => {
     }));
     expect(flat(html)).not.toContain('further hydrant location');
     expect(PART_D_LOCATION_SLOTS).toBe(4);
+  });
+});
+
+describe('the company’s own test equipment', () => {
+  it('carries every field the certificates state, transcribed once', () => {
+    for (const serial of ['SQF-001', 'SQF-002']) {
+      const preset = DEVICE_PRESETS.find((p) => p.device.serialNumber === serial);
+      expect(preset).toBeDefined();
+      expect(preset!.device).toMatchObject({
+        serialNumber: serial,
+        dateCalibrated: '2026-07-18',
+        calibrationCertificate: `CR-${serial}-IN-01`,
+        correctionFactor: '+0.35 %',
+        calibrationBasis: 'service-life',
+        digitalReader: true,
+      });
+    }
+  });
+
+  it('leaves the gauge-only fields off a flow meter rather than filling them', () => {
+    // Face size and increments describe a pressure gauge's dial. A flow meter
+    // has neither, and anything written there reads as a measured specification.
+    for (const preset of DEVICE_PRESETS) {
+      expect(preset.device.faceSize).toBeUndefined();
+      expect(preset.device.incrementsKpa).toBeUndefined();
+    }
+  });
+
+  it('does not tick a measuring element the certificate never names', () => {
+    // The certificate says "microprocessor based" and nothing about orifice,
+    // mechanical or electromagnetic. The three Part C ticks are a statement
+    // about the instrument on a document somebody signs.
+    for (const preset of DEVICE_PRESETS) {
+      expect(preset.flowDeviceKind).toBeUndefined();
+      expect(preset.flowDeviceKindNote).toContain('yours to make');
+    }
+  });
+
+  it('will not offer a meter the form already holds, matched on serial not on id', () => {
+    const [first] = DEVICE_PRESETS;
+    expect(unusedDevicePresets([])).toHaveLength(DEVICE_PRESETS.length);
+    // Typed by hand with the same serial is the same meter: offering it again
+    // would put one instrument in two Part C columns.
+    const byHand = [{ slot: 'Device/gauge 1', serialNumber: first!.device.serialNumber.toLowerCase() }];
+    expect(unusedDevicePresets(byHand).map((p) => p.id)).not.toContain(first!.id);
+  });
+
+  it('names where it was transcribed from, so the next person can check it', () => {
+    expect(DEVICE_PRESET_SOURCE).toContain('CR-SQF-001.pdf');
+    expect(DEVICE_PRESET_SOURCE).toContain('Lawrence Coomber');
+  });
+});
+
+describe('a meter certified for its service life', () => {
+  const meter = (over: Partial<TestDevice> = {}): TestDevice => ({
+    slot: 'Device/gauge 1',
+    serialNumber: 'SQF-001',
+    dateCalibrated: '2026-07-18',
+    calibrationBasis: 'service-life',
+    ...over,
+  });
+
+  it('is not stale a year later, because its certificate says it is not', () => {
+    // On the twelve-month rule this blocked every form raised after 18/07/2027,
+    // for a reason the manufacturer's certificate contradicts.
+    const c = deviceCalibration(meter(), '2028-03-01');
+    expect(c.state).toBe('service-life');
+    expect(c.issue).toBeUndefined();
+    expect(c.monthsBefore).toBeGreaterThan(CALIBRATION_MONTHS);
+  });
+
+  it('still reports a missing date, an unreadable one and one after the test', () => {
+    expect(deviceCalibration(meter({ dateCalibrated: undefined }), '2028-03-01').state).toBe('no-date');
+    expect(deviceCalibration(meter({ dateCalibrated: 'last winter' }), '2028-03-01').state)
+      .toBe('unreadable-date');
+    expect(deviceCalibration(meter(), '2026-01-01').state).toBe('calibrated-after-test');
+  });
+
+  it('leaves a pressure gauge on the twelve-month rule', () => {
+    const gauge = deviceCalibration(meter({ calibrationBasis: undefined }), '2028-03-01');
+    expect(gauge.state).toBe('out-of-calibration');
+    expect(gauge.issue!.blocking).toBe(true);
+  });
+
+  it('does not block the form, which is the whole point', () => {
+    const form = issuable({
+      testDate: '2028-03-01',
+      devices: [meter({ calibrationCertificate: 'CR-SQF-001-IN-01' })],
+    });
+    expect(validateForm72(form).filter((i) => i.part === 'C')).toEqual([]);
+  });
+
+  it('prints which basis each device was accepted on, marked as ours', () => {
+    const html = form72Html(doc({
+      form: issuable({ devices: [meter({ calibrationCertificate: 'CR-SQF-001-IN-01' })] }),
+    }));
+    expect(flat(html)).toContain('Calibration basis <span class="extra">added</span>');
+    expect(flat(html)).toContain("Manufacturer certifies for the device's service life");
+
+    const onInterval = form72Html(doc({
+      form: issuable({ devices: [meter({ calibrationBasis: 'interval' })] }),
+    }));
+    expect(flat(onInterval)).toContain('12 month interval');
+  });
+});
+
+describe('Part C as the department prints it', () => {
+  it('heads the four columns Device/gauge 1 to 4, not two devices and two gauges', () => {
+    const html = form72Html(doc({ form: issuable({ devices: [] }) }));
+    for (const head of DEPARTMENT_DEVICE_SLOTS) expect(html).toContain(head);
+    expect(DEPARTMENT_DEVICE_SLOTS).toHaveLength(4);
+  });
+
+  it('calls the row Correction certificate, which is the department’s label', () => {
+    const html = form72Html(doc());
+    expect(html).toContain('Correction certificate');
+    expect(html).not.toContain('Calibration Certificate');
+  });
+
+  it('marks the correction factor row as ours, because the printed grid has no such row', () => {
+    const html = form72Html(doc());
+    expect(flat(html)).toContain('Correction factor (kPa or %) <span class="extra">added</span>');
+  });
+
+  it('keeps a technician’s own slot name under the department’s head rather than replacing it', () => {
+    const html = form72Html(doc({
+      form: issuable({ devices: [{ slot: 'Pitot gauge', serialNumber: 'PG-1' }] }),
+    }));
+    const head = between(html, 'Device/gauge 1', 'Serial number');
+    expect(head).toContain('Pitot gauge');
+  });
+
+  it('appends a fifth device rather than dropping it off the four printed columns', () => {
+    const five = Array.from({ length: 5 }, (_, i) => ({ slot: `D${i}`, serialNumber: `S-${i}` }));
+    const html = form72Html(doc({ form: issuable({ devices: five }) }));
+    expect(html).toContain('S-4');
+    expect(flat(html)).toContain('<span class="extra">added</span>');
+  });
+});
+
+describe('the department’s own words, label for label', () => {
+  const html = form72Html(doc());
+
+  it('heads the page the way the published form heads it', () => {
+    expect(FORM_TITLE).toBe('Form 72 — fire hydrant and sprinkler system');
+    expect(FORM_SUBTITLE).toBe('periodic testing and maintenance');
+    expect(html).toContain('Version 1 – July 2014');
+  });
+
+  it('bands each part in the department’s casing', () => {
+    for (const band of [
+      'Part A — Test details',
+      'Part B — Hydrant hydrostatic test',
+      'Part C — Hydrant test equipment/pressure gauges',
+      'Part D — Hydrant system flow test',
+      'Part E — Pump appliance booster test',
+      'Part F — Sprinkler hydrostatic test',
+      'Part G — Sprinkler system flow test',
+      'Part H — Compliance',
+      'Part I — Signature',
+    ]) {
+      expect({ band, found: html.includes(band) }).toEqual({ band, found: true });
+    }
+  });
+
+  it('writes every field label the way the published form writes it', () => {
+    for (const label of [
+      'Site name', 'Site address', 'Contractor', 'Test date', 'Maintenance test',
+      'fire hydrant', 'fire sprinkler', 'combined', 'Annual', '5 year',
+      'Boost pressure (kPa)', 'Test pressure (kPa)', 'Duration of test (mins)',
+      'End of test pressure (kPa)', 'Loss (if any) (L/min)',
+      'Flow measuring device', 'Orifice', 'Mechanical', 'Electro magnetic',
+      'Part C not required for orifice testing',
+      'Serial number', 'Date calibrated', 'Correction certificate',
+      '65/100/150 mm face', 'Digital reader', 'Increments (kPa)',
+      'Hydrant 1 location', 'Hydrant 2 location', 'Hydrant 3 location', 'Hydrant 4 location',
+      'System requirements (L/s at kPa)', 'Static pressure (kPa)',
+      'On-site pump set installed', 'Pressure zone number',
+      'Size/flow rate', 'Device/gauge no. (Part C)', 'Hydrant 1 only',
+      'System achieved (L/s at kPa)',
+      'Height of highest hydrant above booster (m)', 'Pump inlet pressure (kPa)',
+      'Pump discharge pressure (kPa)', 'Calculated frictional loss (kPa)',
+      'Time held (mins)',
+      'System specifications (block plan)', 'Test results', 'Test point 1', 'Location',
+      'Required flow rate (L/min)', 'Required pressure (kPa)',
+      'Running test — installation gauge pressure (kPa)',
+      'Critical defects identified', 'Repairs/corrective actions taken',
+      'Licensee name', 'Licensee signature', 'Licence no. (QBCC/PIC)', 'Licensee report no.',
+    ]) {
+      expect({ label, found: html.includes(label) }).toEqual({ label, found: true });
+    }
+  });
+
+  it('prints Part H’s two sentences in the department’s words', () => {
+    expect(flat(html)).toContain('Give owner/occupier a critical defect notice');
+    expect(flat(html)).toContain(
+      "Attach details (including action and date taken) as part of Licensee's report",
+    );
+    expect(flat(html)).toContain('No action required in relation to critical defects at this time');
+    expect(flat(html)).toContain(
+      'No action required in relation to repairs/corrective actions at this time',
+    );
+  });
+
+  it('prints the privacy and right-to-information notices, which are part of the form', () => {
+    // They say what the information on the page may be used for and who it may
+    // be given to. A reproduction that drops them hands somebody a document
+    // that collects their details and does not tell them that.
+    expect(flat(html)).toContain(flat(DEPARTMENT_PRIVACY));
+    expect(flat(html)).toContain(flat(DEPARTMENT_RTI));
+    expect(flat(html)).toContain('Plumbing and Drainage Act 2002');
+    expect(flat(html)).toContain('Right to Information Act 2009');
+    expect(flat(html)).toContain('buildingcodes@qld.gov.au');
+    expect(flat(html)).toContain('© The State of Queensland (Department of Housing and Public Works) 2014.');
+  });
+
+  it('prints the department’s own imprint', () => {
+    expect(html).toContain('Building Codes Queensland');
+    expect(html).toContain('Department of Housing and Public Works');
+  });
+
+  it('marks every row Safe QLD added inside the department’s parts, and adds no others', () => {
+    // Everything else the app adds goes on the attachment page after Part I.
+    // These three sit inside a department part because each belongs beside the
+    // figure it qualifies, so each has to say it is ours. A fourth appearing
+    // here without a reason recorded in this test is a row that slipped in.
+    const inParts = between(html, 'Part A — Test details', 'Part I — Signature');
+    const marked = inParts.match(/<span class="extra">added<\/span>/g) ?? [];
+    expect(marked.length).toBe(3);
+    // Part C's note promises a correction factor and the printed grid has no row for it.
+    expect(flat(inParts)).toContain('Correction factor (kPa or %) <span class="extra">added</span>');
+    // One of our flow meters is certified for its service life, not for twelve
+    // months, so the date alone would read as a year out of calibration.
+    expect(flat(inParts)).toContain('Calibration basis <span class="extra">added</span>');
+    // Part H prints the System Pass/Fail pair and no note field.
+    expect(flat(inParts)).toContain('System notes <span class="extra">added</span>');
   });
 });

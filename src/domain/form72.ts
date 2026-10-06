@@ -39,8 +39,28 @@ export interface MaintenanceTest {
   combinedFiveYear: boolean;
 }
 
+/**
+ * How long a device's calibration is good for.
+ *
+ * 'interval' is the ordinary case and the default: a test gauge is calibrated,
+ * and twelve months later it is not, whatever anybody says about it.
+ *
+ * 'service-life' exists because Safe QLD's two flow meters are not gauges. The
+ * manufacturer's certificate states that calibration is fixed in software and
+ * that the device holds its accuracy for its service life, with recalibration
+ * only on repair. Judged on the twelve-month rule those meters would block
+ * every Form 72 raised a year after their certificate date — a form refused for
+ * a reason the certificate says is not true.
+ *
+ * It is a per-device claim rather than a global exception, it clears only the
+ * staleness check and none of the others, and the printed page says which basis
+ * each device was accepted on. Ticked onto a pressure gauge it would be wrong,
+ * and the page showing the basis is what makes that visible to a reader.
+ */
+export type CalibrationBasis = 'interval' | 'service-life';
+
 export interface TestDevice {
-  /** "Device 1", "Gauge 2" — the column it occupies on the form. */
+  /** "Device/gauge 1" — the column it occupies on the form. */
   slot: string;
   serialNumber: string;
   /** ISO date. */
@@ -51,6 +71,16 @@ export interface TestDevice {
   digitalReader?: boolean;
   /** Gauge increments in kPa. */
   incrementsKpa?: number;
+  /** Defaults to 'interval' where absent, which is every form already stored. */
+  calibrationBasis?: CalibrationBasis;
+  /**
+   * What the device is, in the manufacturer's words.
+   *
+   * Not a field on the department's form. It is what makes a stored device
+   * recognisable in a list a year later — "SQF-001" says nothing, "Flowtech
+   * Omega Series inline meter" says which instrument was on the hydrant.
+   */
+  model?: string;
   /**
    * The gauge's correction, as kPa or a percentage.
    *
@@ -167,8 +197,43 @@ export function flowRowKey(row: FlowRow): string {
   return 'unidentified';
 }
 
-/** How a row prints down the left of Part D. */
+/**
+ * How a row prints down the left of Part D.
+ *
+ * The department groups the eight rows under two headings — "Nozzles" over the
+ * three bores, "Other portable testing devices" over the five metered rates —
+ * and labels each row with the size alone. So the printed page carries the
+ * group in its own cell and this is the size: "19 mm", "5 L/s".
+ */
 export function flowRowLabel(row: FlowRow): string {
+  if (row.nozzleMm !== undefined) return `${row.nozzleMm} mm`;
+  if (row.rateLps !== undefined) return `${row.rateLps} L/s`;
+  return 'Unlabelled row';
+}
+
+/** The two headings the department groups Part D's rows under. */
+export const FLOW_ROW_GROUP_LABEL = {
+  nozzle: 'Nozzles',
+  device: 'Other portable testing devices',
+  unidentified: 'Other',
+} as const;
+
+export type FlowRowGroup = keyof typeof FLOW_ROW_GROUP_LABEL;
+
+export function flowRowGroup(row: FlowRow): FlowRowGroup {
+  if (row.nozzleMm !== undefined) return 'nozzle';
+  if (row.rateLps !== undefined) return 'device';
+  return 'unidentified';
+}
+
+/**
+ * A row's label with its group, for anywhere the two cells are one line.
+ *
+ * The screen shows one row per card and has no column to put the group in, and
+ * "19 mm" on its own card is ambiguous — a bore or a gauge face. The printed
+ * table uses flowRowLabel and prints the group beside it.
+ */
+export function flowRowLongLabel(row: FlowRow): string {
   if (row.nozzleMm !== undefined) return `${row.nozzleMm} mm nozzle`;
   if (row.rateLps !== undefined) return `${row.rateLps} L/s device`;
   return 'Unlabelled row';
@@ -566,6 +631,8 @@ export type CalibrationState =
   | 'no-test-date'
   | 'calibrated-after-test'
   | 'out-of-calibration'
+  /** Certified by the manufacturer for the device's service life, not an interval. */
+  | 'service-life'
   | 'in-calibration';
 
 export interface DeviceCalibration {
@@ -627,6 +694,14 @@ export function deviceCalibration(
   }
 
   const monthsBefore = (testAt - calAt) / (1000 * 60 * 60 * 24 * 30.44);
+
+  // A device whose certificate covers its service life is not stale at twelve
+  // months. Everything above still applied to it — a missing date, an
+  // unreadable one and one after the test are the same problem whatever the
+  // basis — and the age is still reported, so the page can print how old the
+  // certificate is alongside the basis it was accepted on.
+  if (device.calibrationBasis === 'service-life') return { state: 'service-life', monthsBefore };
+
   if (monthsBefore > CALIBRATION_MONTHS) {
     return {
       state: 'out-of-calibration',

@@ -17,7 +17,7 @@ import { describeActionFailure } from '@/domain/loadFailure';
 import { router } from 'expo-router';
 import {
   CALIBRATION_MONTHS, PART_D_ROWS, PART_RESULT_LABEL, SYSTEM_TYPE_LABEL, TEST_INTERVAL_LABEL,
-  deviceCalibration, elevationHeadKpa, flowRowKey, flowRowLabel, flowRowUntouched,
+  deviceCalibration, elevationHeadKpa, flowRowKey, flowRowLongLabel, flowRowUntouched,
   intervalsTested, maintenanceTestFromAxes, overloadCheck, resolveFrictionalLoss,
   systemTypesTested, validateForm72,
   type BoosterTest, type FlowDeviceKind, type FlowRow, type FormDefect, type FormIssue,
@@ -27,9 +27,11 @@ import {
 import {
   DECLARATION, FORM_SUBTITLE, FORM_TITLE, FORM_VERSION, OCCUPIER_COPY_BUSINESS_DAYS,
   PART_B_NOTE, PART_C_NOTE, PART_D_NOTE, PART_E_NOTE, PART_F_NOTE, PART_G_NOTE,
-  PART_D_LOCATION_SLOTS, TESTER_RETENTION_YEARS, form72Html, frictionalLossGaps,
+  DEPARTMENT_DEVICE_SLOTS, PART_D_LOCATION_SLOTS, TESTER_RETENTION_YEARS, form72Html,
+  frictionalLossGaps,
   occupierCopyDueBy, testPointOutcome, testerCopyKeepUntil,
 } from '@/export/form72';
+import { unusedDevicePresets } from '@/domain/form72Devices';
 import { shareFile, writePdf } from '@/export/files';
 import { sendMail } from '@/export/mail';
 import { notSharedNotice } from '@/export/shareOutcome';
@@ -903,8 +905,14 @@ function PartB({ form, locked, patch }: PartProps) {
  * page unusable, and it is the one thing a person reading the printed form
  * cannot check, because the paper does not carry the test date beside it.
  */
+/** The column the next device occupies, in the department's own words. */
+function deviceSlotName(index: number): string {
+  return DEPARTMENT_DEVICE_SLOTS[index] ?? `Device/gauge ${index + 1}`;
+}
+
 function PartC({ form, locked, patch }: PartProps) {
   const devices = form.devices;
+  const unused = unusedDevicePresets(devices);
   const setDevice = (i: number, p: Partial<TestDevice>) => patch({
     devices: devices.map((d, n) => (n === i ? { ...d, ...p } : d)),
   });
@@ -945,7 +953,10 @@ function PartC({ form, locked, patch }: PartProps) {
         return (
         <Card key={`${d.slot}-${i}`}>
           <Rowed>
-            <Txt weight="700" style={{ flex: 1 }}>{d.slot || `Device ${i + 1}`}</Txt>
+            <View style={{ flex: 1 }}>
+              <Txt weight="700">{d.slot || deviceSlotName(i)}</Txt>
+              {d.model ? <Txt size="xs" tone="faint">{d.model}</Txt> : null}
+            </View>
             {cal.issue ? (
               <Chip
                 label={cal.state === 'out-of-calibration' ? 'Out of calibration'
@@ -976,6 +987,39 @@ function PartC({ form, locked, patch }: PartProps) {
             />
           ) : null}
           <Field label="Certificate" value={d.calibrationCertificate ?? ''} onChangeText={(v) => setDevice(i, { calibrationCertificate: v })} editable={!locked} />
+          {/*
+            * Which basis the date was accepted on.
+            *
+            * A pressure gauge is good for twelve months and then it is not,
+            * whatever anybody says. Our two flow meters are not gauges: the
+            * manufacturer certifies them for the device's service life, and on
+            * the twelve-month rule they would block every form raised a year
+            * after their certificate date — refused for a reason the
+            * certificate contradicts. So it is a per-device claim, it clears
+            * only the staleness check, and it prints on the form so a reader
+            * can judge it.
+            */}
+          <View style={{ gap: 6 }}>
+            <Label>Calibration basis</Label>
+            {locked ? (
+              <Chip label={d.calibrationBasis === 'service-life' ? 'Certified for service life' : `${CALIBRATION_MONTHS} month interval`} />
+            ) : (
+              <Segmented
+                options={[
+                  { value: 'interval' as const, label: `${CALIBRATION_MONTHS} months` },
+                  { value: 'service-life' as const, label: 'Service life' },
+                ]}
+                value={d.calibrationBasis ?? 'interval'}
+                onChange={(v) => setDevice(i, { calibrationBasis: v })}
+              />
+            )}
+            {d.calibrationBasis === 'service-life' ? (
+              <Txt size="xs" tone="faint">
+                Only for a device whose certificate says so — our inline meters do. On a pressure
+                gauge this is wrong, and the form prints which basis each device was accepted on.
+              </Txt>
+            ) : null}
+          </View>
           <Field
             label="Correction factor"
             value={d.correctionFactor ?? ''}
@@ -1001,13 +1045,56 @@ function PartC({ form, locked, patch }: PartProps) {
       })}
 
       {!locked ? (
-        <Button
-          title="Add a device"
-          variant="secondary"
-          onPress={() => patch({
-            devices: [...devices, { slot: `Device ${devices.length + 1}`, serialNumber: '' }],
-          })}
-        />
+        <Card>
+          {/*
+            * The company's own meters, in one tap.
+            *
+            * Part C is the same two instruments on nearly every hydrant form
+            * this company raises, and it was typed again every time: a serial
+            * number, a date, a certificate reference and a correction factor.
+            * A serial number mistyped reads exactly like a serial number, and
+            * the form it is on is signed. What a chip adds is still editable —
+            * a serviced meter has a new certificate date before this app does.
+            */}
+          {unused.length ? (
+            <>
+              <Label>Our test equipment</Label>
+              <Txt size="sm" tone="muted">
+                Adds the meter with its serial number, certificate and correction factor already
+                filled in. Check them against the certificate in your hand.
+              </Txt>
+              <View style={{ gap: 8 }}>
+                {unused.map((preset) => (
+                  <View key={preset.id} style={{ gap: 2 }}>
+                    <Chip
+                      label={`+ ${preset.label}`}
+                      onPress={() => patch({
+                        devices: [...devices, { slot: deviceSlotName(devices.length), ...preset.device }],
+                      })}
+                    />
+                    <Txt size="xs" tone="faint">{preset.detail}</Txt>
+                  </View>
+                ))}
+              </View>
+              {unused.some((p) => p.flowDeviceKindNote) ? (
+                <Txt size="xs" tone="faint">
+                  {unused.find((p) => p.flowDeviceKindNote)!.flowDeviceKindNote}
+                </Txt>
+              ) : null}
+            </>
+          ) : (
+            <Txt size="sm" tone="muted">
+              Both of our meters are on this form. Anything else you used goes on by hand.
+            </Txt>
+          )}
+          <Button
+            title="Add a device by hand"
+            variant="secondary"
+            onPress={() => patch({
+              devices: [...devices, { slot: deviceSlotName(devices.length), serialNumber: '' }],
+            })}
+          />
+        </Card>
       ) : null}
     </View>
   );
@@ -1155,7 +1242,7 @@ function PartD({ form, locked, patch }: PartProps) {
         return (
           <Card key={flowRowKey(r)}>
             <Rowed>
-              <Txt weight="700" style={{ flex: 1 }}>{flowRowLabel(r)}</Txt>
+              <Txt weight="700" style={{ flex: 1 }}>{flowRowLongLabel(r)}</Txt>
               {!line.printed ? <Chip label="Not on the printed table" tone="warn" /> : null}
               {untouched ? <Chip label="Nothing read" tone="muted" /> : null}
               {!line.printed && !locked && line.index !== undefined ? (
