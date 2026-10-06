@@ -38,6 +38,16 @@ import {
 type Start = 'here' | 'first';
 
 /**
+ * How many open jobs the "All open" tab will plan a route over.
+ *
+ * Above the open work on this book — around seven hundred of 4,562 — with
+ * room, and said out loud where it bites, because a route planned over part of
+ * the outstanding work and labelled "All open" is the kind of wrong that gets
+ * trusted.
+ */
+const OPEN_PAGE = 1500;
+
+/**
  * The Queensland clock time of an instant, as HH:MM.
  *
  * Read off qldMoment rather than off the string: the eleventh to sixteenth
@@ -79,6 +89,25 @@ export default function RouteScreen() {
   const [failed, setFailed] = useState<string | null>(null);
   /** The ids the office has this person on today. Empty where the phone does not know who it is. */
   const [bookedToday, setBookedToday] = useState<Set<string>>(new Set());
+  /** Whether there is more open work than the page took, so the tab can say so. */
+  const [openCut, setOpenCut] = useState(false);
+
+  /**
+   * Everything still on, asked for as such.
+   *
+   * It read the first five hundred rows of the whole job table. The order puts
+   * open work first, so on a small book that is the same thing and on this one
+   * it is not: 4,562 jobs, around seven hundred of them open, so a couple of
+   * hundred open jobs were never offered to the run and the tab called itself
+   * "All open". One extra row is asked for so the screen can tell a full page
+   * from a complete list, because a cut nobody is told about is the whole
+   * fault here.
+   */
+  const openJobs = useCallback(async () => {
+    const rows = await listJobs({ open: true, limit: OPEN_PAGE + 1 });
+    setOpenCut(rows.length > OPEN_PAGE);
+    return rows.slice(0, OPEN_PAGE);
+  }, []);
 
   const load = useCallback(async () => {
     setFailed(null);
@@ -90,7 +119,7 @@ export default function RouteScreen() {
         setMine(null);
         setEveryones(true);
         setBookedToday(new Set());
-        setJobs(await listJobs({ limit: 500 }));
+        setJobs(await openJobs());
         return;
       }
       const blocks = await listScheduleFor({
@@ -105,7 +134,7 @@ export default function RouteScreen() {
        * today, so the other tab keeps reading the job list. Both are loaded
        * here because switching tabs should not be a second wait.
        */
-      const open = await listJobs({ limit: 500 });
+      const open = await openJobs();
       const byId = new Map(open.map((j) => [j.id, j]));
       for (const j of booked) byId.set(j.id, j);
       /*
@@ -120,7 +149,7 @@ export default function RouteScreen() {
     } catch (e) {
       setFailed(describeLoadFailure(e, "today's run"));
     }
-  }, []);
+  }, [openJobs]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -230,6 +259,22 @@ export default function RouteScreen() {
           <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
             The jobs the office has {mine.label} booked on today.
           </Txt>
+        ) : null}
+        {/*
+          * A tab called "All open" that is not all of it has to say so. It
+          * used to read the first five hundred rows of the job table, which on
+          * this book left a couple of hundred open jobs off the run with
+          * nothing to mark their absence — a route planned over part of the
+          * outstanding work, labelled as the whole of it, is the kind of wrong
+          * that gets trusted.
+          */}
+        {scope === 'open' && openCut ? (
+          <Banner
+            tone="warn"
+            title={`More than ${OPEN_PAGE.toLocaleString()} jobs are open`}
+            body={`The run is planned over the first ${OPEN_PAGE.toLocaleString()}, in the job list's own order. `
+              + 'Use the job list to work through the rest.'}
+          />
         ) : null}
 
         {locationNote ? <Banner tone="warn" title="Ordering without a position" body={locationNote} /> : null}

@@ -148,11 +148,27 @@ const JOB_QLD_DAY = `CASE
          THEN substr(datetime(scheduledFor, '+${QLD_UTC_OFFSET_HOURS} hours'), 1, 10)
      END`;
 
-export async function listJobs(filter: { status?: JobRecord['status']; onDate?: string; limit?: number } = {}): Promise<JobRecord[]> {
+export async function listJobs(filter: {
+  status?: JobRecord['status'];
+  onDate?: string;
+  /**
+   * Only the work still on, by the same rule the whole app uses — see
+   * JOB_IS_OPEN, which is the office's stage and not just the status.
+   *
+   * Added for Today's run, which wanted "everything still open", read the
+   * first five hundred rows of the whole job table and called that it. The
+   * order puts open work first, so it looked right; on this phone there are
+   * 4,562 jobs and around seven hundred open, so a couple of hundred of them
+   * were never on the run and nothing said so.
+   */
+  open?: boolean;
+  limit?: number;
+} = {}): Promise<JobRecord[]> {
   const db = await getDb();
   const where: string[] = [];
   const args: (string | number)[] = [];
   if (filter.status) { where.push('status = ?'); args.push(filter.status); }
+  if (filter.open) where.push(`(${JOB_IS_OPEN})`);
   if (filter.onDate) { where.push('substr(scheduledFor,1,10) = ?'); args.push(filter.onDate); }
   args.push(filter.limit ?? 200);
   return db.getAllAsync<JobRecord>(
@@ -234,6 +250,17 @@ export interface JobPageQuery {
   /** Opened from a site, or from a customer: only theirs. */
   siteId?: string;
   customerExternalId?: string;
+  /**
+   * A window on the Queensland day the office raised the job, inclusive.
+   *
+   * For a screen whose filter is neither "today" nor "everything": the Form 72
+   * starter offers a "recent" tab meaning the job somebody is writing up now,
+   * raised in the last fortnight. It used to take that slice out of a
+   * four-hundred-row window in JavaScript, which on 4,562 jobs meant the tab
+   * could be empty while the job sat on the books.
+   */
+  dayFrom?: string;
+  dayTo?: string;
   /** How many rows the screen will draw. */
   limit?: number;
 }
@@ -303,6 +330,9 @@ export async function listJobPage(q: JobPageQuery): Promise<JobPage> {
     default:
       break;
   }
+
+  if (q.dayFrom) { where.push(`${JOB_QLD_DAY} >= ?`); args.push(q.dayFrom); }
+  if (q.dayTo) { where.push(`${JOB_QLD_DAY} <= ?`); args.push(q.dayTo); }
 
   for (const word of searchWords(q.query)) {
     where.push(`(${JOB_SEARCH_COLUMNS.map((c) => `${c} LIKE ? ESCAPE '\\'`).join(' OR ')})`);

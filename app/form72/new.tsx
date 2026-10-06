@@ -1,9 +1,9 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { createForm72 } from '@/db/form72Repo';
-import { listJobPage, type JobSummary } from '@/db/opsRepo';
+import { getJob, listJobPage, type JobSummary } from '@/db/opsRepo';
 import { getSite, listSitePicks, type SitePick } from '@/db/repo';
 import { SitePicker } from '@/components/SitePicker';
 import { queryAssets } from '@/db/assetRepo';
@@ -47,14 +47,28 @@ import { showAlert } from '@/components/alert';
 
 type Mode = 'today' | 'recent' | 'all';
 
+/**
+ * How many jobs the list draws. Where it cuts, the line under it says so.
+ *
+ * It was four hundred, and the search ran over those four hundred rather than
+ * over the books — so the number was not a drawing limit, it was the limit of
+ * what could be found. Now the search is the query and this is only how many
+ * rows reach the screen.
+ */
+const PAGE = 100;
+
 export default function NewForm72Screen() {
   const t = useTheme();
   const params = useLocalSearchParams<{ siteId?: string; jobId?: string }>();
   const [jobs, setJobs] = useState<JobSummary[] | null>(null);
   const [typed, setTyped] = useState('');
+  /** The search is a query now, so it waits for the typing to stop. */
+  const [debounced, setDebounced] = useState('');
   const [mode, setMode] = useState<Mode>('today');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [capped, setCapped] = useState(false);
+  /** How many jobs the tab and the search match, which is not how many fit. */
+  const [matching, setMatching] = useState(0);
   /*
    * Starting from a site instead of a job.
    *
@@ -90,6 +104,13 @@ export default function NewForm72Screen() {
 
   const today = qldIsoDay(nowIso()) ?? '';
 
+  // The search waits for the typing to stop, because every keystroke is now a
+  // statement rather than a pass over an array already in memory.
+  useEffect(() => {
+    const h = setTimeout(() => setDebounced(typed), 200);
+    return () => clearTimeout(h);
+  }, [typed]);
+
   /*
    * Arrived from a job screen: that job is the one, so it is already chosen and
    * what it fills is already on screen. Walking somebody from a job they have
@@ -110,37 +131,76 @@ export default function NewForm72Screen() {
     }
   }, [today]);
 
+  /*
+   * The tab, as a window on the day the office raised the job.
+   *
+   * "Raised today" is exactly that and nothing else, which is why it is a day
+   * window rather than the repository's own `today` filter — that one also
+   * takes in whatever the schedule has booked for today, which is a different
+   * and larger set than the label promises.
+   */
+  const window = useMemo(() => {
+    if (mode === 'today') return { dayFrom: today, dayTo: today };
+    // The write-up case: a job raised in the last fortnight that somebody is
+    // turning into a document now. Raised, not done — see the note by the
+    // tabs. The job list has no date for when work happened.
+    if (mode === 'recent') return { dayFrom: shiftDays(today, -14), dayTo: shiftDays(today, -1) };
+    return {};
+  }, [mode, today]);
+
   const load = useCallback(async () => {
     try {
-      // Every job, ranked here rather than by the query: "the one I am standing
-      // on" is a different order from the job list's, and the filter the
-      // technician wants is nearly always today.
+      /*
+       * The search, the tab and the cap are the query.
+       *
+       * This read four hundred jobs once and then did all three in JavaScript.
+       * On this owner's phone there are 4,562 of them, so typing a job number
+       * searched the four hundred the window happened to hold — a job raised
+       * yesterday was unreachable while the screen said "search if yours is
+       * not here", which is the worst way to be wrong: the instruction that
+       * cannot work is the one on screen. The job list itself has worked this
+       * way since listJobPage existed; this screen was still on the window.
+       */
       const page = await listJobPage({
-        filter: 'all', today, siteId: params.siteId || undefined, limit: 400,
+        filter: 'all',
+        today,
+        query: debounced.trim() || undefined,
+        siteId: params.siteId || undefined,
+        ...window,
+        limit: PAGE,
       });
       setJobs(page.rows);
-      // Whether there are more jobs than the window took. The repository has
+      setMatching(page.matching);
+      // Whether there are more jobs than the page took. The repository has
       // always said so and this screen threw it away, so a technician
       // searching for a job past the four-hundredth got an empty list with
       // nothing to say the list had ended rather than the job not existing.
       setCapped(page.capped);
       setLoadError(null);
-
-      // The job we arrived from, chosen once. Done here rather than in an
-      // effect watching the list, which would be a setState inside an effect
-      // body and a cascading render for a thing that happens once.
-      if (params.jobId && !autoPicked.current) {
-        autoPicked.current = true;
-        const found = page.rows.find((j) => j.id === params.jobId);
-        if (found) await describeJob(found);
-      }
     } catch (e) {
       setJobs([]);
+      setMatching(0);
       setLoadError(describeLoadFailure(e, 'the job list'));
     }
-  }, [today, params.siteId, params.jobId, describeJob]);
+  }, [today, debounced, params.siteId, window]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
+
+  /*
+   * The job we arrived from, read by its own id rather than looked for in the
+   * list. It used to be found in the page, which worked only while the page
+   * was everything — now that the tab and the search narrow it, a job opened
+   * from its own screen would not be in the rows and the preview would
+   * silently not appear.
+   */
+  useFocusEffect(useCallback(() => {
+    if (!params.jobId || autoPicked.current) return;
+    autoPicked.current = true;
+    void (async () => {
+      const job = await getJob(params.jobId!);
+      if (job) await describeJob(job);
+    })();
+  }, [params.jobId, describeJob]));
 
   const openBySite = useCallback(async () => {
     setBySite(true);
@@ -154,22 +214,10 @@ export default function NewForm72Screen() {
 
   const shown = useMemo(() => {
     if (!jobs) return [];
-    const q = typed.trim().toLowerCase();
-    const matches = (j: JobSummary) => !q
-      || [j.siteName, j.title, j.customerName, j.externalId, j.orderNo, j.address]
-        .some((v) => v?.toLowerCase().includes(q));
-
-    const inMode = (j: JobSummary) => {
-      const day = j.scheduledFor?.slice(0, 10);
-      if (mode === 'all') return true;
-      if (mode === 'today') return day === today;
-      // The write-up case: a job raised in the last fortnight that somebody is
-      // turning into a document now. Raised, not done — see the note by the
-      // tabs. The job list has no date for when work happened.
-      return !!day && day < today && day >= shiftDays(today, -14);
-    };
-
-    const pool = jobs.filter((j) => matches(j) && inMode(j));
+    // The filtering is the query's now. What is left here is the order, which
+    // is this screen's own: "the one I am standing on" is not the job list's
+    // order, and water-based fire work comes first inside whatever tab is on.
+    const pool = jobs;
     const ranked = rankJobsForNewForm(pool.map(toJobForForm), today);
     // Water-based fire work first inside the chosen filter. Everything stays on
     // the list — a hydrant test can be booked under a job called anything.
@@ -182,7 +230,7 @@ export default function NewForm72Screen() {
         if (fireA !== fireB) return fireA - fireB;
         return (order.get(a.externalId ?? a.title) ?? 0) - (order.get(b.externalId ?? b.title) ?? 0);
       });
-  }, [jobs, typed, mode, today]);
+  }, [jobs, today]);
 
 
   const create = useCallback(async (job: JobSummary, mapped: Form72FromJob) => {
@@ -281,11 +329,17 @@ export default function NewForm72Screen() {
         * that quietly means something else.
         */}
       <Txt size="xs" tone="faint">
-        {mode === 'all'
-          ? `${shown.length} job${shown.length === 1 ? '' : 's'}${
-            capped ? ' — the list is windowed, so search if yours is not here' : ''}`
-          : 'By the date the office raised the job, which is the only date Simpro gives us. '
-            + 'Search by job number or site if yours is not here.'}
+        {/*
+          * The two numbers, because they answer different questions: how many
+          * are drawn, and how many there are. It used to say "the list is
+          * windowed, so search if yours is not here" while the search ran over
+          * that same window — advice that could not work. The search is the
+          * query now, so the sentence is true.
+          */}
+        {capped
+          ? `First ${shown.length} of ${matching.toLocaleString()} — add the site or the customer to narrow it.`
+          : `${matching.toLocaleString()} job${matching === 1 ? '' : 's'}${
+            mode === 'all' ? '' : ', by the date the office raised it — the only date Simpro gives us'}`}
       </Txt>
 
       {bySite ? (

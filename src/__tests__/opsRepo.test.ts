@@ -425,6 +425,83 @@ describe('the job list as a query', () => {
     expect([...page.rows.map((j) => j.id)].sort()).toEqual(['j-byhand', 'j-midnight', 'j-old']);
   });
 
+  /*
+   * The day window, which the Form 72 starter's tabs are.
+   *
+   * That screen read four hundred jobs and sliced the fortnight out of them in
+   * JavaScript. On 4,562 jobs the tab could be empty while the job sat on the
+   * books, and the line under it said "search if yours is not here" while the
+   * search ran over the same four hundred.
+   */
+  describe('a window on the day the office raised the job', () => {
+    it('takes a single day, on the Queensland calendar', async () => {
+      await book();
+      const page = await listJobPage({
+        filter: 'all', today: TODAY, dayFrom: TODAY, dayTo: TODAY, limit: 100,
+      });
+      // j-midnight was issued at 23:30 UTC on the 2nd, which is half past nine
+      // this morning in Brisbane. The screen used to read the UTC date off the
+      // front of the string and call it the 2nd.
+      expect([...page.rows.map((j) => j.id)].sort()).toEqual(['j-byhand', 'j-midnight']);
+    });
+
+    it('takes a fortnight, ending the day before today', async () => {
+      await book();
+      const page = await listJobPage({
+        filter: 'all', today: TODAY, dayFrom: '2026-08-20', dayTo: '2026-09-02', limit: 100,
+      });
+      // j-open on the 28th. Not j-midnight or j-byhand, which are today, and
+      // not j-untidy, which the office raised for tomorrow.
+      expect([...page.rows.map((j) => j.id)].sort()).toEqual(['j-open']);
+    });
+
+    it('includes both ends, so a job raised on the first day of the window is in it', async () => {
+      await book();
+      const page = await listJobPage({
+        filter: 'all', today: TODAY, dayFrom: '2026-08-28', dayTo: '2026-09-04', limit: 100,
+      });
+      expect([...page.rows.map((j) => j.id)].sort())
+        .toEqual(['j-byhand', 'j-midnight', 'j-open', 'j-untidy']);
+    });
+
+    it('counts the matches rather than the rows, so a cut page still says how many', async () => {
+      await book();
+      const page = await listJobPage({
+        filter: 'all', today: TODAY, dayFrom: '2026-06-01', dayTo: '2026-09-02', limit: 1,
+      });
+      // j-done in June and j-open in August match; one is drawn. The line over
+      // the list has to read "first 1 of 2" rather than "1 job".
+      expect({ rows: page.rows.length, matching: page.matching, capped: page.capped })
+        .toEqual({ rows: 1, matching: 2, capped: true });
+    });
+
+    it('narrows with the search rather than instead of it', async () => {
+      await book();
+      const page = await listJobPage({
+        filter: 'all', today: TODAY, dayFrom: '2026-08-20', dayTo: '2026-09-02',
+        query: 'harbour', limit: 100,
+      });
+      expect(page.rows.map((j) => j.id)).toEqual(['j-open']);
+    });
+
+    it('leaves a job with no date out, rather than guessing one for it', async () => {
+      // JOB_QLD_DAY is NULL where scheduledFor is absent or unreadable, and a
+      // NULL compares false against both ends. A job with no date is not in
+      // any fortnight, which is the honest answer.
+      await upsertJob({ id: 'j-nodate', externalId: '99', siteName: 'Nowhere', title: 'No date', status: 'scheduled' });
+      const page = await listJobPage({
+        filter: 'all', today: TODAY, dayFrom: '2000-01-01', dayTo: '2099-01-01', limit: 100,
+      });
+      expect(page.rows.map((j) => j.id)).not.toContain('j-nodate');
+    });
+
+    it('is every job when no window is asked for, which is what every other caller does', async () => {
+      await book();
+      const page = await listJobPage({ filter: 'all', today: TODAY, limit: 100 });
+      expect(page.rows).toHaveLength(6);
+    });
+  });
+
   it('finds the person by name as well as by id, and nobody when the phone does not know whose it is', async () => {
     await book();
     const byName = await listJobPage({
