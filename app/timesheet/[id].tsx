@@ -4,6 +4,7 @@ import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getTimesheet, listTimesheets, saveTimesheet } from '@/db/timesheetRepo';
 import { jobCount, openJobPicks, searchJobPicks, type JobPick } from '@/db/opsRepo';
+import { listSiteSummaries } from '@/db/repo';
 import { deleteEntry, insertClosedEntry, listEntriesBetween } from '@/db/clockRepo';
 import { listSetupActivities } from '@/db/moreRepo';
 import { queueClockEntry } from '@/simpro/outboundMore';
@@ -1040,15 +1041,45 @@ function JobPicker({
         // failed.
         setSearching(true);
         try {
-          const rows = await searchJobPicks(typed, 60);
+          /*
+           * The sites as well as the jobs.
+           *
+           * This box says "Job number, site or client" and searched the job
+           * table alone, so a building the office has not raised work against
+           * returned nothing — the technician typed the site they were
+           * standing in and the list stayed empty. The only way on was the
+           * free-text box, which writes a name and no site id, so the row was
+           * never linked to a site record that exists on the phone.
+           *
+           * Jobs first, because a job is the more precise answer and most
+           * hours are worked under one. The sites follow, and only those the
+           * jobs did not already name.
+           */
+          const [rows, sites] = await Promise.all([
+            searchJobPicks(typed, 60),
+            listSiteSummaries({ query: typed, limit: 20 }),
+          ]);
           if (!current) return;
-          setFound(rows.filter((r) => r.externalId).map((r) => ({
+          const jobs: JobOption[] = rows.filter((r) => r.externalId).map((r) => ({
             jobNumber: r.externalId ?? '',
             siteName: r.siteName ?? '',
             siteId: r.siteId,
             customerName: r.customerName,
             source: 'simpro' as const,
-          })));
+          }));
+          const named = new Set(jobs.map((j) => j.siteId).filter(Boolean));
+          setFound([
+            ...jobs,
+            ...sites.rows
+              .filter((site) => !named.has(site.id))
+              .map((site) => ({
+                jobNumber: '',
+                siteName: site.name,
+                siteId: site.id,
+                customerName: site.clientName,
+                source: 'site' as const,
+              })),
+          ]);
         } catch {
           // A search that could not run is not a job that does not exist, so
           // the list empties and the line below says what to do about it —
@@ -1094,7 +1125,14 @@ function JobPicker({
                 <View style={{ flex: 1 }}>
                   <Txt weight="700" numberOfLines={1}>{o.siteName || `Job ${o.jobNumber}`}</Txt>
                   {o.customerName ? <Txt size="xs" tone="muted" numberOfLines={1}>{o.customerName}</Txt> : null}
-                  <Txt size="xs" tone="faint">{o.jobNumber ? `Job ${o.jobNumber}` : 'No job number'} · {o.source === 'recent' ? 'you worked this recently' : 'from the office'}</Txt>
+                  {/* A site with no job says so, rather than reading as a job
+                      whose number went missing. */}
+                  <Txt size="xs" tone="faint">
+                    {o.source === 'site'
+                      ? 'A site on this phone — the office has no job against it'
+                      : `${o.jobNumber ? `Job ${o.jobNumber}` : 'No job number'} · ${
+                        o.source === 'recent' ? 'you worked this recently' : 'from the office'}`}
+                  </Txt>
                 </View>
                 <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
               </Rowed>

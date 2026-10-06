@@ -5,7 +5,7 @@ import { loadPrefs } from '@/app-prefs';
 import { nowIso } from '@/db';
 import { listJobPage, type JobPage, type JobSummary } from '@/db/opsRepo';
 import { getCustomer, scheduledJobExternalIds } from '@/db/mirrorRepo';
-import { getSite } from '@/db/repo';
+import { getSite, listSiteSummaries, type SiteSummary } from '@/db/repo';
 import {
   jobStatusWord, localStateWord, stageLabel, statusSwatch, type JobListFilter,
 } from '@/domain/jobPresentation';
@@ -96,6 +96,35 @@ export default function JobsScreen() {
 
   const shown = page?.rows ?? [];
 
+  /*
+   * The sites the typed words match, for the dead end this box had.
+   *
+   * The placeholder promises "Job number, site or customer" and the query runs
+   * over job columns only — so a building that is on this phone and has no
+   * jobs answered "Nothing matches. Try the job number on its own, or part of
+   * the site or customer name", which reads as "that site is not on this
+   * phone". It is, listSiteSummaries finds it on the same words, and this
+   * module offered no way to reach it.
+   *
+   * Only looked for when the jobs came back empty, so the ordinary search
+   * costs nothing extra.
+   */
+  const [siteHits, setSiteHits] = useState<SiteSummary[]>([]);
+  useEffect(() => {
+    let live = true;
+    const term = query.trim();
+    const worth = !!term && !shown.length && page !== null;
+    // Every write goes through the promise, including the clear: a setState in
+    // the effect body is a cascading render for a list that is usually empty.
+    void (async () => {
+      const rows = worth
+        ? await listSiteSummaries({ query: term, limit: 5 }).then((f) => f.rows).catch(() => [])
+        : [];
+      if (live) setSiteHits(rows);
+    })();
+    return () => { live = false; };
+  }, [query, shown.length, page]);
+
   const empty = (() => {
     if (page === null) return null;
     if (!page.total) {
@@ -104,7 +133,16 @@ export default function JobsScreen() {
         body: 'Jobs come from Simpro. Connect it in Settings and sync, and every job on the books is here — or add one by hand.',
       };
     }
-    if (query.trim()) return { title: 'Nothing matches', body: 'Try the job number on its own, or part of the site or customer name.' };
+    if (query.trim()) {
+      return siteHits.length
+        ? {
+          title: 'No jobs match that',
+          body: `No job on this phone matches those words. ${siteHits.length === 1
+            ? 'The site below does — open it for its register, its history and its documents.'
+            : 'The sites below do — open one for its register, its history and its documents.'}`,
+        }
+        : { title: 'Nothing matches', body: 'Try the job number on its own, or part of the site or customer name.' };
+    }
     if (filter === 'mine' && !whoLabel) {
       return { title: 'This phone does not know whose it is', body: 'Pick yourself in Who you are, or sign in with your Simpro login, and the jobs booked to you show up here.' };
     }
@@ -148,7 +186,28 @@ export default function JobsScreen() {
           initialNumToRender={14}
           windowSize={7}
           contentContainerStyle={{ padding: t.space(4), paddingTop: 0, gap: t.space(3), paddingBottom: t.space(20) }}
-          ListEmptyComponent={empty ? <EmptyState title={empty.title} body={empty.body} icon="clipboard-list-outline" /> : null}
+          ListEmptyComponent={empty ? (
+            <View style={{ gap: t.space(3) }}>
+              <EmptyState title={empty.title} body={empty.body} icon="clipboard-list-outline" />
+              {/*
+                * The way through, rather than only the news that there is
+                * none. A site with no jobs is an ordinary thing — the office
+                * has not raised one yet — and the technician standing at it
+                * still wants its register and its history.
+                */}
+              {siteHits.map((site) => (
+                <Card
+                  key={site.id}
+                  onPress={() => router.push({ pathname: '/site/[id]', params: { id: site.id } })}
+                >
+                  <Txt weight="700">{site.name}</Txt>
+                  <Txt size="sm" tone="muted">
+                    {[site.suburb, site.clientName].filter(Boolean).join(' · ') || 'No suburb recorded'}
+                  </Txt>
+                </Card>
+              ))}
+            </View>
+          ) : null}
           renderItem={({ item, index }) => {
             const row = <JobRow job={item} />;
             // The first screenful arrives as a cascade; past it nobody is

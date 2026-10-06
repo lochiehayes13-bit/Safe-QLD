@@ -587,8 +587,17 @@ export interface JobOption {
   siteId?: string;
   /** The client, where the office knows it: Simpro's own search leads with it. */
   customerName?: string;
-  /** Where the option came from, so the list can say. */
-  source: 'recent' | 'simpro';
+  /**
+   * Where the option came from, so the list can say.
+   *
+   * 'site' is a building with no job against it. The picker's box is
+   * advertised as a site search and searched only the job table, so a site on
+   * the books that the office has not raised work for returned nothing — the
+   * technician typed the building they were standing in and the list stayed
+   * empty. The only way on was the free-text box, which writes a name and no
+   * siteId, so the week's row was never linked to a site record that exists.
+   */
+  source: 'recent' | 'simpro' | 'site';
 }
 
 /**
