@@ -304,6 +304,53 @@ describe('the fields that ride inside the JSON parts', () => {
   });
 });
 
+describe('deleting a wrong test date', () => {
+  /*
+   * The field whose notice and retention clocks the whole document runs from,
+   * and until now it could not be taken back.
+   *
+   * Every other box on this form clears to an empty string, so `!== undefined`
+   * was true of a cleared one and it was written. The test date and the time
+   * are typed fields that answer `undefined` for an empty box — deliberately,
+   * because a half-typed date must never become a stored one — so deleting a
+   * wrong date patched undefined, the write was skipped, and the screen went
+   * blank over a row that still held it. The PDF printed from the screen had
+   * no date; validateForm72 and issueForm72 re-read the database and accepted
+   * the old one; the next open showed it again.
+   */
+  it('clears a date typed by mistake rather than keeping it', async () => {
+    const form = await start();
+    expect((await getForm72(form.id))?.testDate).toBe('2026-10-02');
+    await updateForm72(form.id, { testDate: undefined });
+    expect((await getForm72(form.id))?.testDate).toBeFalsy();
+  });
+
+  it('clears the time the same way', async () => {
+    const form = await start();
+    await updateForm72(form.id, { testTime: '09:30' });
+    expect((await getForm72(form.id))?.testTime).toBe('09:30');
+    await updateForm72(form.id, { testTime: undefined });
+    expect((await getForm72(form.id))?.testTime).toBeFalsy();
+  });
+
+  it('leaves both alone where the patch does not mention them', async () => {
+    // The whole point of a partial patch: two screens editing different parts
+    // of one form must not overwrite each other with a stale copy.
+    const form = await start();
+    await updateForm72(form.id, { testTime: '09:30' });
+    await updateForm72(form.id, { contractor: 'Someone Else' });
+    const after = await getForm72(form.id);
+    expect(after?.testDate).toBe('2026-10-02');
+    expect(after?.testTime).toBe('09:30');
+  });
+
+  it('writes a corrected date over the old one, which always worked', async () => {
+    const form = await start();
+    await updateForm72(form.id, { testDate: '2026-10-03' });
+    expect((await getForm72(form.id))?.testDate).toBe('2026-10-03');
+  });
+});
+
 describe('what an issued form refuses', () => {
   it('refuses to issue a form whose gauge was out of calibration, and says why', async () => {
     const rec = await start();

@@ -356,11 +356,30 @@ export default function TimesheetScreen() {
        * attachment changed would retrain everybody who handles it.
        */
       const file = workbook();
-      const page = await readingCopy();
+      /*
+       * The page is the second attachment and it is allowed to fail.
+       *
+       * It is rendered through the phone's print engine, which can refuse —
+       * storage pressure, no WebView — and before this it was awaited inside
+       * the same try as the send. So a failure to produce a convenience copy
+       * answered "Could not send" and nothing reached the office at all: the
+       * workbook payroll actually works from was never attached, over a
+       * document the email itself describes as the readable one.
+       *
+       * The workbook is what goes. If the page cannot be made, it is said
+       * afterwards rather than instead.
+       */
+      let page: Awaited<ReturnType<typeof readingCopy>> | null = null;
+      try {
+        page = await readingCopy();
+      } catch {
+        page = null;
+      }
       const outcome = await sendMail(
         { to: route.to, subject: timesheetSubject(sheet), body: timesheetBody(sheet) },
-        [file, page],
+        page ? [file, page] : [file],
       );
+      const pageNote = page ? '' : ' The readable copy could not be made on this phone, so only the workbook went.';
 
       if (outcome === 'no-mail-app') {
         showAlert('No mail app set up', 'This phone has no email account configured. Use Export and attach the file yourself.');
@@ -368,7 +387,7 @@ export default function TimesheetScreen() {
       }
       if (outcome === 'sent') {
         void persist({ status: 'submitted' });
-        showAlert('Sent', `Your week has gone to ${routeAddresses(route)} and is marked submitted.`);
+        showAlert('Sent', `Your week has gone to ${routeAddresses(route)} and is marked submitted.${pageNote}`);
         return;
       }
       if (outcome === 'handed-over') {

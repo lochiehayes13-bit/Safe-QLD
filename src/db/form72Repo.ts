@@ -472,8 +472,25 @@ export async function updateForm72(id: string, patch: Form72Patch): Promise<void
   if (patch.siteAddress !== undefined) put('siteAddress', patch.siteAddress ?? '');
   if (patch.contractor !== undefined) put('contractor', patch.contractor);
   if (patch.systemLabel !== undefined) put('systemLabel', patch.systemLabel);
-  if (patch.testDate !== undefined) put('testDate', patch.testDate ?? null);
-  if (patch.testTime !== undefined) put('testTime', patch.testTime ?? null);
+  /*
+   * Present rather than defined, which for these two is the difference between
+   * correcting a date and only appearing to.
+   *
+   * Every other field on this form is a box that clears to an empty string, so
+   * `!== undefined` was true of a cleared one and it was written. The test date
+   * and the time are typed fields that answer `undefined` for a box with
+   * nothing in it — deliberately, because a half-typed date must never become a
+   * stored one — so deleting a wrong date patched undefined, was skipped here,
+   * and the screen went blank over a row that still held it. The PDF printed
+   * from the screen had no date; validateForm72 and issueForm72 re-read the
+   * database and accepted the old one; the next open showed it again. On the
+   * field whose notice and retention clocks the whole document runs from.
+   *
+   * `in` is the test the rest of this function already uses for the fields that
+   * can legitimately be cleared — see overload and Part H below.
+   */
+  if ('testDate' in patch) put('testDate', patch.testDate ?? null);
+  if ('testTime' in patch) put('testTime', patch.testTime ?? null);
   if (patch.maintenanceTest !== undefined) put('maintenanceTest', JSON.stringify(patch.maintenanceTest));
   if (patch.hydrostatic !== undefined) put('hydrostatic', JSON.stringify(patch.hydrostatic));
   if (patch.flowDeviceKinds !== undefined) put('flowDeviceKinds', JSON.stringify(patch.flowDeviceKinds));

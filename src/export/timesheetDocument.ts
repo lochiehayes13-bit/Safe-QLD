@@ -188,7 +188,27 @@ export function timesheetDocumentHtml(sheet: Timesheet): string {
 
   const body = `
   <h1>Timesheet — week beginning ${esc(formatAuDate(sheet.weekStarting))}</h1>
-  <div class="sub">${sheet.status === 'submitted' ? 'Submitted' : 'Draft'}</div>
+  ${/*
+     * Said only when it is true and useful.
+     *
+     * This printed "Draft" or "Submitted" off the record's status, and on the
+     * ordinary path that put "Draft" under the title of the copy that lands in
+     * payroll's inbox: the sheet is marked submitted only after the mail app
+     * reports the email went, which is after the attachment was built. So the
+     * one document the office reads announced itself as not to be acted on,
+     * every time, while the workbook beside it carried no status at all.
+     *
+     * It cannot simply be rendered as submitted instead: on the web the send
+     * is handed to a mail app that cannot report back, the sheet stays a draft
+     * on purpose, and a page claiming otherwise would be worse than this.
+     *
+     * So "Submitted" prints, because it is a fact worth stating and it is
+     * never wrong when it appears. A sheet still being filled in says so by
+     * what is on it — the blank days, the empty signature rule — rather than
+     * by a word that reads as a warning on a document somebody has just been
+     * sent.
+     */''}
+  ${sheet.status === 'submitted' ? '<div class="sub">Submitted</div>' : ''}
   ${who.length ? `<div class="who">${who.join('')}</div>` : ''}
   ${totalsBlock(sheet)}
   ${week.map((d) => dayBlock(d, byDate.get(d.date) ?? [])).join('')}

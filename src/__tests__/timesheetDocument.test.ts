@@ -169,10 +169,30 @@ describe('what it says about itself', () => {
       .toContain('the one payroll works from');
   });
 
-  it('says whether the week is a draft or submitted', () => {
-    expect(text(timesheetDocumentHtml(sheet([entry()])))).toContain('Draft');
+  it('says a week is submitted, and says nothing about one that is not', () => {
+    /*
+     * It used to print "Draft" under the title of every sheet that was not yet
+     * submitted — which is the copy that lands in payroll's inbox, because the
+     * sheet is marked submitted only after the mail app reports the email
+     * went, and the attachment was built before that. So the one document the
+     * office reads announced itself as not to be acted on, every time, while
+     * the workbook beside it carried no status at all.
+     *
+     * It cannot be rendered as submitted instead: on the web the send is
+     * handed to a mail app that cannot report back, the sheet stays a draft on
+     * purpose, and a page claiming otherwise would be worse. So the positive
+     * fact prints and the other says nothing — a sheet still being filled in
+     * says so by what is on it.
+     */
+    expect(text(timesheetDocumentHtml(sheet([entry()])))).not.toContain('Draft');
     expect(text(timesheetDocumentHtml(sheet([entry()], { status: 'submitted' }))))
       .toContain('Submitted');
+  });
+
+  it('still shows the blank days and the unsigned rule, which is what says it is unfinished', () => {
+    const html = timesheetDocumentHtml(sheet([entry()]));
+    expect(text(html)).toContain('Nothing recorded');
+    expect(html).toContain('class="rule"');
   });
 
   it('names the week by its first day, in the only date format this app prints', () => {
