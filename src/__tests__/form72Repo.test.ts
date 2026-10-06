@@ -1,6 +1,6 @@
 import {
-  ISSUED_REFUSAL, createForm72, getForm72, issueForm72, listForm72, recordOccupierCopy,
-  updateForm72,
+  ISSUED_REFUSAL, createForm72, getForm72, issueForm72, listForm72, recordForm72DefectIds,
+  recordOccupierCopy, updateForm72,
 } from '@/db/form72Repo';
 import { createSite } from '@/db/repo';
 import { DEVICE_PRESETS } from '@/domain/form72Devices';
@@ -280,5 +280,92 @@ describe('what an issued form refuses', () => {
     const a = await createForm72({ siteId: 's1', siteName: 'Baldwin Living', testDate: '2025-10-02' });
     const b = await createForm72({ siteId: 's1', siteName: 'Baldwin Living', testDate: '2026-10-02' });
     expect((await listForm72('s1')).map((f) => f.id)).toEqual([b.id, a.id]);
+  });
+});
+
+describe('a defect that became a register row', () => {
+  /*
+   * A critical defect on a Form 72 obliges the owner or occupier to be given a
+   * written notice, and the notice is raised from the defect register rather
+   * than from this form. Issuing the form does not discharge that — so a
+   * defect on a form signed yesterday still has to reach the office, and
+   * recording which register row it became is filing rather than editing.
+   */
+  it('records the ids on a draft', async () => {
+    const rec = await start();
+    await updateForm72(rec.id, {
+      defects: [
+        { description: 'Booster inlet valve seized', critical: true },
+        { description: 'Block plan faded', critical: false },
+      ],
+    });
+    await recordForm72DefectIds(rec.id, ['def-1', 'def-2']);
+    expect((await getForm72(rec.id))!.defects).toEqual([
+      { description: 'Booster inlet valve seized', critical: true, defectId: 'def-1' },
+      { description: 'Block plan faded', critical: false, defectId: 'def-2' },
+    ]);
+  });
+
+  it('records them on an issued form, which is the whole reason it exists', async () => {
+    const rec = await start();
+    await updateForm72(rec.id, {
+      ...completable,
+      criticalDefectsIdentified: true,
+      systemResult: 'fail',
+      systemNotes: 'Isolated pending repair.',
+      defects: [{ description: 'Booster inlet valve seized', critical: true }],
+    });
+    await issueForm72(rec.id);
+    // Every other edit is refused.
+    await expect(updateForm72(rec.id, { defects: [] })).rejects.toThrow(ISSUED_REFUSAL);
+    await recordForm72DefectIds(rec.id, ['def-1']);
+    expect((await getForm72(rec.id))!.defects[0]!.defectId).toBe('def-1');
+  });
+
+  it('cannot reach the text of a signed form through that door', async () => {
+    // Only the ids move: the descriptions and the critical flags are read back
+    // off the stored row and written out untouched, matched by position.
+    const rec = await start();
+    await updateForm72(rec.id, {
+      defects: [{ description: 'Booster inlet valve seized', critical: true }],
+    });
+    await recordForm72DefectIds(rec.id, ['def-1']);
+    const back = await getForm72(rec.id);
+    expect(back!.defects[0]).toEqual({
+      description: 'Booster inlet valve seized', critical: true, defectId: 'def-1',
+    });
+  });
+
+  it('never replaces an id already there, which would orphan a register row', async () => {
+    const rec = await start();
+    await updateForm72(rec.id, {
+      defects: [{ description: 'Seized', critical: true, defectId: 'def-first' }],
+    });
+    await recordForm72DefectIds(rec.id, ['def-second']);
+    expect((await getForm72(rec.id))!.defects[0]!.defectId).toBe('def-first');
+  });
+
+  it('drops an id for a position the form no longer holds', async () => {
+    const rec = await start();
+    await updateForm72(rec.id, { defects: [{ description: 'One', critical: false }] });
+    await recordForm72DefectIds(rec.id, ['def-1', 'def-2', 'def-3']);
+    const back = await getForm72(rec.id);
+    expect(back!.defects).toHaveLength(1);
+    expect(back!.defects[0]!.defectId).toBe('def-1');
+  });
+
+  it('leaves a defect alone where no id was given for it', async () => {
+    const rec = await start();
+    await updateForm72(rec.id, {
+      defects: [{ description: 'One', critical: false }, { description: 'Two', critical: true }],
+    });
+    await recordForm72DefectIds(rec.id, [undefined, 'def-2']);
+    const back = await getForm72(rec.id);
+    expect(back!.defects[0]!.defectId).toBeUndefined();
+    expect(back!.defects[1]!.defectId).toBe('def-2');
+  });
+
+  it('refuses a form that is gone', async () => {
+    await expect(recordForm72DefectIds('nope', ['x'])).rejects.toThrow('no longer exists');
   });
 });

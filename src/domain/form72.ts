@@ -536,6 +536,22 @@ export interface Form72 {
 export interface FormDefect {
   description: string;
   critical: boolean;
+  /**
+   * The defect register record this became, where it has been raised.
+   *
+   * A critical defect on a Form 72 obliges the owner or occupier to be given a
+   * written notice, and the notice flow lives on the defect register — not on
+   * this form. So the two were typed separately: once here, where Part H's
+   * first question is answered from it, and again in the register, where it
+   * reaches the office and the notice.
+   *
+   * Holding the register's id is what makes raising it once mean once. Without
+   * it the screen cannot tell a defect it has already raised from one it has
+   * not, and a second tap would put the same fault on the site twice — which
+   * on a register that drives a statutory notice is worse than not raising it
+   * at all.
+   */
+  defectId?: string;
 }
 
 /**
@@ -591,6 +607,75 @@ export const FLOW_DEVICE_LABEL: Record<FlowDeviceKind, string> = {
   mechanical: 'Mechanical',
   electromagnetic: 'Electro magnetic',
 };
+
+/**
+ * A Form 72 defect, as the defect register wants it.
+ *
+ * The register carries the Queensland statutory apparatus — the two limbs, the
+ * notice, the verbal notification, the rectification date — and this form
+ * carries none of it: a description and whether it is critical. So only what
+ * the form actually knows is filled in, and the rest is left for the defect
+ * screen to ask. Inventing a limb judgement here would be inventing the
+ * finding that obliges the notice.
+ *
+ * Two deliberate omissions beyond that.
+ *
+ * `as1851Class` is left alone. The model's own comment says the AS 1851
+ * classification is not the same test as the Queensland one, so mapping our
+ * critical flag onto it would assert a classification nobody made.
+ *
+ * `location` is the site, because that is as precise as this form gets. A
+ * Form 72 records a system test, not a device inspection — there is no asset
+ * id behind a defect typed on the attachment page — and a location invented
+ * from the part it was found in would read as a place somebody recorded.
+ */
+export interface Form72DefectForRegister {
+  siteId: string;
+  location: string;
+  description: string;
+  severity: 'critical' | 'non-critical';
+  priority?: 'high' | 'medium' | 'low';
+  status: 'open';
+  photos: string[];
+  notes?: string;
+  raisedAt?: string;
+  jobId?: string;
+}
+
+export function form72DefectForRegister(
+  form: Pick<Form72, 'siteId' | 'siteName' | 'testDate' | 'licenseeName'>
+  & { systemLabel?: string; jobExternalId?: string },
+  defect: FormDefect,
+): Form72DefectForRegister {
+  return {
+    siteId: form.siteId,
+    location: [form.siteName.trim(), form.systemLabel?.trim()].filter(Boolean).join(' — ')
+      || 'Location not recorded',
+    description: defect.description.trim(),
+    severity: defect.critical ? 'critical' : 'non-critical',
+    /*
+     * No grade on a critical one — the model says there is nothing above
+     * critical — and none on the others either, because this form never asked.
+     * A default of "medium" would sort somebody's roof defect against grades
+     * that were judged.
+     */
+    priority: undefined,
+    status: 'open',
+    photos: [],
+    notes: `Raised from the Form 72 for ${form.siteName.trim()}${
+      form.testDate ? `, tested ${form.testDate}` : ''}${
+      form.licenseeName.trim() ? `, signed ${form.licenseeName.trim()}` : ''}.`,
+    // The day the test found it, not the day somebody pressed the button. The
+    // rectification clock and the occupier's notice both run from the work.
+    raisedAt: form.testDate ? `${form.testDate}T00:00:00.000Z` : undefined,
+    jobId: form.jobExternalId,
+  };
+}
+
+/** The defects on a form that are not yet on the register. */
+export function unraisedDefects(form: Pick<Form72, 'defects'>): FormDefect[] {
+  return form.defects.filter((d) => !d.defectId && d.description.trim());
+}
 
 export const PART_RESULT_LABEL: Record<PartResult, string> = {
   na: 'N/A',

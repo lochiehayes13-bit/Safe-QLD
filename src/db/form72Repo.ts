@@ -291,6 +291,47 @@ export async function linkForm72Job(id: string, job: { externalId: string; title
   );
 }
 
+/**
+ * Records which defect-register row each of a form's defects became.
+ *
+ * Allowed on an issued form, and that is the whole reason this exists rather
+ * than going through updateForm72. A critical defect on a Form 72 obliges the
+ * owner or occupier to be given a written notice, the notice is raised from the
+ * defect register, and issuing the form does not discharge it — so a defect on
+ * a form signed yesterday still has to reach the office. With no path for it,
+ * the only route left was typing the fault into the register by hand, which is
+ * the double entry this is meant to remove.
+ *
+ * Filing, not editing: the id is not printed anywhere and nothing on the
+ * document changes. The same judgement linkForm72Job is written on.
+ *
+ * Only the ids move. The descriptions and the critical flags are read back off
+ * the stored row and written out again untouched, matched by position, so a
+ * caller cannot reach the text of a signed form through this door — and an id
+ * for a position the form no longer holds is dropped rather than extending the
+ * list.
+ */
+export async function recordForm72DefectIds(
+  id: string,
+  ids: readonly (string | undefined)[],
+): Promise<void> {
+  const form = await getForm72(id);
+  if (!form) throw new Error('That Form 72 no longer exists.');
+
+  const next = form.defects.map((d, i) => {
+    const given = ids[i];
+    // An id already on a defect is never replaced: it is the record of
+    // something that happened, and overwriting it would orphan a register row.
+    return d.defectId || !given ? d : { ...d, defectId: given };
+  });
+
+  const db = await getDb();
+  await db.runAsync(
+    'UPDATE form_72 SET defects = ?, updatedAt = ? WHERE id = ?',
+    [JSON.stringify(next), nowIso(), id],
+  );
+}
+
 /** The PDF has been queued onto the job's attachments. */
 export async function recordForm72Attached(id: string, at: string = nowIso()): Promise<void> {
   const db = await getDb();

@@ -3,7 +3,8 @@ import { Pressable, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
-  ISSUED_REFUSAL, getForm72, issueForm72, linkForm72Job, recordForm72Attached, recordOccupierCopy, updateForm72,
+  ISSUED_REFUSAL, getForm72, issueForm72, linkForm72Job, recordForm72Attached,
+  recordForm72DefectIds, recordOccupierCopy, updateForm72,
   type Form72Patch, type StoredForm72,
 } from '@/db/form72Repo';
 import { listJobPage, type JobSummary } from '@/db/opsRepo';
@@ -20,11 +21,12 @@ import { router } from 'expo-router';
 import {
   CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, FLOW_DEVICE_LABEL, PART_D_ROWS,
   PART_RESULT_LABEL, SYSTEM_TYPE_LABEL, TEST_INTERVAL_LABEL,
-  deviceCalibration, elevationHeadKpa, flowRowDevices, flowRowKey, flowRowLongLabel,
-  flowRowUntouched,
   PART_G_PRINTED_TEST_POINTS,
+  deviceCalibration, elevationHeadKpa, flowRowDevices, flowRowKey, flowRowLongLabel,
+  flowRowUntouched, form72DefectForRegister,
   intervalsTested, maintenanceTestFromAxes, overloadCheck, resolveFrictionalLoss,
-  sprinklerTestPointLines, sprinklerTestPointUntouched, systemTypesTested, validateForm72,
+  sprinklerTestPointLines, sprinklerTestPointUntouched, systemTypesTested, unraisedDefects,
+  validateForm72,
   type BoosterTest, type FlowDeviceKind, type FlowRow, type FormDefect, type FormIssue,
   type HydrostaticTest, type PartResult, type SprinklerFlowTest, type SprinklerHydrostatic,
   type SprinklerTestPoint, type SystemType, type TestDevice, type TestInterval,
@@ -42,7 +44,7 @@ import { sendMail } from '@/export/mail';
 import { notSharedNotice } from '@/export/shareOutcome';
 import { formatAuDate } from '@/export/sheets';
 import { queryAssets } from '@/db/assetRepo';
-import { getSite } from '@/db/repo';
+import { createDefect, getSite } from '@/db/repo';
 import { applyForm72Prefill, form72FromAssets } from '@/domain/formsFromAssets';
 import { loadPrefs } from '@/app-prefs';
 import { nowIso } from '@/db';
@@ -656,10 +658,10 @@ export default function Form72Screen() {
         ? PARTS.map((p) => (
           <View key={p.key} style={{ gap: t.space(3) }}>
             <Divider />
-            <PartBody part={p.key} form={form} locked={!!locked} patch={patch} />
+            <PartBody part={p.key} form={form} locked={!!locked} patch={patch} reload={() => { void load(); }} />
           </View>
         ))
-        : <PartBody part={part} form={form} locked={!!locked} patch={patch} />}
+        : <PartBody part={part} form={form} locked={!!locked} patch={patch} reload={() => { void load(); }} />}
 
       <Divider />
 
@@ -768,12 +770,21 @@ function PartStrip({
 }
 
 function PartBody({
-  part, form, locked, patch,
+  part, form, locked, patch, reload,
 }: {
   part: PartKey;
   form: StoredForm72;
   locked: boolean;
   patch: (p: Form72Patch) => void;
+  /**
+   * Re-reads the form from storage.
+   *
+   * Only the attachment needs it. Raising a defect onto the register writes the
+   * row ids through a path that bypasses `patch` — because `patch` refuses an
+   * issued form — so the screen's copy is behind the database until it reads
+   * again.
+   */
+  reload: () => void;
 }) {
   const meta = PARTS.find((p) => p.key === part)!;
   return (
@@ -791,7 +802,9 @@ function PartBody({
       {part === 'G' ? <PartG form={form} locked={locked} patch={patch} /> : null}
       {part === 'H' ? <PartH form={form} locked={locked} patch={patch} /> : null}
       {part === 'I' ? <PartI form={form} locked={locked} patch={patch} /> : null}
-      {part === 'Attachment' ? <PartAttachment form={form} locked={locked} patch={patch} /> : null}
+      {part === 'Attachment' ? (
+        <PartAttachment form={form} locked={locked} patch={patch} onRaised={reload} />
+      ) : null}
     </View>
   );
 }
@@ -2153,12 +2166,94 @@ function OutcomePicker({
  * the form. Kept here, the list is bound to the form that records the defects,
  * and Part H's answer can be checked against the defects actually found.
  */
-function PartAttachment({ form, locked, patch }: PartProps) {
+function PartAttachment({ form, locked, patch, onRaised }: PartProps & { onRaised: () => void }) {
+  const t = useTheme();
   const defects = form.defects;
   const setDefect = (i: number, p: Partial<FormDefect>) => patch({
     defects: defects.map((d, n) => (n === i ? { ...d, ...p } : d)),
   });
   const criticals = defects.filter((d) => d.critical).length;
+  const unraised = unraisedDefects(form);
+  const [raising, setRaising] = useState(false);
+
+  /**
+   * Raises every defect not yet on the register, and remembers which is which.
+   *
+   * The register id goes back onto the form, which is what makes a second tap
+   * do nothing rather than put the same fault on the site twice — on a
+   * register that drives a statutory notice, a duplicate is worse than a gap.
+   *
+   * The ids are written in one call after the loop rather than one at a time,
+   * because a per-defect write would be computed off the form as it was before
+   * the previous one landed and would drop it.
+   *
+   * They go through recordForm72DefectIds rather than patch, because patch
+   * refuses an issued form — and an issued form is exactly where this matters:
+   * issuing does not discharge the notice, so a defect on a form signed
+   * yesterday still has to reach the office. Writing it through patch would
+   * have created the register rows and recorded none of them, and the next tap
+   * would have raised them all again.
+   *
+   * A failure part way through still records the ones that went, for the same
+   * reason: all-or-nothing would leave rows on the register that the form knows
+   * nothing about.
+   */
+  const raiseDefects = async () => {
+    setRaising(true);
+    const raised = new Map<string, string>();
+    let failure: string | null = null;
+    try {
+      for (const defect of unraised) {
+        try {
+          // eslint-disable-next-line no-await-in-loop -- one at a time on purpose: a
+          // failure must stop rather than raise the rest against a broken database.
+          const made = await createDefect(form72DefectForRegister(form, defect));
+          raised.set(defect.description, made.id);
+        } catch (e) {
+          failure = describeActionFailure(e, 'raising the defect');
+          break;
+        }
+      }
+      if (raised.size) {
+        try {
+          await recordForm72DefectIds(
+            form.id,
+            defects.map((d) => (d.defectId ? undefined : raised.get(d.description))),
+          );
+          onRaised();
+        } catch (e) {
+          /*
+           * The register has the rows and the form could not be told. Said
+           * plainly and with the count, because the next tap would raise them
+           * again and the person has to know not to.
+           */
+          showAlert(
+            'Raised, but not recorded on this form',
+            `${raised.size} ${raised.size === 1 ? 'defect is' : 'defects are'} on the register. `
+            + 'This form could not be updated to say so, so do not raise them again — '
+            + `check the site's register. ${describeActionFailure(e, 'updating the form')}`,
+          );
+          return;
+        }
+      }
+      if (failure) {
+        showAlert(
+          raised.size ? 'Some were raised' : 'Not raised',
+          raised.size
+            ? `${raised.size} went onto the register and the rest did not: ${failure}`
+            : failure,
+        );
+      } else {
+        showAlert(
+          'On the register',
+          `${raised.size} ${raised.size === 1 ? 'defect is' : 'defects are'} now on this site's `
+          + 'register. Open it to answer the limb questions and raise the occupier notice.',
+        );
+      }
+    } finally {
+      setRaising(false);
+    }
+  };
 
   return (
     <View style={{ gap: 12 }}>
@@ -2241,6 +2336,50 @@ function PartAttachment({ form, locked, patch }: PartProps) {
           variant="secondary"
           onPress={() => patch({ defects: [...defects, { description: '', critical: false }] })}
         />
+      ) : null}
+
+      {/*
+        * Onto the defect register, once.
+        *
+        * A critical defect here obliges the owner or occupier to be given a
+        * written notice, and the notice flow lives on the register rather than
+        * on this form — so the same fault was typed twice: once where Part H's
+        * answer comes from, and again where the office and the notice can see
+        * it. Raising it carries over what this form knows and leaves the
+        * Queensland limb judgements to the defect screen, because inventing
+        * one here would be inventing the finding that obliges the notice.
+        *
+        * Shown on an issued form too. Issuing does not discharge the notice,
+        * and a defect on a form signed yesterday still has to reach the
+        * office. It is the one thing on this part an issued form can still do,
+        * because raising a defect writes to the register rather than to the
+        * form — the only mark it leaves here is which register row it became.
+        */}
+      {unraised.length ? (
+        <Card>
+          <Txt weight="700">
+            {`${unraised.length} defect${unraised.length === 1 ? '' : 's'} not on the register yet`}
+          </Txt>
+          <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+            The register is where the office sees it and where the occupier&rsquo;s notice is raised
+            from. This carries over the description, whether it is critical, the site and the job;
+            the limb judgements and the notice are asked for there.
+          </Txt>
+          <Button
+            title={unraised.length === 1 ? 'Raise it on the register' : `Raise all ${unraised.length}`}
+            loading={raising}
+            onPress={() => { void raiseDefects(); }}
+          />
+        </Card>
+      ) : defects.some((d) => d.defectId) ? (
+        <Card>
+          <Rowed gap={2}>
+            <MaterialCommunityIcons name="check-circle-outline" size={18} color={t.color.pass} />
+            <Txt size="sm" tone="muted" style={{ flex: 1 }}>
+              {`${defects.filter((d) => d.defectId).length} of these are on the defect register.`}
+            </Txt>
+          </Rowed>
+        </Card>
       ) : null}
 
       {/*

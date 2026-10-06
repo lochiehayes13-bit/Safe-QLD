@@ -12,7 +12,7 @@ import { DEVICE_PRESETS, DEVICE_PRESET_SOURCE, unusedDevicePresets } from '@/dom
 import {
   CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, FLOW_DEVICE_LABEL, FLOW_ROW_COLUMNS,
   PART_G_PRINTED_TEST_POINTS, flowCellState, flowDeviceCalibrationFrom,
-  flowRowColumnsRun, flowRowDevices, flowRowLabel,
+  flowRowColumnsRun, flowRowDevices, flowRowLabel, form72DefectForRegister, unraisedDefects,
   sprinklerTestPointLines, sprinklerTestPointUntouched,
   PART_D_NOZZLE_SIZES_MM, PART_D_ROWS, deviceCalibration, emptyForm72, intervalsTested,
   maintenanceTestCell, maintenanceTestFromAxes, overloadCheck, resolveFrictionalLoss,
@@ -2575,5 +2575,90 @@ describe('a preset that names its measuring element', () => {
       expect({ kind, ticked: row.includes(`<span class="cb on">&#10007;</span>${FLOW_DEVICE_LABEL[kind]}`) })
         .toEqual({ kind, ticked: true });
     }
+  });
+});
+
+describe('a Form 72 defect on its way to the register', () => {
+  const form = {
+    siteId: 's1',
+    siteName: 'Baldwin Living',
+    systemLabel: 'Towns Main System',
+    testDate: '2026-10-02',
+    licenseeName: 'D. McKee',
+    jobExternalId: '41820',
+  };
+
+  it('carries over what this form knows and nothing it does not', () => {
+    const out = form72DefectForRegister(form, {
+      description: 'Booster inlet valve seized', critical: true,
+    });
+    expect(out).toMatchObject({
+      siteId: 's1',
+      location: 'Baldwin Living — Towns Main System',
+      description: 'Booster inlet valve seized',
+      severity: 'critical',
+      status: 'open',
+      jobId: '41820',
+    });
+  });
+
+  it('leaves the Queensland limb judgements and the AS 1851 class alone', () => {
+    /*
+     * The limbs are the finding that obliges the notice; inventing one here
+     * would be inventing the finding. And the model's own comment says the
+     * AS 1851 classification is not the same test as the Queensland one, so
+     * mapping our critical flag onto it would assert a classification nobody
+     * made.
+     */
+    const out = form72DefectForRegister(form, { description: 'Seized', critical: true });
+    expect(out).not.toHaveProperty('qldLimbInoperable');
+    expect(out).not.toHaveProperty('qldLimbAdverseImpact');
+    expect(out).not.toHaveProperty('as1851Class');
+    expect(out).not.toHaveProperty('noticeIssuedAt');
+  });
+
+  it('gives no grade, on a critical one or any other', () => {
+    // There is nothing above critical, and this form never asked about the
+    // rest — a default of "medium" would sort somebody's roof defect against
+    // grades that were judged.
+    expect(form72DefectForRegister(form, { description: 'a', critical: true }).priority)
+      .toBeUndefined();
+    expect(form72DefectForRegister(form, { description: 'a', critical: false }).priority)
+      .toBeUndefined();
+  });
+
+  it('dates it to the day of the test, not the day of the tap', () => {
+    // The rectification clock and the occupier's notice both run from the work.
+    expect(form72DefectForRegister(form, { description: 'a', critical: true }).raisedAt)
+      .toBe('2026-10-02T00:00:00.000Z');
+    expect(form72DefectForRegister({ ...form, testDate: undefined }, { description: 'a', critical: true }).raisedAt)
+      .toBeUndefined();
+  });
+
+  it('says in the note where it came from, so the register row stands alone', () => {
+    const out = form72DefectForRegister(form, { description: 'Seized', critical: true });
+    expect(out.notes).toContain('Form 72');
+    expect(out.notes).toContain('Baldwin Living');
+    expect(out.notes).toContain('2026-10-02');
+    expect(out.notes).toContain('D. McKee');
+  });
+
+  it('falls back on a location rather than inventing one from the part', () => {
+    // A Form 72 records a system test, not a device inspection: there is no
+    // asset behind a defect typed on the attachment page.
+    expect(form72DefectForRegister({ ...form, systemLabel: undefined }, { description: 'a', critical: true }).location)
+      .toBe('Baldwin Living');
+    expect(form72DefectForRegister({ ...form, siteName: '  ', systemLabel: undefined }, { description: 'a', critical: true }).location)
+      .toBe('Location not recorded');
+  });
+
+  it('counts only the defects not yet raised, and only the ones with words', () => {
+    expect(unraisedDefects({
+      defects: [
+        { description: 'Raised already', critical: true, defectId: 'def-1' },
+        { description: 'Not yet', critical: false },
+        { description: '   ', critical: false },
+      ],
+    }).map((d) => d.description)).toEqual(['Not yet']);
   });
 });
