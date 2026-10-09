@@ -559,7 +559,7 @@ export default function ScheduleScreen() {
             compact
             disabled={busy || !employeeId}
             onPress={() => { setPicking(true); setStep(null); setBooking(null); setMoving(null); }}
-            icon={<MaterialCommunityIcons name="calendar-plus" size={18} color="#fff" />}
+            icon={<MaterialCommunityIcons name="calendar-plus" size={18} color={t.color.onAccent} />}
           />
         </Rowed>
 

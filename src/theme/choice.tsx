@@ -3,17 +3,10 @@ import { useColorScheme } from 'react-native';
 import { loadPrefs, patchPrefs } from '@/app-prefs';
 
 /**
- * Whether the app follows the phone, or is told.
+ * Light, dark, or whatever the phone is set to.
  *
- * This is built dark-first: the rooms it is used in are switch rooms, risers,
- * plant rooms and basement carparks, and a white screen in one of those is
- * genuinely worse than a dark one. But it followed the operating system, and
- * on a phone that switches to light at sunrise the app goes light at exactly
- * the hour a technician walks into the first plant room of the day — and then
- * back to dark on the drive home, when it does not matter.
- *
- * So it can be locked. 'system' stays the default, because most people never
- * think about this and the operating system is a reasonable guess for them.
+ * Light is the default, the company website's look. Dark is there for switch
+ * rooms and risers, and following the phone for anyone who wants it.
  *
  * The choice lives in preferences with everything else, but it is held in a
  * context as well because the theme has to change the moment somebody picks
@@ -23,13 +16,28 @@ export type ThemeChoice = 'system' | 'dark' | 'light';
 
 export const THEME_CHOICE_LABEL: Record<ThemeChoice, string> = {
   system: 'Follow the phone',
-  dark: 'Always dark',
-  light: 'Always light',
+  dark: 'Dark',
+  light: 'Light',
 };
 
-/** A stored value this build does not recognise falls back to following the phone. */
+/** A stored value this build does not recognise falls back to light, the default. */
 export function readThemeChoice(value: unknown): ThemeChoice {
-  return value === 'dark' || value === 'light' ? value : 'system';
+  return value === 'dark' || value === 'system' ? value : 'light';
+}
+
+/**
+ * The stored choice, moved once from the old default to the new one.
+ *
+ * Every phone that saved its settings under the old build holds 'system',
+ * because that was the default and settings are saved whole. Left alone, those
+ * phones would go dark at night and never show the new look. So 'system' is
+ * read as light once, and the flag records it, so somebody who picks 'Follow
+ * the phone' after this keeps it.
+ */
+export function migratedThemeChoice(stored: unknown, alreadyMoved: boolean): { choice: ThemeChoice; move: boolean } {
+  const choice = readThemeChoice(stored);
+  if (!alreadyMoved && choice === 'system') return { choice: 'light', move: true };
+  return { choice, move: false };
 }
 
 /**
@@ -46,7 +54,7 @@ export function resolveMode(
 ): 'dark' | 'light' {
   // Before preferences are read: the default look, so there is no dark flash.
   if (choice === undefined) return 'light';
-  if (choice === 'system') return scheme === 'light' ? 'light' : 'dark';
+  if (choice === 'system') return scheme === 'dark' ? 'dark' : 'light';
   return choice;
 }
 
@@ -59,36 +67,28 @@ interface ChoiceContext {
 
 /*
  * The default is what useTheme falls back on outside a provider — in a test,
- * or in a screen mounted before the root layout. Dark, because that is this
- * app's own default, and because the alternative is a white flash.
+ * or in a screen mounted before the root layout. Light, the app's default.
  */
 const Ctx = createContext<ChoiceContext>({
-  choice: 'system',
-  mode: 'dark',
+  choice: 'light',
+  mode: 'light',
   setChoice: () => {},
 });
 
 export function ThemeChoiceProvider({ children }: { children: React.ReactNode }): React.ReactElement {
   const scheme = useColorScheme();
-  /*
-   * Undefined until the stored choice is read, and dark while it is unknown.
-   *
-   * Starting at 'system' meant asking the phone, and on a handset set to light
-   * that draws the first frames white — including for somebody who locked it
-   * to dark, which is the one case the lock exists for and the one device it
-   * matters on. It also lands white immediately after a splash screen that is
-   * this app's own near-black, which is the most visible flash the app can
-   * produce.
-   *
-   * So the unknown state is dark. That is continuous with the splash, it is
-   * this app's own default, and the one person it briefly surprises — someone
-   * who locked light on a light phone — gets a dark frame that resolves rather
-   * than the reverse.
-   */
+  // Undefined until the stored choice is read, and light (the splash's own
+  // paper) while it is unknown.
   const [choice, setLocal] = useState<ThemeChoice | undefined>(undefined);
 
   useEffect(() => {
-    void loadPrefs().then((p) => setLocal(readThemeChoice(p.theme))).catch(() => setLocal('system'));
+    void loadPrefs()
+      .then((p) => {
+        const read = migratedThemeChoice(p.theme, p.themeMovedToLight === true);
+        setLocal(read.choice);
+        if (read.move) void patchPrefs({ theme: read.choice, themeMovedToLight: true }).catch(() => {});
+      })
+      .catch(() => setLocal('light'));
   }, []);
 
   const setChoice = useCallback((next: ThemeChoice) => {
@@ -106,7 +106,7 @@ export function ThemeChoiceProvider({ children }: { children: React.ReactNode })
   const value = useMemo<ChoiceContext>(() => ({
     // What the settings screen shows while the read is in flight is the
     // default, not a guess at what is stored.
-    choice: choice ?? 'system',
+    choice: choice ?? 'light',
     mode: resolveMode(choice, scheme),
     setChoice,
   }), [choice, scheme, setChoice]);

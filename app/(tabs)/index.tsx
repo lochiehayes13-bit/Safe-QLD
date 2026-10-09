@@ -1,7 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, TextInput, View } from 'react-native';
+import { Image, Pressable, TextInput, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { listImpairments, impairmentElapsedMs, jobSummariesByExternalIds, type ImpairmentRecord } from '@/db/opsRepo';
 import { defectsAwaitingNotice } from '@/db/repo';
@@ -25,6 +24,9 @@ import { StuckWorkStrip } from '@/components/StuckWorkStrip';
 import { showAlert } from '@/components/alert';
 import { runAutoSync } from '@/simpro/autoSync';
 import { jobNotHereWords } from '@/domain/syncWords';
+
+const LOGO = require('../../assets/brand-logo.png');
+const LOGO_LIGHT = require('../../assets/brand-logo-light.png');
 
 /**
  * Home — the company hub.
@@ -108,7 +110,7 @@ export default function HomeScreen() {
 
   return (
     <Screen>
-      <Hero name={prefs?.technicianName ?? ''} />
+      <Hero />
       <AskBar />
       <FindRow />
       <PhotoDrop />
@@ -156,68 +158,45 @@ export default function HomeScreen() {
 // ---------------------------------------------------------------------------
 
 /**
- * The masthead.
+ * The masthead: the company's logo, the date, and the update check.
  *
- * A dark ground with the flame on it, the greeting in the display face, and
- * the date. Warmer in the morning and cooler in the evening only in the
- * words; the colour stays the brand's, because a hub that changes colour
- * with the clock is a hub you cannot find at a glance.
+ * The whole logo or none of it. A greeting in a display face read as a chat
+ * app's opening line; the logo reads as the company's own tool.
  */
-function Hero({ name }: { name: string }) {
+function Hero() {
   const t = useTheme();
-  const hour = new Date().getHours();
-  const part = hour < 12 ? 'Morning' : hour < 17 ? 'Afternoon' : 'Evening';
-  const first = name.trim().split(/\s+/)[0] ?? '';
   const date = new Date().toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
   return (
-    <Reveal index={0} distance={8}>
-      <LinearGradient
-        colors={t.gradient.ground}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={{
-          borderRadius: t.radius.xl,
-          padding: t.space(5),
-          paddingBottom: t.space(6),
-          borderWidth: 1,
-          borderColor: t.color.border,
-          overflow: 'hidden',
-          ...t.shadow.card,
-        }}
-      >
-        <Rowed gap={2}>
-          <View style={{ width: 3, height: t.font.size.xs + 2, borderRadius: 2, backgroundColor: t.color.accent }} />
-          <Txt size="xs" tone="accent" weight="800" style={{ letterSpacing: 2 }}>SAFE QLD</Txt>
-          {/*
-            * Top right of the front page, in the header rather than below it.
-            *
-            * The banner underneath appears on its own when a newer build is
-            * known, but a technician told over the phone that something has
-            * been fixed wants to ask now — and the automatic check runs at most
-            * once every six hours, so the answer was three screens into
-            * Settings.
-            */}
-          <View style={{ flex: 1 }} />
-          <UpdateCheckButton />
-        </Rowed>
-        <Txt size="display" weight="800" style={{ letterSpacing: -1.4, marginTop: t.space(1) }} numberOfLines={1}>
-          {first ? `${part}, ${first}` : part}
-        </Txt>
-        <Txt tone="muted" size="sm" weight="600">{date}</Txt>
-      </LinearGradient>
-    </Reveal>
+    <View
+      style={{
+        backgroundColor: t.color.surface,
+        borderRadius: t.radius.lg,
+        padding: t.space(4),
+        borderWidth: 1,
+        borderColor: t.color.border,
+        gap: t.space(2),
+        ...t.shadow.card,
+      }}
+    >
+      <Rowed gap={2}>
+        <Image
+          source={t.mode === 'dark' ? LOGO_LIGHT : LOGO}
+          accessibilityLabel="Safe QLD Fire Protection"
+          resizeMode="contain"
+          style={{ flex: 1, height: 44, maxWidth: 220 }}
+        />
+        <View style={{ flex: 1 }} />
+        <UpdateCheckButton />
+      </Rowed>
+      <Txt tone="muted" size="sm" weight="600">{date}</Txt>
+    </View>
   );
 }
 
 /**
- * The question bar.
- *
- * The one thing on this screen that is the same for everybody. It pulls up
- * over the masthead's bottom edge so the two read as one object, and it is
- * the biggest control on the page on purpose.
+ * The library search: standards, defect wording, EOL values and the
+ * calculators, offline.
  */
-const STARTERS = ['AS 1851 monthly', 'EOL values', 'Detector spacing', 'Defect wording', 'Hydrant flow', 'Battery sizing'];
-
 function AskBar() {
   const t = useTheme();
   const [q, setQ] = useState('');
@@ -229,52 +208,31 @@ function AskBar() {
     setQ('');
   };
   return (
-    <Reveal index={1} style={{ marginTop: -t.space(7), gap: t.space(2.5) }}>
-      <View
-        style={{
-          backgroundColor: t.color.bgElevated,
-          borderWidth: 2,
-          borderColor: t.color.accent,
-          borderRadius: t.radius.xl,
-          padding: t.space(3),
-          gap: t.space(2),
-          ...t.shadow.glow,
-        }}
-      >
-        <Rowed gap={3}>
-          <IconPlate icon="magnify" size={46} />
-          <TextInput
-            value={q}
-            onChangeText={setQ}
-            onSubmitEditing={() => go(q)}
-            returnKeyType="search"
-            placeholder="Ask anything"
-            placeholderTextColor={t.color.textFaint}
-            style={{ flex: 1, color: t.color.text, fontSize: t.font.size.lg, fontFamily: t.font.family('600'), paddingVertical: t.space(2) }}
-          />
-          <Bounce onPress={() => go(q)} haptic="light" scaleTo={0.9} accessibilityLabel="Search">
-            <MaterialCommunityIcons name="arrow-right-circle" size={38} color={q.trim().length >= 2 ? t.color.accent : t.color.textFaint} />
-          </Bounce>
-        </Rowed>
-        <Txt size="xs" tone="faint" style={{ paddingHorizontal: 2 }}>
-          Standards, defect wording, EOL values and calculators.
-        </Txt>
-      </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2) }}>
-        {STARTERS.map((s) => (
-          <Bounce key={s} onPress={() => go(s)} haptic="selection" scaleTo={0.94}>
-            <View
-              style={{
-                paddingHorizontal: t.space(3.5), minHeight: 40, justifyContent: 'center',
-                borderRadius: t.radius.pill, backgroundColor: t.color.surface, borderWidth: 1, borderColor: t.color.border,
-              }}
-            >
-              <Txt size="sm" weight="700">{s}</Txt>
-            </View>
-          </Bounce>
-        ))}
-      </ScrollView>
-    </Reveal>
+    <View
+      style={{
+        flexDirection: 'row', alignItems: 'center', gap: t.space(2),
+        backgroundColor: t.color.surface,
+        borderWidth: 1,
+        borderColor: t.color.borderInput,
+        borderRadius: t.radius.md,
+        paddingHorizontal: t.space(3),
+        minHeight: t.touch,
+      }}
+    >
+      <MaterialCommunityIcons name="magnify" size={22} color={t.color.textFaint} />
+      <TextInput
+        value={q}
+        onChangeText={setQ}
+        onSubmitEditing={() => go(q)}
+        returnKeyType="search"
+        placeholder="Search standards, defects, EOL values"
+        placeholderTextColor={t.color.textFaint}
+        style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md, fontFamily: t.font.family('400'), minHeight: t.touch }}
+      />
+      <Bounce onPress={() => go(q)} haptic="light" scaleTo={0.9} accessibilityLabel="Search">
+        <MaterialCommunityIcons name="arrow-right-circle" size={32} color={q.trim().length >= 2 ? t.color.accent : t.color.textFaint} />
+      </Bounce>
+    </View>
   );
 }
 
@@ -619,15 +577,6 @@ const GROUP_ICON: Record<ModuleGroup, React.ComponentProps<typeof MaterialCommun
   'Admin': 'cog-outline',
 };
 
-const GROUP_BLURB: Record<ModuleGroup, string> = {
-  'Every day': 'Timesheet, ask the office, leave, the map, suggestions.',
-  'Learn': 'The standards, the law, defect wording, the routines.',
-  'Calculators': 'Resistors, EOL, batteries, volt drop, flow, sound, doors.',
-  'On site': 'Sites, assets, tags, routines, defects, stock, parts.',
-  'Forms and records': 'Reports, Form 72, occupier statements, baselines, labels.',
-  'Jobs and planning': 'Jobs, the run, what is due, promises, the month.',
-  'Admin': 'Settings, sign in, who you are, importing files.',
-};
 
 /**
  * The rest of the app, by group.
@@ -670,7 +619,6 @@ function GroupList() {
                 <Txt weight="800">{group}</Txt>
                 <Txt size="xs" tone="faint" weight="800">{counts.get(group) ?? 0}</Txt>
               </Rowed>
-              <Txt size="xs" tone="muted" numberOfLines={1}>{GROUP_BLURB[group]}</Txt>
             </View>
             <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
           </View>

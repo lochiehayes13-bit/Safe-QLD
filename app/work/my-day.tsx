@@ -143,7 +143,7 @@ export default function MyDayScreen() {
           <Button title="Schedule" variant="secondary" compact onPress={() => router.push('/work/schedule')}
             icon={<MaterialCommunityIcons name="calendar-month-outline" size={18} color={t.color.accentText} />} />
           <Button title="Book me on" compact onPress={() => router.push({ pathname: '/work/schedule', params: { book: '1' } })}
-            icon={<MaterialCommunityIcons name="calendar-plus" size={18} color="#fff" />} />
+            icon={<MaterialCommunityIcons name="calendar-plus" size={18} color={t.color.onAccent} />} />
         </Rowed>
 
         <H2>Today</H2>

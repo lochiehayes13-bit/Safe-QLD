@@ -4,15 +4,15 @@
  * test can hold it to what it promises.
  */
 
-/** The dark ground of the app, so a slow first load is not a white flash. */
-const GROUND = '#0B0D10';
+/** The paper ground of the app, so a slow first load is the colour the app opens in. */
+const GROUND = '#F7F6F2';
 
 const { REGISTRATION } = require('./webServiceWorker');
 
 const TAGS = `
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, shrink-to-fit=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Safe QLD" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="theme-color" content="${GROUND}" />

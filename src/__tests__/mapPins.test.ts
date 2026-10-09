@@ -50,7 +50,7 @@ const ALL = new Set<PinKind>(PIN_KINDS);
 describe('the kinds', () => {
   it('are ordered strongest first, with the quote between recent work and a plain site', () => {
     expect(PIN_KINDS).toEqual(['open', 'upcoming', 'recent', 'quote', 'site']);
-    expect(PIN_COLOUR.quote).toBe('#B197FC');
+    expect(PIN_COLOUR.open).toBe('#9B2335');
   });
 
   it('start with the live work and the sites on, and the quarter’s invoices and the quotes off', () => {

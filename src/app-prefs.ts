@@ -166,6 +166,8 @@ export interface Prefs {
    * are one setting away.
    */
   theme: 'system' | 'dark' | 'light';
+  /** Set once the old 'system' default has been moved to light; see migratedThemeChoice. */
+  themeMovedToLight: boolean;
   /**
    * How this person's timesheet weeks are filled: from their own Simpro
    * schedule (construction crews, whose week is the schedule), or typed
@@ -225,6 +227,7 @@ export const DEFAULT_PREFS: Prefs = {
   attendanceAfterHoursMinutes: 180,
   // The website's look, light on paper. Dark is a choice in Settings.
   theme: 'light',
+  themeMovedToLight: true,
   timesheetFill: '',
   timesheetFilledDays: [],
 };

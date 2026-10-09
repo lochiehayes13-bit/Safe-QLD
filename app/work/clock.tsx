@@ -446,7 +446,7 @@ export default function ClockScreen() {
               {neverSendable(open) ? <Txt size="sm" tone="warn">{neverSendable(open)}</Txt> : null}
               <Rowed gap={2} wrap>
                 <Button title="Off" variant="danger" disabled={busy} onPress={() => { void clockOff(); }}
-                  icon={<MaterialCommunityIcons name="timer-off-outline" size={18} color="#fff" />} />
+                  icon={<MaterialCommunityIcons name="timer-off-outline" size={18} color={t.color.onAccent} />} />
                 <Button title="Switch job" variant="secondary" disabled={busy || !employeeId} onPress={() => { setPicking(true); setStep(null); }} />
               </Rowed>
             </View>
@@ -460,7 +460,7 @@ export default function ClockScreen() {
                 title="On"
                 disabled={busy || !employeeId}
                 onPress={() => { setPicking(true); setStep(null); }}
-                icon={<MaterialCommunityIcons name="timer-play-outline" size={18} color="#fff" />}
+                icon={<MaterialCommunityIcons name="timer-play-outline" size={18} color={t.color.onAccent} />}
               />
             </View>
           )}

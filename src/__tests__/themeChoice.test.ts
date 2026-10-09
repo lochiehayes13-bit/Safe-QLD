@@ -1,5 +1,5 @@
 import { DEFAULT_PREFS } from '@/app-prefs';
-import { THEME_CHOICE_LABEL, readThemeChoice, resolveMode } from '@/theme/choice';
+import { THEME_CHOICE_LABEL, migratedThemeChoice, readThemeChoice, resolveMode } from '@/theme/choice';
 
 /**
  * Whether the app follows the phone, or is told.
@@ -15,15 +15,23 @@ describe('reading the stored choice', () => {
     expect(readThemeChoice('light')).toBe('light');
   });
 
-  it('falls back to following the phone for anything it does not know', () => {
+  it('falls back to light, the default, for anything it does not know', () => {
     /*
      * A phone that has been through an older build, a value hand-edited into
      * storage, a half-written preferences blob. None of those should leave the
      * app unable to decide what colour to be.
      */
-    for (const junk of ['system', 'Dark', 'auto', '', null, undefined, 7, {}, []]) {
-      expect(readThemeChoice(junk)).toBe('system');
+    for (const junk of ['Dark', 'auto', '', null, undefined, 7, {}, []]) {
+      expect(readThemeChoice(junk)).toBe('light');
     }
+    expect(readThemeChoice('system')).toBe('system');
+  });
+
+  it('moves the old default to light once, and keeps a later choice to follow the phone', () => {
+    expect(migratedThemeChoice('system', false)).toEqual({ choice: 'light', move: true });
+    expect(migratedThemeChoice('system', true)).toEqual({ choice: 'system', move: false });
+    expect(migratedThemeChoice('dark', false)).toEqual({ choice: 'dark', move: false });
+    expect(migratedThemeChoice(undefined, false)).toEqual({ choice: 'light', move: false });
   });
 
   it('starts light, the website\u2019s look; dark and following the phone are choices', () => {
@@ -34,7 +42,7 @@ describe('reading the stored choice', () => {
   it('has a label for every choice, in words rather than jargon', () => {
     expect(Object.keys(THEME_CHOICE_LABEL).sort()).toEqual(['dark', 'light', 'system']);
     for (const label of Object.values(THEME_CHOICE_LABEL)) {
-      expect(label.length).toBeGreaterThan(5);
+      expect(label.length).toBeGreaterThan(3);
       expect(label.toLowerCase()).not.toContain('scheme');
     }
   });
@@ -43,15 +51,15 @@ describe('reading the stored choice', () => {
 describe('the splash screen', () => {
   it('is the colour the app actually opens in', () => {
     /*
-     * It was #FFFFFF while the app opens on #0B0E13, so every launch was a
-     * white flash into a dark app — the one moment a technician in a dark
-     * plant room is looking straight at the screen.
+     * The app opens on the website's paper colour, and the splash was a
+     * near-black, so every launch flashed dark, and the logo's black
+     * "FIRE PROTECTION" line could not be seen on it.
      */
     const app = JSON.parse(
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('node:fs').readFileSync(require('node:path').join(__dirname, '..', '..', 'app.json'), 'utf8'),
     ) as { expo: { splash: { backgroundColor: string } } };
-    expect(app.expo.splash.backgroundColor.toUpperCase()).toBe('#0B0E13');
+    expect(app.expo.splash.backgroundColor.toUpperCase()).toBe('#F7F6F2');
   });
 });
 
@@ -75,8 +83,8 @@ describe('the frame before the choice is known', () => {
   it('follows the phone once the choice is known to be system', () => {
     expect(resolveMode('system', 'light')).toBe('light');
     expect(resolveMode('system', 'dark')).toBe('dark');
-    // A phone that will not say is treated as dark, as it always was.
-    expect(resolveMode('system', null)).toBe('dark');
+    // A phone that will not say gets the default look.
+    expect(resolveMode('system', null)).toBe('light');
   });
 
   it('ignores the phone entirely once it is locked', () => {

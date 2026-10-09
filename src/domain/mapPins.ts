@@ -34,12 +34,13 @@ export const PIN_KINDS: readonly PinKind[] = ['open', 'upcoming', 'recent', 'quo
  */
 export const DEFAULT_KINDS: readonly PinKind[] = ['open', 'upcoming', 'site'];
 
+/** The website's colours: crimson for live work, then blue, green, orange and slate. */
 export const PIN_COLOUR: Record<PinKind, string> = {
-  open: '#FF6B1A',
-  upcoming: '#4DABF7',
-  recent: '#51CF66',
-  quote: '#B197FC',
-  site: '#9AA6B6',
+  open: '#9B2335',
+  upcoming: '#1F5F99',
+  recent: '#1C6B3A',
+  quote: '#E8833A',
+  site: '#526664',
 };
 
 export const PIN_LABEL: Record<PinKind, string> = {
@@ -718,8 +719,8 @@ export function mapHtml(pins: readonly MapPin[], options: MapHtmlOptions): strin
   }));
 
   const c = options.dark
-    ? { bg: '#0B0E13', surface: '#161B24', text: '#EEF2F7', muted: '#9AA6B6', border: '#2E3847', ring: '#0B0E13' }
-    : { bg: '#F8F9FA', surface: '#FFFFFF', text: '#212529', muted: '#495057', border: '#DEE2E6', ring: '#FFFFFF' };
+    ? { bg: '#1A1F1E', surface: '#1F2524', text: '#F1F0EC', muted: '#B9C1BA', border: '#3C4544', ring: '#1A1F1E' }
+    : { bg: '#F7F6F2', surface: '#FFFFFF', text: '#232928', muted: '#526664', border: '#D8D5CC', ring: '#FFFFFF' };
 
   const darkTiles = options.dark
     ? '.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.92) contrast(.9) saturate(.7)}'
@@ -732,7 +733,7 @@ export function mapHtml(pins: readonly MapPin[], options: MapHtmlOptions): strin
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <link rel="stylesheet" href="${LEAFLET_CSS_URL}" integrity="${LEAFLET_CSS_INTEGRITY}" crossorigin="anonymous">
 <style>
-html,body,#map{height:100%;margin:0;padding:0;background:${c.bg};font-family:-apple-system,Roboto,Helvetica,Arial,sans-serif;-webkit-tap-highlight-color:transparent}
+html,body,#map{height:100%;margin:0;padding:0;background:${c.bg};font-family:Inter,-apple-system,Roboto,Helvetica,Arial,sans-serif;-webkit-tap-highlight-color:transparent}
 ${darkTiles}
 .offline{display:flex;align-items:center;justify-content:center;height:100%;padding:24px;text-align:center;color:${c.muted};font-size:15px}
 .leaflet-container{background:${c.bg}}
@@ -742,7 +743,7 @@ ${darkTiles}
 .leaflet-top.leaflet-left{top:150px}
 .leaflet-bottom{bottom:${Math.max(0, Math.round(options.bottomClearancePx ?? DEFAULT_BOTTOM_CLEARANCE_PX))}px}
 .clw{background:none;border:none}
-.cl{display:flex;align-items:center;justify-content:center;border-radius:50%;color:#12080A;font-weight:800;border:2px solid ${c.ring};box-shadow:0 2px 8px rgba(0,0,0,.35);font-size:12px;line-height:1}
+.cl{display:flex;align-items:center;justify-content:center;border-radius:50%;color:#FFFFFF;font-weight:800;border:2px solid ${c.ring};box-shadow:0 2px 8px rgba(0,0,0,.35);font-size:12px;line-height:1}
 .cl-s{width:30px;height:30px}
 .cl-m{width:38px;height:38px;font-size:13px}
 .cl-l{width:46px;height:46px;font-size:14px}
@@ -908,7 +909,7 @@ function addPlace(place) {
   L.circleMarker([place.lat, place.lng], {
     radius: 10,
     weight: 3,
-    color: '#FF6B1A',
+    color: '#9B2335',
     fillColor: SURFACE,
     fillOpacity: 0.9
   }).on('click', function (e) {
@@ -989,7 +990,7 @@ window.__select = function (selection) {
 window.__here = function (lat, lng) {
   if (!map) return;
   if (here) map.removeLayer(here);
-  here = L.circleMarker([lat, lng], { radius: 8, weight: 3, color: '#FFFFFF', fillColor: '#4DABF7', fillOpacity: 1, interactive: false })
+  here = L.circleMarker([lat, lng], { radius: 8, weight: 3, color: '#FFFFFF', fillColor: '#1F5F99', fillOpacity: 1, interactive: false })
     .addTo(map);
 };
 

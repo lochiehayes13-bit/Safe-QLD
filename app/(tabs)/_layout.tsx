@@ -18,7 +18,7 @@ export default function TabsLayout() {
       screenOptions={{
         headerStyle: { backgroundColor: t.color.bgElevated },
         headerTintColor: t.color.text,
-        headerTitleStyle: { fontWeight: '700', fontFamily: t.font.family('700') },
+        headerTitleStyle: { fontFamily: t.font.family('700') },
         headerShadowVisible: false,
         // The floating bar covers the last few rows otherwise; every scrolling
         // screen pads its own bottom, but the page ground has to reach under it.

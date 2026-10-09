@@ -78,6 +78,8 @@ export interface Theme {
     surfaceAlt: string;
     border: string;
     borderStrong: string;
+    /** The edge of something you type in or press: 3:1 against its ground, so a field does not vanish in sunlight. */
+    borderInput: string;
     text: string;
     textMuted: string;
     textFaint: string;
@@ -203,6 +205,7 @@ export const darkTheme: Theme = {
     surfaceAlt: palette.night3,
     border: palette.night4,
     borderStrong: palette.night5,
+    borderInput: '#7C8783',
     text: '#F1F0EC',
     textMuted: '#B9C1BA',
     textFaint: '#8F9992',
@@ -233,6 +236,7 @@ export const lightTheme: Theme = {
     surfaceAlt: '#EFEDE7',
     border: palette.line,
     borderStrong: palette.lineStrong,
+    borderInput: '#7E8782',
     text: palette.ink,
     textMuted: palette.slate,
     textFaint: palette.faint,

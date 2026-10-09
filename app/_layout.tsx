@@ -162,7 +162,7 @@ function RootShell() {
           screenOptions={{
             headerStyle: { backgroundColor: t.color.bgElevated },
             headerTintColor: t.color.text,
-            headerTitleStyle: { fontWeight: '700', fontFamily: t.font.family('700') },
+            headerTitleStyle: { fontFamily: t.font.family('700') },
             headerBackButtonDisplayMode: 'minimal',
             contentStyle: { backgroundColor: t.color.bg },
             headerShadowVisible: false,

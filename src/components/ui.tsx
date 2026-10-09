@@ -213,16 +213,7 @@ export function H1({ children }: { children: React.ReactNode }) {
 export function H2({ children }: { children: React.ReactNode }) {
   const t = useTheme();
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.space(2.5), marginTop: t.space(4) }}>
-      {/* The website's eyebrow rule: a short orange bar. */}
-      <View
-        style={{
-          width: 3,
-          height: t.font.size.md,
-          borderRadius: 2,
-          backgroundColor: EYEBROW,
-        }}
-      />
+    <View style={{ marginTop: t.space(4) }}>
       <Txt size="lg" weight="800" style={{ letterSpacing: -0.3 }}>{children}</Txt>
     </View>
   );
@@ -313,11 +304,8 @@ export function Button({
             // A secondary button is outlined, as the site's are; a ghost is a
             // crimson word and nothing else.
             borderWidth: variant === 'secondary' ? 1.5 : 0,
-            borderColor: t.color.border,
+            borderColor: t.color.accentText,
           },
-          // A soft crimson shadow under the one button that matters, gone
-          // while it is disabled so it always means "this is live".
-          variant === 'primary' && !isDisabled ? t.shadow.glow : null,
         ]}
       >
         {inner}
@@ -360,10 +348,10 @@ export function Field({
         style={{
           flexDirection: 'row',
           alignItems: 'center',
-          backgroundColor: t.color.surfaceAlt,
+          backgroundColor: t.color.surface,
           borderRadius: t.radius.md,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: t.color.border,
+          borderWidth: 1,
+          borderColor: t.color.borderInput,
           paddingHorizontal: t.space(3),
           minHeight: t.touch,
           opacity: editable ? 1 : 0.6,
@@ -383,6 +371,7 @@ export function Field({
             flex: 1,
             color: t.color.text,
             fontSize: t.font.size.md,
+            fontFamily: t.font.family('400'),
             paddingVertical: multiline ? t.space(3) : 0,
             minHeight: multiline ? 96 : undefined,
             textAlignVertical: multiline ? 'top' : 'center',
@@ -412,8 +401,8 @@ export function Segmented<T extends string>({
         backgroundColor: t.color.surfaceAlt,
         borderRadius: t.radius.md,
         padding: 3,
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: t.color.border,
+        borderWidth: 1,
+        borderColor: t.color.borderInput,
       }}
     >
       {options.map((o) => {
@@ -757,8 +746,8 @@ export function SearchBox({ value, onChange, placeholder }: { value: string; onC
     <View
       style={{
         flexDirection: 'row', alignItems: 'center', gap: t.space(2),
-        backgroundColor: t.color.surfaceAlt, borderRadius: t.radius.md,
-        borderWidth: StyleSheet.hairlineWidth, borderColor: t.color.border,
+        backgroundColor: t.color.surface, borderRadius: t.radius.md,
+        borderWidth: 1, borderColor: t.color.borderInput,
         paddingHorizontal: t.space(3), minHeight: t.touch,
       }}
     >
@@ -772,7 +761,7 @@ export function SearchBox({ value, onChange, placeholder }: { value: string; onC
         autoCorrect={false}
         clearButtonMode="while-editing"
         returnKeyType="search"
-        style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md, minHeight: t.touch }}
+        style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md, fontFamily: t.font.family('400'), minHeight: t.touch }}
       />
       {value ? (
         <Pressable

@@ -3838,6 +3838,7 @@ function OccupierCopyCard({
   onPress: () => void;
   onEmail: () => void;
 }) {
+  const t = useTheme();
   const due = occupierCopyDueBy(form.testDate);
   const keep = testerCopyKeepUntil(form.testDate);
   const to = occupierCopyRecipient(form, site);
@@ -3846,7 +3847,7 @@ function OccupierCopyCard({
     return (
       <Card>
         <Rowed gap={2}>
-          <MaterialCommunityIcons name="check-circle-outline" size={20} color="#2E9E5B" />
+          <MaterialCommunityIcons name="check-circle-outline" size={20} color={t.color.pass} />
           <View style={{ flex: 1 }}>
             <Txt weight="600">Occupier has their copy</Txt>
             <Txt size="sm" tone="muted">
