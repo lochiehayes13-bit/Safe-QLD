@@ -10,7 +10,7 @@ import type { Panel, Site } from '@/domain/types';
  * The three documents the letterhead sweep deliberately did not treat alike.
  *
  * Everything else the app prints now opens with the Safe QLD band and closes
- * with the swoosh. These three do not, and each for a different reason, so the
+ * with the entity line. These three do not, and each for a different reason, so the
  * risk they share is that somebody later notices the gap, calls it an oversight
  * and "fixes" it. That would put a second masthead over a statutory form, push
  * the bottom of a zone chart onto a page a technician does not have at the
@@ -52,25 +52,24 @@ describe('Form 72 carries the company mark at the foot only', () => {
     }).toEqual({ mastheadAnywhere: false, headIsFirst: true });
   });
 
-  it('closes with the swoosh, after the department\'s note and after our own disclaimer', () => {
-    // The ordering is the whole judgement call. The swoosh sits below the
+  it('closes with the entity line, after the department\'s note and after our own disclaimer', () => {
+    // The ordering is the whole judgement call. The entity line sits below the
     // dashed "Not part of the department's form" block, so it reads as the
     // producer's mark on a reproduced form rather than as part of the form.
-    // Measured inside <body>, because `lh-entity` and `lh-footer` also appear in
-    // the stylesheet and a whole-document indexOf finds the rule, not the element.
+    // Measured inside <body>, because `lh-entity` also appears in the
+    // stylesheet and a whole-document indexOf finds the rule, not the element.
     const body = html.slice(html.indexOf('<body>'));
     const positions = {
       deptNote: body.indexOf(DEPARTMENT_NOTE.slice(0, 40)),
       ours: body.indexOf('Not part of the department'),
       entity: body.indexOf('lh-entity'),
-      swoosh: body.indexOf('lh-footer'),
       bodyEnd: body.indexOf('</body>'),
     };
     expect(positions.deptNote).toBeGreaterThan(0);
     expect(positions.ours).toBeGreaterThan(positions.deptNote);
     expect(positions.entity).toBeGreaterThan(positions.ours);
-    expect(positions.swoosh).toBeGreaterThan(positions.entity);
-    expect(positions.bodyEnd).toBeGreaterThan(positions.swoosh);
+    expect(positions.bodyEnd).toBeGreaterThan(positions.entity);
+    expect(body).not.toContain('lh-footer');
   });
 
   it('prints the legal name and the ABN, which is the reason to keep the foot', () => {
@@ -144,8 +143,8 @@ describe('the zone chart keeps its own sheet', () => {
     const html = zoneChart(30);
     expect({
       masthead: html.includes('lh-header'),
-      swoosh: html.includes('lh-footer'),
-    }).toEqual({ masthead: false, swoosh: false });
+      entity: html.includes('lh-entity'),
+    }).toEqual({ masthead: false, entity: false });
   });
 
   it('stays landscape with the letterhead on, at the row count that forces it', () => {
@@ -177,10 +176,9 @@ describe('the zone chart keeps its own sheet', () => {
     const body = html.slice(html.indexOf('<body>'));
     expect({
       masthead: body.includes('lh-header'),
-      swoosh: body.includes('lh-footer'),
       entity: body.includes('lh-entity'),
       warning: body.includes('Verify against the panel before it is relied on'),
-    }).toEqual({ masthead: true, swoosh: false, entity: false, warning: true });
+    }).toEqual({ masthead: true, entity: false, warning: true });
   });
 
   it('puts the masthead above the chart\'s own red bar', () => {

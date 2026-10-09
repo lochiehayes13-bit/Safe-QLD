@@ -137,7 +137,6 @@ describe('brand constants', () => {
     expect(brand).toEqual({
       red: '#9E1215',
       orange: '#F1592A',
-      swoosh: '#F07110',
       charcoal: '#231F20',
       paper: '#FAFAFA',
     });

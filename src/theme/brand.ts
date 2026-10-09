@@ -14,8 +14,6 @@ export const brand = {
   red: '#9E1215',
   /** The "QLD" half of the wordmark. The primary brand colour. */
   orange: '#F1592A',
-  /** The swoosh across the top and bottom of the page. */
-  swoosh: '#F07110',
   /** "FIRE PROTECTION" under the wordmark. */
   charcoal: '#231F20',
   /** The letterhead stock. Not pure white. */

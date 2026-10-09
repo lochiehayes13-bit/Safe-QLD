@@ -25,8 +25,8 @@ import { letterheaded } from './letterhead';
  * is nowhere near the orange that is actually the primary mark. So the one
  * document a building manager sees most often was the one that looked least
  * like the company's, and the bar was doing the letterhead's job badly rather than
- * leaving room for the real thing. The bar is gone, the masthead and swoosh
- * from `letterheaded` take its place, and the two rules that used that red for
+ * leaving room for the real thing. The bar is gone, the masthead and entity
+ * line from `letterheaded` take its place, and the two rules that used that red for
  * a rule line and a callout edge now read brand.red so there is one source for
  * it.
  *

@@ -39,17 +39,17 @@ export interface ZoneChartInput {
    *
    * Every other document the app prints wears the letterhead, and this one is
    * the deliberate exception, because the chart's whole job is to fit on one
-   * sheet. The masthead is 36mm of artwork across a 190mm column and the swoosh
-   * and entity line come to about another 40mm, and the file's rule at the top
-   * is that a chart in two halves is a chart nobody trusts — 76mm is enough to
-   * push the bottom of a 40-row chart onto a second page. So the copy that goes
+   * sheet. The masthead is 36mm of artwork across a 190mm column and the entity
+   * line another 15mm, and the file's rule at the top is that a chart in two
+   * halves is a chart nobody trusts — 50mm is enough to push the bottom of a
+   * 40-row chart onto a second page. So the copy that goes
    * on the panel door stays bare, and the masthead is for the copy that gets
    * emailed to a building manager who wants to know who produced it.
    *
    * Only the masthead, even then. The `.foot` line already carries the company
    * name and "Verify against the panel before it is relied on", and that warning
    * is the one that matters to someone reading this at a panel at night; burying
-   * it above a swoosh and an ABN line would not improve it.
+   * it above an ABN line would not improve it.
    */
   letterhead?: boolean;
 }
@@ -78,8 +78,8 @@ export function zoneChartHtml(input: ZoneChartInput): string {
   // LETTERHEAD_CSS alone is safe because the page box was split out of it: the
   // furniture half declares no @page at all.
   //
-  // The second is that `letterheaded` always closes a document with the swoosh
-  // and the entity line, and this one wants the head without the foot. The
+  // The second is that `letterheaded` always closes a document with the entity
+  // line, and this one wants the head without the foot. The
   // rules for both come in with LETTERHEAD_CSS; the unused half costs a few
   // bytes and is worth more than a second copy of the masthead's proportions
   // living in this file and drifting from the artwork.

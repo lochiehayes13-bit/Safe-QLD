@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 
 import { LETTERHEAD_PAGE } from '@/export/letterhead';
-import { LETTERHEAD_FOOTER_DATA_URI, LETTERHEAD_HEADER_DATA_URI } from '@/export/letterheadArt';
+import { LETTERHEAD_HEADER_DATA_URI } from '@/export/letterheadArt';
 import { company } from '@/theme/brand';
 
 import { buildLabelSheet, LABEL_STOCKS } from '@/export/assetLabels';
@@ -396,8 +396,8 @@ const DOCUMENTS: DocumentRow[] = [
      * department's own full-width statutory head. The Safe QLD band stacked
      * above that gives the reader two mastheads, reads as though the company has
      * altered a form the regulator prescribes, and pushes the signature part of
-     * Part I onto a second page. The foot stays because the entity line under
-     * the swoosh carries the legal name and the ABN, and a statutory record
+     * Part I onto a second page. The foot stays because the entity line
+     * carries the legal name and the ABN, and a statutory record
      * leaving this company without its ABN on it is a different problem again.
      */
     furniture: 'foot-only',
@@ -414,12 +414,12 @@ const DOCUMENTS: DocumentRow[] = [
     /*
      * Masthead only, and only when asked for — the copy that goes on the panel
      * door prints bare. The chart's whole job is to fit on one sheet: the
-     * masthead is 36mm across a 190mm column and the swoosh and entity line come
-     * to about another 40mm, which is enough to put the bottom of a forty-row
-     * chart on a page nobody is holding at the panel. The `.foot` line already
-     * carries the company name and "Verify against the panel before it is relied
-     * on", and that warning is the one that matters to somebody reading this at
-     * a panel at night; burying it above a swoosh would not improve it.
+     * masthead is 36mm across a 190mm column and the entity line another 15mm,
+     * which is enough to put the bottom of a forty-row chart on a page nobody is
+     * holding at the panel. The `.foot` line already carries the company name
+     * and "Verify against the panel before it is relied on", and that warning is
+     * the one that matters to somebody reading this at a panel at night; burying
+     * it above an ABN line would not improve it.
      */
     furniture: 'masthead-only',
     page: 'size: A4 portrait; margin: 10mm;',
@@ -486,7 +486,7 @@ const NO_MARKUP_AT_ALL: { file: string; reason: string }[] = [
  * The document's one stylesheet, which is where the whole cascade happens.
  *
  * Every assertion about `@page` reads from here rather than from the whole
- * document, because a class name like `lh-footer` appears in the stylesheet as
+ * document, because a class name like `lh-entity` appears in the stylesheet as
  * well as in the markup and a whole-document `indexOf` finds the rule.
  */
 function styles(html: string): string {
@@ -572,12 +572,14 @@ describe.each(DOCUMENTS)('$name', (row: DocumentRow) => {
      */
     const expected = {
       masthead: row.furniture === 'full' || row.furniture === 'masthead-only',
-      swoosh: row.furniture === 'full' || row.furniture === 'foot-only',
+      // The foot is the entity line and nothing else: the orange swoosh that
+      // closed every page went at the owner's ask.
+      footArtwork: false,
       entity: row.furniture === 'full' || row.furniture === 'foot-only',
     };
     expect({
       masthead: body.includes('lh-header'),
-      swoosh: body.includes('lh-footer'),
+      footArtwork: body.includes('lh-footer'),
       entity: body.includes('lh-entity'),
     }).toEqual(expected);
   });
@@ -695,23 +697,22 @@ describe("Form 72 wears the mark at the foot and nothing above the department's 
     }).toEqual({ masthead: false, headBeforeAnyFurniture: true });
   });
 
-  it("closes with the swoosh, below the department's own note", () => {
+  it("closes with the entity line, below the department's own note", () => {
     /*
      * The ordering is the judgement call, not an accident of assembly. The
-     * swoosh sits under the department's note and under our own "not part of the
-     * department's form" block, so it reads as the producer's mark on a
+     * entity line sits under the department's note and under our own "not part
+     * of the department's form" block, so it reads as the producer's mark on a
      * reproduced form rather than as part of the form itself.
      */
     const at = {
       deptNote: body.indexOf(DEPARTMENT_NOTE.slice(0, 40)),
       entity: body.indexOf('lh-entity'),
-      swoosh: body.indexOf('lh-footer'),
       bodyEnd: body.indexOf('</body>'),
     };
     expect(at.deptNote).toBeGreaterThan(0);
     expect(at.entity).toBeGreaterThan(at.deptNote);
-    expect(at.swoosh).toBeGreaterThan(at.entity);
-    expect(at.bodyEnd).toBeGreaterThan(at.swoosh);
+    expect(at.bodyEnd).toBeGreaterThan(at.entity);
+    expect(body).not.toContain('lh-footer');
   });
 });
 
@@ -722,8 +723,8 @@ describe('the zone chart that goes on the panel door', () => {
     const html = zoneChartHtml({
       site, panel, chart: zoneChart, companyName: 'Safe QLD Fire Protection', generatedAt: AT,
     });
-    expect({ masthead: html.includes('lh-header'), swoosh: html.includes('lh-footer') })
-      .toEqual({ masthead: false, swoosh: false });
+    expect({ masthead: html.includes('lh-header'), entity: html.includes('lh-entity') })
+      .toEqual({ masthead: false, entity: false });
   });
 
   it('stays landscape with the letterhead on', () => {
@@ -767,8 +768,8 @@ describe('printableDocument is a delivery wrapper, not a document', () => {
     expect({
       titled: wrapped.includes('<title>A fragment</title>'),
       masthead: wrapped.includes('lh-header'),
-      swoosh: wrapped.includes('lh-footer'),
-    }).toEqual({ titled: true, masthead: false, swoosh: false });
+      entity: wrapped.includes('lh-entity'),
+    }).toEqual({ titled: true, masthead: false, entity: false });
   });
 });
 
@@ -788,13 +789,11 @@ describe('the embedded artwork keeps its shape', () => {
    * The CSS depends on these numbers. `.lh-header img` is `width: 100%` with
    * `height: auto`, so the printed height of the band is purely the artwork's
    * aspect ratio — 189/1000 across a 190mm column is the 36mm the whole layout
-   * is reasoned from, and the 107/1000 swoosh is the 20.5mm the page's bottom
-   * margin has to leave room for. Change the pixels and every page-break
-   * judgement in `src/export` is working from the wrong figure.
+   * is reasoned from. Change the pixels and every page-break judgement in
+   * `src/export` is working from the wrong figure.
    */
   it.each([
     ['header band', LETTERHEAD_HEADER_DATA_URI, 1000, 189],
-    ['foot swoosh', LETTERHEAD_FOOTER_DATA_URI, 1000, 107],
   ])('the %s is still %sx%s pixels', (_name, uri, width, height) => {
     expect(jpegSize(decode(uri))).toEqual({ width, height });
   });

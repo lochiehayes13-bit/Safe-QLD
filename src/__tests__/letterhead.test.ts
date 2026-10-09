@@ -1,5 +1,5 @@
 import { company } from '@/theme/brand';
-import { LETTERHEAD_FOOTER_DATA_URI, LETTERHEAD_HEADER_DATA_URI } from '@/export/letterheadArt';
+import { LETTERHEAD_HEADER_DATA_URI } from '@/export/letterheadArt';
 import { LETTERHEAD_CSS, LETTERHEAD_PAGE, LETTERHEAD_PAGE_CSS, letterheaded } from '@/export/letterhead';
 import { routineServiceReportHtml } from '@/export/routineServiceReport';
 
@@ -22,7 +22,6 @@ function decode(dataUri: string): Buffer {
 describe('the embedded artwork', () => {
   it.each([
     ['header', LETTERHEAD_HEADER_DATA_URI],
-    ['footer', LETTERHEAD_FOOTER_DATA_URI],
   ])('%s is a real JPEG, not a truncated string', (_name, uri) => {
     expect(uri.startsWith('data:image/jpeg;base64,')).toBe(true);
     const bytes = decode(uri);
@@ -37,7 +36,6 @@ describe('the embedded artwork', () => {
 
   it.each([
     ['header', LETTERHEAD_HEADER_DATA_URI, 20_000],
-    ['footer', LETTERHEAD_FOOTER_DATA_URI, 4_000],
   ])('%s is big enough to be the artwork and small enough to email', (_name, uri, floor) => {
     const bytes = decode(uri).length;
     expect({ bytes, plausible: bytes > floor && bytes < 120_000 })
@@ -54,9 +52,11 @@ describe('page furniture', () => {
     expect(LETTERHEAD_CSS).not.toMatch(/\.lh-header\s*\{[^}]*height:\s*\d/);
   });
 
-  it('keeps the furniture out of the flow of a page break', () => {
-    // The swoosh splitting across two pages is worse than no swoosh.
-    expect(LETTERHEAD_CSS).toMatch(/\.lh-footer[^}]*page-break-inside:\s*avoid/);
+  it('keeps the entity line out of the flow of a page break, and carries no foot artwork', () => {
+    // The orange swoosh that closed every page is gone at the owner's ask;
+    // nothing at the foot but the entity line, which must not split.
+    expect(LETTERHEAD_CSS).toMatch(/\.lh-entity[^}]*page-break-inside:\s*avoid/);
+    expect(LETTERHEAD_CSS).not.toContain('lh-footer');
   });
 
   it('carries no page box of its own', () => {
@@ -70,7 +70,7 @@ describe('page furniture', () => {
 
   it('does not position furniture with `fixed`', () => {
     // Tried and measured: Chrome clips a fixed element to the page content box,
-    // so a swoosh offset into the bottom margin is cut off, and a fixed footer
+    // so artwork offset into the bottom margin is cut off, and a fixed footer
     // inside the box has body text run underneath it on a full page.
     expect(LETTERHEAD_CSS).not.toMatch(/position:\s*fixed/);
   });
@@ -79,16 +79,19 @@ describe('page furniture', () => {
 describe('letterheaded()', () => {
   const doc = letterheaded({ title: 'Test', css: '.x{color:red}', body: '<p id="content">body</p>' });
 
-  it('opens with the masthead and closes with the swoosh', () => {
+  it('opens with the masthead and closes with the entity line, with no artwork at the foot', () => {
     // Measured inside <body> only. Both class names appear in the stylesheet
     // first, so searching the whole document finds the CSS rule and reports
     // the footer as coming before the content no matter where it is.
     const body = doc.slice(doc.indexOf('<body>'));
     const header = body.indexOf('lh-header');
     const content = body.indexOf('id="content"');
-    const footer = body.indexOf('lh-footer');
+    const footer = body.indexOf('lh-entity');
     expect({ headerFirst: header < content, footerLast: footer > content, allPresent: header >= 0 && footer >= 0 })
       .toEqual({ headerFirst: true, footerLast: true, allPresent: true });
+    expect(body).not.toContain('lh-footer');
+    // One image on the page: the masthead. Nothing drawn at the foot.
+    expect((body.match(/<img /g) ?? []).length).toBe(1);
   });
 
   it('keeps the caller\'s own stylesheet', () => {
@@ -97,7 +100,7 @@ describe('letterheaded()', () => {
 
   it('puts the furniture rules after the document\'s own so a broad rule cannot reach them', () => {
     // The furniture comes last so a document-wide `img { width: 50% }` or
-    // `div { border }` cannot shrink the masthead or box the swoosh. Note this
+    // `div { border }` cannot shrink the masthead or box the entity line. Note this
     // is NOT, as the docstring used to claim, about beating a caller's
     // `body { margin: 0 }` — see the @page tests below for what appending last
     // was really doing before this was split up.
@@ -174,8 +177,7 @@ describe('the page box', () => {
   it('gives the routine service report the margins its own stylesheet asks for', () => {
     // The real document, not a fixture: routineServiceReport has asked for
     // 12mm/10mm/16mm since it was written and, until the split, printed on the
-    // letterhead's 8mm/10mm/10mm instead. The bottom margin is the one that
-    // matters — it is the room the swoosh needs.
+    // letterhead's 8mm/10mm/10mm instead.
     const html = routineServiceReportHtml({
       customer: { name: 'A Customer' },
       site: { name: 'A Site' },
@@ -198,12 +200,12 @@ describe('a document that wants the foot but not the masthead', () => {
     expect(body).not.toContain('lh-header');
   });
 
-  it('still closes with the swoosh and the ABN', () => {
+  it('still closes with the entity line and the ABN', () => {
     expect({
-      swoosh: body.includes('lh-footer'),
+      entity: body.includes('lh-entity'),
       abn: body.includes(company.abn),
       legalName: body.includes(company.legalName),
-    }).toEqual({ swoosh: true, abn: true, legalName: true });
+    }).toEqual({ entity: true, abn: true, legalName: true });
   });
 
   it('keeps the masthead when the option is left alone or passed as true', () => {
@@ -225,12 +227,11 @@ describe('the routine service report wears it', () => {
     sections: [],
   });
 
-  it('carries the masthead, the swoosh and the ABN', () => {
+  it('carries the masthead and the ABN', () => {
     expect({
       masthead: html.includes('lh-header'),
-      swoosh: html.includes('lh-footer'),
       abn: html.includes(company.abn),
-    }).toEqual({ masthead: true, swoosh: true, abn: true });
+    }).toEqual({ masthead: true, abn: true });
   });
 
   it('still prints the contact rows it was given', () => {

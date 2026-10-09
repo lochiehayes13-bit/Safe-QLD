@@ -31,7 +31,7 @@ import { TAG_LENGTH, compactTag, parseTag, tagPayload } from '@/domain/assetTag'
  * a label that implies a service happened is worse than no label.
  *
  * **What is deliberately not printed: the letterhead.** Every other document
- * this app prints now carries the Safe QLD masthead and swoosh, and this sheet
+ * this app prints now carries the Safe QLD masthead and entity line, and this sheet
  * is the one place where that would be a fault rather than an omission, so it is
  * recorded here before somebody sweeps the export folder looking for the file
  * that got missed.

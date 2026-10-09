@@ -186,13 +186,6 @@ function Hero({ name }: { name: string }) {
           ...t.shadow.card,
         }}
       >
-        {/* The swoosh: a flame arc off the corner, the same mark as the icon. */}
-        <LinearGradient
-          colors={[t.color.accent, 'transparent'] as const}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={{ position: 'absolute', right: -70, top: -70, width: 200, height: 200, borderRadius: 100, opacity: 0.35 }}
-        />
         <Rowed gap={2}>
           <View style={{ width: 3, height: t.font.size.xs + 2, borderRadius: 2, backgroundColor: t.color.accent }} />
           <Txt size="xs" tone="accent" weight="800" style={{ letterSpacing: 2 }}>SAFE QLD</Txt>
@@ -203,8 +196,7 @@ function Hero({ name }: { name: string }) {
             * known, but a technician told over the phone that something has
             * been fixed wants to ask now — and the automatic check runs at most
             * once every six hours, so the answer was three screens into
-            * Settings. It sits in the gap the swoosh leaves, which is otherwise
-            * decoration.
+            * Settings.
             */}
           <View style={{ flex: 1 }} />
           <UpdateCheckButton />

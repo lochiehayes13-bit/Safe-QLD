@@ -1,5 +1,5 @@
 import { company } from '@/theme/brand';
-import { LETTERHEAD_FOOTER_DATA_URI, LETTERHEAD_HEADER_DATA_URI } from './letterheadArt';
+import { LETTERHEAD_HEADER_DATA_URI } from './letterheadArt';
 
 /**
  * The Safe QLD letterhead, for anything the app prints or emails.
@@ -12,10 +12,12 @@ import { LETTERHEAD_FOOTER_DATA_URI, LETTERHEAD_HEADER_DATA_URI } from './letter
  * Deliberately free of any React Native import so it can be unit-tested and so
  * every document builder can use it without dragging a view layer in.
  *
- * The band and swoosh are the office's own artwork. The entity line underneath
- * is real text drawn from the shared `company` constants, so the ABN and phone
- * number stay correct and selectable even though the artwork above them cannot
- * be edited.
+ * The masthead is the office's own artwork: the full logo on its band. The
+ * entity line at the foot is real text drawn from the shared `company`
+ * constants, so the ABN and phone number stay correct and selectable even
+ * though the artwork cannot be edited. There is no artwork at the foot. The
+ * orange swoosh that used to close every page went at the owner's ask: on its
+ * own, without the logo, it was decoration nobody wanted on their paperwork.
  */
 
 /**
@@ -52,22 +54,21 @@ export const LETTERHEAD_PAGE_CSS = `@page { ${LETTERHEAD_PAGE} }`;
  *
  * `position: fixed` is the obvious way to repeat a letterhead on every sheet,
  * and it was tried first. It does not work here, for two measured reasons.
- * Chrome clips a fixed element to the page's content box, so a swoosh nudged
- * into the bottom margin to bleed off the paper edge is simply cut off — at a
- * -16mm offset only a two-millimetre sliver survived. And a fixed footer inside
- * the content box does not push text aside: the last table on a full page runs
+ * Chrome clips a fixed element to the page's content box, so artwork nudged
+ * into the margin to bleed off the paper edge is simply cut off — at a -16mm
+ * offset only a two-millimetre sliver survived. And a fixed footer inside the
+ * content box does not push text aside: the last table on a full page runs
  * straight underneath it.
  *
- * So the masthead opens the document and the swoosh closes it, which is how the
- * printed stock reads anyway. A dozen-page asset register does not spend an
- * eighth of every sheet on a logo the reader saw on page one, and no page can
- * collide with its own furniture.
+ * So the masthead opens the document and the entity line closes it. A
+ * dozen-page asset register does not spend an eighth of every sheet on a logo
+ * the reader saw on page one, and no page can collide with its own furniture.
  *
- * Heights are the artwork's own proportions, never a chosen number: the source
- * page is 2480px wide, the masthead crop 470px tall and the swoosh 267px, so
- * across a 190mm column they come to 36.0mm and 20.5mm. `height: auto` keeps
- * that true at any page size — a fixed height is what makes a logo look
- * stretched on someone's letterhead.
+ * The masthead's height is the artwork's own proportion, never a chosen
+ * number: the source page is 2480px wide and the masthead crop 470px tall, so
+ * across a 190mm column it comes to 36.0mm. `height: auto` keeps that true at
+ * any page size — a fixed height is what makes a logo look stretched on
+ * someone's letterhead.
  *
  * The `body { margin: 0 }` is here, after the caller's own stylesheet, on
  * purpose: the paper inset is the job of the @page margin, and a body margin on
@@ -81,8 +82,7 @@ export const LETTERHEAD_PAGE_CSS = `@page { ${LETTERHEAD_PAGE} }`;
 export const LETTERHEAD_CSS = `
   body { margin: 0; }
   .lh-header { display: block; width: 100%; margin: 0 0 6mm; }
-  .lh-footer { display: block; width: 100%; margin: 8mm 0 0; page-break-inside: avoid; }
-  .lh-header img, .lh-footer img { display: block; width: 100%; height: auto; }
+  .lh-header img { display: block; width: 100%; height: auto; }
   .lh-entity {
     text-align: center; font-size: 6.5px; color: #6B6B6B; letter-spacing: 0.2px;
     margin-top: 10mm; page-break-inside: avoid;
@@ -95,11 +95,11 @@ export function letterheadHeaderHtml(): string {
 }
 
 /**
- * The repeating foot: the swoosh, and the entity line above it.
+ * The foot: the entity line, as text.
  *
- * The legal name and ABN are here rather than in the artwork because they are
- * the parts that must be right, and pixels cannot be corrected without new
- * artwork from the office.
+ * The legal name and ABN are text rather than artwork because they are the
+ * parts that must be right, and pixels cannot be corrected without new artwork
+ * from the office.
  */
 export function letterheadFooterHtml(): string {
   const line = [
@@ -109,8 +109,7 @@ export function letterheadFooterHtml(): string {
     `P ${company.phone}`,
     company.email,
   ].join(' · ');
-  return `<div class="lh-entity">${escapeHtml(line)}</div>`
-    + `<div class="lh-footer"><img src="${LETTERHEAD_FOOTER_DATA_URI}" alt="" /></div>`;
+  return `<div class="lh-entity">${escapeHtml(line)}</div>`;
 }
 
 /**
@@ -125,7 +124,7 @@ export function letterheadFooterHtml(): string {
  *  2. the caller's stylesheet;
  *  3. the letterhead furniture, last, so a document with a broad rule of its
  *     own — an `img { width: 50% }` in a photo report, a `div { border }` in a
- *     table-heavy form — cannot shrink the masthead or box the swoosh.
+ *     table-heavy form — cannot shrink the masthead or box the entity line.
  *
  * The docstring that used to be here said the furniture came last so that the
  * letterhead's body padding beat a caller's `body { margin: 0 }`. That was
@@ -142,8 +141,8 @@ export function letterheadFooterHtml(): string {
  * that: it is an approved form with its own full-width statutory head, and
  * stacking the Safe QLD band above it gives the reader two mastheads and pushes
  * the signature part onto a second page. Such a document still gets the foot,
- * because the entity line under the swoosh carries the legal name and ABN, and
- * a document leaving this company without its ABN on it is a different problem.
+ * because the entity line carries the legal name and ABN, and a document
+ * leaving this company without its ABN on it is a different problem.
  */
 export function letterheaded(options: {
   title?: string;
