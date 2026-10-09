@@ -131,13 +131,14 @@ describe('the closing statement', () => {
         finding({ id: 'c', kind: 'observation', seq: 1, item: 'East offices', priority: undefined }),
       ],
     }));
-    expect(html).toContain('(1) Replacement of the FIP; (2) Replacement of the detection fleet');
+    expect(html).toContain('Recommended improvements: (1) Replacement of the FIP; (2) Replacement of the detection fleet.');
+    expect(html).not.toContain('upcoming project');
     expect(html).toContain('The installation appears to remain effective.');
   });
 
   it('leaves the list off when nothing is recommended', () => {
     const html = effectivenessReportHtml(input({ statement: 'All good.', findings: [] }));
-    expect(html).not.toContain('should incorporate');
+    expect(html).not.toContain('Recommended improvements');
     expect(html).toContain('All good.');
   });
 });

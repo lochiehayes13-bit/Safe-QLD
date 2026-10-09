@@ -46,7 +46,7 @@ describe('missingCredentials', () => {
     expect(reason).toMatch(/client secret/i);
     // The build ships with the domain, company and client ID set, so the
     // message must not send someone hunting for those too.
-    expect(reason).toMatch(/already filled in/i);
+    expect(reason).toMatch(/Office setup/);
     expect(await SimproClient.secretSource(config({ clientId: 'some-other-application' }))).toBe('none');
   });
 

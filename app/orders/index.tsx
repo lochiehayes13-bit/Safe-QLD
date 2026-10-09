@@ -102,14 +102,14 @@ export default function OrdersScreen() {
       <Stack.Screen options={{ title }} />
       <Screen scroll={false} padded={false}>
         <View style={{ padding: t.space(4), paddingBottom: t.space(2), gap: t.space(2) }}>
-          <SearchBox value={typed} onChange={setTyped} placeholder="Order, supplier, reference, job, site or suburb" />
+          <SearchBox value={typed} onChange={setTyped} placeholder="Order, supplier, job, suburb" />
           <Segmented
             value={filter}
             onChange={setFilter}
             options={[{ value: 'open', label: `Open${counts ? ` ${counts.open}` : ''}` }, { value: 'all', label: `All${counts ? ` ${counts.all}` : ''}` }]}
           />
           {rows && rows.length >= PAGE ? (
-            <Txt size="xs" tone="faint">The newest {PAGE} shown. Search to reach an older one.</Txt>
+            <Txt size="xs" tone="faint">Newest {PAGE} shown. Search to find older ones.</Txt>
           ) : null}
         </View>
         <FlatList
@@ -119,7 +119,7 @@ export default function OrdersScreen() {
           initialNumToRender={14}
           windowSize={7}
           contentContainerStyle={{ padding: t.space(4), paddingTop: 0, gap: t.space(3), paddingBottom: t.space(20) }}
-          ListHeaderComponent={failed ? <Banner tone="fail" title="The orders could not be read" body={failed} /> : null}
+          ListHeaderComponent={failed ? <Banner tone="fail" title="Couldn't load orders" body={failed} /> : null}
           ListEmptyComponent={rows === null && !failed ? null : (
             empty ? (
               <EmptyState icon="cart-outline" title={empty.title} body={empty.body} />
@@ -130,10 +130,10 @@ export default function OrdersScreen() {
                   ? 'Nothing matched'
                   : filter === 'open' ? 'Nothing on order' : jobExternalId ? 'No orders for this job' : vendorExternalId ? 'No orders with this supplier' : 'No purchase orders'}
                 body={query.trim()
-                  ? 'Try the order number on its own, or part of the supplier name.'
+                  ? 'Try the order number or supplier.'
                   : filter === 'open'
-                    ? 'All shows the completed and archived ones as well.'
-                    : 'The office has raised no purchase order the phone knows of.'}
+                    ? 'All shows completed and archived orders too.'
+                    : ''}
               />
             )
           )}

@@ -92,7 +92,7 @@ describe('what it refuses to guess', () => {
     // fields look filled in.
     const r = readPastedConnection('Hi, can you look at the panel at the tower tomorrow morning?');
     expect(r.found).toEqual({});
-    expect(r.problem).toContain('no client ID, client secret or token URL');
+    expect(r.problem).toContain('No client ID, secret or token URL found');
   });
 
   it('refuses a client id that is a sentence rather than a token', () => {

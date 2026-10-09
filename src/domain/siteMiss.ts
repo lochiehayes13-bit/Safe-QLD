@@ -206,9 +206,7 @@ export function siteMissLine(input: SiteMissInput): string {
  */
 export function siteFallbackWords(count: number, what: string): { title: string; body: string } {
   return {
-    title: `No ${what} match that`,
-    body: `No ${what} on this phone match those words. ${count === 1
-      ? 'The site below does — open it for its register, its history and its documents.'
-      : 'The sites below do — open one for its register, its history and its documents.'}`,
+    title: `No ${what} match`,
+    body: count === 1 ? 'This site matches. Open it below.' : 'These sites match. Open one below.',
   };
 }

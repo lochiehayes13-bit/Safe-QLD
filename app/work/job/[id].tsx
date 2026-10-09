@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { Directory, File, Paths } from 'expo-file-system';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { loadPrefs } from '@/app-prefs';
@@ -26,8 +25,9 @@ import {
   signatureFilename, statusChoices, statusContentKey, statusPayload, type JobMaterialPayload, type StatusChoice,
 } from '@/domain/jobActions';
 import { attachmentContentKey, attachmentFilename, mimeTypeForPhoto } from '@/domain/outboundWork';
-import { CAPTURE_QUALITY, PHOTO_DIR, photoPath } from '@/domain/photoStore';
+import { CAPTURE_QUALITY } from '@/domain/photoStore';
 import { keepPhoto } from '@/export/photoFiles';
+import { keepSignature } from '@/export/signatureFile';
 import { shrinkForStorage } from '@/export/photoResize';
 import { formatCents } from '@/domain/rates';
 import { formatAuDate } from '@/export/sheets';
@@ -256,10 +256,7 @@ export default function JobScreen() {
   const localClock = qldClock(localAt);
   const swatch = statusSwatch(job.statusColor, t.color.surface);
   const stage = stageLabel(job.stageRaw ?? job.stage);
-  const isSimpro = !!job.externalId;
-  // scheduledFor is Simpro's DateIssued on a mirrored job and the booked day
-  // on one added by hand; the office's word is only right for the office's.
-  const dates = jobDates(job).map((d) => (d.label === 'Issued' && !isSimpro ? { ...d, label: 'Scheduled' } : d));
+  const dates = jobDates(job);
   const sell = sellTotalLine(job.totalExTaxCents, job.totalIncTaxCents);
   const technicians = technicianLine(full.technicians, job.technician);
   const contact = full.siteContact;
@@ -334,7 +331,7 @@ export default function JobScreen() {
         { contentKey: queueKey('job-note', { jobId: job.externalId, subject: subj, note: body, day: qldIsoDay(at) ?? at }) },
       );
       setSheet(null);
-      said(row.duplicate ? `That note is already queued: ${subj}` : `Note: ${subj}`);
+      said(row.duplicate ? `Already queued: ${subj}` : `Note: ${subj}`);
       return true;
     } catch (e) {
       showAlert('Could not queue that note', describeActionFailure(e, 'queue the note'));
@@ -370,7 +367,7 @@ export default function JobScreen() {
         ? await ImagePicker.requestCameraPermissionsAsync()
         : await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        showAlert('Permission needed', 'Safe QLD needs access to attach a photo to this job.');
+        showAlert('Permission needed', 'Allow camera or photo access in Settings.');
         return;
       }
       const result = fromCamera
@@ -402,9 +399,9 @@ export default function JobScreen() {
    * The customer's sign-off: the signature as a file on the job, a note
    * that names who signed and where the file is, and the phone's own
    * complete — which queues the work-completed note as Mark complete does.
-   * The file is written to document storage beside the photographs, so it
-   * survives a cache clear and is read by the same path the photographs
-   * are.
+   * The signature is kept by @/export/signatureFile: in document storage
+   * beside the photographs on a phone, as a `data:` URI in a browser, so
+   * nothing here touches a file system.
    */
   const signOff = async (signedBy: string, svg: string) => {
     if (!job.externalId) return;
@@ -412,17 +409,10 @@ export default function JobScreen() {
     try {
       const at = nowIso();
       const filename = signatureFilename(job.externalId, at);
-      const dir = new Directory(Paths.document, PHOTO_DIR);
-      if (!dir.exists) dir.create({ intermediates: true });
-      const stored = filename.replace(/[^A-Za-z0-9 ._-]/g, '_');
-      const file = new File(dir, stored);
-      if (file.exists) file.delete();
-      file.create();
-      file.write(svg);
-      const sizeBytes = new TextEncoder().encode(svg).length;
+      const { localUri, sizeBytes } = keepSignature(filename, svg);
       const key = attachmentContentKey({ jobId: job.externalId, filename, sizeBytes });
       await queueJobAttachment({
-        jobId: job.externalId, localUri: photoPath(stored), filename, mimeType: 'image/svg+xml',
+        jobId: job.externalId, localUri, filename, mimeType: 'image/svg+xml',
         subject: `Customer signature, ${signedBy.trim()}`, sizeBytes, key,
       });
       const note = signOffNote({ externalId: job.externalId, title: job.title, siteName: job.siteName }, signedBy, at);
@@ -478,7 +468,7 @@ export default function JobScreen() {
         </Rowed>
 
         <Card>
-          <MetaRow label="Job no." value={job.externalId ? `#${job.externalId}` : 'On this phone only'} mono={!!job.externalId} />
+          {job.externalId ? <MetaRow label="Job no." value={`#${job.externalId}`} mono /> : null}
           {job.orderNo ? <MetaRow label="Order no." value={job.orderNo} mono /> : null}
           {job.requestNo ? <MetaRow label="Request no." value={job.requestNo} mono /> : null}
           <MetaRow
@@ -491,8 +481,8 @@ export default function JobScreen() {
           <MetaRow
             label="Site"
             value={job.siteName}
-            hint={job.siteId ? undefined : 'Not matched to a site on this phone yet'}
-            onPress={job.siteId ? () => router.push({ pathname: '/site/[id]', params: { id: job.siteId! } }) : undefined}
+            hint={resolvedSiteId ? undefined : 'No site linked'}
+            onPress={resolvedSiteId ? () => router.push({ pathname: '/site/[id]', params: { id: resolvedSiteId } }) : undefined}
           />
           {job.address ? (
             <MetaRow
@@ -537,7 +527,7 @@ export default function JobScreen() {
                 ))}
               </Rowed>
             ) : (
-              <Txt size="sm" tone="faint" style={{ marginTop: 4 }}>The office has no number or email for them.</Txt>
+              <Txt size="sm" tone="faint" style={{ marginTop: 4 }}>No phone or email on file.</Txt>
             )}
           </Card>
         ) : null}
@@ -576,98 +566,82 @@ export default function JobScreen() {
         ) : null}
 
         {/* -- Sections, cost centres, lines ------------------------------- */}
-        {isSimpro ? (
-          <>
-            <H2>Sections</H2>
-            {full.sections.length ? (
-              full.sections.map((s) => <SectionCard key={s.id} section={s} queued={queuedLines} />)
-            ) : (
-              <NotYet
-                synced={full.detailSynced}
-                what="lines"
-                none="The office has no sections or lines on this job."
-              />
-            )}
-          </>
-        ) : null}
+        <H2>Sections</H2>
+        {full.sections.length ? (
+          full.sections.map((s) => <SectionCard key={s.id} section={s} queued={queuedLines} />)
+        ) : (
+          <NotYet synced={full.detailSynced} none="No lines on this job." />
+        )}
 
         {/* -- Attachments ------------------------------------------------- */}
-        {isSimpro ? (
-          <>
-            <H2>Attachments</H2>
-            {full.attachments.length ? (
-              full.attachments.map((a) => (
-                <Card key={a.id} onPress={() => void open(a)}>
-                  <Rowed gap={3}>
-                    <MaterialCommunityIcons name={attachmentIcon(a.mimeType, a.filename)} size={26} color={t.color.accentText} />
-                    <View style={{ flex: 1 }}>
-                      <Txt weight="600" numberOfLines={2}>{a.filename}</Txt>
-                      <Txt size="xs" tone="muted">
-                        {[formatFileSize(a.sizeBytes), a.addedBy, a.dateAdded ? formatAuDate(a.dateAdded) : undefined, a.folder]
-                          .filter(Boolean).join(' · ') || 'Details come with the file'}
-                      </Txt>
-                    </View>
-                    {opening === a.id ? (
-                      <Txt size="xs" tone="accent" weight="700">Fetching…</Txt>
-                    ) : a.localUri ? (
-                      <Chip label="On phone" tone="pass" />
-                    ) : (
-                      <MaterialCommunityIcons name="cloud-download-outline" size={20} color={t.color.textFaint} />
-                    )}
-                  </Rowed>
-                </Card>
-              ))
-            ) : (
-              <NotYet synced={full.detailSynced} what="files" none="Nothing is attached to this job." />
-            )}
-          </>
-        ) : null}
+        <H2>Attachments</H2>
+        {full.attachments.length ? (
+          full.attachments.map((a) => (
+            <Card key={a.id} onPress={() => void open(a)}>
+              <Rowed gap={3}>
+                <MaterialCommunityIcons name={attachmentIcon(a.mimeType, a.filename)} size={26} color={t.color.accentText} />
+                <View style={{ flex: 1 }}>
+                  <Txt weight="600" numberOfLines={2}>{a.filename}</Txt>
+                  <Txt size="xs" tone="muted">
+                    {[formatFileSize(a.sizeBytes), a.addedBy, a.dateAdded ? formatAuDate(a.dateAdded) : undefined, a.folder]
+                      .filter(Boolean).join(' · ') || 'Tap to open'}
+                  </Txt>
+                </View>
+                {opening === a.id ? (
+                  <Txt size="xs" tone="accent" weight="700">Downloading…</Txt>
+                ) : a.localUri ? (
+                  <Chip label="On phone" tone="pass" />
+                ) : (
+                  <MaterialCommunityIcons name="cloud-download-outline" size={20} color={t.color.textFaint} />
+                )}
+              </Rowed>
+            </Card>
+          ))
+        ) : (
+          <NotYet synced={full.detailSynced} none="No attachments." />
+        )}
 
         {/* -- Timeline ---------------------------------------------------- */}
-        {isSimpro ? (
-          <>
-            <H2>Activity</H2>
-            {full.timeline.length ? (
-              <Card>
-                <View style={{ gap: t.space(3) }}>
-                  {timeline.map((e, i) => (
-                    <View key={`${e.at ?? ''}-${i}`} style={{ flexDirection: 'row', gap: t.space(3) }}>
-                      <View style={{ width: 8, alignItems: 'center', paddingTop: 6 }}>
-                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: i === 0 ? t.color.accent : t.color.borderStrong }} />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Txt size="sm" style={{ lineHeight: 19 }}>{e.message}</Txt>
-                        <Txt size="xs" tone="faint">
-                          {[e.staffName, relativeQldTime(e.at, now), e.type].filter(Boolean).join(' · ')}
-                        </Txt>
-                      </View>
-                    </View>
-                  ))}
-                </View>
-                {full.timeline.length > timeline.length || showAllTimeline ? (
-                  // Tall enough for a glove: a tap that lands on the last
-                  // row instead of a line of text expands nothing, and reads
-                  // as the rest of the activity never having synced.
-                  <Pressable
-                    onPress={() => { animateNextLayout(); setShowAllTimeline((v) => !v); }}
-                    hitSlop={6}
-                    accessibilityRole="button"
-                    style={{ marginTop: t.space(2), minHeight: 44, justifyContent: 'center' }}
-                  >
-                    <Txt size="sm" tone="accent" weight="700">
-                      {showAllTimeline ? 'Show less' : `Show all ${full.timeline.length}`}
+        <H2>Activity</H2>
+        {full.timeline.length ? (
+          <Card>
+            <View style={{ gap: t.space(3) }}>
+              {timeline.map((e, i) => (
+                <View key={`${e.at ?? ''}-${i}`} style={{ flexDirection: 'row', gap: t.space(3) }}>
+                  <View style={{ width: 8, alignItems: 'center', paddingTop: 6 }}>
+                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: i === 0 ? t.color.accent : t.color.borderStrong }} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Txt size="sm" style={{ lineHeight: 19 }}>{e.message}</Txt>
+                    <Txt size="xs" tone="faint">
+                      {[e.staffName, relativeQldTime(e.at, now), e.type].filter(Boolean).join(' · ')}
                     </Txt>
-                  </Pressable>
-                ) : null}
-              </Card>
-            ) : (
-              <NotYet synced={full.detailSynced} what="activity" none="No activity has been logged on this job." />
-            )}
-          </>
-        ) : null}
+                  </View>
+                </View>
+              ))}
+            </View>
+            {full.timeline.length > timeline.length || showAllTimeline ? (
+              // Tall enough for a glove: a tap that lands on the last
+              // row instead of a line of text expands nothing, and reads
+              // as the rest of the activity never having synced.
+              <Pressable
+                onPress={() => { animateNextLayout(); setShowAllTimeline((v) => !v); }}
+                hitSlop={6}
+                accessibilityRole="button"
+                style={{ marginTop: t.space(2), minHeight: 44, justifyContent: 'center' }}
+              >
+                <Txt size="sm" tone="accent" weight="700">
+                  {showAllTimeline ? 'Show less' : `Show all ${full.timeline.length}`}
+                </Txt>
+              </Pressable>
+            ) : null}
+          </Card>
+        ) : (
+          <NotYet synced={full.detailSynced} none="No activity yet." />
+        )}
 
         {/* -- Tasks ------------------------------------------------------- */}
-        {isSimpro && (full.tasks.length || !full.detailSynced) ? (
+        {full.tasks.length || !full.detailSynced ? (
           <>
             <H2>Tasks</H2>
             {full.tasks.length ? (
@@ -688,43 +662,39 @@ export default function JobScreen() {
                 );
               })
             ) : (
-              <NotYet synced={full.detailSynced} what="tasks" none="" />
+              <NotYet synced={full.detailSynced} none="" />
             )}
           </>
         ) : null}
 
         {/* -- Invoices ---------------------------------------------------- */}
-        {isSimpro ? (
-          <>
-            <H2>Invoices</H2>
-            {full.invoices.length ? (
-              full.invoices.map((inv) => {
-                const state = invoiceState(inv, today);
-                return (
-                  <Card key={inv.externalId} onPress={() => router.push({ pathname: '/invoices/[id]', params: { id: inv.externalId } })}>
-                    <Rowed align="flex-start">
-                      <View style={{ flex: 1 }}>
-                        <Txt weight="700">Invoice {inv.externalId}</Txt>
-                        <Txt size="sm" tone="muted">
-                          {[inv.dateIssued ? `Issued ${formatAuDate(inv.dateIssued)}` : undefined, inv.invoiceType].filter(Boolean).join(' · ')}
-                        </Txt>
-                        {inv.totalIncTaxCents !== undefined ? (
-                          <Txt size="sm" weight="700" style={{ marginTop: 2 }}>{formatCents(inv.totalIncTaxCents)} inc GST</Txt>
-                        ) : null}
-                      </View>
-                      <StatusPill label={state.label} tone={state.tone} />
-                    </Rowed>
-                  </Card>
-                );
-              })
-            ) : (
-              <NotYet synced={full.detailSynced} what="invoices" none="Nothing has been invoiced against this job yet." />
-            )}
-          </>
-        ) : null}
+        <H2>Invoices</H2>
+        {full.invoices.length ? (
+          full.invoices.map((inv) => {
+            const state = invoiceState(inv, today);
+            return (
+              <Card key={inv.externalId} onPress={() => router.push({ pathname: '/invoices/[id]', params: { id: inv.externalId } })}>
+                <Rowed align="flex-start">
+                  <View style={{ flex: 1 }}>
+                    <Txt weight="700">Invoice {inv.externalId}</Txt>
+                    <Txt size="sm" tone="muted">
+                      {[inv.dateIssued ? `Issued ${formatAuDate(inv.dateIssued)}` : undefined, inv.invoiceType].filter(Boolean).join(' · ')}
+                    </Txt>
+                    {inv.totalIncTaxCents !== undefined ? (
+                      <Txt size="sm" weight="700" style={{ marginTop: 2 }}>{formatCents(inv.totalIncTaxCents)} inc GST</Txt>
+                    ) : null}
+                  </View>
+                  <StatusPill label={state.label} tone={state.tone} />
+                </Rowed>
+              </Card>
+            );
+          })
+        ) : (
+          <NotYet synced={full.detailSynced} none="Not invoiced yet." />
+        )}
 
         {/* -- Purchase orders --------------------------------------------- */}
-        {isSimpro && orders.length ? (
+        {orders.length ? (
           <>
             <H2>Purchase orders</H2>
             {orders.map((o) => (
@@ -732,7 +702,7 @@ export default function JobScreen() {
                 <Rowed align="flex-start">
                   <View style={{ flex: 1 }}>
                     <Txt weight="700">Order {o.id}</Txt>
-                    <Txt size="sm" tone="muted">{[o.vendorName ?? 'Supplier not named', o.reference].filter(Boolean).join(' · ')}</Txt>
+                    <Txt size="sm" tone="muted">{[o.vendorName ?? 'No supplier', o.reference].filter(Boolean).join(' · ')}</Txt>
                     {o.dateIssued ? <Txt size="xs" tone="faint">Issued {formatAuDate(o.dateIssued)}</Txt> : null}
                   </View>
                   {o.statusName || o.stage ? <Chip label={(o.statusName ?? o.stage)!} tone={o.archived ? 'muted' : 'default'} /> : null}
@@ -749,15 +719,11 @@ export default function JobScreen() {
           <StatTile label="Open defects" value={defects.length} tone={critical.length ? 'fail' : 'default'} />
           <StatTile label="Critical" value={critical.length} tone={critical.length ? 'fail' : 'default'} />
         </Rowed>
-        {!job.siteId ? (
-          <Txt size="xs" tone="faint">
-            This job is not matched to a site on this phone, so the counts above are empty rather than known.
-          </Txt>
-        ) : null}
+        {!resolvedSiteId ? <Txt size="xs" tone="faint">No site linked.</Txt> : null}
 
         {knowledge.length ? (
           <Card>
-            <Label>You should know about this site</Label>
+            <Label>Worth knowing</Label>
             <View style={{ marginTop: t.space(2), gap: t.space(2) }}>
               {knowledge.slice(0, 4).map((k) => (
                 <View key={k.id}>
@@ -779,14 +745,14 @@ export default function JobScreen() {
         {critical.length ? (
           <Banner
             tone="fail"
-            title={`${critical.length} critical defect${critical.length === 1 ? '' : 's'} already open here`}
+            title={`${critical.length} critical defect${critical.length === 1 ? '' : 's'} open`}
             body={critical.slice(0, 3).map((d) => `${d.location}: ${d.description.slice(0, 90)}`).join('\n')}
           />
         ) : null}
 
         {site?.notes ? (
           <Card>
-            <Label>Site notes on this phone</Label>
+            <Label>Site notes</Label>
             <Txt size="sm" style={{ lineHeight: 20, marginTop: 4 }}>{site.notes}</Txt>
           </Card>
         ) : null}
@@ -800,7 +766,7 @@ export default function JobScreen() {
           <Button
             title="Mark complete"
             onPress={() => {
-              showAlert('Complete this job?', 'Check the test sheet, defects and photos are done first — anything missing is harder to add later.', [
+              showAlert('Complete this job?', 'Test sheet, defects and photos done?', [
                 { text: 'Not yet', style: 'cancel' },
                 { text: 'Complete', onPress: () => void setStatus(job.id, 'complete') },
               ]);
@@ -819,15 +785,9 @@ export default function JobScreen() {
                 <Txt weight="700" size="sm">
                   {local.label}{localAt ? ` at ${qldMoment(localAt) ?? formatAuDate(localAt)}` : ''}
                 </Txt>
-                {isSimpro && job.status === 'complete' ? (
+                {job.status === 'complete' ? (
                   <Txt size="xs" tone="muted" style={{ marginTop: 2, lineHeight: 17 }}>
-                    {noteQueued
-                      ? 'Work-completed note queued for the office. It goes with the next send, and the office moves the job on from there.'
-                      : "The office's record moves on when the scheduler reads the completion note and closes the job at their end."}
-                  </Txt>
-                ) : isSimpro ? (
-                  <Txt size="xs" tone="muted" style={{ marginTop: 2, lineHeight: 17 }}>
-                    The office's status above is theirs; this is what happened on this phone.
+                    {noteQueued ? 'Completion note queued for the office.' : 'The office closes it in Simpro.'}
                   </Txt>
                 ) : null}
               </View>
@@ -835,72 +795,68 @@ export default function JobScreen() {
           </Card>
         ) : null}
 
-        {isSimpro ? (
-          <>
-            {queuedWords.length ? (
-              <Banner
-                tone="info"
-                title="Queued for the office"
-                body={`${queuedWords.join('\n')}\n\nGoes with the next send; Waiting to send has the rows.`}
-              />
-            ) : null}
-            <Rowed gap={2}>
-              <Button
-                title="Change status"
-                variant="secondary"
-                style={{ flex: 1 }}
-                loading={acting === 'status'}
-                icon={<MaterialCommunityIcons name="swap-horizontal" size={18} color={t.color.text} />}
-                onPress={() => setSheet('status')}
-              />
-              <Button
-                title="Add note"
-                variant="secondary"
-                style={{ flex: 1 }}
-                loading={acting === 'note'}
-                icon={<MaterialCommunityIcons name="note-plus-outline" size={18} color={t.color.text} />}
-                onPress={() => setSheet('note')}
-              />
-            </Rowed>
-            <Rowed gap={2}>
-              <Button
-                title="Add materials"
-                variant="secondary"
-                style={{ flex: 1 }}
-                icon={<MaterialCommunityIcons name="package-variant" size={18} color={t.color.text} />}
-                onPress={() => {
-                  if (!full.sections.some((s) => s.costCenters.length)) {
-                    showAlert('No cost centre yet', full.detailSynced
-                      ? 'The office has no cost centre on this job to put a line under. Ask them to add one, then open the job again with signal.'
-                      : 'The job\'s cost centres have not been read from the office yet. Open it once with signal and try again.');
-                    return;
-                  }
-                  setSheet('materials');
-                }}
-              />
-              <Button
-                title="Attach photo"
-                variant="secondary"
-                style={{ flex: 1 }}
-                loading={acting === 'photo'}
-                icon={<MaterialCommunityIcons name="camera-outline" size={18} color={t.color.text} />}
-                onPress={() => {
-                  showAlert('Attach a photo', 'Where from?', [
-                    { text: 'Camera', onPress: () => void addPhoto(true) },
-                    { text: 'Photo library', onPress: () => void addPhoto(false) },
-                    { text: 'Cancel', style: 'cancel' },
-                  ]);
-                }}
-              />
-            </Rowed>
-            <Button
-              title="Sign off"
-              loading={acting === 'signoff'}
-              icon={<MaterialCommunityIcons name="draw-pen" size={18} color={t.color.onAccent} />}
-              onPress={() => setSheet('signoff')}
-            />
-          </>
+        {queuedWords.length ? (
+          <Banner
+            tone="info"
+            title="Queued for the office"
+            body={`${queuedWords.join('\n')}\n\nSends when you have signal.`}
+          />
         ) : null}
+        <Rowed gap={2}>
+          <Button
+            title="Change status"
+            variant="secondary"
+            style={{ flex: 1 }}
+            loading={acting === 'status'}
+            icon={<MaterialCommunityIcons name="swap-horizontal" size={18} color={t.color.text} />}
+            onPress={() => setSheet('status')}
+          />
+          <Button
+            title="Add note"
+            variant="secondary"
+            style={{ flex: 1 }}
+            loading={acting === 'note'}
+            icon={<MaterialCommunityIcons name="note-plus-outline" size={18} color={t.color.text} />}
+            onPress={() => setSheet('note')}
+          />
+        </Rowed>
+        <Rowed gap={2}>
+          <Button
+            title="Add materials"
+            variant="secondary"
+            style={{ flex: 1 }}
+            icon={<MaterialCommunityIcons name="package-variant" size={18} color={t.color.text} />}
+            onPress={() => {
+              if (!full.sections.some((s) => s.costCenters.length)) {
+                showAlert('No cost centre yet', full.detailSynced
+                  ? 'Ask the office to add one, then reopen the job.'
+                  : 'Open the job with signal, then try again.');
+                return;
+              }
+              setSheet('materials');
+            }}
+          />
+          <Button
+            title="Attach photo"
+            variant="secondary"
+            style={{ flex: 1 }}
+            loading={acting === 'photo'}
+            icon={<MaterialCommunityIcons name="camera-outline" size={18} color={t.color.text} />}
+            onPress={() => {
+              showAlert('Attach a photo', 'Where from?', [
+                { text: 'Camera', onPress: () => void addPhoto(true) },
+                { text: 'Photo library', onPress: () => void addPhoto(false) },
+                { text: 'Cancel', style: 'cancel' },
+              ]);
+            }}
+          />
+        </Rowed>
+        <Button
+          title="Sign off"
+          loading={acting === 'signoff'}
+          icon={<MaterialCommunityIcons name="draw-pen" size={18} color={t.color.onAccent} />}
+          onPress={() => setSheet('signoff')}
+        />
 
         <Rowed gap={2}>
           {/*
@@ -922,7 +878,7 @@ export default function JobScreen() {
               title="Open site"
               variant="secondary"
               style={{ flex: 1 }}
-              onPress={() => router.push({ pathname: '/site/[id]', params: { id: job.siteId! } })}
+              onPress={() => router.push({ pathname: '/site/[id]', params: { id: resolvedSiteId } })}
             />
           ) : null}
         </Rowed>
@@ -945,7 +901,7 @@ export default function JobScreen() {
           * the form for no good reason. Searching the site list from a job the
           * technician already has open is the detour this removes.
           */}
-        {job.siteId ? (
+        {resolvedSiteId ? (
           <Button
             title="Form 72 for this job"
             variant="secondary"
@@ -954,7 +910,7 @@ export default function JobScreen() {
               pathname: '/form72/new',
               // The job as well as the site, so the one being looked at is the
               // one already chosen rather than one to be found in a list again.
-              params: { siteId: job.siteId!, jobId: job.id },
+              params: { siteId: resolvedSiteId, jobId: job.id },
             })}
           />
         ) : null}
@@ -972,47 +928,39 @@ export default function JobScreen() {
             <Txt size="xs" tone="accent">Refreshing from Simpro…</Txt>
           ) : null}
           {refresh.state === 'done' && refresh.partial.length ? (
-            <Txt size="xs" tone="warn">
-              Refreshed, but the office would not hand over: {refresh.partial.join('; ')}
-            </Txt>
+            <Txt size="xs" tone="warn">{`Some details didn't load: ${refresh.partial.join('; ')}`}</Txt>
           ) : null}
           {refresh.state === 'failed' ? (
-            <Txt size="xs" tone="faint">Showing what the phone holds. Could not refresh: {refresh.error}</Txt>
+            <Txt size="xs" tone="faint">Offline copy. Refresh failed: {refresh.error}</Txt>
           ) : null}
           <Txt size="xs" tone="faint">
-            {isSimpro
-              ? job.detailSyncedAt
-                ? `Office record as of ${qldMoment(job.detailSyncedAt) ?? job.detailSyncedAt}.`
-                : 'The lines, files and activity under this job have not been read yet. They come the first time it is opened with signal.'
-              : 'Added on this phone; the office does not have this job.'}
-            {job.scheduledFor ? ` ${isSimpro ? 'Issued' : 'Scheduled'} ${formatAuDate(job.scheduledFor)}.` : ''}
+            {job.detailSyncedAt
+              ? `Synced ${qldMoment(job.detailSyncedAt) ?? job.detailSyncedAt}.`
+              : 'Details load when opened with signal.'}
+            {job.scheduledFor ? ` Issued ${formatAuDate(job.scheduledFor)}.` : ''}
           </Txt>
         </View>
       </Screen>
 
-      {isSimpro ? (
-        <>
-          <StatusSheet
-            visible={sheet === 'status'}
-            onClose={() => setSheet(null)}
-            choices={statuses}
-            current={job.statusName}
-            suggested={suggested}
-            busy={acting === 'status'}
-            onPick={(c) => void queueStatus(c)}
-          />
-          <NoteSheet visible={sheet === 'note'} onClose={() => setSheet(null)} busy={acting === 'note'} onSend={queueNote} />
-          <MaterialsSheet visible={sheet === 'materials'} onClose={() => setSheet(null)} sections={full.sections} onQueue={queueMaterial} />
-          <SignOffSheet
-            visible={sheet === 'signoff'}
-            onClose={() => setSheet(null)}
-            jobLabel={`Job ${job.externalId} - ${job.siteName}`}
-            defaultName={contact?.name ?? ''}
-            busy={acting === 'signoff'}
-            onSign={(name, svg) => void signOff(name, svg)}
-          />
-        </>
-      ) : null}
+      <StatusSheet
+        visible={sheet === 'status'}
+        onClose={() => setSheet(null)}
+        choices={statuses}
+        current={job.statusName}
+        suggested={suggested}
+        busy={acting === 'status'}
+        onPick={(c) => void queueStatus(c)}
+      />
+      <NoteSheet visible={sheet === 'note'} onClose={() => setSheet(null)} busy={acting === 'note'} onSend={queueNote} />
+      <MaterialsSheet visible={sheet === 'materials'} onClose={() => setSheet(null)} sections={full.sections} onQueue={queueMaterial} />
+      <SignOffSheet
+        visible={sheet === 'signoff'}
+        onClose={() => setSheet(null)}
+        jobLabel={`Job ${job.externalId} - ${job.siteName}`}
+        defaultName={contact?.name ?? ''}
+        busy={acting === 'signoff'}
+        onSign={(name, svg) => void signOff(name, svg)}
+      />
     </>
   );
 }
@@ -1074,7 +1022,7 @@ function StatusSheet({ visible, onClose, choices, current, suggested, busy, onPi
   return (
     <Sheet title="Change status" visible={visible} onClose={onClose}>
       <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-        The office's status on this job. Queued and sent with the next send; the office sees it move.
+        Updates Simpro when you have signal.
       </Txt>
       {ordered.length ? ordered.map((c) => {
         const isCurrent = c.name.trim().toLowerCase() === currentKey;
@@ -1096,10 +1044,10 @@ function StatusSheet({ visible, onClose, choices, current, suggested, busy, onPi
               <View style={{ flex: 1 }}>
                 <Txt weight="700">{c.name}</Txt>
                 <Txt size="xs" tone="faint">
-                  {isCurrent ? 'The job is at this status now'
-                    : !sendable ? 'The office uses this, but the phone has no id for it yet'
-                      : c === suggested ? 'Likely next, from what this phone did'
-                        : c.seen ? `${c.seen} job${c.seen === 1 ? '' : 's'} on this phone wear it` : 'No job on this phone wears it'}
+                  {isCurrent ? 'Current status'
+                    : !sendable ? 'Set this one in Simpro'
+                      : c === suggested ? 'Suggested'
+                        : c.seen ? `On ${c.seen} job${c.seen === 1 ? '' : 's'}` : 'Not used yet'}
                 </Txt>
               </View>
               {sendable && !isCurrent ? <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} /> : null}
@@ -1107,7 +1055,7 @@ function StatusSheet({ visible, onClose, choices, current, suggested, busy, onPi
           </Pressable>
         );
       }) : (
-        <Txt size="sm" tone="faint">No statuses are known yet. They come with the job sync.</Txt>
+        <Txt size="sm" tone="faint">No statuses yet. Sync to load them.</Txt>
       )}
     </Sheet>
   );
@@ -1133,9 +1081,9 @@ function NoteSheet({ visible, onClose, busy, onSend }: {
       <Field label="Subject" value={subject} onChangeText={setSubject} placeholder="What it is about" autoCapitalize="sentences" />
       <Field label="Note" value={note} onChangeText={setNote} placeholder="What you found, what you did, what is still to do" multiline />
       <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-        Goes on the job's notes in Simpro under your name.
+        Goes on the job in Simpro under your name.
       </Txt>
-      <Button title="Queue note" loading={busy} onPress={() => { void send(); }} />
+      <Button title="Send note" loading={busy} onPress={() => { void send(); }} />
     </Sheet>
   );
 }
@@ -1193,7 +1141,7 @@ function MaterialsSheet({ visible, onClose, sections, onQueue }: {
   }, [query]);
 
   const add = async () => {
-    if (!target) { setWhy('Pick the cost centre the line goes under.'); return; }
+    if (!target) { setWhy('Pick a cost centre.'); return; }
     setAdding(true);
     setWhy(null);
     try {
@@ -1246,7 +1194,7 @@ function MaterialsSheet({ visible, onClose, sections, onQueue }: {
             </Card>
           ) : (
             <>
-              <SearchBox value={query} onChange={setQuery} placeholder="Part number or name in the office catalogue" />
+              <SearchBox value={query} onChange={setQuery} placeholder="Part no. or name" />
               {searchFailed ? <Txt size="sm" tone="fail">{searchFailed}</Txt> : null}
               {results.map((r) => (
                 <Pressable
@@ -1259,7 +1207,7 @@ function MaterialsSheet({ visible, onClose, sections, onQueue }: {
                 </Pressable>
               ))}
               {query.trim().length >= 2 && !results.length && !searchFailed ? (
-                <Txt size="sm" tone="faint">Nothing in the office catalogue matches. Try the part number, or add it as a one-off.</Txt>
+                <Txt size="sm" tone="faint">No match. Try the part no., or add a one-off.</Txt>
               ) : null}
             </>
           )}
@@ -1272,10 +1220,10 @@ function MaterialsSheet({ visible, onClose, sections, onQueue }: {
       <Button title="Add line" loading={adding} disabled={tab === 'catalog' ? !picked : !description.trim()} onPress={() => void add()} />
       {added.length ? (
         <Card>
-          <Label>Queued this visit</Label>
+          <Label>Added this visit</Label>
           {added.map((a, i) => <Txt key={`${a}-${i}`} size="sm" style={{ marginTop: 4 }}>{a}</Txt>)}
           <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
-            Sell prices come from the office's price book once the lines land; the card shows them after the next refresh.
+            Prices show after the next sync.
           </Txt>
         </Card>
       ) : null}
@@ -1296,9 +1244,9 @@ function SignOffSheet({ visible, onClose, jobLabel, defaultName, busy, onSign }:
   const [svg, setSvg] = useState<string | undefined>(undefined);
   const [, setDataUri] = useState<string | undefined>(undefined);
   const complete = () => {
-    if (!name.trim()) { showAlert('Who is signing?', 'Put the customer\'s name above the signature.'); return; }
+    if (!name.trim()) { showAlert('Who is signing?', 'Enter the customer\'s name.'); return; }
     if (!svg) { showAlert('No signature yet', 'Ask the customer to sign in the box.'); return; }
-    showAlert('Complete and sign?', 'This marks the job complete on this phone, queues the signature as a file on the job and a note naming who signed. Check the test sheet, defects and photos are done first.', [
+    showAlert('Complete and sign?', 'Completes the job and sends the signature.', [
       { text: 'Not yet', style: 'cancel' },
       { text: 'Complete and sign', onPress: () => onSign(name, svg) },
     ]);
@@ -1309,7 +1257,7 @@ function SignOffSheet({ visible, onClose, jobLabel, defaultName, busy, onSign }:
       <Field label="Signed by" value={name} onChangeText={setName} placeholder="Customer's name" autoCapitalize="words" />
       <SignaturePad label="Customer signature" onChange={setDataUri} onSvg={setSvg} />
       <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-        The signature goes onto the job's attachments as a file, with a note saying who signed and when.
+        Goes on the job with their name and the time.
       </Txt>
       <Button title="Complete and sign" loading={busy} onPress={complete} />
     </Sheet>
@@ -1366,14 +1314,8 @@ function MetaRow({ label, value, hint, mono, onPress }: { label: string; value: 
  * same on a card and mean opposite things to somebody deciding whether to
  * drive back for the site plan.
  */
-function NotYet({ synced, what, none }: { synced: boolean; what: string; none: string }) {
-  if (!synced) {
-    return (
-      <Txt size="sm" tone="faint" style={{ lineHeight: 19 }}>
-        The {what} have not been read from the office yet — they come the first time this job is opened with signal.
-      </Txt>
-    );
-  }
+function NotYet({ synced, none }: { synced: boolean; none: string }) {
+  if (!synced) return <Txt size="sm" tone="faint">Not downloaded yet. Open with signal.</Txt>;
   return none ? <Txt size="sm" tone="faint">{none}</Txt> : null;
 }
 
@@ -1423,7 +1365,7 @@ function CostCenterBlock({ costCenter: c, queued }: { costCenter: SimproCostCent
         {c.percentComplete !== undefined ? <Chip label={`${Math.round(c.percentComplete)}%`} tone={c.percentComplete >= 100 ? 'pass' : 'default'} /> : null}
       </Rowed>
       {c.items.length ? c.items.map((it) => <ItemRow key={`${it.kind}-${it.id}`} item={it} />) : !queued.length ? (
-        <Txt size="xs" tone="faint">No lines under this cost centre.</Txt>
+        <Txt size="xs" tone="faint">No lines.</Txt>
       ) : null}
       {queued.map((q) => (
         // Added on this phone and not yet seen back: no price, since the

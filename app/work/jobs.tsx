@@ -16,7 +16,7 @@ import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
 import { Reveal } from '@/components/motion';
 import { SiteMissCards, useSiteMisses } from '@/components/SiteMisses';
-import { Card, Chip, EmptyState, Rowed, Screen, SearchBox, Segmented, Txt } from '@/components/ui';
+import { Button, Card, Chip, EmptyState, Rowed, Screen, SearchBox, Segmented, Txt } from '@/components/ui';
 
 /**
  * The job list.
@@ -113,25 +113,29 @@ export default function JobsScreen() {
    */
   const siteHits = useSiteMisses(query, !shown.length && page !== null);
 
-  const empty = (() => {
+  const empty = ((): { title: string; body: string; action?: React.ReactNode } | null => {
     if (page === null) return null;
     if (!page.total) {
       return {
-        title: scope ? `No jobs ${scope}` : 'No jobs on this phone yet',
-        body: 'Jobs come from Simpro. Connect it in Settings and sync, and every job on the books is here — or add one by hand.',
+        title: scope ? `No jobs ${scope}` : 'No jobs yet',
+        body: 'Jobs come from Simpro. Sync in Settings.',
       };
     }
     if (query.trim()) {
       return siteHits.length
         ? siteFallbackWords(siteHits.length, 'jobs')
-        : { title: 'Nothing matches', body: 'Try the job number on its own, or part of the site or customer name.' };
+        : { title: 'Nothing matches', body: 'Try the job no., site or customer.' };
     }
     if (filter === 'mine' && !whoLabel) {
-      return { title: 'This phone does not know whose it is', body: 'Pick yourself in Who you are, or sign in with your Simpro login, and the jobs booked to you show up here.' };
+      return {
+        title: 'Who are you?',
+        body: 'Pick your name to see your jobs.',
+        action: <Button title="Pick your name" compact onPress={() => router.push('/whoami')} />,
+      };
     }
-    if (filter === 'mine') return { title: 'Nothing booked to you', body: `No open job lists ${whoLabel} as a technician. Today's schedule is on My day.` };
-    if (filter === 'today') return { title: 'Nothing on today', body: scheduledToday ? 'The schedule has nothing for today that matches.' : 'The schedule has nothing for today, or has not synced yet.' };
-    if (filter === 'open') return { title: 'Nothing open', body: 'Every job the phone holds is complete, invoiced or archived at the office, or has been completed on this phone.' };
+    if (filter === 'mine') return { title: 'Nothing booked to you', body: `No open jobs for ${whoLabel}. Today's bookings are on My day.` };
+    if (filter === 'today') return { title: 'Nothing on today', body: scheduledToday ? 'None of today\'s bookings match.' : 'Nothing booked today, or not synced yet.' };
+    if (filter === 'open') return { title: 'No open jobs', body: '' };
     return { title: 'No jobs', body: '' };
   })();
 
@@ -140,7 +144,7 @@ export default function JobsScreen() {
       <Stack.Screen options={{ title: scope ? `Jobs ${scope}` : 'Jobs' }} />
       <Screen scroll={false} padded={false}>
         <View style={{ padding: t.space(4), paddingBottom: t.space(2), gap: t.space(2) }}>
-          <SearchBox value={typed} onChange={setTyped} placeholder="Job number, site, suburb, client or customer" />
+          <SearchBox value={typed} onChange={setTyped} placeholder="Job no., site, suburb or customer" />
           <Segmented
             value={filter}
             onChange={setFilter}
@@ -158,7 +162,7 @@ export default function JobsScreen() {
                   list that does not match the rows under it is worse than no
                   number. The search still reaches every job: it runs in the
                   database, not over the rows on screen. */}
-              {page.capped ? ` · first ${PAGE} shown, search to narrow` : ''}
+              {page.capped ? ` · first ${PAGE} shown. Search to narrow.` : ''}
             </Txt>
           ) : null}
         </View>
@@ -171,7 +175,7 @@ export default function JobsScreen() {
           contentContainerStyle={{ padding: t.space(4), paddingTop: 0, gap: t.space(3), paddingBottom: t.space(20) }}
           ListEmptyComponent={empty ? (
             <View style={{ gap: t.space(3) }}>
-              <EmptyState title={empty.title} body={empty.body} icon="clipboard-list-outline" />
+              <EmptyState title={empty.title} body={empty.body} action={empty.action} icon="clipboard-list-outline" />
               {/*
                 * The way through, rather than only the news that there is
                 * none. A site with no jobs is an ordinary thing — the office
@@ -210,7 +214,7 @@ function JobRow({ job }: { job: JobSummary }) {
     ? `Due ${formatAuDate(job.dueAt)}`
     : done
       ? `Done ${formatAuDate(done)}`
-      : job.scheduledFor ? `${job.externalId ? 'Issued' : 'Scheduled'} ${formatAuDate(job.scheduledFor)}` : undefined;
+      : job.scheduledFor ? `Issued ${formatAuDate(job.scheduledFor)}` : undefined;
   return (
     <Card onPress={() => router.push({ pathname: '/work/job/[id]', params: { id: job.id } })}>
       <Rowed align="flex-start" gap={3}>

@@ -143,7 +143,7 @@ export function layOutDay(
       end,
       travelMinutes,
       bookable,
-      why: bookable ? undefined : 'No open Simpro job at this site, so there is no schedule to put a block on. Ask the office to raise one.',
+      why: bookable ? undefined : 'No open job. Ask the office to raise one.',
       pushedBy: cleared.pushedBy,
     };
   });
@@ -198,11 +198,11 @@ export function bookingsFor(
       continue;
     }
     if (!/^\d+$/.test(input.employeeId.trim())) {
-      skipped.push({ stop, why: 'This phone is not signed in as a Simpro employee.' });
+      skipped.push({ stop, why: 'Pick who you are first.' });
       continue;
     }
     if (!validDay) {
-      skipped.push({ stop, why: 'The day is not one the app can read.' });
+      skipped.push({ stop, why: 'Not a valid date.' });
       continue;
     }
     payloads.push({
@@ -224,6 +224,6 @@ export function bookingsFor(
 export function dayHeadline(layout: DayLayout): string {
   if (!layout.stops.length) return 'Nothing on the day yet';
   const stops = `${layout.stops.length} stop${layout.stops.length === 1 ? '' : 's'}`;
-  const over = layout.overrunHours ? `, ${layout.overrunHours} h past the end of the shift` : '';
+  const over = layout.overrunHours ? `, ${layout.overrunHours} h past knock-off` : '';
   return `${stops}, ${layout.totalHours} h, finishing about ${layout.endsAt}${over}`;
 }

@@ -95,7 +95,7 @@ export default function InvoiceScreen() {
       <RecordGate
         missing={missing}
         what="invoice"
-        why="The phone holds the last two years of invoices from Simpro. This one is older than that, or has not come down yet."
+        why="Older than two years, or not synced."
         failed={failed}
         onRetry={() => setReloads((n) => n + 1)}
       />
@@ -180,7 +180,7 @@ export default function InvoiceScreen() {
                     <Txt size="xs" tone="faint">
                       {[
                         p.status,
-                        p.invoices.length > 1 ? `one payment across ${p.invoices.length} invoices` : undefined,
+                        p.invoices.length > 1 ? `split across ${p.invoices.length} invoices` : undefined,
                         p.notes,
                       ].filter(Boolean).join(' · ') || `Payment ${p.id}`}
                     </Txt>
@@ -192,7 +192,7 @@ export default function InvoiceScreen() {
           })
         ) : (
           <Txt size="sm" tone="faint">
-            {inv.isPaid ? 'Marked paid at the office, but no payment record for it has come down.' : 'No payment recorded against this invoice on the phone.'}
+            {inv.isPaid ? 'Paid. No payment details synced.' : 'No payments recorded.'}
           </Txt>
         )}
 
@@ -212,7 +212,7 @@ export default function InvoiceScreen() {
             </Card>
           ))
         ) : (
-          <Txt size="sm" tone="faint">No credit note against this invoice.</Txt>
+          <Txt size="sm" tone="faint">No credit notes.</Txt>
         )}
 
         {/*
@@ -223,18 +223,19 @@ export default function InvoiceScreen() {
           * disagreement is the useful thing to see.
           */}
         <Card>
-          <Txt size="sm" style={{ lineHeight: 20 }}>
+          <Txt size="sm" weight="700">
             {inv.balanceDueCents !== undefined
-              ? `The office records ${formatCents(inv.balanceDueCents)} still due on ${inv.totalIncTaxCents !== undefined ? formatCents(inv.totalIncTaxCents) : 'this invoice'}`
-              : inv.isPaid ? 'The office records this invoice as paid' : 'The office has not recorded a balance for this invoice'}
-            {inv.amountAppliedCents !== undefined ? `, with ${formatCents(inv.amountAppliedCents)} applied` : ''}.
-            {' '}The phone holds {payments.length
-              ? `${payments.length} payment${payments.length === 1 ? '' : 's'}${attributed.length === payments.length
-                ? ` totalling ${formatCents(paidHere)}`
-                : `, ${formatCents(paidHere)} of it recorded against this invoice`}`
-              : 'no payment'}
-            {credits.length ? ` and ${credits.length} credit note${credits.length === 1 ? '' : 's'} for ${formatCents(creditedHere)}` : ''} against it.
+              ? `${formatCents(inv.balanceDueCents)} due${inv.totalIncTaxCents !== undefined ? ` of ${formatCents(inv.totalIncTaxCents)}` : ''}.`
+              : inv.isPaid ? 'Paid.' : 'No balance recorded.'}
           </Txt>
+          {payments.length || credits.length ? (
+            <Txt size="sm" tone="muted">
+              {[
+                attributed.length ? `Payments ${formatCents(paidHere)}` : undefined,
+                credits.length ? `Credits ${formatCents(creditedHere)}` : undefined,
+              ].filter(Boolean).join(' · ')}
+            </Txt>
+          ) : null}
         </Card>
 
         <H2>Jobs billed</H2>
@@ -249,7 +250,7 @@ export default function InvoiceScreen() {
                   {sellTotalLine(j.totalExTaxCents, j.totalIncTaxCents) ? (
                     <Txt size="xs" tone="muted" style={{ marginTop: 2 }}>{sellTotalLine(j.totalExTaxCents, j.totalIncTaxCents)}</Txt>
                   ) : null}
-                  {!j.held ? <Txt size="xs" tone="faint">This job is not on the phone yet.</Txt> : null}
+                  {!j.held ? <Txt size="xs" tone="faint">Job not synced yet.</Txt> : null}
                 </View>
                 {j.type ? <Chip label={j.type} /> : null}
                 {j.held ? <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} /> : null}
@@ -265,22 +266,22 @@ export default function InvoiceScreen() {
                     ))
                   ) : (
                     <Txt size="xs" tone="faint">
-                      {j.detailSynced ? 'No cost centres on the job.' : 'The job’s cost centres have not been read yet — open the job with signal.'}
+                      {j.detailSynced ? 'No cost centres on the job.' : 'Open the job with signal to load cost centres.'}
                     </Txt>
                   )}
-                  {j.costCenters.length ? <Txt size="xs" tone="faint">The job’s cost centres, ex GST, as the phone holds them.</Txt> : null}
+                  {j.costCenters.length ? <Txt size="xs" tone="faint">Cost centres, ex GST.</Txt> : null}
                 </View>
               ) : null}
             </Card>
           ))
         ) : (
           <Txt size="sm" tone="faint">
-            {inv.detailSyncedAt ? 'This invoice is not linked to a job.' : 'Which jobs this bills comes with the invoice record, on the next sync.'}
+            {inv.detailSyncedAt ? 'Not linked to a job.' : 'Jobs load on next sync.'}
           </Txt>
         )}
 
         <Txt size="xs" tone="faint" style={{ marginTop: t.space(2) }}>
-          Simpro invoice {inv.externalId}.{inv.dateModified ? ` Last changed at the office ${formatAuDate(inv.dateModified)}.` : ''}
+          Simpro invoice {inv.externalId}{inv.dateModified ? ` · changed ${formatAuDate(inv.dateModified)}` : ''}
         </Txt>
       </Screen>
     </>

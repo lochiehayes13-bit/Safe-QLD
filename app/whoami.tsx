@@ -128,17 +128,14 @@ export default function WhoAmIScreen() {
                     <View style={{ flex: 1 }}>
                       <Txt weight="700">{current?.name ?? prefs.technicianName ?? `Employee ${prefs.simproEmployeeId}`}</Txt>
                       <Txt size="xs" tone="muted">
-                        {current?.archived ? 'This employee is archived in Simpro. Pick again.' : 'This phone is yours.'}
+                        {current?.archived ? 'Archived in Simpro. Pick again.' : 'This phone is yours.'}
                       </Txt>
                     </View>
                     <Button title="Clear" variant="ghost" compact onPress={() => { void choose(null); }} />
                   </Rowed>
                 </Card>
               ) : (
-                <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-                  Tap your name. It goes on reports where the name is blank, and My day shows the jobs
-                  the office has scheduled to you.
-                </Txt>
+                <Txt size="sm" tone="muted">Tap your name.</Txt>
               )}
               <View
                 style={{
@@ -208,7 +205,7 @@ function Nobody({ loading, failed, held, searching, onRetry }: {
     return (
       <EmptyState
         icon="cloud-off-outline"
-        title="The staff list could not be read"
+        title="Couldn't load the staff list"
         body={failed}
         action={<Button title="Try again" onPress={onRetry} />}
       />
@@ -218,7 +215,7 @@ function Nobody({ loading, failed, held, searching, onRetry }: {
     return (
       <View style={{ alignItems: 'center', paddingVertical: t.space(12), gap: t.space(3) }}>
         <ActivityIndicator color={t.color.accent} size="large" />
-        <Txt tone="muted">Getting the staff list from Simpro.</Txt>
+        <Txt tone="muted">Loading staff from Simpro…</Txt>
       </View>
     );
   }
@@ -227,7 +224,7 @@ function Nobody({ loading, failed, held, searching, onRetry }: {
       <EmptyState
         icon="account-group-outline"
         title="Nobody on the staff list"
-        body="Simpro answered, and there is no employee on the office’s list to pick. That is the office’s list in Simpro, not this phone."
+        body="No staff found in Simpro."
         action={<Button title="Try again" variant="secondary" onPress={onRetry} />}
       />
     );
@@ -239,8 +236,8 @@ function Nobody({ loading, failed, held, searching, onRetry }: {
   return (
     <EmptyState
       icon="account-off-outline"
-      title="Everyone on the list is archived"
-      body="Simpro answered with a staff list, and every person on it is archived. Somebody in the office has to un-archive whoever is still working here."
+      title="Everyone is archived"
+      body="Everyone is archived in Simpro. Ask the office."
     />
   );
 }

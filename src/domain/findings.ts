@@ -77,7 +77,7 @@ export const PRIORITY_LABEL: Record<FindingPriority, string> = {
  */
 export const KIND_MEANING: Record<FindingKind, string> = {
   recommendation:
-    'Area of recommended improvement or lifecycle upgrade proposed for the upcoming project, '
+    'Area of recommended improvement or lifecycle upgrade, '
     + 'assessed against the original design intent as installed. No defect exists and no design '
     + 'non-compliance is asserted.',
   observation:
@@ -163,8 +163,8 @@ export function validateFindings(findings: Finding[]): FindingIssue[] {
       issues.push({
         findingId: f.id,
         message: f.kind === 'recommendation'
-          ? `${ref} recommends something but does not say what to do about it.`
-          : `${ref} has no note, so the register would print an empty row.`,
+          ? `${ref} has no action.`
+          : `${ref} has no note.`,
       });
     }
     if (!f.location.trim()) issues.push({ findingId: f.id, message: `${ref} has no location.` });
@@ -172,8 +172,7 @@ export function validateFindings(findings: Finding[]): FindingIssue[] {
     if (f.kind === 'observation' && f.priority) {
       issues.push({
         findingId: f.id,
-        message: `${ref} is an observation with a ${PRIORITY_LABEL[f.priority]} priority. `
-          + 'An observation is note-only and needs no action, so it cannot carry one.',
+        message: `${ref} is an observation, so it can't have a priority.`,
       });
     }
     if (f.kind === 'recommendation' && !f.priority) {
@@ -186,7 +185,7 @@ export function validateFindings(findings: Finding[]): FindingIssue[] {
       } else if (!refs.has(findingRef(parseFindingRef(related)!.kind, parseFindingRef(related)!.seq))) {
         issues.push({
           findingId: f.id,
-          message: `${ref} cites ${related}, which is not in this report. A client reading it finds nothing there.`,
+          message: `${ref} cites ${related}, which is not in this report.`,
         });
       } else if (related.toUpperCase().replace('-', '') === ref.replace('-', '')) {
         issues.push({ findingId: f.id, message: `${ref} cites itself.` });
@@ -221,6 +220,20 @@ export function recommendationList(findings: Finding[]): string {
     .filter((f) => f.kind === 'recommendation')
     .map((f, i) => `(${i + 1}) ${f.item.trim().replace(/[.;]$/, '')}`);
   return items.join('; ');
+}
+
+/**
+ * The sentence the report closes on, built from the register: "Recommended
+ * improvements: (1) …; (2) …." Empty where nothing is recommended.
+ *
+ * Worded without saying what the work is for. It used to say "the upcoming
+ * project should incorporate", which is wrong for every assessment that is
+ * not ahead of a project. One function, so the screen's preview and the
+ * printed report cannot say different things.
+ */
+export function recommendationClosing(findings: Finding[]): string {
+  const list = recommendationList(findings);
+  return list ? `Recommended improvements: ${list}.` : '';
 }
 
 /**
@@ -262,7 +275,21 @@ export function openDefectCaution(openDefects: number, criticalOpen: number): st
   const critical = criticalOpen > 0
     ? ` ${criticalOpen} of them ${criticalOpen === 1 ? 'is' : 'are'} critical.`
     : '';
+  return `${openDefects} open defect${openDefects === 1 ? '' : 's'} already on this site.${critical} `
+    + 'Mention them in the report or fix them first.';
+}
+
+/**
+ * The same fact, as the issued report states it to the client.
+ *
+ * Kept apart from the screen's caution, which is an instruction to the
+ * technician and used to be printed into the client's report word for word.
+ */
+export function openDefectReportNote(openDefects: number, criticalOpen: number): string | undefined {
+  if (openDefects <= 0) return undefined;
+  const critical = criticalOpen > 0
+    ? ` ${criticalOpen} of them ${criticalOpen === 1 ? 'is' : 'are'} critical.`
+    : '';
   return `This site has ${openDefects} open defect${openDefects === 1 ? '' : 's'} already recorded.${critical} `
-    + 'This assessment found none because it tested nothing, but a client reading "no defects were '
-    + 'identified" will not make that distinction. Say so in the report or resolve them first.';
+    + 'No equipment was tested at this attendance, so this report does not assess them.';
 }

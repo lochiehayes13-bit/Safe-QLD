@@ -1,5 +1,5 @@
 import {
-  distanceKm, formatKm, hasPosition, planRoute, type RoutePoint, runCandidates} from '@/domain/routing';
+  distanceKm, formatKm, hasPosition, navigationUrl, planRoute, type RoutePoint, runCandidates} from '@/domain/routing';
 
 /**
  * Route ordering.
@@ -231,5 +231,27 @@ describe("whose jobs are today's run", () => {
       scope: 'today', bookedToday: new Set(), everyones: true, today: TODAY, dayOf: qld,
     });
     expect(out.map((j) => j.id)).toEqual(['a']);
+  });
+});
+
+describe('the Navigate link', () => {
+  const site = { latitude: -27.4678, longitude: 153.0281, address: '1 Main St, Fictional Tower', siteName: 'Fictional Tower' };
+
+  it('gives the web build an https Google Maps link, because Safari cannot open geo:', () => {
+    const url = navigationUrl(site, 'web');
+    expect(url).toBe('https://www.google.com/maps/dir/?api=1&destination=-27.4678%2C153.0281');
+    expect(url.startsWith('https://')).toBe(true);
+  });
+
+  it('keeps geo: on Android and the Maps scheme on a native iPhone build', () => {
+    expect(navigationUrl(site, 'android')).toBe('geo:0,0?q=-27.4678%2C153.0281');
+    expect(navigationUrl(site, 'ios')).toBe('maps://?daddr=-27.4678%2C153.0281');
+  });
+
+  it('falls back to the address, then the site name, where there are no coordinates', () => {
+    expect(navigationUrl({ address: '1 Main St', siteName: 'Fictional Tower' }, 'web'))
+      .toBe('https://www.google.com/maps/dir/?api=1&destination=1%20Main%20St');
+    expect(navigationUrl({ latitude: 0, longitude: 0, siteName: 'Fictional Tower' }, 'web'))
+      .toBe('https://www.google.com/maps/dir/?api=1&destination=Fictional%20Tower');
   });
 });

@@ -85,7 +85,7 @@ export default function LeadsScreen() {
           ) : null}
           {rows ? (
             <Txt size="xs" tone="faint">
-              {rows.length >= PAGE ? `The newest ${PAGE} shown. Search to narrow.` : `${rows.length} lead${rows.length === 1 ? '' : 's'}`}
+              {rows.length >= PAGE ? `Newest ${PAGE} shown. Search to narrow.` : `${rows.length} lead${rows.length === 1 ? '' : 's'}`}
             </Txt>
           ) : null}
         </View>
@@ -96,7 +96,7 @@ export default function LeadsScreen() {
           initialNumToRender={14}
           windowSize={7}
           contentContainerStyle={{ padding: t.space(4), paddingTop: 0, gap: t.space(3), paddingBottom: t.space(20) }}
-          ListHeaderComponent={failed ? <Banner tone="fail" title="The leads could not be read" body={failed} /> : null}
+          ListHeaderComponent={failed ? <Banner tone="fail" title="Couldn't load leads" body={failed} /> : null}
           ListEmptyComponent={rows === null && !failed ? null : (
             empty ? (
               <EmptyState icon="lightbulb-outline" title={empty.title} body={empty.body} />
@@ -104,7 +104,7 @@ export default function LeadsScreen() {
               <EmptyState
                 icon="lightbulb-outline"
                 title={query.trim() ? 'Nothing matched' : stage ? `Nothing at ${stage}` : 'No leads'}
-                body={query.trim() ? 'Try part of the customer or site name.' : 'The office is chasing nothing the phone knows of.'}
+                body={query.trim() ? 'Try part of the customer or site name.' : ''}
               />
             )
           )}
@@ -119,7 +119,6 @@ export default function LeadsScreen() {
 }
 
 function LeadRow({ lead: l }: { lead: LeadRecord }) {
-  const t = useTheme();
   // A lead has no record screen of its own; the site it names does, where
   // the phone holds it, and that is the useful place to land.
   const openSite = async () => {
@@ -128,11 +127,11 @@ function LeadRow({ lead: l }: { lead: LeadRecord }) {
     try {
       site = await getSiteByExternalId(l.siteId);
     } catch (e) {
-      showAlert('The site could not be looked up', e instanceof Error ? e.message : String(e));
+      showAlert("Couldn't open the site", e instanceof Error ? e.message : String(e));
       return;
     }
     if (!site) {
-      showAlert('Not on this phone yet', `The site this lead names${l.siteName ? ` (${l.siteName})` : ''} has not come down from the office. It arrives with the next sync.`);
+      showAlert('Site not synced yet', l.siteName ?? 'Sync and try again.');
       return;
     }
     router.push({ pathname: '/site/[id]', params: { id: site.id } });
@@ -160,7 +159,6 @@ function LeadRow({ lead: l }: { lead: LeadRecord }) {
           {l.tags.slice(0, 2).map((tag) => <Chip key={tag} label={tag} />)}
         </View>
       </Rowed>
-      {l.siteId ? <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5) }}>Opens the site where the phone holds it.</Txt> : null}
     </Card>
   );
 }

@@ -1,14 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Linking, Switch, View } from 'react-native';
+import { Linking, Platform, Switch, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SimproClient } from '@/simpro/client';
 import { simproConfigFromPrefs } from '@/simpro/config';
 import { holdAutoSync, runAutoSync, useAutoSync } from '@/simpro/autoSync';
-import { describeAutoSync } from '@/simpro/autoSyncPolicy';
-import { backgroundSyncNote, registerAutoSyncTask, unregisterAutoSyncTask } from '@/simpro/autoSyncTask';
+import { INCREMENTAL_EVERY_MS, describeAutoSync } from '@/simpro/autoSyncPolicy';
+import { registerAutoSyncTask, unregisterAutoSyncTask } from '@/simpro/autoSyncTask';
 import { clearPlacesKey, hasPlacesKey, storePlacesKey } from '@/geo/placesKey';
 import { WEBSITE_PHOTOS_INBOX, endpointProblem } from '@/domain/photoSend';
+import { SUGGESTION_TAG } from '@/domain/suggestions';
+import { officeSetupStartsOpen, pastedSummary, storageWords } from '@/domain/settingsWords';
 import { loadPrefs, patchPrefs, DEFAULT_PREFS, type Prefs } from '@/app-prefs';
 import { clearExports, exportsSize } from '@/export/files';
 import { listPhotoFiles } from '@/export/photoFiles';
@@ -21,7 +23,7 @@ import { flushQueue, pullFromSimpro, type SyncProgress } from '@/simpro/sync';
 import { describeStaleness, type SyncState } from '@/simpro/incremental';
 import { readAllSyncState } from '@/simpro/watermark';
 import { SimproResources } from '@/simpro/resources';
-import { describePastedConnection, readPastedConnection } from '@/simpro/oauthDetails';
+import { readPastedConnection } from '@/simpro/oauthDetails';
 import { clearRateCard, loadRateCard, saveRateCard } from '@/db/rateCardRepo';
 import { effectiveRateCard, formatCents, parseCents, type LabourRate, type ServiceFee } from '@/domain/rates';
 import type { RateCardImport } from '@/simpro/rateCard';
@@ -36,9 +38,8 @@ import {
   checkForUpdate, clearToken as clearGhToken, hasToken as hasGhToken, storeToken as storeGhToken, useUpdateCheck,
 } from '@/update/check';
 import { useTheme } from '@/theme';
-import { Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
+import { Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Segmented, Txt } from '@/components/ui';
 import { showAlert } from '@/components/alert';
-import { describeLoadFailure } from '@/domain/loadFailure';
 import { THEME_CHOICE_LABEL, useThemeChoice } from '@/theme/choice';
 
 
@@ -47,11 +48,11 @@ export default function SettingsScreen() {
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
   const [secret, setSecret] = useState('');
   const [hasSecret, setHasSecret] = useState(false);
-  /** The second application, the one that can sign a person in. */
-  const [hasSignInSecret, setHasSignInSecret] = useState(false);
-  const [signInSecret, setSignInSecret] = useState('');
-  /** Where the secret a token request carries comes from: pasted, shipped with the build, the proxy, or nowhere. */
-  const [secretSource, setSecretSource] = useState<'proxy' | 'keystore' | 'built-in' | 'none'>('none');
+  /**
+   * Where the secret a token request carries comes from: pasted, shipped with
+   * the build, the proxy, or nowhere. Null until it has been asked.
+   */
+  const [secretSource, setSecretSource] = useState<'proxy' | 'keystore' | 'built-in' | 'none' | null>(null);
   /** The whole oAuth2 details block off Simpro, pasted rather than picked apart by hand. */
   const [pastedDetails, setPastedDetails] = useState('');
   /** The optional Google Places key for the map's place search. Keystore only; see geo/placesKey. */
@@ -62,6 +63,12 @@ export default function SettingsScreen() {
   const [session, setSession] = useState<UserSession | null>(null);
   const [signedOutReason, setSignedOutReason] = useState<string | null>(null);
   const [hasGh, setHasGh] = useState(false);
+  /**
+   * Office setup, open or shut once someone has tapped it. Null until then,
+   * and it follows `officeSetupStartsOpen`: shut unless this phone has no
+   * way to reach Simpro yet.
+   */
+  const [officeChoice, setOfficeChoice] = useState<boolean | null>(null);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ name: string; readable: boolean; total: number | null; error?: string }[] | null>(null);
   /** What the last connection attempt actually established, kept beside the endpoint list. */
@@ -97,12 +104,13 @@ export default function SettingsScreen() {
   /** Whether a newer build has been published, and when that was last asked. */
   const updateCheck = useUpdateCheck();
   const build = useMemo(() => buildInfo(), []);
+  /** The web build keeps keys and records in the browser, not a keystore or a database file. */
+  const words = useMemo(() => storageWords(Platform.OS === 'web', Math.round(INCREMENTAL_EVERY_MS / 60_000)), []);
 
   useEffect(() => {
     void loadPrefs().then(setPrefs);
     void loadRateCard().then(setCard);
     void SimproClient.hasSecret().then(setHasSecret);
-    void SimproClient.hasSecret('signin').then(setHasSignInSecret);
     void hasPlacesKey().then(setHasPlaces);
     void hasGhToken().then(setHasGh);
     void readUserSession().then(setSession);
@@ -174,7 +182,7 @@ export default function SettingsScreen() {
     await SimproClient.storeSecret(secret.trim());
     setSecret('');
     setHasSecret(true);
-    showAlert('Saved', 'The client secret is held in this device’s secure keystore. It is never written to ordinary app storage and never leaves the device except to Simpro.');
+    showAlert('Saved', `Client secret saved ${words.keyPlace}.`);
   };
 
   /**
@@ -192,7 +200,7 @@ export default function SettingsScreen() {
   const applyPastedDetails = async () => {
     const read = readPastedConnection(pastedDetails);
     if (read.problem) {
-      showAlert('Nothing was read from that', read.problem);
+      showAlert('Nothing read', read.problem);
       return;
     }
     try {
@@ -203,9 +211,9 @@ export default function SettingsScreen() {
       if (Object.keys(next).length) update(next);
       if (read.found.clientSecret) setHasSecret(true);
       setPastedDetails('');
-      showAlert('Connection updated', describePastedConnection(read));
+      showAlert('Connection updated', pastedSummary(read.fields));
     } catch (e) {
-      showAlert('That could not be saved', describeLoadFailure(e, 'the connection details'));
+      showAlert('Couldn’t save', e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -229,14 +237,14 @@ export default function SettingsScreen() {
           'Nothing came back',
           report.unreadable.length
             ? report.unreadable.map((u) => `${u.what}: ${u.error}`).join('\n\n')
-            : 'Simpro answered but had no rates or fees to give. The figures in Settings are still used.',
+            : 'Simpro has no rates or fees. The rates typed here are used.',
         );
         return;
       }
       await saveRateCard(report.rates, report.fees);
       setCard(await loadRateCard());
     } catch (e) {
-      showAlert('Could not read the rate card', e instanceof Error ? e.message : String(e));
+      showAlert('Couldn’t read the rates', e instanceof Error ? e.message : String(e));
     } finally {
       setPulling(false);
     }
@@ -274,8 +282,7 @@ export default function SettingsScreen() {
       setVerdict({
         ok: report.ready,
         company: report.company?.name ?? null,
-        message: report.problem
-          ?? `Connected to ${report.company?.name ?? 'Simpro'}. Everything this app needs is readable.`,
+        message: report.problem ?? `Connected to ${report.company?.name ?? 'Simpro'}.`,
       });
     } catch (e) {
       setVerdict({ ok: false, company: null, message: e instanceof Error ? e.message : String(e) });
@@ -310,14 +317,14 @@ export default function SettingsScreen() {
         .filter(([, mode]) => mode === 'incremental')
         .map(([resource]) => resource);
       const lines = [
-        `${r.sitesAdded} sites added, ${r.sitesUpdated} updated`,
-        `${r.jobsAdded + r.jobsUpdated} jobs synced`,
+        `${r.sitesAdded} sites added, ${r.sitesUpdated} updated.`,
+        `${r.jobsAdded + r.jobsUpdated} jobs synced.`,
         r.ratesRead || r.feesRead
-          ? `${r.ratesRead} labour rate${r.ratesRead === 1 ? '' : 's'} and ${r.feesRead} service fee${r.feesRead === 1 ? '' : 's'} read`
-          : 'No rate card came back — the figures in Settings are still used.',
+          ? `${r.ratesRead} labour rate${r.ratesRead === 1 ? '' : 's'} and ${r.feesRead} service fee${r.feesRead === 1 ? '' : 's'} read.`
+          : 'No rate card came back.',
         incremental.length
-          ? `Only changes were fetched for ${incremental.join(' and ')}.`
-          : 'Everything was fetched — this was a full sync.',
+          ? `Only changes fetched for ${incremental.join(' and ')}.`
+          : 'Full sync.',
       ];
       // A server that ignores the filter returns everything and looks like a
       // busy day. Saying so is the difference between a slow sync and a sync
@@ -345,9 +352,7 @@ export default function SettingsScreen() {
   const confirmFetchEverything = () => {
     showAlert(
       'Fetch everything?',
-      'This re-reads every site, job and asset the office holds — a few minutes on a good signal. '
-      + 'Sync now fetches only what changed and is usually seconds. Everything is re-read on its own '
-      + 'once a day anyway; do this when you have reason to doubt what is on the phone.',
+      'Re-reads every site, job and asset. Takes a few minutes on good signal.',
       [
         { text: 'Not now', style: 'cancel' },
         { text: 'Fetch everything', onPress: () => { void runPull(true); } },
@@ -411,8 +416,95 @@ export default function SettingsScreen() {
 
   const themeChoice = useThemeChoice();
 
+  // Every "Connect to Simpro" button lands here; open the fields that fix it.
+  const officeOpen = officeChoice ?? officeSetupStartsOpen(secretSource);
+
+  /** Photos bound for Simpro, in one line. */
+  const photoQueueLine = [
+    attachments.pending
+      ? `${attachments.pending} photo${attachments.pending === 1 ? '' : 's'} waiting to upload`
+      : 'No photos waiting to upload',
+    attachments.unknown ? `${attachments.unknown} sent with no reply` : null,
+    attachments.failed ? `${attachments.failed} couldn't be sent. See Waiting to send.` : null,
+  ].filter(Boolean).join(' · ') + (attachments.sent ? ` · ${attachments.sent} uploaded` : '');
+
+  const synced = syncState.filter((st) => st.lastSyncedAt || st.lastRecordCount > 0);
+
   return (
     <Screen>
+
+      <H2>You</H2>
+      <Card>
+        {prefs.simproEmployeeId ? (
+          <Rowed gap={3}>
+            <MaterialCommunityIcons name="account-check-outline" size={22} color={t.color.pass} />
+            <View style={{ flex: 1 }}>
+              <Txt weight="700">{prefs.technicianName || `Employee ${prefs.simproEmployeeId}`}</Txt>
+              <Txt size="sm" tone="muted">
+                Employee {prefs.simproEmployeeId}{prefs.simproEmployeeEmail ? ` · ${prefs.simproEmployeeEmail}` : ''}
+              </Txt>
+            </View>
+          </Rowed>
+        ) : (
+          <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
+            Pick your name from the staff list.
+          </Txt>
+        )}
+        <View style={{ height: t.space(2.5) }} />
+        <Button
+          title={prefs.simproEmployeeId ? 'Change who I am' : 'Pick who I am'}
+          variant="secondary"
+          onPress={() => router.push('/whoami')}
+        />
+        <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
+          My day uses the name picked here.
+        </Txt>
+        {session ? (
+          <>
+            <View style={{ height: t.space(2.5) }} />
+            <Rowed gap={2}>
+              <Txt size="sm" tone="pass" style={{ flex: 1 }}>
+                Signed in{session.label ? ` as ${session.label}` : ''}.
+              </Txt>
+              <Button
+                title="Sign out"
+                variant="ghost"
+                compact
+                onPress={() => {
+                  void Promise.all([signOut(), forgetSignInSkipped()]).then(() => { setSession(null); setSignedOutReason(null); });
+                }}
+              />
+            </Rowed>
+          </>
+        ) : signedOutReason ? (
+          <>
+            <View style={{ height: t.space(2.5) }} />
+            <Banner tone="warn" title="Signed out" body={signedOutReason} />
+          </>
+        ) : null}
+        <Divider />
+        <Field label="Name" value={prefs.technicianName} onChangeText={(v) => update({ technicianName: v })} autoCapitalize="words" />
+        <View style={{ height: t.space(2.5) }} />
+        <Field label="Licence number" value={prefs.technicianLicence} onChangeText={(v) => update({ technicianLicence: v })} autoCapitalize="characters" />
+        <View style={{ height: t.space(2.5) }} />
+        <Field label="Vehicle rego" value={prefs.vehicleRego} onChangeText={(v) => update({ vehicleRego: v })} autoCapitalize="characters" />
+        <View style={{ height: t.space(2.5) }} />
+        <Field label="Company" value={prefs.companyName} onChangeText={(v) => update({ companyName: v })} />
+        <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
+          Used on reports and timesheets.
+        </Txt>
+        <Divider />
+        <Label>New timesheet weeks</Label>
+        <View style={{ height: t.space(2) }} />
+        <Segmented<'' | 'schedule' | 'manual'>
+          options={[
+            { value: 'schedule', label: 'From my schedule' },
+            { value: 'manual', label: 'I type mine' },
+          ]}
+          value={prefs.timesheetFill}
+          onChange={(v) => update({ timesheetFill: v })}
+        />
+      </Card>
 
       {/*
         * Locking the colours.
@@ -435,126 +527,41 @@ export default function SettingsScreen() {
             />
           ))}
         </Rowed>
-        <Txt size="sm" tone="muted" style={{ marginTop: t.space(2), lineHeight: 19 }}>
-          This app is meant to be read in a dark switch room. Lock it if your phone keeps turning it white at
-          sunrise.
-        </Txt>
-      </Card>
-
-      <H2>You</H2>
-      <Card>
-        <Field label="Name" value={prefs.technicianName} onChangeText={(v) => update({ technicianName: v })} autoCapitalize="words" />
-        <View style={{ height: t.space(2.5) }} />
-        <Field label="Licence number" value={prefs.technicianLicence} onChangeText={(v) => update({ technicianLicence: v })} autoCapitalize="characters" />
-        <View style={{ height: t.space(2.5) }} />
-        <Field label="Vehicle rego" value={prefs.vehicleRego} onChangeText={(v) => update({ vehicleRego: v })} autoCapitalize="characters" />
-        <View style={{ height: t.space(2.5) }} />
-        <Field label="Company" value={prefs.companyName} onChangeText={(v) => update({ companyName: v })} />
-        <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
-          These prefill reports, baseline data and timesheets so you are not retyping them on every job.
-        </Txt>
-      </Card>
-
-      <H2>You in Simpro</H2>
-      <Card>
-        {prefs.simproEmployeeId ? (
-          <Rowed gap={3}>
-            <MaterialCommunityIcons name="account-check-outline" size={22} color={t.color.pass} />
-            <View style={{ flex: 1 }}>
-              <Txt weight="700">{prefs.technicianName || `Employee ${prefs.simproEmployeeId}`}</Txt>
-              <Txt size="sm" tone="muted">
-                Employee {prefs.simproEmployeeId}{prefs.simproEmployeeEmail ? ` · ${prefs.simproEmployeeEmail}` : ''}
-              </Txt>
-            </View>
-          </Rowed>
-        ) : (
-          <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-            Pick yourself from the Simpro staff list.
-          </Txt>
-        )}
-        <View style={{ height: t.space(2.5) }} />
-        <Rowed gap={2}>
-          <Button
-            title={prefs.simproEmployeeId ? 'Change who I am' : 'Pick who I am'}
-            variant="secondary"
-            onPress={() => router.push('/whoami')}
-            style={{ flex: 1 }}
-          />
-        </Rowed>
-        {session ? (
-          <>
-            <View style={{ height: t.space(2.5) }} />
-            <Rowed gap={2}>
-              <Txt size="sm" tone="pass" style={{ flex: 1 }}>
-                Signed in{session.label ? ` as ${session.label}` : ''}. Notes you write are yours in Simpro.
-              </Txt>
-              <Button
-                title="Sign out"
-                variant="ghost"
-                compact
-                onPress={() => {
-                  void Promise.all([signOut(), forgetSignInSkipped()]).then(() => { setSession(null); setSignedOutReason(null); });
-                }}
-              />
-            </Rowed>
-          </>
-        ) : signedOutReason ? (
-          <>
-            <View style={{ height: t.space(2.5) }} />
-            <Banner tone="warn" title="Signed out by the app" body={signedOutReason} />
-          </>
-        ) : null}
-        <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
-          Signing in uses the same login as Simpro Mobile. Until someone signs in, this phone talks to
-          Simpro as the office's shared API key, and My day filters the schedule by the name above.
-        </Txt>
       </Card>
 
       <H2>Where things go</H2>
       <Card>
-        <Field label="Supervisor" value={prefs.supervisorEmail} onChangeText={(v) => update({ supervisorEmail: v })} keyboardType="email-address" autoCapitalize="none" hint="Questions from Ask the office go here. Leave is booked straight onto your Simpro schedule, not emailed." />
-        <View style={{ height: t.space(2.5) }} />
-        <Field label="Suggestions about the app" value={prefs.suggestionsEmail} onChangeText={(v) => update({ suggestionsEmail: v })} keyboardType="email-address" autoCapitalize="none" hint="Every suggestion goes out with the subject tag [Safe QLD app], so an inbox rule can file them." />
-        <View style={{ height: t.space(2.5) }} />
-        {/*
-          * The one setting that takes the mail app out of the photo button.
-          * Empty is the normal state and costs nothing: the photos go to the
-          * phone's share sheet already attached, which is one tap. Filled in,
-          * they are posted straight to the office and no mail app opens at
-          * all — which is what was actually asked for. server/photo-relay in
-          * this repository is the forty lines that answer it.
-          */}
         <Field
-          label="Photo address"
-          value={prefs.websitePhotoUrl}
-          onChangeText={(v) => update({ websitePhotoUrl: v })}
+          label="Supervisor"
+          value={prefs.supervisorEmail}
+          onChangeText={(v) => update({ supervisorEmail: v })}
+          keyboardType="email-address"
           autoCapitalize="none"
-          placeholder="https://…"
-          hint={`Where website photos are posted. Leave it empty and they go out through the phone's share sheet to ${WEBSITE_PHOTOS_INBOX} instead.`}
+          hint="Ask the office and Things I need go here."
         />
-        {endpointProblem(prefs.websitePhotoUrl) ? (
-          <Txt size="xs" tone="fail" style={{ marginTop: t.space(1.5), lineHeight: 17 }}>
-            {endpointProblem(prefs.websitePhotoUrl)}
-          </Txt>
-        ) : null}
+        <View style={{ height: t.space(2.5) }} />
+        <Field
+          label="App suggestions"
+          value={prefs.suggestionsEmail}
+          onChangeText={(v) => update({ suggestionsEmail: v })}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          hint={`Subject starts with ${SUGGESTION_TAG}.`}
+        />
       </Card>
 
       <H2>The map</H2>
       <Card>
         <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-          Searching the map for a place that is not one of our sites asks OpenStreetMap, which is free
-          and knows every address. A Google Places key finds shops by name as well; each search then
-          costs the account the key belongs to a fraction of a cent, and the phone’s rough position —
-          to about a kilometre, never the exact spot — goes to Google with each search so the nearest
-          match comes first.
+          Optional. Adds business names to map search.
         </Txt>
         <View style={{ height: t.space(3) }} />
         {hasPlaces ? (
           <>
-            <Txt size="sm" tone="pass">A Google Places key is held in this device's keystore.</Txt>
+            <Txt size="sm" tone="pass">Places key saved {words.keyPlace}.</Txt>
             <View style={{ height: t.space(2.5) }} />
             <Button
-              title="Remove the key"
+              title="Remove key"
               variant="ghost"
               compact
               onPress={() => { void clearPlacesKey().then(() => setHasPlaces(false)); }}
@@ -563,16 +570,16 @@ export default function SettingsScreen() {
         ) : (
           <>
             <Field
-              label="Google Places key (optional)"
+              label="Google Places key"
               value={placesKey}
               onChangeText={setPlacesKey}
               placeholder="AIza…"
               autoCapitalize="none"
-              hint="Held in the hardware keystore, never in ordinary app storage. Without one the map searches OpenStreetMap."
+              hint={`Kept ${words.keyPlace}.`}
             />
             <View style={{ height: t.space(2.5) }} />
             <Button
-              title="Save the key"
+              title="Save key"
               variant="secondary"
               disabled={!placesKey.trim()}
               onPress={() => {
@@ -584,386 +591,42 @@ export default function SettingsScreen() {
         )}
       </Card>
 
-      <H2>Charge-out rates</H2>
+      <H2>Sync</H2>
       <Card>
-        <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-          The office system is the record. These are a copy so the app can put a figure on labour
-          out of signal, and they stay on this device. Leave one blank and nothing is priced from
-          it — hours are shown on their own rather than a total that might be wrong.
-        </Txt>
-        <View style={{ height: t.space(3) }} />
-        <Label>Labour, excluding GST</Label>
-        <Money label="Normal hours" cents={prefs.normalHoursSellCents} onCents={(c) => update({ normalHoursSellCents: c })} suffix="per hour" />
-        <View style={{ height: t.space(2.5) }} />
-        <Money label="After hours" cents={prefs.afterHoursSellCents} onCents={(c) => update({ afterHoursSellCents: c })} suffix="per hour" />
-        <Divider />
-        <Label>Site attendance, excluding GST</Label>
-        <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-          An attendance fee covers a set number of minutes on site. Only the time past that is
-          charged again at the labour rate — charging the fee and then every hour double-bills the
-          start of every job.
-        </Txt>
-        <View style={{ height: t.space(2.5) }} />
-        <Rowed gap={2} align="flex-start">
-          <View style={{ flex: 2 }}>
-            <Money label="Normal hours" cents={prefs.attendanceNormalCents} onCents={(c) => update({ attendanceNormalCents: c })} />
-          </View>
+        <Rowed gap={2}>
           <View style={{ flex: 1 }}>
-            <Minutes label="Covers" minutes={prefs.attendanceNormalMinutes} onMinutes={(m) => update({ attendanceNormalMinutes: m })} />
+            <Txt size="sm" weight="700">Sync automatically</Txt>
+            <Txt
+              size="sm"
+              tone={!prefs.autoSync ? 'faint' : auto.record.lastError ? 'warn' : 'muted'}
+              style={{ lineHeight: 19 }}
+            >
+              {!prefs.autoSync
+                ? 'Off. Sync now still works.'
+                : auto.inFlight
+                  ? 'Syncing now.'
+                  : describeAutoSync(auto.record, new Date())}
+            </Txt>
           </View>
-        </Rowed>
-        <View style={{ height: t.space(2.5) }} />
-        <Rowed gap={2} align="flex-start">
-          <View style={{ flex: 2 }}>
-            <Money label="After hours" cents={prefs.attendanceAfterHoursCents} onCents={(c) => update({ attendanceAfterHoursCents: c })} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Minutes label="Covers" minutes={prefs.attendanceAfterHoursMinutes} onMinutes={(m) => update({ attendanceAfterHoursMinutes: m })} />
-          </View>
-        </Rowed>
-        <Txt
-          size="xs"
-          tone={effective.rateSource === 'none' && effective.feeSource === 'none' ? 'warn' : 'muted'}
-          style={{ marginTop: t.space(3), lineHeight: 17 }}
-        >
-          {effective.note}
-        </Txt>
-        <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 16 }}>
-          Cost rates are not asked for and not held here. Only what a client is charged, so nothing
-          on this device reveals a margin.
-        </Txt>
-      </Card>
-
-      <Card>
-        <Txt size="sm" weight="700">Follow the office system instead</Txt>
-        <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5), lineHeight: 17 }}>
-          Rates change in Simpro day to day, so they can be read from there rather than retyped
-          here. A pull replaces the whole card — a rate deleted in Simpro disappears here too,
-          because a stale rate still gets used where a missing one is reported.
-        </Txt>
-        <View style={{ height: t.space(3) }} />
-        <Button title="Pull the rate card from Simpro" variant="secondary" onPress={pullRates} loading={pulling} />
-
-        {card.rates.length || card.fees.length ? (
-          <>
-            <Divider />
-            <Rowed style={{ justifyContent: 'space-between' }}>
-              <Txt size="sm">Held from Simpro</Txt>
-              <Txt size="sm" tone="muted">
-                {card.rates.length} rate{card.rates.length === 1 ? '' : 's'}, {card.fees.length} fee{card.fees.length === 1 ? '' : 's'}
-              </Txt>
-            </Rowed>
-            {card.rates.map((r) => (
-              <Rowed key={r.id} style={{ justifyContent: 'space-between' }} align="flex-start">
-                <View style={{ flex: 1 }}>
-                  <Txt size="sm">{r.name}</Txt>
-                  <Txt size="xs" tone="faint">
-                    {r.hours === 'normal' ? 'Normal hours' : 'After hours'} · {r.kind === 'callout' ? 'call-out' : 'hourly'}
-                    {r.customerName ? ` · ${r.customerName}` : ''}
-                  </Txt>
-                </View>
-                <Txt size="sm">{formatCents(r.sellCentsPerHour)}</Txt>
-              </Rowed>
-            ))}
-            {card.fees.map((f) => (
-              <Rowed key={f.id} style={{ justifyContent: 'space-between' }} align="flex-start">
-                <View style={{ flex: 1 }}>
-                  <Txt size="sm">{f.name}</Txt>
-                  <Txt size="xs" tone="faint">covers {f.includedLabourMinutes} minutes</Txt>
-                </View>
-                <Txt size="sm">{formatCents(f.chargeCents)}</Txt>
-              </Rowed>
-            ))}
-            <View style={{ height: t.space(3) }} />
-            <Button title="Forget the pulled card" variant="ghost" compact onPress={forgetRates} />
-          </>
-        ) : null}
-
-        {pullReport ? (
-          <>
-            <Divider />
-            {pullReport.suspect.length ? (
-              <Banner
-                tone="warn"
-                title={`${pullReport.suspect.length} rate name${pullReport.suspect.length === 1 ? '' : 's'} will not match a customer`}
-                body={pullReport.suspect.join('\n\n')}
-              />
-            ) : null}
-            {pullReport.unreadable.length ? (
-              <Banner
-                tone="warn"
-                title="Part of the card could not be read"
-                body={pullReport.unreadable.map((u) => `${u.what}: ${u.error}`).join('\n')}
-              />
-            ) : null}
-            {pullReport.skipped.length ? (
-              <Txt size="xs" tone="warn" style={{ lineHeight: 17 }}>
-                Left out: {pullReport.skipped.map((sk) => `${sk.name} (${sk.reason})`).join('; ')}.
-              </Txt>
-            ) : null}
-            {pullReport.notes.length ? (
-              <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-                {pullReport.notes.join(' ')}
-              </Txt>
-            ) : null}
-          </>
-        ) : null}
-      </Card>
-
-      <H2>Simpro</H2>
-      <Banner
-        tone={secretSource === 'none' ? 'warn' : 'info'}
-        title={secretSource === 'built-in' ? 'Connected out of the box' : 'How this phone reaches Simpro'}
-        body={secretSource === 'built-in'
-          ? `This build ships with the office's “${OFFICE_APPLICATION.name}” API application, so nothing has to be pasted before the app works. If the office regenerates that application's secret in Simpro, paste the new one below and it takes over on this phone straight away.`
-          : secretSource === 'keystore'
-            ? 'A pasted secret in this phone\'s keystore is what every request carries. Remove it to go back to the one built into the app.'
-            : secretSource === 'proxy'
-              ? 'Requests go through the proxy below, which holds the secret. This phone holds none.'
-              : 'This client ID is not the one the app ships with, so its secret has to be pasted below before anything can sync.'}
-      />
-      <Card>
-        <Label>Paste the oAuth2 details from Simpro</Label>
-        <Txt size="xs" tone="faint" style={{ marginTop: 4, marginBottom: t.space(2), lineHeight: 17 }}>
-          Only needed to move this phone to a different API application. System Setup → API in Simpro
-          shows a block starting “Token URL”. Copy the whole thing and paste it here — the build, the
-          client ID and the secret are read out of it, and the secret goes straight to the keystore.
-          Anything the block does not carry is left alone.
-        </Txt>
-        <Field
-          label=""
-          value={pastedDetails}
-          onChangeText={setPastedDetails}
-          autoCapitalize="none"
-          multiline
-          placeholder={'Token URL: https://…/oauth2/token\nclient_id: …\nclient_secret: …'}
-        />
-        <View style={{ height: t.space(2) }} />
-        <Button title="Read it in" onPress={applyPastedDetails} disabled={!pastedDetails.trim()} />
-        <Divider />
-        <Field label="Build domain" value={prefs.simproDomain} onChangeText={(v) => update({ simproDomain: v })} autoCapitalize="none" />
-        <View style={{ height: t.space(2.5) }} />
-        <Field label="Company ID" value={prefs.simproCompanyId} onChangeText={(v) => update({ simproCompanyId: v })} keyboardType="numeric" hint="Already set for this build. Clear it and connect to look it up again." />
-        <View style={{ height: t.space(2.5) }} />
-        <Field label="Client ID" value={prefs.simproClientId} onChangeText={(v) => update({ simproClientId: v })} autoCapitalize="none" />
-        <View style={{ height: t.space(2.5) }} />
-        <Field
-          label="Proxy URL (recommended)"
-          value={prefs.simproProxyUrl}
-          onChangeText={(v) => update({ simproProxyUrl: v })}
-          autoCapitalize="none"
-          placeholder="https://api.safeqld.com.au/simpro"
-          hint="When set, the device holds no secret at all"
-        />
-
-        {!prefs.simproProxyUrl ? (
-          <>
-            <Divider />
-            <Label>Client secret</Label>
-            <View style={{ height: t.space(1.5) }} />
-            {hasSecret ? (
-              <Rowed gap={2}>
-                <MaterialCommunityIcons name="lock-check" size={18} color={t.color.pass} />
-                <Txt size="sm" tone="pass" style={{ flex: 1 }}>
-                  A pasted secret is stored in the keystore{secretSource === 'keystore' && OFFICE_APPLICATION.clientId === prefs.simproClientId.trim() ? ' and is used ahead of the built-in one' : ''}.
-                </Txt>
-                <Button
-                  title="Remove"
-                  variant="danger"
-                  compact
-                  onPress={async () => {
-                    await SimproClient.clearSecret();
-                    setHasSecret(false);
-                  }}
-                />
-              </Rowed>
-            ) : (
-              <>
-                {secretSource === 'built-in' ? (
-                  <Rowed gap={2} style={{ marginBottom: t.space(2) }}>
-                    <MaterialCommunityIcons name="lock-check" size={18} color={t.color.pass} />
-                    <Txt size="sm" tone="pass" style={{ flex: 1 }}>Using the office key built into this build. Paste a new one only if it has been regenerated.</Txt>
-                  </Rowed>
-                ) : null}
-                <Field label="" value={secret} onChangeText={setSecret} autoCapitalize="none" placeholder={secretSource === 'built-in' ? 'Paste a regenerated client secret' : 'Paste the client secret'} />
-                <View style={{ height: t.space(2) }} />
-                <Button title="Save to keystore" onPress={saveSecret} disabled={!secret.trim()} variant={secretSource === 'built-in' ? 'secondary' : 'primary'} />
-              </>
-            )}
-          </>
-        ) : null}
-
-        <Divider />
-        {/*
-          * The application that signs a person in.
-          *
-          * An API application in Simpro has one Authentication Method, fixed
-          * when it is made, and the office's is Client Credentials — which is
-          * how this phone reaches Simpro with nobody logged in, and which
-          * refuses every login. Signing in as yourself needs a second
-          * application made to allow it. Both live on the same build, so only
-          * the id and the secret are asked for here.
-          */}
-        <Label>Signing in as yourself</Label>
-        <Txt size="xs" tone="faint" style={{ marginTop: 4, marginBottom: t.space(2), lineHeight: 17 }}>
-          The application above is a Client Credentials one: it lets this phone reach the office with
-          nobody logged in, and it cannot sign a person in. Leave this empty and everyone picks
-          themselves from the staff list, which works and puts their name on what they write. Fill it
-          in with a second API application — one made with an Authentication Method that allows
-          logins, and with the Redirect URI the sign-in screen shows — and Simpro's own login works.
-        </Txt>
-        <Field
-          label="Sign-in application client ID"
-          value={prefs.simproSignInClientId}
-          onChangeText={(v) => update({ simproSignInClientId: v })}
-          autoCapitalize="none"
-          placeholder="Leave empty to use the staff list"
-        />
-        {prefs.simproSignInClientId.trim() && !prefs.simproProxyUrl ? (
-          <>
-            <View style={{ height: t.space(2.5) }} />
-            <Label>Sign-in application secret</Label>
-            <View style={{ height: t.space(1.5) }} />
-            {hasSignInSecret ? (
-              <Rowed gap={2}>
-                <MaterialCommunityIcons name="lock-check" size={18} color={t.color.pass} />
-                <Txt size="sm" tone="pass" style={{ flex: 1 }}>Held in the keystore, apart from the office's own.</Txt>
-                <Button
-                  title="Remove"
-                  variant="danger"
-                  compact
-                  onPress={async () => {
-                    await SimproClient.clearSecret('signin');
-                    setHasSignInSecret(false);
-                  }}
-                />
-              </Rowed>
-            ) : (
-              <>
-                <Field label="" value={signInSecret} onChangeText={setSignInSecret} autoCapitalize="none" placeholder="Paste the sign-in application's secret" />
-                <View style={{ height: t.space(2) }} />
-                <Button
-                  title="Save to keystore"
-                  disabled={!signInSecret.trim()}
-                  onPress={async () => {
-                    await SimproClient.storeSecret(signInSecret.trim(), 'signin');
-                    setSignInSecret('');
-                    setHasSignInSecret(true);
-                  }}
-                />
-              </>
-            )}
-          </>
-        ) : null}
-
-        <Divider />
-        <Label>Write test results back</Label>
-        <Txt size="xs" tone="faint" style={{ marginTop: 4, marginBottom: t.space(2), lineHeight: 17 }}>
-          Off by default. Everything else this app sends is appended — a note, an order — and can be
-          deleted if it is wrong. This changes the last test result on the asset itself, which is what
-          the office schedules from. Turn it on and check one asset in Simpro before trusting it with a
-          full site. A result that is not a plain pass or fail stays in the job note, in words.
-        </Txt>
-        <Rowed gap={2}>
-          <MaterialCommunityIcons
-            name={prefs.simproWriteAssetTests ? 'database-edit' : 'database-lock'}
-            size={18}
-            color={prefs.simproWriteAssetTests ? t.color.warn : t.color.textFaint}
-          />
-          <Txt size="sm" tone={prefs.simproWriteAssetTests ? 'warn' : 'faint'} style={{ flex: 1 }}>
-            {prefs.simproWriteAssetTests
-              ? 'Completed tests are written onto the asset in Simpro.'
-              : 'Results stay on this device and in the job note.'}
-          </Txt>
-          <Button
-            title={prefs.simproWriteAssetTests ? 'Turn off' : 'Turn on'}
-            variant={prefs.simproWriteAssetTests ? 'danger' : 'secondary'}
-            compact
-            onPress={() => update({ simproWriteAssetTests: !prefs.simproWriteAssetTests })}
-          />
-        </Rowed>
-
-        <Divider />
-        <Label>Send photos to Simpro attachments</Label>
-        <Txt size="xs" tone="faint" style={{ marginTop: 4, marginBottom: t.space(2), lineHeight: 17 }}>
-          On by default. When a service is sent from Waiting to send, each defect photograph goes
-          onto the Simpro job as its own attachment, named by site, location and date, and is never
-          public. Photos over 4 MB are downscaled first. Off keeps them on the phone and in the
-          report, and the job note says so.
-        </Txt>
-        <Rowed gap={2}>
-          <MaterialCommunityIcons
-            name={prefs.simproSendPhotos ? 'image-multiple' : 'image-off-outline'}
-            size={18}
-            color={prefs.simproSendPhotos ? t.color.accent : t.color.textFaint}
-          />
-          <Txt
-            size="sm"
-            tone={attachments.failed || attachments.unknown ? 'warn' : attachments.pending ? 'muted' : 'faint'}
-            style={{ flex: 1, lineHeight: 19 }}
-          >
-            {[
-              attachments.pending
-                ? `${attachments.pending} photo${attachments.pending === 1 ? '' : 's'} waiting to upload`
-                : 'No photos waiting to upload',
-              attachments.unknown ? `${attachments.unknown} sent with no reply` : null,
-              attachments.failed ? `${attachments.failed} couldn't be sent. See Waiting to send.` : null,
-            ].filter(Boolean).join(' · ')}
-            {attachments.sent ? ` · ${attachments.sent} uploaded` : ''}
-          </Txt>
-          <Switch
-            value={prefs.simproSendPhotos}
-            onValueChange={(on) => update({ simproSendPhotos: on })}
-            trackColor={{ true: t.color.accent, false: t.color.border }}
-          />
-        </Rowed>
-
-        <Divider />
-        <Label>Sync automatically</Label>
-        <Txt size="xs" tone="faint" style={{ marginTop: 4, marginBottom: t.space(2), lineHeight: 17 }}>
-          Changes come down every half hour, whenever there is signal. Everything is re-read in full
-          once a day as well, but a couple of things at a time while nothing is waiting on it —
-          never as one long pull when you open the app. Anything queued for the office goes the
-          moment it can. No popups: this line says what happened last.
-        </Txt>
-        <Txt size="xs" tone="faint" style={{ marginBottom: t.space(2), lineHeight: 17 }}>
-          {backgroundSyncNote()}
-        </Txt>
-        <Rowed gap={2}>
-          <Txt
-            size="sm"
-            tone={!prefs.autoSync ? 'faint' : auto.record.lastError ? 'warn' : 'muted'}
-            style={{ flex: 1, lineHeight: 19 }}
-          >
-            {!prefs.autoSync
-              ? 'Off. Sync now still works.'
-              : auto.inFlight
-                ? 'Syncing now.'
-                : describeAutoSync(auto.record, new Date())}
-          </Txt>
           <Switch
             value={prefs.autoSync}
             onValueChange={(on) => { void setAutoSync(on); }}
             trackColor={{ true: t.color.accent, false: t.color.border }}
           />
         </Rowed>
-
-        <View style={{ height: t.space(3) }} />
-        <Button title="Connect to Simpro" onPress={test} loading={testing} />
-        {verdict ? (
-          <Rowed gap={2} style={{ marginTop: t.space(2), alignItems: 'flex-start' }}>
-            <MaterialCommunityIcons
-              name={verdict.ok ? 'check-circle' : 'alert-circle'}
-              size={18}
-              color={verdict.ok ? t.color.pass : t.color.fail}
-              style={{ marginTop: 1 }}
-            />
-            <Txt size="sm" tone={verdict.ok ? 'pass' : 'fail'} style={{ flex: 1, lineHeight: 19 }}>
-              {verdict.message}
-            </Txt>
-          </Rowed>
+        <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5), lineHeight: 17 }}>
+          {words.autoSync}
+        </Txt>
+        {prefs.simproSendPhotos ? (
+          <Txt
+            size="sm"
+            tone={attachments.failed || attachments.unknown ? 'warn' : attachments.pending ? 'muted' : 'faint'}
+            style={{ marginTop: t.space(2), lineHeight: 19 }}
+          >
+            {photoQueueLine}
+          </Txt>
         ) : null}
-        <View style={{ height: t.space(2) }} />
+        <View style={{ height: t.space(3) }} />
         <Rowed gap={2}>
           <Button
             title="Sync now"
@@ -995,41 +658,14 @@ export default function SettingsScreen() {
           </Txt>
         ) : null}
         <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
-          Sync now fetches only what the office has changed since the last sync, which is usually
-          seconds. Everything is re-read in full once a day on its own; Fetch everything does it on
-          demand and takes a few minutes. Either way a pull fills in blanks and adds records. It never
-          overwrites something you typed on site — the person standing in the building knows better
-          than the office record.
+          A sync never overwrites what you typed on site.
         </Txt>
       </Card>
 
-      {result ? (
-        <Card>
-          <Label>Endpoint access</Label>
-          <Txt size="xs" tone="faint" style={{ marginTop: 4, marginBottom: t.space(2), lineHeight: 17 }}>
-            Simpro permissions are per endpoint, so a key that reads jobs can still be blocked from timesheets.
-          </Txt>
-          {result.map((e) => (
-            <Rowed key={e.name} gap={2} style={{ paddingVertical: t.space(1.5) }}>
-              <MaterialCommunityIcons
-                name={e.readable ? 'check-circle' : 'close-circle'}
-                size={16}
-                color={e.readable ? t.color.pass : t.color.fail}
-              />
-              <Txt size="sm" style={{ flex: 1 }}>{e.name}</Txt>
-              <Txt size="sm" tone="muted">{e.readable ? (e.total !== null ? `${e.total.toLocaleString()} records` : 'readable') : 'no access'}</Txt>
-            </Rowed>
-          ))}
-        </Card>
-      ) : null}
-
-      <H2>How current this device is</H2>
+      <H2>Last synced</H2>
       <Card>
-        {syncState.filter((st) => st.lastSyncedAt || st.lastRecordCount > 0).length === 0 ? (
-          <Txt size="sm" tone="muted">
-            Nothing has been synced from the office yet. Everything held here was entered on this
-            device or imported from a file.
-          </Txt>
+        {synced.length === 0 ? (
+          <Txt size="sm" tone="muted">Nothing synced yet.</Txt>
         ) : (
           syncState.map((st, i) => {
             const age = describeStaleness(st, new Date());
@@ -1046,25 +682,20 @@ export default function SettingsScreen() {
                   </Txt>
                 </Rowed>
                 {st.mode === 'full' && st.lastSyncedAt ? (
-                  <Txt size="xs" tone="faint">
-                    Fetched in full — this endpoint does not filter by change date.
-                  </Txt>
+                  <Txt size="xs" tone="faint">Always fetched in full.</Txt>
                 ) : null}
               </View>
             );
           })
         )}
-        <View style={{ height: t.space(2) }} />
-        <Txt size="xs" tone="faint" style={{ lineHeight: 16 }}>
-          Safe QLD works offline, so what you are looking at is a copy taken when there was last a
-          signal — not a live view of the office system. That is why this says how old it is.
-        </Txt>
       </Card>
 
       <H2>Storage</H2>
       <Card>
+        <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>{words.dataKept}</Txt>
+        <Divider />
         <Rowed style={{ justifyContent: 'space-between' }}>
-          <Txt size="sm">Generated exports</Txt>
+          <Txt size="sm">Exports</Txt>
           <Txt size="sm" tone="muted">{formatBytes(storage)}</Txt>
         </Rowed>
         <Divider />
@@ -1074,7 +705,7 @@ export default function SettingsScreen() {
         </Rowed>
         <Divider />
         <Rowed style={{ justifyContent: 'space-between' }}>
-          <Txt size="sm">Photographs</Txt>
+          <Txt size="sm">Photos</Txt>
           <Txt size="sm" tone={photos?.missing.length ? 'fail' : 'muted'}>
             {photos ? `${photos.count} kept, ${formatBytes(photos.totalBytes)}` : 'checking…'}
           </Txt>
@@ -1096,8 +727,7 @@ export default function SettingsScreen() {
         </Rowed>
         {drafts.length ? (
           <Txt size="xs" tone="muted" style={{ lineHeight: 16 }}>
-            Forms typed into and not saved. They come back when you reopen the same form, so
-            clearing them throws that work away.
+            Reopen the form to pick up where you left off.
           </Txt>
         ) : null}
         <Divider />
@@ -1109,10 +739,10 @@ export default function SettingsScreen() {
         </Rowed>
         <View style={{ height: t.space(3) }} />
         <Button
-          title="Clear generated exports"
+          title="Clear exports"
           variant="secondary"
           onPress={() => {
-            showAlert('Clear exports?', 'This removes generated spreadsheets and PDFs from this device. Anything already sent is unaffected, and sites, reports and defects are not touched.', [
+            showAlert('Clear exports?', 'Deletes generated spreadsheets and PDFs. Sites, reports and defects stay.', [
               { text: 'Cancel', style: 'cancel' },
               {
                 text: 'Clear',
@@ -1140,9 +770,7 @@ export default function SettingsScreen() {
                */
               showAlert(
                 'Throw away unfinished forms?',
-                `${drafts.length} form${drafts.length === 1 ? ' has' : 's have'} been typed into and `
-                + 'not saved. They come back when you reopen the same form. Clearing them cannot be '
-                + 'undone.',
+                `${drafts.length} unsaved form${drafts.length === 1 ? '' : 's'}. This can't be undone.`,
                 [
                   { text: 'Keep them', style: 'cancel' },
                   {
@@ -1165,13 +793,10 @@ export default function SettingsScreen() {
       <H2>About</H2>
       <Card>
         <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-          Safe QLD field application. Everything is stored on this device — there is no account and no cloud copy unless you
-          share or sync it deliberately.
+          Safe QLD field app. Syncs with Simpro.
         </Txt>
-        <View style={{ height: t.space(2) }} />
-        <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-          Calculations and reference data follow Australian practice and cite their sources where they have one. They do not
-          replace the current standard, the panel manufacturer's documentation, or your own judgement on site.
+        <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5), lineHeight: 17 }}>
+          Reference only. Check the current standard and the panel maker’s manual.
         </Txt>
         <Divider />
         <Label>This build</Label>
@@ -1192,50 +817,382 @@ export default function SettingsScreen() {
           loading={updateCheck.inFlight}
           onPress={() => { void checkForUpdate({ force: true }); }}
         />
-        <Divider />
-        {hasGh ? (
-          <>
-            <Txt size="sm" tone="pass">A GitHub token is held in this device's keystore.</Txt>
-            <View style={{ height: t.space(2.5) }} />
-            <Button
-              title="Remove the token"
-              variant="ghost"
-              compact
-              onPress={() => { void clearGhToken().then(() => setHasGh(false)); }}
-            />
-          </>
-        ) : (
-          <>
-            <Field
-              label="GitHub token for update checks (optional)"
-              value={ghToken}
-              onChangeText={setGhToken}
-              placeholder="github_pat_…"
-              autoCapitalize="none"
-              hint="Only needed while the releases are on the private repository. A fine-grained token with read-only access to that one repository is enough. Held in the hardware keystore, never in ordinary app storage."
-            />
-            <View style={{ height: t.space(2.5) }} />
-            <Button
-              title="Save the token"
-              variant="secondary"
-              compact
-              disabled={!ghToken.trim()}
-              onPress={() => {
-                if (!ghToken.trim()) return;
-                void storeGhToken(ghToken).then(() => {
-                  setGhToken('');
-                  setHasGh(true);
-                  // The token was pasted because the last check could not
-                  // see the release; ask again with it straight away.
-                  void checkForUpdate({ force: true });
-                });
-              }}
-            />
-          </>
-        )}
         <View style={{ height: t.space(2) }} />
         <Button title="Safe QLD website" variant="ghost" compact onPress={() => void Linking.openURL('https://www.safeqldfire.com.au')} />
       </Card>
+
+      {/*
+        * Everything a technician never touches, behind one tap: the Simpro
+        * connection, write-back switches, charge-out rates and the update
+        * token. A stray edit in here takes a phone off Simpro.
+        */}
+      <Card
+        style={{ marginTop: t.space(4) }}
+        onPress={() => setOfficeChoice(!officeOpen)}
+      >
+        <Rowed gap={3}>
+          <MaterialCommunityIcons name="office-building-cog-outline" size={22} color={t.color.textMuted} />
+          <View style={{ flex: 1 }}>
+            <Txt weight="700">Office setup</Txt>
+            <Txt size="xs" tone="faint">Simpro connection, rates and keys.</Txt>
+          </View>
+          <MaterialCommunityIcons name={officeOpen ? 'chevron-up' : 'chevron-down'} size={20} color={t.color.textFaint} />
+        </Rowed>
+      </Card>
+
+      {officeOpen ? (
+        <>
+          {secretSource ? (
+            <Banner
+              tone={secretSource === 'none' ? 'warn' : 'info'}
+              title={secretSource === 'none' ? 'Secret needed' : 'Simpro connection'}
+              body={secretSource === 'built-in'
+                ? `Uses the built-in “${OFFICE_APPLICATION.name}” application. If its secret is regenerated, paste the new one below.`
+                : secretSource === 'keystore'
+                  ? 'Using the pasted secret. Remove it to go back to the built-in one.'
+                  : secretSource === 'proxy'
+                    ? 'Requests go through the proxy, which holds the secret.'
+                    : 'Paste the secret for this client ID below before syncing.'}
+            />
+          ) : null}
+
+          <Card>
+            <Label>Paste oAuth2 details</Label>
+            <Txt size="xs" tone="faint" style={{ marginTop: 4, marginBottom: t.space(2), lineHeight: 17 }}>
+              Paste the whole block from System Setup, API keys.
+            </Txt>
+            <Field
+              label=""
+              value={pastedDetails}
+              onChangeText={setPastedDetails}
+              autoCapitalize="none"
+              multiline
+              placeholder={'Token URL: https://…/oauth2/token\nclient_id: …\nclient_secret: …'}
+            />
+            <View style={{ height: t.space(2) }} />
+            <Button title="Save details" onPress={applyPastedDetails} disabled={!pastedDetails.trim()} />
+            <Divider />
+            <Field label="Build domain" value={prefs.simproDomain} onChangeText={(v) => update({ simproDomain: v })} autoCapitalize="none" />
+            <View style={{ height: t.space(2.5) }} />
+            <Field label="Company ID" value={prefs.simproCompanyId} onChangeText={(v) => update({ simproCompanyId: v })} keyboardType="numeric" hint="Clear it and connect to look it up." />
+            <View style={{ height: t.space(2.5) }} />
+            <Field label="Client ID" value={prefs.simproClientId} onChangeText={(v) => update({ simproClientId: v })} autoCapitalize="none" />
+            <View style={{ height: t.space(2.5) }} />
+            <Field
+              label="Proxy URL"
+              value={prefs.simproProxyUrl}
+              onChangeText={(v) => update({ simproProxyUrl: v })}
+              autoCapitalize="none"
+              placeholder="https://api.safeqld.com.au/simpro"
+              hint="Optional. The proxy holds the secret instead."
+            />
+
+            {!prefs.simproProxyUrl ? (
+              <>
+                <Divider />
+                <Label>Client secret</Label>
+                <View style={{ height: t.space(1.5) }} />
+                {hasSecret ? (
+                  <Rowed gap={2}>
+                    <MaterialCommunityIcons name="lock-check" size={18} color={t.color.pass} />
+                    <Txt size="sm" tone="pass" style={{ flex: 1 }}>
+                      Pasted secret saved {words.keyPlace}.
+                      {secretSource === 'keystore' && OFFICE_APPLICATION.clientId === prefs.simproClientId.trim() ? ' Used instead of the built-in one.' : ''}
+                    </Txt>
+                    <Button
+                      title="Remove"
+                      variant="danger"
+                      compact
+                      onPress={async () => {
+                        await SimproClient.clearSecret();
+                        setHasSecret(false);
+                      }}
+                    />
+                  </Rowed>
+                ) : (
+                  <>
+                    {secretSource === 'built-in' ? (
+                      <Rowed gap={2} style={{ marginBottom: t.space(2) }}>
+                        <MaterialCommunityIcons name="lock-check" size={18} color={t.color.pass} />
+                        <Txt size="sm" tone="pass" style={{ flex: 1 }}>Using the built-in secret.</Txt>
+                      </Rowed>
+                    ) : null}
+                    <Field
+                      label=""
+                      value={secret}
+                      onChangeText={setSecret}
+                      autoCapitalize="none"
+                      placeholder={secretSource === 'built-in' ? 'Paste a regenerated client secret' : 'Paste the client secret'}
+                    />
+                    <View style={{ height: t.space(2) }} />
+                    <Button title="Save secret" onPress={saveSecret} disabled={!secret.trim()} variant={secretSource === 'built-in' ? 'secondary' : 'primary'} />
+                  </>
+                )}
+              </>
+            ) : null}
+
+            <View style={{ height: t.space(3) }} />
+            <Button title="Connect to Simpro" onPress={test} loading={testing} />
+            {verdict ? (
+              <Rowed gap={2} style={{ marginTop: t.space(2), alignItems: 'flex-start' }}>
+                <MaterialCommunityIcons
+                  name={verdict.ok ? 'check-circle' : 'alert-circle'}
+                  size={18}
+                  color={verdict.ok ? t.color.pass : t.color.fail}
+                  style={{ marginTop: 1 }}
+                />
+                <Txt size="sm" tone={verdict.ok ? 'pass' : 'fail'} style={{ flex: 1, lineHeight: 19 }}>
+                  {verdict.message}
+                </Txt>
+              </Rowed>
+            ) : null}
+          </Card>
+
+          {result ? (
+            <Card>
+              <Label>Endpoint access</Label>
+              <View style={{ height: t.space(1.5) }} />
+              {result.map((e) => (
+                <Rowed key={e.name} gap={2} style={{ paddingVertical: t.space(1.5) }}>
+                  <MaterialCommunityIcons
+                    name={e.readable ? 'check-circle' : 'close-circle'}
+                    size={16}
+                    color={e.readable ? t.color.pass : t.color.fail}
+                  />
+                  <Txt size="sm" style={{ flex: 1 }}>{e.name}</Txt>
+                  <Txt size="sm" tone="muted">{e.readable ? (e.total !== null ? `${e.total.toLocaleString()} records` : 'readable') : 'no access'}</Txt>
+                </Rowed>
+              ))}
+            </Card>
+          ) : null}
+
+          <Card>
+            <Label>Write test results back</Label>
+            <Txt size="xs" tone="faint" style={{ marginTop: 4, marginBottom: t.space(2), lineHeight: 17 }}>
+              Writes pass or fail onto the Simpro asset. Try one first.
+            </Txt>
+            <Rowed gap={2}>
+              <MaterialCommunityIcons
+                name={prefs.simproWriteAssetTests ? 'database-edit' : 'database-lock'}
+                size={18}
+                color={prefs.simproWriteAssetTests ? t.color.warn : t.color.textFaint}
+              />
+              <Txt size="sm" tone={prefs.simproWriteAssetTests ? 'warn' : 'faint'} style={{ flex: 1 }}>
+                {prefs.simproWriteAssetTests
+                  ? 'On. Results go onto Simpro assets.'
+                  : 'Off. Results go in the job note.'}
+              </Txt>
+              <Button
+                title={prefs.simproWriteAssetTests ? 'Turn off' : 'Turn on'}
+                variant={prefs.simproWriteAssetTests ? 'danger' : 'secondary'}
+                compact
+                onPress={() => update({ simproWriteAssetTests: !prefs.simproWriteAssetTests })}
+              />
+            </Rowed>
+
+            <Divider />
+            <Label>Photos to Simpro</Label>
+            <View style={{ height: t.space(2) }} />
+            <Rowed gap={2}>
+              <MaterialCommunityIcons
+                name={prefs.simproSendPhotos ? 'image-multiple' : 'image-off-outline'}
+                size={18}
+                color={prefs.simproSendPhotos ? t.color.accent : t.color.textFaint}
+              />
+              <Txt size="sm" tone={prefs.simproSendPhotos ? 'muted' : 'faint'} style={{ flex: 1, lineHeight: 19 }}>
+                {prefs.simproSendPhotos
+                  ? 'Defect photos go onto the job as attachments.'
+                  : 'Off. Photos stay with the report.'}
+              </Txt>
+              <Switch
+                value={prefs.simproSendPhotos}
+                onValueChange={(on) => update({ simproSendPhotos: on })}
+                trackColor={{ true: t.color.accent, false: t.color.border }}
+              />
+            </Rowed>
+
+            <Divider />
+            {/*
+              * The one setting that takes the mail app out of the photo button.
+              * Empty is the normal state and costs nothing: the photos go to the
+              * phone's share sheet already attached, which is one tap. Filled in,
+              * they are posted straight to the office and no mail app opens at
+              * all — which is what was actually asked for. server/photo-relay in
+              * this repository is the forty lines that answer it.
+              */}
+            <Field
+              label="Website photo address"
+              value={prefs.websitePhotoUrl}
+              onChangeText={(v) => update({ websitePhotoUrl: v })}
+              autoCapitalize="none"
+              placeholder="https://…"
+              hint={`Leave empty to share them to ${WEBSITE_PHOTOS_INBOX}.`}
+            />
+            {endpointProblem(prefs.websitePhotoUrl) ? (
+              <Txt size="xs" tone="fail" style={{ marginTop: t.space(1.5), lineHeight: 17 }}>
+                {endpointProblem(prefs.websitePhotoUrl)}
+              </Txt>
+            ) : null}
+          </Card>
+
+          <Card>
+            <Label>Charge-out rates</Label>
+            <Txt size="xs" tone="faint" style={{ marginTop: 4, lineHeight: 17 }}>
+              Used to price quotes offline.
+            </Txt>
+            <View style={{ height: t.space(3) }} />
+            <Label>Labour, ex GST</Label>
+            <Money label="Normal hours" cents={prefs.normalHoursSellCents} onCents={(c) => update({ normalHoursSellCents: c })} suffix="per hour" />
+            <View style={{ height: t.space(2.5) }} />
+            <Money label="After hours" cents={prefs.afterHoursSellCents} onCents={(c) => update({ afterHoursSellCents: c })} suffix="per hour" />
+            <Divider />
+            <Label>Site attendance, ex GST</Label>
+            <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
+              Time past the covered minutes is charged hourly.
+            </Txt>
+            <View style={{ height: t.space(2.5) }} />
+            <Rowed gap={2} align="flex-start">
+              <View style={{ flex: 2 }}>
+                <Money label="Normal hours" cents={prefs.attendanceNormalCents} onCents={(c) => update({ attendanceNormalCents: c })} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Minutes label="Covers" minutes={prefs.attendanceNormalMinutes} onMinutes={(m) => update({ attendanceNormalMinutes: m })} />
+              </View>
+            </Rowed>
+            <View style={{ height: t.space(2.5) }} />
+            <Rowed gap={2} align="flex-start">
+              <View style={{ flex: 2 }}>
+                <Money label="After hours" cents={prefs.attendanceAfterHoursCents} onCents={(c) => update({ attendanceAfterHoursCents: c })} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Minutes label="Covers" minutes={prefs.attendanceAfterHoursMinutes} onMinutes={(m) => update({ attendanceAfterHoursMinutes: m })} />
+              </View>
+            </Rowed>
+            <Txt
+              size="xs"
+              tone={effective.rateSource === 'none' && effective.feeSource === 'none' ? 'warn' : 'muted'}
+              style={{ marginTop: t.space(3), lineHeight: 17 }}
+            >
+              {effective.note}
+            </Txt>
+
+            <Divider />
+            <Label>Rates from Simpro</Label>
+            <View style={{ height: t.space(2) }} />
+            <Button title="Pull rates from Simpro" variant="secondary" onPress={pullRates} loading={pulling} />
+
+            {card.rates.length || card.fees.length ? (
+              <>
+                <Divider />
+                <Rowed style={{ justifyContent: 'space-between' }}>
+                  <Txt size="sm">From Simpro</Txt>
+                  <Txt size="sm" tone="muted">
+                    {card.rates.length} rate{card.rates.length === 1 ? '' : 's'}, {card.fees.length} fee{card.fees.length === 1 ? '' : 's'}
+                  </Txt>
+                </Rowed>
+                {card.rates.map((r) => (
+                  <Rowed key={r.id} style={{ justifyContent: 'space-between' }} align="flex-start">
+                    <View style={{ flex: 1 }}>
+                      <Txt size="sm">{r.name}</Txt>
+                      <Txt size="xs" tone="faint">
+                        {r.hours === 'normal' ? 'Normal hours' : 'After hours'} · {r.kind === 'callout' ? 'call-out' : 'hourly'}
+                        {r.customerName ? ` · ${r.customerName}` : ''}
+                      </Txt>
+                    </View>
+                    <Txt size="sm">{formatCents(r.sellCentsPerHour)}</Txt>
+                  </Rowed>
+                ))}
+                {card.fees.map((f) => (
+                  <Rowed key={f.id} style={{ justifyContent: 'space-between' }} align="flex-start">
+                    <View style={{ flex: 1 }}>
+                      <Txt size="sm">{f.name}</Txt>
+                      <Txt size="xs" tone="faint">covers {f.includedLabourMinutes} minutes</Txt>
+                    </View>
+                    <Txt size="sm">{formatCents(f.chargeCents)}</Txt>
+                  </Rowed>
+                ))}
+                <View style={{ height: t.space(3) }} />
+                <Button title="Clear pulled rates" variant="ghost" compact onPress={forgetRates} />
+              </>
+            ) : null}
+
+            {pullReport ? (
+              <>
+                <Divider />
+                {pullReport.suspect.length ? (
+                  <Banner
+                    tone="warn"
+                    title={`${pullReport.suspect.length} rate name${pullReport.suspect.length === 1 ? '' : 's'} won't match a customer`}
+                    body={pullReport.suspect.join('\n\n')}
+                  />
+                ) : null}
+                {pullReport.unreadable.length ? (
+                  <Banner
+                    tone="warn"
+                    title="Some rates couldn’t be read"
+                    body={pullReport.unreadable.map((u) => `${u.what}: ${u.error}`).join('\n')}
+                  />
+                ) : null}
+                {pullReport.skipped.length ? (
+                  <Txt size="xs" tone="warn" style={{ lineHeight: 17 }}>
+                    Left out: {pullReport.skipped.map((sk) => `${sk.name} (${sk.reason})`).join('; ')}.
+                  </Txt>
+                ) : null}
+                {pullReport.notes.length ? (
+                  <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
+                    {pullReport.notes.join(' ')}
+                  </Txt>
+                ) : null}
+              </>
+            ) : null}
+          </Card>
+
+          <Card>
+            <Label>Update checks</Label>
+            <View style={{ height: t.space(2) }} />
+            {hasGh ? (
+              <>
+                <Txt size="sm" tone="pass">GitHub token saved {words.keyPlace}.</Txt>
+                <View style={{ height: t.space(2.5) }} />
+                <Button
+                  title="Remove token"
+                  variant="ghost"
+                  compact
+                  onPress={() => { void clearGhToken().then(() => setHasGh(false)); }}
+                />
+              </>
+            ) : (
+              <>
+                <Field
+                  label="GitHub token (optional)"
+                  value={ghToken}
+                  onChangeText={setGhToken}
+                  placeholder="github_pat_…"
+                  autoCapitalize="none"
+                  hint={`Read-only, for private releases. Kept ${words.keyPlace}.`}
+                />
+                <View style={{ height: t.space(2.5) }} />
+                <Button
+                  title="Save token"
+                  variant="secondary"
+                  compact
+                  disabled={!ghToken.trim()}
+                  onPress={() => {
+                    if (!ghToken.trim()) return;
+                    void storeGhToken(ghToken).then(() => {
+                      setGhToken('');
+                      setHasGh(true);
+                      // The token was pasted because the last check could not
+                      // see the release; ask again with it straight away.
+                      void checkForUpdate({ force: true });
+                    });
+                  }}
+                />
+              </>
+            )}
+          </Card>
+        </>
+      ) : null}
     </Screen>
   );
 }
@@ -1267,7 +1224,7 @@ function Money({
       keyboardType="decimal-pad"
       placeholder="0.00"
       suffix={suffix}
-      hint={bad ? 'Not an amount — write it like 136.88' : undefined}
+      hint={bad ? 'Not an amount. Write it like 136.88' : undefined}
       onChangeText={(v) => {
         setDraft(v);
         if (v.trim() === '') { onCents(0); return; }

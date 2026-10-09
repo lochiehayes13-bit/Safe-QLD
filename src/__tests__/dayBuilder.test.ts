@@ -13,9 +13,9 @@ import {
  */
 
 const sites = [
-  { siteId: 'a', siteName: 'Tower', estimateHours: 2, job: { externalId: '41900', title: 'Annual' } },
+  { siteId: 'a', siteName: 'Tower', estimateHours: 2, job: { externalId: '9001', title: 'Annual' } },
   { siteId: 'b', siteName: 'Shed', estimateHours: 0.75 },
-  { siteId: 'c', siteName: 'Clinic', estimateHours: 3.4, job: { externalId: '41950' } },
+  { siteId: 'c', siteName: 'Clinic', estimateHours: 3.4, job: { externalId: '9002' } },
 ];
 
 describe('laying out the day', () => {
@@ -37,7 +37,7 @@ describe('laying out the day', () => {
   it('says how far past the shift it runs rather than squeezing the last site', () => {
     const day = layOutDay([...sites, { siteId: 'd', siteName: 'Big', estimateHours: 4 }]);
     expect(day.overrunHours).toBe(2.75);
-    expect(dayHeadline(day)).toContain('past the end of the shift');
+    expect(dayHeadline(day)).toContain('past knock-off');
   });
 
   it('marks a site with no job as not bookable, and says why', () => {
@@ -77,7 +77,7 @@ describe('the bookings a day becomes', () => {
   it('is one payload per stop with a job, in order, all with the same undo moment', () => {
     const day = layOutDay(sites);
     const plan = bookingsFor(day, { employeeId: '45', date: '2026-09-15', notBefore: '2026-09-15T00:01:00.000Z' });
-    expect(plan.payloads.map((p) => [p.jobId, p.start, p.end])).toEqual([['41900', '07:00', '09:00'], ['41950', '10:25', '13:55']]);
+    expect(plan.payloads.map((p) => [p.jobId, p.start, p.end])).toEqual([['9001', '07:00', '09:00'], ['9002', '10:25', '13:55']]);
     expect(plan.payloads.every((p) => p.notBefore === '2026-09-15T00:01:00.000Z' && p.employeeId === '45' && p.date === '2026-09-15')).toBe(true);
     expect(plan.skipped).toHaveLength(1);
     expect(plan.skipped[0]!.stop.siteName).toBe('Shed');
@@ -86,7 +86,7 @@ describe('the bookings a day becomes', () => {
   it('books nothing for a phone that is nobody in Simpro, and says so', () => {
     const plan = bookingsFor(layOutDay(sites), { employeeId: '', date: '2026-09-15', notBefore: 'x' });
     expect(plan.payloads).toEqual([]);
-    expect(plan.skipped.some((s) => s.why.includes('not signed in'))).toBe(true);
+    expect(plan.skipped.some((s) => s.why.includes('who you are'))).toBe(true);
   });
 
   it('refuses a day it cannot read', () => {
@@ -102,9 +102,9 @@ describe('the office already has you somewhere', () => {
         { siteId: 's1', siteName: 'Fictional Tower', estimateHours: 2, job: { externalId: '1001' } },
         { siteId: 's2', siteName: 'Fictional Clinic', estimateHours: 1, job: { externalId: '1002' } },
       ],
-      { busy: [{ start: '07:00', end: '09:00', label: 'Job 41900' }] },
+      { busy: [{ start: '07:00', end: '09:00', label: 'Job 9001' }] },
     );
-    expect(layout.stops[0]).toMatchObject({ start: '09:00', end: '11:00', pushedBy: 'Job 41900' });
+    expect(layout.stops[0]).toMatchObject({ start: '09:00', end: '11:00', pushedBy: 'Job 9001' });
     // The second is clear of it, so it runs straight on from the first.
     expect(layout.stops[1]).toMatchObject({ start: '11:20', end: '12:20' });
     expect(layout.stops[1]!.pushedBy).toBeUndefined();

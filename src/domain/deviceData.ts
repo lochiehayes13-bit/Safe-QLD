@@ -57,10 +57,8 @@ export function officeEmptyState(state: DeviceDataState, what: string): EmptySta
   }
   if (!state.everSynced) {
     return {
-      title: 'Nothing has come down yet',
-      body:
-        `This device knows how to reach the office but has not pulled the ${what} yet. `
-        + 'Sync from Settings, or leave it a few minutes on a connection and it will do it itself.',
+      title: 'Not synced yet',
+      body: `Sync from Settings to load ${what}.`,
       action: { label: 'Open Settings', route: '/settings' },
     };
   }

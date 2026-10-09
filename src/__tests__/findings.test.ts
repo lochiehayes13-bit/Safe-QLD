@@ -1,6 +1,6 @@
 import {
-  KIND_MEANING, NOT_A_SERVICE_RECORD, findingRef, openDefectCaution, parseFindingRef,
-  recommendationList, renumber, summariseFindings, validateFindings, type Finding,
+  KIND_MEANING, NOT_A_SERVICE_RECORD, findingRef, openDefectCaution, openDefectReportNote, parseFindingRef,
+  recommendationClosing, recommendationList, renumber, summariseFindings, validateFindings, type Finding,
 } from '@/domain/findings';
 
 /**
@@ -96,7 +96,7 @@ describe('validateFindings', () => {
       finding({ id: 'b', kind: 'observation', seq: 1, priority: 'high' }),
     ]);
     expect(issues).toHaveLength(1);
-    expect(issues[0]!.message).toContain('note-only');
+    expect(issues[0]!.message).toBe("OBS-01 is an observation, so it can't have a priority.");
   });
 
   it('wants a priority on every recommendation', () => {
@@ -110,7 +110,7 @@ describe('validateFindings', () => {
     const issues = validateFindings([
       finding({ id: 'a', kind: 'recommendation', seq: 1, action: '  ' }),
     ]);
-    expect(issues[0]!.message).toContain('does not say what to do');
+    expect(issues[0]!.message).toBe('R-01 has no action.');
   });
 
   it('catches a cross-reference to a finding that is not in the report', () => {
@@ -118,7 +118,7 @@ describe('validateFindings', () => {
       finding({ id: 'a', kind: 'recommendation', seq: 1, relatedRefs: ['R-09'] }),
     ]);
     expect(issues[0]!.message).toContain('R-09');
-    expect(issues[0]!.message).toContain('finds nothing there');
+    expect(issues[0]!.message).toContain('not in this report');
   });
 
   it('accepts a cross-reference that resolves', () => {
@@ -190,20 +190,53 @@ describe('recommendationList', () => {
   });
 });
 
+describe('recommendationClosing', () => {
+  it('lists the recommendations without assuming a project is coming', () => {
+    const closing = recommendationClosing([
+      finding({ id: 'a', kind: 'recommendation', seq: 1, item: 'Replacement of the FIP' }),
+      finding({ id: 'b', kind: 'recommendation', seq: 2, item: 'Replacement of the detection fleet' }),
+    ]);
+    expect(closing).toBe('Recommended improvements: (1) Replacement of the FIP; (2) Replacement of the detection fleet.');
+    expect(closing).not.toMatch(/project/i);
+  });
+
+  it('is empty when nothing is recommended', () => {
+    expect(recommendationClosing([finding({ id: 'o', kind: 'observation', seq: 1, priority: undefined })])).toBe('');
+  });
+
+  it('keeps the classification key free of the same assumption', () => {
+    expect(KIND_MEANING.recommendation).not.toMatch(/upcoming project/i);
+  });
+});
+
 describe('openDefectCaution', () => {
   it('says nothing when the site has no open defects', () => {
     expect(openDefectCaution(0, 0)).toBeUndefined();
   });
 
-  it('warns that "no defects identified" reads differently to a client', () => {
+  it('tells the technician what to do about them', () => {
     const note = openDefectCaution(4, 0)!;
     expect(note).toContain('4 open defects');
-    expect(note).toContain('tested nothing');
+    expect(note).toContain('Mention them in the report');
   });
 
   it('calls out the critical ones separately', () => {
     expect(openDefectCaution(4, 1)).toContain('1 of them is critical');
     expect(openDefectCaution(4, 2)).toContain('2 of them are critical');
+  });
+});
+
+describe('openDefectReportNote', () => {
+  it('says nothing when the site has no open defects', () => {
+    expect(openDefectReportNote(0, 0)).toBeUndefined();
+  });
+
+  it('states the fact to the client without the instruction meant for the technician', () => {
+    const note = openDefectReportNote(4, 1)!;
+    expect(note).toContain('4 open defects already recorded');
+    expect(note).toContain('1 of them is critical');
+    expect(note).toContain('No equipment was tested');
+    expect(note).not.toMatch(/fix them|mention them|say so/i);
   });
 });
 

@@ -101,7 +101,7 @@ export function endpointProblem(url: string | undefined): string | null {
     const parsed = new URL(trimmed);
     return parsed.protocol === 'https:'
       ? 'That address cannot be read.'
-      : 'It has to be an https address. Photographs of a customer’s building do not go over plain http.';
+      : 'Use an https address.';
   } catch {
     return 'That is not a web address.';
   }
@@ -150,14 +150,13 @@ export function photoBody(technicianName: string, count: number, note?: string):
 export function describeRoute(route: PhotoRoute): string {
   switch (route) {
     case 'endpoint':
-      return 'They go straight to the office. No email, nothing else to do.';
+      return 'They go straight to the office. No email needed.';
     case 'share':
-      return `They go to ${WEBSITE_PHOTOS_INBOX}. Your phone will ask which app to send them with — `
-        + 'the photos are already on it, so it is one tap.';
+      return `They go to ${WEBSITE_PHOTOS_INBOX}. Pick an app to send them with.`;
     case 'composer':
-      return `An email to ${WEBSITE_PHOTOS_INBOX} opens with the photos attached. Press send in there.`;
+      return `An email to ${WEBSITE_PHOTOS_INBOX} opens with the photos attached. Press send.`;
     default:
-      return 'This device has no way to send them: no address is set up and there is no mail app.';
+      return 'Add a mail account, or a photo address in Settings.';
   }
 }
 
@@ -165,8 +164,7 @@ export function describeRoute(route: PhotoRoute): string {
 export function photoSendNotReady(count: number, route: PhotoRoute): string | null {
   if (count <= 0) return 'Add a photo first.';
   if (route === 'nothing') {
-    return 'There is nowhere to send them from this device. Set the photo address in Settings, or '
-      + 'set up an email account on the phone.';
+    return 'Add a mail account, or a photo address in Settings.';
   }
   return null;
 }
@@ -188,7 +186,7 @@ export function describeSent(route: PhotoRoute, count: number, note?: string): {
       // what happened next. Claiming a send this app did not see is how a
       // week's timesheet got marked submitted that nobody had sent.
       title: 'Handed over',
-      body: `${count} photo${many} went to whichever app you picked. If you changed your mind, nothing was sent.${tail}`,
+      body: `${count} photo${many} handed to the app you picked.${tail}`,
     };
   }
   if (route === 'composer') {

@@ -60,7 +60,7 @@ export default function OrderScreen() {
       <RecordGate
         missing={missing}
         what="purchase order"
-        why="Purchase orders come down with a sync once Simpro is connected. This one is not on the phone yet, or the office has removed it."
+        why="Not synced yet, or removed."
         failed={failed}
         onRetry={() => setReloads((n) => n + 1)}
       />
@@ -93,7 +93,7 @@ export default function OrderScreen() {
           />
           <MetaRow
             label="Job"
-            value={o.jobId ? `Job ${o.jobId}${jobHeld ? '' : ' — not on this phone yet'}` : 'Not for a job'}
+            value={o.jobId ? `Job ${o.jobId}${jobHeld ? '' : ' (not synced yet)'}` : 'Not for a job'}
             onPress={o.jobId && jobHeld ? () => router.push({ pathname: '/work/job/[id]', params: { id: localJobId(o.jobId!) } }) : undefined}
           />
           {o.reference ? <MetaRow label="Reference" value={o.reference} /> : null}
@@ -148,14 +148,12 @@ export default function OrderScreen() {
           </>
         ) : (
           <Txt size="sm" tone="faint">
-            {o.detailSyncedAt
-              ? 'The office has no lines on this order.'
-              : 'The lines have not been read yet. They come down the next time the phone syncs with signal; orders against a job you have open are read first.'}
+            {o.detailSyncedAt ? 'No lines on this order.' : 'Lines load on next sync.'}
           </Txt>
         )}
 
         <Txt size="xs" tone="faint" style={{ marginTop: t.space(2) }}>
-          Simpro purchase order {o.id}.{o.dateModified ? ` Last changed at the office ${formatAuDate(o.dateModified)}.` : ''} Quantities only — the phone holds no prices on an order.
+          Simpro purchase order {o.id}{o.dateModified ? ` · changed ${formatAuDate(o.dateModified)}` : ''}
         </Txt>
       </Screen>
     </>

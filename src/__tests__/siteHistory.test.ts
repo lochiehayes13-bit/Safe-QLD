@@ -18,25 +18,25 @@ describe('the last job', () => {
   it('names who did it, when, and how long, where the phone holds all three', () => {
     const f = buildSiteFacts({
       ...base,
-      lastJob: { externalId: '41000', title: 'Annual', status: 'complete', statusName: 'Completed', completedDate: '2026-09-01', techniciansJson: '[{"id":5,"name":"Dan"},{"id":6,"name":"Mike"}]' },
+      lastJob: { externalId: '9003', title: 'Annual', status: 'complete', statusName: 'Completed', completedDate: '2026-09-01', techniciansJson: '[{"id":5,"name":"Dan"},{"id":6,"name":"Mike"}]' },
       hours: [
         { staffName: 'Dan', date: '2026-09-01', hours: 3.5, source: 'schedule' },
         { staffName: 'Mike', date: '2026-09-01', hours: 3.5, source: 'schedule' },
       ],
     });
-    expect(f.lastJob).toMatchObject({ jobNo: '41000', who: ['Dan', 'Mike'], finished: '2026-09-01', daysAgo: 9 });
+    expect(f.lastJob).toMatchObject({ jobNo: '9003', who: ['Dan', 'Mike'], finished: '2026-09-01', daysAgo: 9 });
     expect(f.hours).toEqual({ total: 7, byPerson: [{ name: 'Dan', hours: 3.5 }, { name: 'Mike', hours: 3.5 }], source: 'schedule' });
     expect(f.clockedOn).toBe('yes');
-    expect(lastServiceLine(f)).toBe('Last job 41000 — Dan, Mike, 9 days ago, 7 h');
+    expect(lastServiceLine(f)).toBe('Last job 9003 — Dan, Mike, 9 days ago, 7 h');
   });
 
   it('says hours are not held rather than that nobody clocked on', () => {
     const f = buildSiteFacts({
       ...base,
-      lastJob: { externalId: '41000', title: 'Annual', status: 'complete', completedDate: '2026-03-01' },
+      lastJob: { externalId: '9003', title: 'Annual', status: 'complete', completedDate: '2026-03-01' },
     });
     expect(f.clockedOn).toBe('unknown');
-    expect(f.clockedOnNote).toContain('No hours for job 41000 are held on this phone');
+    expect(f.clockedOnNote).toContain('No hours synced for job 9003');
     expect(f.hours).toBeUndefined();
     expect(lastServiceLine(f)).toContain('nobody named');
   });
@@ -44,7 +44,7 @@ describe('the last job', () => {
   it('prefers the office\'s hours over the phone\'s own clock when both are there', () => {
     const f = buildSiteFacts({
       ...base,
-      lastJob: { externalId: '41000', title: 'Annual', status: 'complete', completedDate: '2026-09-08' },
+      lastJob: { externalId: '9003', title: 'Annual', status: 'complete', completedDate: '2026-09-08' },
       hours: [
         { date: '2026-09-08', hours: 2, source: 'phone-clock' },
         { staffName: 'Dan', date: '2026-09-08', hours: 2.25, source: 'office-timesheet' },
@@ -104,21 +104,21 @@ describe('what is at the site', () => {
 
 describe('locked in with the client', () => {
   it('is booked when the office has a block for the next job', () => {
-    const f = buildSiteFacts({ ...base, nextJob: { externalId: '41900', title: 'Annual', scheduled: { date: '2026-09-15', staffName: 'Dan', startTime: '07:00', endTime: '11:00' } } });
+    const f = buildSiteFacts({ ...base, nextJob: { externalId: '9004', title: 'Annual', scheduled: { date: '2026-09-15', staffName: 'Dan', startTime: '07:00', endTime: '11:00' } } });
     expect(f.lockedIn).toBe('booked');
-    expect(f.lockedInNote).toContain('on the calendar for 2026-09-15 (Dan), 07:00–11:00');
+    expect(f.lockedInNote).toContain('on the calendar for 15/09/2026 (Dan), 07:00–11:00');
   });
 
   it('is job-only when the job exists and nothing is on the calendar', () => {
-    const f = buildSiteFacts({ ...base, nextJob: { externalId: '41900', title: 'Annual', statusName: 'Pending' } });
+    const f = buildSiteFacts({ ...base, nextJob: { externalId: '9004', title: 'Annual', statusName: 'Pending' } });
     expect(f.lockedIn).toBe('job-only');
-    expect(f.lockedInNote).toContain('nothing is on the calendar');
+    expect(f.lockedInNote).toContain('no booking yet');
   });
 
   it('is none — with the reason — when there is no job to book', () => {
     const f = buildSiteFacts(base);
     expect(f.lockedIn).toBe('none');
-    expect(f.lockedInNote).toContain('office raises one');
+    expect(f.lockedInNote).toContain('raise one');
   });
 });
 

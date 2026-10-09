@@ -87,13 +87,13 @@ describe('what the screen says before the button is pressed', () => {
 
   it('says a mail app is coming on the two routes that end in one', () => {
     expect(describeRoute('share')).toContain(WEBSITE_PHOTOS_INBOX);
-    expect(describeRoute('share')).toMatch(/ask which app/i);
+    expect(describeRoute('share')).toMatch(/Pick an app/);
     expect(describeRoute('composer')).toContain(WEBSITE_PHOTOS_INBOX);
     expect(describeRoute('composer')).toMatch(/opens with the photos attached/i);
   });
 
   it('says plainly when there is nowhere to send from', () => {
-    expect(describeRoute('nothing')).toMatch(/no way to send/i);
+    expect(describeRoute('nothing')).toMatch(/Add a mail account/);
   });
 });
 
@@ -107,7 +107,7 @@ describe('what the person is told afterwards', () => {
     // week's timesheet got marked submitted that nobody had sent.
     const said = describeSent('share', 3);
     expect(said.title).not.toBe('Sent');
-    expect(said.body).toMatch(/if you changed your mind, nothing was sent/i);
+    expect(said.body).toMatch(/handed to the app you picked/);
   });
 
   it('tells the composer route there is still a button to press', () => {
@@ -164,7 +164,7 @@ describe('why a send is blocked', () => {
   it('names both ways out where the device has no route', () => {
     const why = photoSendNotReady(2, 'nothing');
     expect(why).toContain('Settings');
-    expect(why).toMatch(/email account/i);
+    expect(why).toMatch(/mail account/i);
   });
 
   it('blocks nothing where there is a route and a photo', () => {

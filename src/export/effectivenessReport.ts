@@ -1,6 +1,6 @@
 import {
   KIND_MEANING, NOT_A_DESIGN_REVIEW, NOT_A_SERVICE_RECORD, NO_TESTING_CONDUCTED,
-  PRIORITY_LABEL, findingRef, recommendationList, summariseFindings, type Finding,
+  PRIORITY_LABEL, findingRef, recommendationClosing, summariseFindings, type Finding,
 } from '@/domain/findings';
 import { letterheaded } from './letterhead';
 import { formatAuDate } from './sheets';
@@ -241,14 +241,13 @@ function photoRegister(photos: ReportPhoto[]): string {
 
 export function effectivenessReportHtml(input: EffectivenessReportInput): string {
   const tally = summariseFindings(input.findings);
-  const list = recommendationList(input.findings);
   const company = input.companyName?.trim();
 
   const activities = input.activities?.filter((a) => a.trim()) ?? [];
 
   const closing = [
     input.statement?.trim(),
-    list ? `As areas of recommended improvement, the upcoming project should incorporate: ${list}.` : '',
+    recommendationClosing(input.findings),
   ].filter(Boolean).join(' ');
 
   return letterheaded({

@@ -346,8 +346,7 @@ export class SimproClient {
       return 'No Simpro client ID is set. Add it in Settings.';
     }
     if (!(await SimproClient.secretFor(config))) {
-      return 'Paste the Simpro client secret in Settings and save it to the keystore. '
-        + 'Everything else is already filled in.';
+      return 'Paste the Simpro client secret in Office setup, in Settings.';
     }
     return null;
   }

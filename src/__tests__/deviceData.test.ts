@@ -26,7 +26,7 @@ describe('a list of the office own records', () => {
 
   it('once connected but never pulled, says to sync rather than to connect again', () => {
     const words = officeEmptyState(connected, 'sites');
-    expect(words.title).toMatch(/nothing has come down/i);
+    expect(words.title).toMatch(/not synced yet/i);
     expect(words.body).toMatch(/sync/i);
   });
 

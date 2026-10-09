@@ -101,19 +101,14 @@ export default function InvoicesScreen() {
     if (invoices === null) return null;
     if (!invoices.length) {
       return {
-        title: scope ? `No invoices ${scope}` : 'No invoices on this phone yet',
-        body: 'The last two years of invoices come down with a sync once Simpro is connected in Settings.',
+        title: scope ? `No invoices ${scope}` : 'No invoices yet',
+        body: scope ? '' : 'Invoices come from Simpro. Sync in Settings.',
       };
     }
     if (query.trim()) {
-      return {
-        title: 'Nothing matches',
-        body: paged
-          ? `Try the invoice number, the job number it bills, or part of the customer. Only the newest ${PAGE} are searched here; a customer's or a site's own list reaches further back.`
-          : 'Try the invoice number, the job number it bills, or part of the customer.',
-      };
+      return { title: 'Nothing matches', body: 'Try the invoice or job number.' };
     }
-    if (filter === 'unpaid') return { title: 'Nothing unpaid', body: 'Every invoice the phone holds has been paid.' };
+    if (filter === 'unpaid') return { title: 'Nothing unpaid', body: '' };
     return { title: 'No invoices', body: '' };
   })();
 
@@ -122,7 +117,7 @@ export default function InvoicesScreen() {
       <Stack.Screen options={{ title: scope ? `Invoices ${scope}` : 'Invoices' }} />
       <Screen scroll={false} padded={false}>
         <View style={{ padding: t.space(4), paddingBottom: t.space(2), gap: t.space(2) }}>
-          <SearchBox value={query} onChange={setQuery} placeholder="Invoice, job number, customer, site or suburb" />
+          <SearchBox value={query} onChange={setQuery} placeholder="Invoice, job, customer, suburb" />
           <Segmented
             value={filter}
             onChange={setFilter}
@@ -136,7 +131,7 @@ export default function InvoicesScreen() {
             </Rowed>
           ) : null}
           {paged ? (
-            <Txt size="xs" tone="faint">The newest {PAGE} invoices. A customer or a site opens its own full list.</Txt>
+            <Txt size="xs" tone="faint">Newest {PAGE} shown. Search to find older ones.</Txt>
           ) : null}
         </View>
         <FlatList

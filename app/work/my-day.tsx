@@ -9,7 +9,7 @@ import { listScheduleFor, scheduleSyncedAt } from '@/db/scheduleRepo';
 import {
   groupScheduleByDay, scheduleWindow, whoseSchedule, type MyDayGroups, type MyDayRow, type WhoseSchedule,
 } from '@/domain/myDay';
-import { qldMoment } from '@/domain/qldTime';
+import { syncedLine, whoName } from '@/domain/dayHeader';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
 import { Button, Card, Chip, EmptyState, H2, Rowed, Screen, Txt } from '@/components/ui';
@@ -30,6 +30,7 @@ import { describeLoadFailure } from '@/domain/loadFailure';
 export default function MyDayScreen() {
   const t = useTheme();
   const [who, setWho] = useState<WhoseSchedule | null | undefined>(undefined);
+  const [name, setName] = useState('');
   const [groups, setGroups] = useState<MyDayGroups | null>(null);
   const [asOf, setAsOf] = useState<string | undefined>(undefined);
   const [showEarlier, setShowEarlier] = useState(false);
@@ -74,6 +75,7 @@ export default function MyDayScreen() {
       );
       if (!live()) return;
       setWho(w);
+      setName(whoName(w, prefs.technicianName));
       setAsOf(synced);
       setGroups(groupScheduleByDay(rows, now, jobs.map((j) => ({
         id: j.id, externalId: j.externalId, siteName: j.siteName, title: j.title, address: j.address,
@@ -133,9 +135,10 @@ export default function MyDayScreen() {
       <Stack.Screen options={{ title: 'My day' }} />
       <Screen>
         <Rowed gap={2}>
-          <Txt size="sm" tone="muted" style={{ flex: 1 }}>
-            Scheduled to {who.label}.{asOf ? ` Office schedule as of ${qldMoment(asOf) ?? asOf}.` : ' Nothing synced yet.'}
-          </Txt>
+          <View style={{ flex: 1 }}>
+            <Txt weight="700">{name}</Txt>
+            <Txt size="sm" tone="muted">{syncedLine(asOf, nowIso())}</Txt>
+          </View>
           <Button title="Change" variant="ghost" compact onPress={() => router.push('/whoami')} />
         </Rowed>
         {/* The team's calendar, and the shortest way onto it: the same screen, opened at the picker. */}
@@ -148,7 +151,7 @@ export default function MyDayScreen() {
 
         <H2>Today</H2>
         {g && g.today.length ? g.today.map((r) => <ScheduleRow key={r.schedule.id} row={r} />) : (
-          <Card><Txt tone="muted">{asOf ? 'Nothing scheduled today.' : 'Nothing scheduled today. Schedule not synced yet.'}</Txt></Card>
+          <Card><Txt tone="muted">Nothing scheduled today.</Txt></Card>
         )}
 
         <H2>Tomorrow</H2>
@@ -212,7 +215,7 @@ function ScheduleRow({ row, withDate }: { row: MyDayRow; withDate?: boolean }) {
           {job?.title ? <Txt size="sm" tone="muted" numberOfLines={1}>{job.title}</Txt> : null}
           {job?.address ? <Txt size="xs" tone="faint" numberOfLines={1}>{job.address}</Txt> : null}
           {!job && s.jobId ? (
-            <Txt size="xs" tone="faint">Job {s.jobId} isn’t on this phone yet. Tap to sync.</Txt>
+            <Txt size="xs" tone="faint">Job {s.jobId} not synced yet. Tap to sync.</Txt>
           ) : null}
         </View>
         {job ? <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} /> : <Chip label={s.type ?? 'Block'} />}

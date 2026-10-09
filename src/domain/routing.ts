@@ -195,3 +195,28 @@ export function runCandidates<T extends { id: string; status: string; scheduledF
     return opts.dayOf(j.scheduledFor ?? undefined) === opts.today;
   });
 }
+
+/**
+ * The link the Navigate button opens.
+ *
+ * iPhones run the web build, and Safari cannot open a `geo:` link, so the
+ * web build gets Google Maps' https directions link: it opens the Google Maps
+ * app where it is installed and the website where it is not. The native
+ * builds keep the platform's own maps scheme.
+ *
+ * Coordinates win over the address where both are known, because the office's
+ * address text is often a building name or a lot number a geocoder cannot read.
+ */
+export function navigationUrl(
+  to: { latitude?: number; longitude?: number; address?: string; siteName?: string },
+  os: string,
+): string {
+  const point: RoutePoint = { id: '', label: '', latitude: to.latitude, longitude: to.longitude };
+  const destination = hasPosition(point)
+    ? `${point.latitude},${point.longitude}`
+    : (to.address?.trim() || to.siteName?.trim() || '');
+  const q = encodeURIComponent(destination);
+  if (os === 'ios') return `maps://?daddr=${q}`;
+  if (os === 'android') return `geo:0,0?q=${q}`;
+  return `https://www.google.com/maps/dir/?api=1&destination=${q}`;
+}

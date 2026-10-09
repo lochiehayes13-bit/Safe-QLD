@@ -56,7 +56,7 @@ export default function VendorScreen() {
       <RecordGate
         missing={missing}
         what="supplier"
-        why="Suppliers come down with a sync once Simpro is connected. This one is not on the phone yet, or the office has removed it."
+        why="Not synced yet, or removed."
         failed={failed}
         onRetry={() => setReloads((n) => n + 1)}
       />
@@ -79,7 +79,7 @@ export default function VendorScreen() {
           <Chip label={`#${v.id}`} />
         </Rowed>
         {v.archived ? (
-          <Banner tone="warn" title="Archived in Simpro" body="The office has filed this supplier away. Check before ordering from them." />
+          <Banner tone="warn" title="Archived in Simpro" body="Check before ordering." />
         ) : null}
 
         <Card>
@@ -108,7 +108,7 @@ export default function VendorScreen() {
             ) : null}
             {address ? <ActionRow icon="map-marker-outline" label={address} onPress={map ? () => void Linking.openURL(map) : undefined} /> : null}
             {!ways.length && !website && !address ? (
-              <Txt size="sm" tone="faint">The office has no phone, email or address for them.</Txt>
+              <Txt size="sm" tone="faint">No phone, email or address.</Txt>
             ) : null}
           </View>
         </Card>
@@ -134,11 +134,11 @@ export default function VendorScreen() {
             </Card>
           ))
         ) : (
-          <Txt size="sm" tone="faint">No purchase orders to this supplier are on the phone.</Txt>
+          <Txt size="sm" tone="faint">No orders.</Txt>
         )}
 
         <Txt size="xs" tone="faint" style={{ marginTop: t.space(2) }}>
-          Simpro supplier {v.id}.{v.dateModified ? ` Last changed at the office ${formatAuDate(v.dateModified)}.` : ''}
+          Simpro supplier {v.id}{v.dateModified ? ` · changed ${formatAuDate(v.dateModified)}` : ''}
         </Txt>
       </Screen>
     </>

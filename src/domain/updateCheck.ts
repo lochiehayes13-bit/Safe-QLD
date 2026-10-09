@@ -362,7 +362,7 @@ export function describeUpdateCheck(record: UpdateCheckRecord, now: Date, runnin
   // because the line under the build number is where somebody goes to find
   // out whether the update they just installed took.
   if (record.result && !answersFor(record, running)) {
-    return 'This build has not been checked yet — the last answer was about the one before it.';
+    return 'Not checked since this build was installed.';
   }
   const checked = readInstant(record.checkedAt);
   const answered = record.result && checked !== undefined

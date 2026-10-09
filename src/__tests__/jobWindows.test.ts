@@ -87,6 +87,6 @@ describe('today’s run', () => {
 
   it('says so on screen where even that is not all of it', () => {
     expect(source).toMatch(/scope === 'open' && openCut/);
-    expect(source).toMatch(/More than \$\{OPEN_PAGE\.toLocaleString\(\)\} jobs are open/);
+    expect(source).toMatch(/More than \$\{OPEN_PAGE\.toLocaleString\(\)\} open jobs/);
   });
 });

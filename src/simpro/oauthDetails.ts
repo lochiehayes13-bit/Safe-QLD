@@ -117,8 +117,7 @@ export function readPastedConnection(text: string): PastedConnectionRead {
     return {
       found: {},
       fields: [],
-      problem: 'That text has no client ID, client secret or token URL in it. '
-        + 'Copy the whole oAuth2 details block from Simpro — System Setup, then API keys — and paste it again.',
+      problem: 'No client ID, secret or token URL found. Paste the whole block from System Setup, API keys.',
     };
   }
   return { found, fields };

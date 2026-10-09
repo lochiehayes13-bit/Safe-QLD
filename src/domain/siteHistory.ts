@@ -1,5 +1,5 @@
 import { SYSTEM_LABELS } from '@/seed/assetTypes';
-import { qldIsoDay } from '@/domain/qldTime';
+import { qldDay, qldIsoDay } from '@/domain/qldTime';
 import type { DueState } from '@/domain/schedule';
 
 /**
@@ -260,7 +260,7 @@ export function buildSiteFacts(input: SiteFactsInput): SiteFacts {
   let clockedOn: SiteFacts['clockedOn'] = 'unknown';
   let clockedOnNote: string;
   if (!job) {
-    clockedOnNote = 'No Simpro job at this site on the phone, so there is nothing to have clocked onto.';
+    clockedOnNote = 'No Simpro job here.';
   } else if (hours) {
     clockedOn = 'yes';
     clockedOnNote = `${hours.total} h recorded on job ${job.externalId}${hours.byPerson.length ? ` by ${hours.byPerson.map((p) => p.name).join(', ')}` : ''}.`;
@@ -269,9 +269,9 @@ export function buildSiteFacts(input: SiteFactsInput): SiteFacts {
     // on" or "the office's hours are outside what this phone mirrors"
     // depends on the source's reach, which the caller knows and we do not —
     // so it is unknown with the reason, never no.
-    clockedOnNote = `No hours for job ${job.externalId} are held on this phone. The office's timesheet for that job would say; the phone only mirrors its own hours and the last week of the schedule.`;
+    clockedOnNote = `No hours synced for job ${job.externalId}. Check the office timesheet.`;
   } else {
-    clockedOnNote = `Job ${job.externalId} is ${job.statusName ?? job.status}; no hours held here yet.`;
+    clockedOnNote = `Job ${job.externalId} is ${job.statusName ?? job.status}. No hours yet.`;
   }
 
   const assets = input.assetCounts
@@ -331,12 +331,12 @@ export function buildSiteFacts(input: SiteFactsInput): SiteFacts {
   if (input.nextJob?.scheduled) {
     lockedIn = 'booked';
     const s = input.nextJob.scheduled;
-    lockedInNote = `Job ${input.nextJob.externalId} is on the calendar for ${s.date}${s.staffName ? ` (${s.staffName})` : ''}${s.startTime ? `, ${s.startTime}${s.endTime ? `–${s.endTime}` : ''}` : ''}.`;
+    lockedInNote = `Job ${input.nextJob.externalId} is on the calendar for ${qldDay(s.date) ?? s.date}${s.staffName ? ` (${s.staffName})` : ''}${s.startTime ? `, ${s.startTime}${s.endTime ? `–${s.endTime}` : ''}` : ''}.`;
   } else if (input.nextJob) {
     lockedIn = 'job-only';
-    lockedInNote = `Job ${input.nextJob.externalId} exists${input.nextJob.statusName ? ` (${input.nextJob.statusName})` : ''} but nothing is on the calendar for it yet. Booking it here puts it there.`;
+    lockedInNote = `Job ${input.nextJob.externalId}${input.nextJob.statusName ? ` (${input.nextJob.statusName})` : ''} has no booking yet.`;
   } else {
-    lockedInNote = 'No open Simpro job at this site. A day here cannot go on the schedule until the office raises one.';
+    lockedInNote = 'No open job. Ask the office to raise one.';
   }
 
   return {

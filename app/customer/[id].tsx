@@ -97,7 +97,7 @@ export default function CustomerScreen() {
       <RecordGate
         missing={missing}
         what="customer"
-        why="Customers come down with a sync once Simpro is connected. This one is not on the phone yet, or the office has removed it."
+        why="Not synced yet, or removed."
         failed={failed}
         onRetry={() => setReloads((n) => n + 1)}
       />
@@ -127,7 +127,7 @@ export default function CustomerScreen() {
           <Chip label={`#${c.externalId}`} />
         </Rowed>
         {c.archived ? (
-          <Banner tone="warn" title="Archived in Simpro" body="The office has filed this customer away. Check before doing work under their name." />
+          <Banner tone="warn" title="Archived in Simpro" body="Check with the office." />
         ) : null}
 
         <Card>
@@ -174,7 +174,7 @@ export default function CustomerScreen() {
             {billing && billing !== address ? <ActionRow icon="mailbox-outline" label={billing} sub="Billing" /> : null}
             {!phone && !email && !address ? (
               <Txt size="sm" tone="faint">
-                {c.detailSyncedAt ? 'The office has no phone, email or address for them.' : 'Only the name has come down so far; the rest comes with the next full sync.'}
+                {c.detailSyncedAt ? 'No phone, email or address.' : 'Details load on next sync.'}
               </Txt>
             ) : null}
           </View>
@@ -191,16 +191,11 @@ export default function CustomerScreen() {
           <>
             <Rowed gap={2}>
               <StatTile label="Jobs done" value={Math.max(0, stats.jobsTotal - stats.jobsOpen)} />
-              <StatTile label="Open" value={stats.jobsOpen} tone={stats.jobsOpen ? 'warn' : 'default'} />
-              <StatTile label="Open quotes" value={stats.quotesOpen} />
+              <StatTile label="Open jobs" value={stats.jobsOpen} />
             </Rowed>
             <Rowed gap={2}>
+              <StatTile label="Open quotes" value={stats.quotesOpen} />
               <StatTile label="Last job" value={stats.lastJobAt ? formatAuDate(stats.lastJobAt) : '—'} />
-              <StatTile
-                label="Unpaid"
-                value={formatCents(stats.invoicesUnpaidCents)}
-                tone={stats.invoicesUnpaidCents ? 'fail' : 'default'}
-              />
             </Rowed>
           </>
         ) : null}
@@ -262,7 +257,7 @@ export default function CustomerScreen() {
           })
         ) : (
           <Txt size="sm" tone="faint">
-            {c.detailSyncedAt ? 'The office lists nobody under this customer.' : 'People come with the contact sync and the full customer record.'}
+            {c.detailSyncedAt ? 'No contacts.' : 'Contacts load on next sync.'}
           </Txt>
         )}
 
@@ -291,7 +286,7 @@ export default function CustomerScreen() {
           })
         ) : (
           <Txt size="sm" tone="faint">
-            {c.detailSyncedAt ? 'The office lists no sites under this customer.' : 'Sites come with the full customer record, on the next full sync.'}
+            {c.detailSyncedAt ? 'No sites.' : 'Sites load on next sync.'}
           </Txt>
         )}
 
@@ -319,7 +314,7 @@ export default function CustomerScreen() {
             );
           })
         ) : (
-          <Txt size="sm" tone="faint">No jobs for this customer are on the phone.</Txt>
+          <Txt size="sm" tone="faint">No jobs.</Txt>
         )}
 
         <SectionHeader
@@ -346,7 +341,7 @@ export default function CustomerScreen() {
             );
           })
         ) : (
-          <Txt size="sm" tone="faint">No Simpro quotes for this customer are on the phone.</Txt>
+          <Txt size="sm" tone="faint">No quotes.</Txt>
         )}
 
         <SectionHeader
@@ -354,6 +349,14 @@ export default function CustomerScreen() {
           action={invoices.length ? 'All' : undefined}
           onAction={() => router.push({ pathname: '/invoices', params: { customerId: c.externalId } })}
         />
+        {/*
+          * Owed money, said plainly in the list it belongs to. It was a red
+          * "Unpaid" tile at the top of a card a technician may hand across to
+          * the customer.
+          */}
+        {stats?.invoicesUnpaidCents ? (
+          <Txt size="sm" tone="muted">{formatCents(stats.invoicesUnpaidCents)} unpaid</Txt>
+        ) : null}
         {invoices.length ? (
           invoices.map((inv) => {
             const state = invoiceState(inv, today);
@@ -372,11 +375,11 @@ export default function CustomerScreen() {
             );
           })
         ) : (
-          <Txt size="sm" tone="faint">No invoices for this customer in the two years the phone holds.</Txt>
+          <Txt size="sm" tone="faint">No invoices in the last two years.</Txt>
         )}
 
         <Txt size="xs" tone="faint" style={{ marginTop: t.space(2) }}>
-          Simpro customer {c.externalId}.{c.dateModified ? ` Last changed at the office ${formatAuDate(c.dateModified)}.` : ''}
+          Simpro customer {c.externalId}{c.dateModified ? ` · changed ${formatAuDate(c.dateModified)}` : ''}
         </Txt>
       </Screen>
     </>

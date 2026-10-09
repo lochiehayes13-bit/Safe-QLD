@@ -146,16 +146,15 @@ describe('the way out of a module that has no row for the building', () => {
     // The sentence is a function now, so this asserts the words themselves
     // rather than a line of source that could be reworded around the test.
     expect(siteFallbackWords(1, 'jobs')).toEqual({
-      title: 'No jobs match that',
-      body: 'No jobs on this phone match those words. The site below does — open it for its '
-        + 'register, its history and its documents.',
+      title: 'No jobs match',
+      body: 'This site matches. Open it below.',
     });
   });
 
   it('and names the module it is speaking for, in the plural it was given', () => {
-    expect(siteFallbackWords(2, 'quotes').title).toBe('No quotes match that');
-    expect(siteFallbackWords(2, 'quotes').body).toContain('The sites below do');
-    expect(siteFallbackWords(1, 'quotes').body).toContain('The site below does');
+    expect(siteFallbackWords(2, 'quotes').title).toBe('No quotes match');
+    expect(siteFallbackWords(2, 'quotes').body).toBe('These sites match. Open one below.');
+    expect(siteFallbackWords(1, 'quotes').body).toBe('This site matches. Open it below.');
   });
 
   it.each([

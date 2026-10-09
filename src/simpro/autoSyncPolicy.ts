@@ -375,7 +375,7 @@ export function sweptEverything(at: string): Record<string, string> {
 export function describeAutoSync(record: AutoSyncRecord, now: Date): string {
   const ran = record.lastRunAt ? Date.parse(record.lastRunAt) : NaN;
   if (!Number.isFinite(ran)) {
-    return 'Has not run yet. It runs when the app opens, comes to the front, or gets signal back.';
+    return 'Not run yet.';
   }
   const ago = describeAge(Math.max(0, now.getTime() - ran));
 

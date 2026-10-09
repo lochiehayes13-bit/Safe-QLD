@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, TextInput, View } from 'react-native';
+import { Pressable, TextInput, View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { loadPrefs, patchPrefs, type Prefs } from '@/app-prefs';
@@ -70,14 +70,11 @@ export default function ShortcutsScreen() {
     <>
       <Stack.Screen options={{ title: onlyGroup ?? 'All modules' }} />
       <Screen>
-        <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-          Tap a row to open it. Tap the circle to put it on your home screen. What you choose is
-          yours; nobody else's phone changes.
-        </Txt>
+        <Txt size="sm" tone="muted">Tap to open. Tap the circle to pin.</Txt>
 
         <H2>On your home screen</H2>
         {chosen.length === 0 ? (
-          <Card><Txt tone="muted">Nothing pinned yet. Add something from below.</Txt></Card>
+          <Card><Txt tone="muted">Nothing pinned. Tap a circle below.</Txt></Card>
         ) : (
           <Card>
             {chosen.map((m, i) => (
@@ -116,9 +113,8 @@ export default function ShortcutsScreen() {
               </View>
             ))}
             {chosen.length > 2 ? (
-              <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
-                Hold an arrow to send a tile straight to the top or the bottom, rather than tapping it up one row
-                at a time.
+              <Txt size="xs" tone="faint" style={{ marginTop: t.space(2) }}>
+                Hold an arrow to jump to top or bottom.
               </Txt>
             ) : null}
           </Card>

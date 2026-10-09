@@ -342,7 +342,7 @@ describe('the line in Settings', () => {
   }
 
   it('says it has not run yet rather than inventing a time', () => {
-    expect(describeAutoSync(record({ lastFullAt: hoursAgo(3) }), NOW)).toMatch(/^Has not run yet\./);
+    expect(describeAutoSync(record({ lastFullAt: hoursAgo(3) }), NOW)).toMatch(/^Not run yet\./);
   });
 
   it('reads the way the brief asked for', () => {

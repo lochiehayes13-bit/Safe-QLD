@@ -5,6 +5,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { loadPrefs } from '@/app-prefs';
 import { getQuoteFull, localJobId, type AttachmentRecord, type QuoteFull } from '@/db/mirrorRepo';
 import { getJob } from '@/db/opsRepo';
+import { getSiteByExternalId } from '@/db/searchRepo';
 import type { SimproCostCenter, SimproItem, SimproSection } from '@/simpro/mirrorResources';
 import {
   attachmentIcon, contactActions, discountLabel, formatFileSize, formatQty, itemHeading, itemPrice, quoteState,
@@ -49,6 +50,9 @@ export default function SimproQuoteScreen() {
   // And a read that threw is neither. See RecordGate.
   const [failed, setFailed] = useState<string | null>(null);
   const [jobHeld, setJobHeld] = useState(false);
+  // The quote's site on this phone, including one found by the office's own
+  // site id where the quote was never matched to a local site.
+  const [siteId, setSiteId] = useState<string | undefined>(undefined);
   const [refresh, setRefresh] = useState<Refresh>({ state: 'idle' });
   const [opening, setOpening] = useState<string | null>(null);
   const refreshing = useRef(false);
@@ -61,6 +65,8 @@ export default function SimproQuoteScreen() {
       setFull(f);
       setMissing(!f);
       if (f?.quote.jobExternalId) setJobHeld(!!(await getJob(localJobId(f.quote.jobExternalId))));
+      setSiteId(f?.quote.siteId
+        || (f?.quote.siteExternalId ? (await getSiteByExternalId(f.quote.siteExternalId))?.id : undefined));
       return f;
     } catch (e) {
       setFailed(describeLoadFailure(e, 'this quote'));
@@ -155,7 +161,7 @@ export default function SimproQuoteScreen() {
               <View style={{ flex: 1 }}>
                 <Txt weight="700">Converted to job {q.jobExternalId}</Txt>
                 <Txt size="sm" tone="muted">
-                  {jobHeld ? 'Open the job for its lines, files and activity.' : 'The job is not on this phone yet; it comes with the next sync.'}
+                  {jobHeld ? 'Tap to open the job.' : 'Job not synced yet.'}
                 </Txt>
               </View>
               {jobHeld ? <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} /> : null}
@@ -176,8 +182,8 @@ export default function SimproQuoteScreen() {
             <MetaRow
               label="Site"
               value={q.siteName}
-              hint={q.siteId ? undefined : 'Not matched to a site on this phone yet'}
-              onPress={q.siteId ? () => router.push({ pathname: '/site/[id]', params: { id: q.siteId! } }) : undefined}
+              hint={siteId ? undefined : 'No site linked'}
+              onPress={siteId ? () => router.push({ pathname: '/site/[id]', params: { id: siteId } }) : undefined}
             />
           ) : null}
           {technicians ? <MetaRow label="Technicians" value={technicians} /> : null}
@@ -238,7 +244,7 @@ export default function SimproQuoteScreen() {
         {full.sections.length ? (
           full.sections.map((s) => <SectionCard key={s.id} section={s} />)
         ) : (
-          <NotYet synced={full.detailSynced} what="lines" none="The office has no sections or lines on this quote." />
+          <NotYet synced={full.detailSynced} none="No lines on this quote." />
         )}
 
         {full.notes.length ? (
@@ -266,11 +272,11 @@ export default function SimproQuoteScreen() {
                   <Txt weight="600" numberOfLines={2}>{a.filename}</Txt>
                   <Txt size="xs" tone="muted">
                     {[formatFileSize(a.sizeBytes), a.addedBy, a.dateAdded ? formatAuDate(a.dateAdded) : undefined, a.folder]
-                      .filter(Boolean).join(' · ') || 'Details come with the file'}
+                      .filter(Boolean).join(' · ') || 'Tap to open'}
                   </Txt>
                 </View>
                 {opening === a.id ? (
-                  <Txt size="xs" tone="accent" weight="700">Fetching…</Txt>
+                  <Txt size="xs" tone="accent" weight="700">Downloading…</Txt>
                 ) : a.localUri ? (
                   <Chip label="On phone" tone="pass" />
                 ) : (
@@ -280,21 +286,21 @@ export default function SimproQuoteScreen() {
             </Card>
           ))
         ) : (
-          <NotYet synced={full.detailSynced} what="files" none="Nothing is attached to this quote." />
+          <NotYet synced={full.detailSynced} none="No attachments." />
         )}
 
         <View style={{ gap: 2 }}>
           {refresh.state === 'running' ? <Txt size="xs" tone="accent">Refreshing from Simpro…</Txt> : null}
           {refresh.state === 'done' && refresh.partial.length ? (
-            <Txt size="xs" tone="warn">Refreshed, but the office would not hand over: {refresh.partial.join('; ')}</Txt>
+            <Txt size="xs" tone="warn">{`Some details didn't load: ${refresh.partial.join('; ')}`}</Txt>
           ) : null}
           {refresh.state === 'failed' ? (
-            <Txt size="xs" tone="faint">Showing what the phone holds. Could not refresh: {refresh.error}</Txt>
+            <Txt size="xs" tone="faint">Offline copy. Refresh failed: {refresh.error}</Txt>
           ) : null}
           <Txt size="xs" tone="faint">
             {q.detailSyncedAt
-              ? `Office record as of ${qldMoment(q.detailSyncedAt) ?? q.detailSyncedAt}.`
-              : 'The lines, notes and files under this quote have not been read yet. They come the first time it is opened with signal.'}
+              ? `Synced ${qldMoment(q.detailSyncedAt) ?? q.detailSyncedAt}.`
+              : 'Details load when opened with signal.'}
           </Txt>
         </View>
       </Screen>
@@ -339,14 +345,8 @@ function MetaRow({ label, value, hint, mono, onPress }: { label: string; value: 
   return onPress ? <Pressable onPress={onPress} hitSlop={4}>{body}</Pressable> : body;
 }
 
-function NotYet({ synced, what, none }: { synced: boolean; what: string; none: string }) {
-  if (!synced) {
-    return (
-      <Txt size="sm" tone="faint" style={{ lineHeight: 19 }}>
-        The {what} have not been read from the office yet — they come the first time this quote is opened with signal.
-      </Txt>
-    );
-  }
+function NotYet({ synced, none }: { synced: boolean; none: string }) {
+  if (!synced) return <Txt size="sm" tone="faint">Not downloaded yet. Open with signal.</Txt>;
   return none ? <Txt size="sm" tone="faint">{none}</Txt> : null;
 }
 
@@ -390,7 +390,7 @@ function CostCenterBlock({ costCenter: c }: { costCenter: SimproCostCenter }) {
         {total ? <Txt size="xs" tone="muted">{total}</Txt> : null}
       </View>
       {c.items.length ? c.items.map((it) => <ItemRow key={`${it.kind}-${it.id}`} item={it} />) : (
-        <Txt size="xs" tone="faint">No lines under this cost centre.</Txt>
+        <Txt size="xs" tone="faint">No lines.</Txt>
       )}
     </View>
   );

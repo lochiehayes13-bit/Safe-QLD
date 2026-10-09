@@ -402,7 +402,7 @@ describe('an answer about the build before this one', () => {
 
   it('says in Settings that this build has not been checked, rather than repeating the old answer', () => {
     expect(describeUpdateCheck(newer, NOW, installed))
-      .toBe('This build has not been checked yet — the last answer was about the one before it.');
+      .toBe('Not checked since this build was installed.');
   });
 
   it('never offers the release the phone is already running, whatever the record says', () => {

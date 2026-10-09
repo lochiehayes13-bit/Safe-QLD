@@ -9,7 +9,7 @@ import {
 } from '@/db/assessmentRepo';
 import { getSite, listDefects } from '@/db/repo';
 import {
-  KIND_LABEL, PRIORITY_LABEL, findingRef, openDefectCaution, recommendationList,
+  KIND_LABEL, PRIORITY_LABEL, findingRef, openDefectCaution, openDefectReportNote, recommendationClosing,
   summariseFindings, validateFindings, type Finding, type FindingKind, type FindingPriority,
 } from '@/domain/findings';
 import { effectivenessReportHtml } from '@/export/effectivenessReport';
@@ -22,6 +22,8 @@ import { shareFile, writePdf } from '@/export/files';
 import { notSharedNotice } from '@/export/shareOutcome';
 import { loadPrefs } from '@/app-prefs';
 import { newId } from '@/db';
+import { typedDay } from '@/domain/qldTime';
+import { formatAuDate } from '@/export/sheets';
 import type { Site } from '@/domain/types';
 import { useTheme } from '@/theme';
 import {
@@ -107,7 +109,7 @@ export default function AssessmentScreen() {
   const remove = (finding: Finding) => {
     showAlert(
       `Remove ${findingRef(finding.kind, finding.seq)}?`,
-      'The findings after it renumber, so the register has no gap in it.',
+      'Later findings renumber.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -191,13 +193,13 @@ export default function AssessmentScreen() {
           group: group.label,
         })),
         statement: assessment.statement,
-        openDefectCaution: caution,
+        openDefectCaution: openDefectReportNote(defects.open, defects.critical),
       });
       return writePdf(
         `${assessment.reportReference || 'effectiveness-report'}-${site.name}`,
         html,
       );
-  }, [assessment, site, caution]);
+  }, [assessment, site, defects]);
 
   const produce = async () => {
     if (!assessment || !site) return;
@@ -230,7 +232,7 @@ export default function AssessmentScreen() {
     if (issues.length) {
       showAlert(
         `${issues.length} thing${issues.length === 1 ? '' : 's'} to fix before issuing`,
-        `${issues.map((i) => i.message).join('\n')}\n\nProducing it anyway renumbers the findings as they stand.`,
+        `${issues.map((i) => i.message).join('\n')}\n\nProducing it now renumbers the findings as they are.`,
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Produce anyway', style: 'destructive', onPress: () => void produce() },
@@ -247,16 +249,7 @@ export default function AssessmentScreen() {
     <>
       <Stack.Screen options={{ title: assessment.reportReference || 'Effectiveness assessment' }} />
       <Screen>
-        <Banner
-          tone="info"
-          title="Nothing here is a defect"
-          body={
-            'An effectiveness assessment is visual and advisory. No device is activated and nothing '
-            + 'is tested, so its findings are recommendations for an upcoming project and '
-            + 'observations noted for the record. A recommendation written up as a defect starts '
-            + 'statutory clocks that have no business running.'
-          }
-        />
+        <Banner tone="info" title="Nothing here is a defect" body="Visual only. Nothing is tested. Findings are not defects." />
 
         <Rowed gap={2}>
           <StatTile
@@ -269,7 +262,7 @@ export default function AssessmentScreen() {
         </Rowed>
 
         {caution ? (
-          <Banner tone="warn" title="Defects are already open at this site" body={caution} />
+          <Banner tone="warn" title="Open defects here" body={caution} />
         ) : null}
 
         {issues.length ? (
@@ -299,11 +292,10 @@ export default function AssessmentScreen() {
               />
             </View>
             <View style={{ flex: 1 }}>
-              <Field
+              <DateField
                 label="Attendance date"
-                value={assessment.attendanceDate ?? ''}
-                onChangeText={(v) => patch({ attendanceDate: v })}
-                placeholder="2026-07-03"
+                value={assessment.attendanceDate}
+                onChange={(v) => patch({ attendanceDate: v })}
               />
             </View>
           </Rowed>
@@ -328,7 +320,7 @@ export default function AssessmentScreen() {
             value={assessment.boundary}
             onChangeText={(v) => patch({ boundary: v })}
             multiline
-            hint="An unstated boundary reads as a whole-site assessment"
+            hint="Say what is excluded."
           />
         </Card>
 
@@ -375,10 +367,7 @@ export default function AssessmentScreen() {
         </Rowed>
 
         {!findings.length ? (
-          <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-            Nothing recorded yet. An assessment that finds nothing is a real outcome and the report
-            says so — it does not print an empty table.
-          </Txt>
+          <Txt size="sm" tone="muted">No findings yet.</Txt>
         ) : null}
 
         {findings.map((f) => (
@@ -407,11 +396,10 @@ export default function AssessmentScreen() {
             autoCapitalize="words"
           />
           <View style={{ height: t.space(2.5) }} />
-          <Field
+          <DateField
             label="Issue date"
-            value={assessment.issueDate ?? ''}
-            onChangeText={(v) => patch({ issueDate: v })}
-            placeholder="2026-07-06"
+            value={assessment.issueDate}
+            onChange={(v) => patch({ issueDate: v })}
           />
           <View style={{ height: t.space(2.5) }} />
           <Field
@@ -419,19 +407,18 @@ export default function AssessmentScreen() {
             value={assessment.statement}
             onChangeText={(v) => patch({ statement: v })}
             multiline
-            hint="The list of recommendations is added automatically"
+            hint="The recommendations are added after it."
           />
           {tally.recommendations ? (
             <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
-              The report will append: “As areas of recommended improvement, the upcoming project
-              should incorporate: {recommendationList(findings)}.”
+              Then: “{recommendationClosing(findings)}”
             </Txt>
           ) : null}
         </Card>
 
         <Button title="Produce the report" onPress={issue} loading={busy} />
         <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-          Findings renumber on issue so the register has no gaps in it.
+          Findings renumber when the report is produced.
         </Txt>
 
         <JobFileCard
@@ -447,10 +434,51 @@ export default function AssessmentScreen() {
           onPickJob={(job) => patch({ jobExternalId: job?.externalId, jobTitle: job?.title })}
           onAttached={(at) => patch({ attachedAt: at })}
           disabled={!site}
-          disabledWhy={site ? undefined : 'The site this assessment belongs to is not on this phone yet. Sync first.'}
+          disabledWhy={site ? undefined : 'Site not synced yet. Sync first.'}
         />
       </Screen>
     </>
+  );
+}
+
+/**
+ * A date typed as it is written here, dd/mm/yyyy, and stored as yyyy-mm-dd.
+ *
+ * These were plain text boxes holding the stored string, with "2026-07-03" as
+ * the placeholder. What is typed stays in the box; only a real date is stored,
+ * through the same typedDay reader Form 72 and leave use, so a half-typed date
+ * never reaches the report.
+ */
+function DateField({ label, value, onChange }: {
+  label: string;
+  value: string | undefined;
+  onChange: (iso: string | undefined) => void;
+}) {
+  const t = useTheme();
+  // An older record may hold text that is not a date; show it as it was typed.
+  const [text, setText] = useState(() => (value ? (typedDay(value) ? formatAuDate(value) : value) : ''));
+  const resolved = typedDay(text);
+  const typing = text.trim() !== '' && resolved === undefined;
+  return (
+    <View style={{ gap: 4 }}>
+      <Field
+        label={label}
+        value={text}
+        keyboardType="numeric"
+        placeholder="dd/mm/yyyy"
+        onChangeText={(v) => {
+          setText(v);
+          const next = typedDay(v);
+          if (!v.trim()) onChange(undefined);
+          else if (next !== undefined) onChange(next);
+        }}
+      />
+      {typing ? (
+        <Txt size="xs" tone="warn">Type it as dd/mm/yyyy.</Txt>
+      ) : resolved && formatAuDate(resolved) !== text.trim() ? (
+        <Txt size="xs" style={{ color: t.color.textFaint }}>{`Read as ${formatAuDate(resolved)}`}</Txt>
+      ) : null}
+    </View>
   );
 }
 
@@ -480,7 +508,7 @@ function FindingCard({
       ? await ImagePicker.requestCameraPermissionsAsync()
       : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
-      showAlert('Permission needed', 'Safe QLD needs access to add a photograph to this finding.');
+      showAlert('Permission needed', fromCamera ? 'Allow camera access to add a photo.' : 'Allow photo access to add a photo.');
       return;
     }
     const result = fromCamera
@@ -504,10 +532,8 @@ function FindingCard({
       onChange({ photos: [...finding.photos, kept.path] });
     } catch (e) {
       showAlert(
-        'Could not keep that photograph',
-        `It was taken but could not be saved to this device, so it has not been attached. ${
-          e instanceof Error ? e.message : String(e)
-        }`,
+        'Photo not saved',
+        `It was not attached. ${e instanceof Error ? e.message : String(e)}`,
       );
     }
   };
@@ -563,7 +589,7 @@ function FindingCard({
             label="Reference"
             value={finding.reference ?? ''}
             onChangeText={(v) => onChange({ reference: v || undefined })}
-            hint="What it is measured against — a manufacturer's product status, a service life"
+            hint="e.g. product status or service life"
           />
           <View style={{ height: t.space(2.5) }} />
           <Field
@@ -580,7 +606,7 @@ function FindingCard({
             multiline
             hint={finding.kind === 'recommendation'
               ? 'What is proposed, and within what scope'
-              : 'Note only — no action required'}
+              : 'Note only. No action required.'}
           />
 
           {finding.kind === 'recommendation' ? (
@@ -608,16 +634,13 @@ function FindingCard({
 
           <View style={{ height: t.space(3) }} />
           <Label>Photographs</Label>
-          <Txt size="xs" tone="faint" style={{ lineHeight: 16 }}>
-            These print in the report's photographic register, grouped under {ref} and numbered in
-            the order they were taken.
-          </Txt>
+          <Txt size="xs" tone="faint">Printed in the photo register under {ref}.</Txt>
           {finding.photos.length ? (
             <Rowed gap={2} style={{ flexWrap: 'wrap', marginTop: t.space(2) }}>
               {finding.photos.map((path) => (
                 <Pressable
                   key={path}
-                  onPress={() => showAlert('Remove this photograph?', 'It stays on the device; it just leaves the register.', [
+                  onPress={() => showAlert('Remove this photo?', 'It stays on the device.', [
                     { text: 'Cancel', style: 'cancel' },
                     {
                       text: 'Remove',

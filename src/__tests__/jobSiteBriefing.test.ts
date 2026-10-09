@@ -60,6 +60,42 @@ describe('whose site the briefing is about', () => {
     expect(screen).toContain('setResolvedSiteId(siteId)');
     expect(screen).toContain('{resolvedSiteId ? (');
   });
+
+  it('opens the resolved site, never job.siteId, which is unset for a site found by the office’s id', () => {
+    /*
+     * "Open site" showed whenever the site resolved and then pushed
+     * `job.siteId!` — undefined for exactly the jobs resolved through
+     * siteExternalId, so it opened /site/undefined. The Site row and the
+     * Form 72 button read job.siteId too, and said "not matched" or hid
+     * themselves on a job whose briefing had found the site.
+     */
+    expect(screen).not.toMatch(/job\.siteId!/);
+    expect(screen).toContain("router.push({ pathname: '/site/[id]', params: { id: resolvedSiteId } })");
+    expect(screen).toContain("hint={resolvedSiteId ? undefined : 'No site linked'}");
+    expect(screen).toContain('params: { siteId: resolvedSiteId, jobId: job.id }');
+    expect(screen).toContain('{!resolvedSiteId ? <Txt size="xs" tone="faint">No site linked.</Txt> : null}');
+    const below = screen.slice(screen.indexOf('setResolvedSiteId(siteId)'));
+    expect(below).not.toMatch(/\bjob\.siteId\b/);
+  });
+});
+
+describe('jobs only come from Simpro', () => {
+  /*
+   * Nothing creates a job but the sync (upsertJob in src/simpro/sync.ts), so
+   * the list's promise to "add one by hand" and the job screen's branches for
+   * a job "added on this phone" described something that cannot happen.
+   */
+  const list = readFileSync(join(__dirname, '..', '..', 'app', 'work', 'jobs.tsx'), 'utf8');
+
+  it('does not promise a job can be added by hand', () => {
+    expect(list).not.toMatch(/by hand/i);
+  });
+
+  it('has no branches for a job the office does not have', () => {
+    expect(screen).not.toContain('isSimpro');
+    expect(screen).not.toContain("'Added on this phone");
+    expect(screen).not.toContain("'On this phone only'");
+  });
 });
 
 describe('raising a defect from a job with no site', () => {

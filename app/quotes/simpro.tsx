@@ -77,12 +77,12 @@ export default function SimproQuotesScreen() {
     if (page === null || held === null) return null;
     if (!held) {
       return {
-        title: scope ? `No Simpro quotes ${scope}` : 'No Simpro quotes on this phone yet',
-        body: 'Quotes come down with a sync once Simpro is connected in Settings. Quotes raised on this phone are under Ours.',
+        title: scope ? `No Simpro quotes ${scope}` : 'No Simpro quotes yet',
+        body: 'Quotes come from Simpro. Sync in Settings.',
       };
     }
-    if (query.trim()) return { title: 'Nothing matches', body: 'Try the quote number, the job number it became, or part of the site or customer.' };
-    return { title: `No ${FILTER_WORD[filter]} quotes`, body: '' };
+    if (query.trim()) return { title: 'Nothing matches', body: 'Try the quote no., job no., site or customer.' };
+    return { title: ['No', FILTER_WORD[filter], 'quotes'].filter(Boolean).join(' '), body: '' };
   })();
 
   return (
@@ -94,10 +94,10 @@ export default function SimproQuotesScreen() {
             <Segmented
               value="simpro"
               onChange={(v) => { if (v === 'ours') router.replace('/quotes'); }}
-              options={[{ value: 'ours', label: 'Ours on this phone' }, { value: 'simpro', label: 'Simpro' }]}
+              options={[{ value: 'ours', label: 'This phone' }, { value: 'simpro', label: 'Simpro' }]}
             />
           ) : null}
-          <SearchBox value={typed} onChange={setTyped} placeholder="Quote number, site, suburb, customer or job" />
+          <SearchBox value={typed} onChange={setTyped} placeholder="Quote or job no., site, suburb or customer" />
           <Segmented
             value={filter}
             onChange={setFilter}
@@ -117,7 +117,7 @@ export default function SimproQuotesScreen() {
               </Rowed>
               {/* Said out loud where the list is cut. The search still reaches
                   every quote: it runs in the database, not over the rows. */}
-              {page.capped ? <Txt size="xs" tone="faint">First {PAGE} shown, search to narrow</Txt> : null}
+              {page.capped ? <Txt size="xs" tone="faint">First {PAGE} shown. Search to narrow.</Txt> : null}
             </>
           ) : null}
         </View>

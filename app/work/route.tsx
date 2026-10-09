@@ -9,7 +9,8 @@ import { jobsByExternalIds, listJobs, type JobRecord } from '@/db/opsRepo';
 import { listScheduleFor } from '@/db/scheduleRepo';
 import { whoseSchedule } from '@/domain/myDay';
 import { loadPrefs } from '@/app-prefs';
-import { formatKm, planRoute, runCandidates, type RoutePoint } from '@/domain/routing';
+import { formatKm, navigationUrl, planRoute, runCandidates, type RoutePoint } from '@/domain/routing';
+import { whoName } from '@/domain/dayHeader';
 import { useTheme } from '@/theme';
 import { showAlert } from '@/components/alert';
 import { describeLoadFailure } from '@/domain/loadFailure';
@@ -134,7 +135,7 @@ export default function RouteScreen() {
        */
       setJobs([...byId.values()]);
       setBookedToday(new Set(booked.map((j) => j.id)));
-      setMine({ label: who.label });
+      setMine({ label: whoName(who, prefs.technicianName) });
       setEveryones(false);
     } catch (e) {
       setFailed(describeLoadFailure(e, "today's run"));
@@ -149,7 +150,7 @@ export default function RouteScreen() {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        setLocationNote('Location was declined, so the run is ordered from the first job instead.');
+        setLocationNote('Location is off. Ordered from the first job.');
         setStart('first');
         return;
       }
@@ -159,9 +160,7 @@ export default function RouteScreen() {
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       setHere({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
     } catch (e) {
-      setLocationNote(
-        `Could not get a position (${e instanceof Error ? e.message : String(e)}). Ordering from the first job instead.`,
-      );
+      setLocationNote(`No position (${e instanceof Error ? e.message : String(e)}). Ordered from the first job.`);
       setStart('first');
     } finally {
       setLocating(false);
@@ -192,18 +191,12 @@ export default function RouteScreen() {
   }, [candidates, start, here]);
 
   const navigateTo = (job: JobRecord) => {
-    const destination =
-      job.latitude !== undefined && job.longitude !== undefined
-        ? `${job.latitude},${job.longitude}`
-        : job.address ?? job.siteName;
     // Hands off to whatever the phone uses for navigation rather than
-    // pretending to route: the maps app knows about roads and traffic.
-    const url = Platform.select({
-      ios: `maps://?daddr=${encodeURIComponent(destination)}`,
-      default: `geo:0,0?q=${encodeURIComponent(destination)}`,
-    })!;
+    // pretending to route: the maps app knows about roads and traffic. On the
+    // web build (every iPhone) that is an https link; see navigationUrl.
+    const url = navigationUrl(job, Platform.OS);
     void Linking.openURL(url).catch(() => {
-      showAlert('No maps app', `Could not open a maps app for ${destination}.`);
+      showAlert('Could not open maps', job.address ?? job.siteName);
     });
   };
 
@@ -228,27 +221,17 @@ export default function RouteScreen() {
         />
 
         {failed ? (
-          <Banner
-            tone="fail"
-            title="The run could not be read"
-            body={`${failed}\n\nWhat is below is not your day — it is nothing, because nothing could be read. Do not take the empty list as no work.`}
-          />
+          <Banner tone="fail" title="Couldn't load today's run" body={failed} />
         ) : null}
 
         {scope === 'today' && everyones && !failed ? (
-          <Banner
-            tone="warn"
-            title="This is everybody's day, not yours"
-            body={
-              'This phone does not know whose it is, so the run is every job in the company scheduled today. '
-              + 'Pick yourself under Who am I and it becomes the jobs the office has you booked on.'
-            }
-          />
+          <>
+            <Banner tone="warn" title="Everyone's jobs" body="Pick yourself in Who you are to see only yours." />
+            <Button title="Pick who you are" variant="secondary" compact onPress={() => router.push('/whoami')} />
+          </>
         ) : null}
         {scope === 'today' && mine ? (
-          <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-            The jobs the office has {mine.label} booked on today.
-          </Txt>
+          <Txt size="sm" tone="muted">Booked for {mine.label} today.</Txt>
         ) : null}
         {/*
           * A tab called "All open" that is not all of it has to say so. It
@@ -261,13 +244,12 @@ export default function RouteScreen() {
         {scope === 'open' && openCut ? (
           <Banner
             tone="warn"
-            title={`More than ${OPEN_PAGE.toLocaleString()} jobs are open`}
-            body={`The run is planned over the first ${OPEN_PAGE.toLocaleString()}, in the job list's own order. `
-              + 'Use the job list to work through the rest.'}
+            title={`More than ${OPEN_PAGE.toLocaleString()} open jobs`}
+            body={`The run covers the first ${OPEN_PAGE.toLocaleString()}. Use the job list for the rest.`}
           />
         ) : null}
 
-        {locationNote ? <Banner tone="warn" title="Ordering without a position" body={locationNote} /> : null}
+        {locationNote ? <Banner tone="warn" title="No position" body={locationNote} /> : null}
 
         {start === 'here' && !here && !locationNote ? (
           <Card>
@@ -291,10 +273,8 @@ export default function RouteScreen() {
               </Txt>
               <Chip label={`${formatKm(route.totalKm)} straight line`} />
             </Rowed>
-            <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5), lineHeight: 17 }}>
-              Straight-line distance, so the real drive is longer — often much longer where the river or a motorway is
-              in the way. Nearest-neighbour ordering, which is close to the shortest route for a day's stops but not
-              guaranteed to be it. Urgent jobs are placed first regardless of distance.
+            <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5) }}>
+              Straight-line distances. Urgent jobs first.
             </Txt>
           </Card>
         ) : null}
@@ -306,10 +286,9 @@ export default function RouteScreen() {
             body={
               scope === 'today'
                 ? mine
-                  ? 'The office has not booked you on anything today. Switch to all open work to plan a run across '
-                    + 'everything outstanding, or book yourself on from the calendar.'
-                  : 'Switch to all open work to plan a run across everything outstanding.'
-                : 'No jobs are outstanding. Pull from Simpro in Settings if you expect some.'
+                  ? 'Try All open, or book yourself on from the calendar.'
+                  : 'Try All open.'
+                : 'Sync in Settings if you expect some.'
             }
           />
         ) : null}
@@ -351,11 +330,11 @@ export default function RouteScreen() {
 
         {route.unplaceable.length ? (
           <>
-            <H2>Not placed in the run</H2>
+            <H2>Not in the run</H2>
             <Banner
               tone="warn"
               title={`${route.unplaceable.length} job${route.unplaceable.length === 1 ? '' : 's'} with no location`}
-              body="These have no coordinates, so they cannot be ordered against the rest. They are listed here rather than dropped at the end of the run, where they would look like a decision."
+              body="No location, so not in the run."
             />
             {route.unplaceable.map((p) => {
               const job = (p as RoutePoint & { job: JobRecord }).job;

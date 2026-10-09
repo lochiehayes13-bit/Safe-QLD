@@ -74,7 +74,7 @@ export default function WebsitePhotosScreen() {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        showAlert('Permission needed', 'Safe QLD needs to see your photos to pick the ones to send.');
+        showAlert('Permission needed', 'Allow photo access to pick photos.');
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -142,15 +142,11 @@ export default function WebsitePhotosScreen() {
 
       const outcome = await sendMail({ to: WEBSITE_PHOTOS_INBOX, subject, body }, going);
       if (outcome === 'no-mail-app') {
-        showAlert(
-          'Nowhere to send them',
-          `This device has no email account and no photo address set up. Set one in Settings, or add a `
-          + `mail account. They go to ${WEBSITE_PHOTOS_INBOX}.`,
-        );
+        showAlert('Nowhere to send them', 'Add a mail account, or a photo address in Settings.');
         return;
       }
       if (outcome === 'not-sent') {
-        showAlert('Not sent', 'The email was not sent, so the photos have not gone anywhere.');
+        showAlert('Not sent', 'The photos have not gone.');
         return;
       }
       const said = describeSent('composer', going.length, pick.note);
@@ -167,10 +163,7 @@ export default function WebsitePhotosScreen() {
     <Screen scroll>
       <Stack.Screen options={{ title: 'Photos for the website' }} />
 
-      <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-        A clean panel, a tidy booster, a valve set that looks like somebody cares. Pick them, check them,
-        send them.
-      </Txt>
+      <Txt size="sm" tone="muted">Clean, tidy installs. Pick and send.</Txt>
 
       {photos.length ? (
         <>
@@ -209,44 +202,37 @@ export default function WebsitePhotosScreen() {
         loading={picking}
       />
       {photos.length >= MAX_PHOTOS_PER_SEND ? (
-        <Txt size="xs" tone="faint" style={{ lineHeight: 16 }}>
-          {MAX_PHOTOS_PER_SEND} is as many as go at once. Send these and pick the rest after.
-        </Txt>
+        <Txt size="xs" tone="faint">{MAX_PHOTOS_PER_SEND} at a time. Send these, then pick more.</Txt>
       ) : null}
 
       {photos.length ? (
         <>
-          <H2>Anything to say about them</H2>
+          <H2>Note</H2>
           <Card>
             <Field
               label="Optional"
               value={note}
               onChangeText={setNote}
-              placeholder="Booster at the Wickham Street job, done Tuesday"
+              placeholder="Booster at Main St, done Tuesday"
               multiline
             />
           </Card>
 
-          <Card>
-            <Rowed gap={2} align="flex-start">
-              <MaterialCommunityIcons
-                name={route === 'endpoint' ? 'cloud-upload-outline' : 'share-variant-outline'}
-                size={20}
-                color={t.color.accentText}
-              />
-              <Txt size="sm" tone="muted" style={{ flex: 1, lineHeight: 19 }}>{describeRoute(route)}</Txt>
-            </Rowed>
-          </Card>
+          {route === 'nothing' ? (
+            <Banner tone="warn" title="Nowhere to send" body="Add a mail account or photo address." />
+          ) : (
+            <Card>
+              <Rowed gap={2} align="flex-start">
+                <MaterialCommunityIcons
+                  name={route === 'endpoint' ? 'cloud-upload-outline' : 'share-variant-outline'}
+                  size={20}
+                  color={t.color.accentText}
+                />
+                <Txt size="sm" tone="muted" style={{ flex: 1, lineHeight: 19 }}>{describeRoute(route)}</Txt>
+              </Rowed>
+            </Card>
+          )}
         </>
-      ) : null}
-
-      {route === 'nothing' && photos.length ? (
-        <Banner
-          tone="warn"
-          title="Nowhere to send them from this device"
-          body={'No photo address is set up in Settings and there is no mail app on this device. '
-            + 'Either fixes it; the address is the one that needs no email at all.'}
-        />
       ) : null}
 
       <View style={{ height: t.space(2) }} />
@@ -256,8 +242,8 @@ export default function WebsitePhotosScreen() {
         loading={busy}
         disabled={!!blocked}
       />
-      {blocked ? (
-        <Txt size="sm" tone="muted" style={{ marginTop: t.space(2), lineHeight: 19 }}>{blocked}</Txt>
+      {blocked && route !== 'nothing' ? (
+        <Txt size="sm" tone="muted" style={{ marginTop: t.space(2) }}>{blocked}</Txt>
       ) : null}
     </Screen>
   );
