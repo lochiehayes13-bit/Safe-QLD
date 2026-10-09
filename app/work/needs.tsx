@@ -1,19 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, View } from 'react-native';
-import { Stack, router, useFocusEffect } from 'expo-router';
+import { Stack, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { addNeed, deleteNeed, listNeeds, saveNeed } from '@/db/needsRepo';
-import { createPurchaseRequest } from '@/db/opsRepo';
 import { queryCatalogue, type CatalogueItem } from '@/db/catalogueRepo';
 import { listSiteSummaries } from '@/db/repo';
 import { nowIso } from '@/db';
 import { loadPrefs } from '@/app-prefs';
 import { shareFile, writeCsv } from '@/export/files';
+import { sendMail } from '@/export/mail';
 import { notSharedNotice } from '@/export/shareOutcome';
 import { formatAuDate } from '@/export/sheets';
 import {
   STATE_LABEL, groupNeeds, markOrdered, moveNeed, needHeadline, needSubtitle, needsCsvRows,
-  orderableLines, otherWhen, parseNeedLine, tickNeed, withNeedState,
+  orderEmail, otherWhen, parseNeedLine, tickNeed, withNeedState,
   type NeedLine, type NeedWhen,
 } from '@/domain/needsList';
 import { useTheme } from '@/theme';
@@ -46,12 +46,9 @@ const SITE_SUGGESTIONS = 8;
  * be ticked with a glove on, and so it can go to the office as a list rather
  * than being read out over the phone.
  *
- * It is next door to Purchase requests and it is not the same thing. A
- * purchase request is a document the office turns into an order and it needs
- * part numbers and quantities; this needs three words. When a line is ready to
- * be ordered it goes across on the existing request path — that button is on
- * this screen — and the line stays here, marked ordered, so the technician can
- * still see what they are waiting on.
+ * When a line is ready to be ordered it is emailed to the office, and the
+ * line stays here, marked ordered, so the technician can still see what they
+ * are waiting on.
  *
  * The typing is the part that had to be got right. "flow meter" is a complete
  * line, because that is what somebody types with one hand free. A count and a
@@ -270,38 +267,42 @@ export default function NeedsScreen() {
   const nowNeeded = lines.filter((l) => l.when === 'now' && l.state === 'needed');
 
   /**
-   * Sends what is wanted now to the office, on the existing purchase path.
+   * Emails what is wanted now to the office to order.
    *
-   * The "for now" lines only. Future works are on the list precisely because
-   * nobody wants them ordered yet, and a line that has to be ordered early is
-   * one tap from being moved across.
-   *
-   * The lines are marked ordered only once the request exists, and each one
-   * keeps a note saying which request took it — a line marked ordered with no
-   * request behind it is a part nobody is actually getting.
+   * The "for now" lines only: future works are on the list because nobody
+   * wants them ordered yet. Lines are marked ordered only once the mail app
+   * says it sent, or the person says so where it cannot tell (a browser, the
+   * share sheet), because a line marked ordered that nobody ordered is a part
+   * nobody is getting.
    */
-  const raiseRequest = async () => {
+  const emailOrder = async () => {
     if (!nowNeeded.length) return;
+    const prefs = await loadPrefs();
+    const to = prefs.supervisorEmail.trim();
+    if (!to) { showAlert('No office address', 'Add it in Settings.'); return; }
     setOrdering(true);
-    try {
-      const prefs = await loadPrefs();
-      const request = await createPurchaseRequest({
-        requestedBy: prefs.technicianName,
-        lines: orderableLines(nowNeeded),
-        notes: 'From the Things I need list.',
-      });
+    const markAll = async () => {
       const at = nowIso();
-      for (const line of nowNeeded) {
-        await saveNeed(markOrdered(line, at, `On a purchase request ${formatAuDate(at)}`, request.id));
-      }
+      for (const line of nowNeeded) await saveNeed(markOrdered(line, at, `Emailed to the office ${formatAuDate(at)}`));
       void load();
-      showAlert(
-        'Added to a purchase request',
-        `${nowNeeded.length} line${nowNeeded.length === 1 ? ' is' : 's are'} on a draft request. Send it from Purchase requests.`,
-      );
-      router.push('/work/purchases');
+    };
+    try {
+      const outcome = await sendMail({ to, ...orderEmail(nowNeeded, prefs.technicianName) });
+      if (outcome === 'sent') {
+        await markAll();
+        showAlert('Sent', `${nowNeeded.length} part${nowNeeded.length === 1 ? '' : 's'} sent to ${to}.`);
+      } else if (outcome === 'no-mail-app') {
+        showAlert('No mail app', 'Add an email account to this phone, then try again.');
+      } else if (outcome === 'not-sent') {
+        showAlert('Not sent', 'Nothing was marked ordered.');
+      } else {
+        showAlert('Did it send?', 'Mark the parts as ordered once the email has gone.', [
+          { text: 'Not yet', style: 'cancel' },
+          { text: "It's sent", onPress: () => { void markAll(); } },
+        ]);
+      }
     } catch (e) {
-      showAlert("Couldn't raise the request", describeActionFailure(e, 'raise a purchase request'));
+      showAlert("Couldn't send", describeActionFailure(e, 'email the order'));
     } finally {
       setOrdering(false);
     }
@@ -493,14 +494,8 @@ export default function NeedsScreen() {
             compact
             loading={ordering}
             disabled={!nowNeeded.length}
-            onPress={() => void raiseRequest()}
+            onPress={() => void emailOrder()}
             icon={<MaterialCommunityIcons name="cart-outline" size={16} color={t.color.text} />}
-          />
-          <Button
-            title="Purchase requests"
-            variant="ghost"
-            compact
-            onPress={() => router.push('/work/purchases')}
           />
         </Rowed>
 

@@ -268,7 +268,7 @@ function Result({ found, onAgain }: { found: Found; onAgain: () => void }) {
         <Button
           title="Search parts"
           variant="secondary"
-          onPress={() => router.push({ pathname: '/catalogue', params: { q: found.read } })}
+          onPress={() => router.push({ pathname: '/office-catalogue', params: { q: found.read } })}
           style={{ flex: 1 }}
         />
       </Rowed>

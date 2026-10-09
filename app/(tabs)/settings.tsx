@@ -26,7 +26,6 @@ import { clearRateCard, loadRateCard, saveRateCard } from '@/db/rateCardRepo';
 import { effectiveRateCard, formatCents, parseCents, type LabourRate, type ServiceFee } from '@/domain/rates';
 import type { RateCardImport } from '@/simpro/rateCard';
 import { formatBytes } from '@/share/pack';
-import { MODE_BLURB, MODE_LABEL, readMode } from '@/domain/appMode';
 import { signOut } from '@/simpro/auth';
 import { forgetSignInSkipped } from '@/simpro/signInFlow';
 import { OFFICE_APPLICATION } from '@/simpro/office';
@@ -410,25 +409,10 @@ export default function SettingsScreen() {
     }
   };
 
-  const mode = readMode(prefs.appMode);
   const themeChoice = useThemeChoice();
 
   return (
     <Screen>
-      <H2>What this device shows</H2>
-      <Card onPress={() => router.push('/settings/mode')}>
-        <Rowed gap={3}>
-          <MaterialCommunityIcons name="account-switch-outline" size={22} color={t.color.accentText} />
-          <View style={{ flex: 1 }}>
-            <Txt weight="600">{MODE_LABEL[mode.mode]}</Txt>
-            <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{MODE_BLURB[mode.mode]}</Txt>
-          </View>
-          <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
-        </Rowed>
-        {mode.assumed ? (
-          <Banner tone="warn" title="Mode not recognised" body={mode.assumed} />
-        ) : null}
-      </Card>
 
       {/*
         * Locking the colours.
@@ -485,13 +469,11 @@ export default function SettingsScreen() {
           </Rowed>
         ) : (
           <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-            This phone does not know who holds it yet. Sign in with your Simpro login, or pick yourself
-            from the staff list.
+            Pick yourself from the Simpro staff list.
           </Txt>
         )}
         <View style={{ height: t.space(2.5) }} />
         <Rowed gap={2}>
-          <Button title="Sign in with Simpro" onPress={() => router.push('/signin')} style={{ flex: 1 }} />
           <Button
             title={prefs.simproEmployeeId ? 'Change who I am' : 'Pick who I am'}
             variant="secondary"

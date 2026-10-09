@@ -44,11 +44,8 @@ export default function WorkScreen() {
         { label: 'Schedule', sub: "Your day and the team's. Book yourself on.", icon: 'calendar-multiselect-outline', href: '/work/schedule' },
         { label: 'Plan work', sub: 'Build a day and book it in Simpro', icon: 'calendar-month-outline', href: '/work/plan' },
         { label: "Today's run", sub: 'Jobs in order of distance', icon: 'map-marker-path', href: '/work/route' },
-        { label: 'Portfolio health', sub: 'Service coverage across every site', icon: 'chart-donut', href: '/work/portfolio' },
-        { label: 'Overdue and due', sub: 'Routines past due across every site', icon: 'calendar-alert', href: '/work/due' },
         { label: 'Impairments', sub: 'Systems out of service', icon: 'alert-octagon-outline', href: '/work/impairments', badge: counts.impairmentsOpen, tone: counts.impairmentsOpen ? 'fail' : undefined },
         { label: 'Defects', sub: 'Raised, quoted and open', icon: 'alert-circle-outline', href: '/work/defects', badge: counts.defectsOpen, tone: counts.defectsOpen ? 'warn' : undefined },
-        { label: 'Promises', sub: "Things you said you'd come back for", icon: 'hand-back-right-outline', href: '/work/promises', badge: counts.promisesOpen },
       ],
     },
     {
@@ -66,8 +63,8 @@ export default function WorkScreen() {
       title: 'Parts',
       rows: [
         { label: 'Things I need', sub: 'Parts to get, now and for coming work', icon: 'format-list-checks', href: '/work/needs' },
-        { label: 'Purchase requests', sub: 'Parts to order', icon: 'cart-outline', href: '/work/purchases', badge: counts.purchasesDraft },
-        { label: 'Asset labels', sub: 'Number untagged assets and print', icon: 'tag-multiple-outline', href: '/work/labels' },
+        { label: 'Office catalogue', sub: 'Part numbers and sell prices', icon: 'clipboard-list-outline', href: '/office-catalogue' },
+        { label: 'Purchase orders', sub: 'What the office has ordered', icon: 'package-variant', href: '/orders' },
       ],
     },
   ];

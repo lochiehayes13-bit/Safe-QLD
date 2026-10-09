@@ -469,7 +469,7 @@ export default function SiteScreen() {
             <Button
               title="Import config"
               variant="secondary"
-              onPress={() => router.push({ pathname: '/import', params: { siteId: site.id } })}
+              onPress={() => router.push('/config')}
               style={{ flex: 1 }}
             />
             <Button
@@ -701,7 +701,7 @@ export default function SiteScreen() {
             action={
               <Button
                 title="Import config"
-                onPress={() => router.push({ pathname: '/import', params: { siteId: site.id } })}
+                onPress={() => router.push('/config')}
               />
             }
           />

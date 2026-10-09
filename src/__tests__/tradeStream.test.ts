@@ -197,7 +197,7 @@ describe('what the settings screen reports', () => {
 describe('the split itself', () => {
   it('puts the AS 1851 servicing work on the service side', () => {
     const held = new Set(heldBackFrom('construction').map((n) => n.destination.route));
-    for (const route of ['/routine/run', '/tools/routines', '/work/due', '/occupier']) {
+    for (const route of ['/routine/run', '/tools/routines', '/occupier']) {
       expect(held).toContain(route);
     }
   });

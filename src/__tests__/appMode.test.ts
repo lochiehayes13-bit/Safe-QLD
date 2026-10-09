@@ -90,13 +90,13 @@ describe('nothing is ever unreachable', () => {
   });
 
   it('refuses to count search as the proof, because you cannot search for a name you have never seen', () => {
-    const labels = reach('/work/labels', 'technician')!;
-    expect(labels.reachable).toBe(true);
-    expect(labels.channel).toBe('search');
-    expect(labels.proven).toBe(false);
+    const baselines = reach('/work/baselines', 'technician')!;
+    expect(baselines.reachable).toBe(true);
+    expect(baselines.channel).toBe('search');
+    expect(baselines.proven).toBe(false);
 
     // And in the mode that does list it, the same route is proven.
-    expect(reach('/work/labels', 'office')).toMatchObject({ proven: true, channel: 'nav' });
+    expect(reach('/work/baselines', 'office')).toMatchObject({ proven: true, channel: 'nav' });
   });
 
   it('gives the tap path for anything a mode does list, so a nav row can be checked against it', () => {
@@ -153,14 +153,14 @@ describe('nothing is ever unreachable', () => {
   });
 
   it('says a hidden screen is still opened by the action that opens it, rather than sending you to search', () => {
-    // Things I need ends a request on the purchase request it just made, and
-    // it does that in Technician mode too. Telling somebody to search for a
-    // screen they were standing on is how a true setting reads as a broken one.
-    const po = reach('/work/purchases', 'technician')!;
-    expect(po.channel).toBe('opened');
-    expect(po.proven).toBe(true);
-    expect(po.chain).toEqual(['/work', '/work/needs', '/work/purchases']);
-    expect(po.sentence).toContain('Things I need still opens it');
+    // Simpro quotes carries a switch to the phone's own quotes, and it works
+    // in Technician mode too. Telling somebody to search for a screen they
+    // were standing on is how a true setting reads as a broken one.
+    const quotes = reach('/quotes', 'technician')!;
+    expect(quotes.channel).toBe('opened');
+    expect(quotes.proven).toBe(true);
+    expect(quotes.chain).toEqual(['/sites', '/site/[id]', '/quotes/simpro', '/quotes']);
+    expect(quotes.sentence).toContain('Simpro quotes still opens it');
   });
 });
 
@@ -208,13 +208,6 @@ describe('technician mode', () => {
       '/quotes',
       '/site/quote',
       '/work/baselines',
-      // A batch job that ends at a label printer, so it happens in the workshop.
-      '/work/labels',
-      // How 897 sites are going is not a question anybody answers from a plant
-      // room, and it is not actionable by the person standing in one. The site
-      // in front of them already shows its own state in full.
-      '/work/portfolio',
-      '/work/purchases',
     ]);
     expect(hiddenFrom('office')).toEqual([]);
   });
@@ -241,7 +234,7 @@ describe('technician mode', () => {
     const tech = summarise('technician');
     const office = summarise('office');
     expect(tech.total).toBe(DESTINATIONS.length);
-    expect(tech.hidden).toBe(7);
+    expect(tech.hidden).toBe(4);
     expect(office.hidden).toBe(0);
     expect(tech.listed).toBeLessThan(office.listed);
   });
@@ -277,14 +270,13 @@ describe('the grouping', () => {
     }
   });
 
-  it('leaves a technician the one planning screen they act on, and holds back the rest', () => {
+  it('leaves a technician the planning screen they act on', () => {
     // Building your own day is field work: it is done the afternoon before,
-    // from the same phone. Deciding who covers which suburb next month, and
-    // printing a batch of labels, are not, so those stay in the office.
+    // from the same phone.
     const techPlanning = navFor('technician').find((g) => g.tab === 'work')!.sections.find((s) => s.title === 'Planning');
     const officePlanning = navFor('office').find((g) => g.tab === 'work')!.sections.find((s) => s.title === 'Planning');
     expect(techPlanning!.destinations.map((d) => d.route)).toEqual(['/work/plan']);
-    expect(officePlanning!.destinations.map((d) => d.route)).toEqual(expect.arrayContaining(['/work/plan', '/work/portfolio', '/work/labels']));
+    expect(officePlanning!.destinations.map((d) => d.route)).toEqual(['/work/plan']);
   });
 
   it('keeps every section it shows populated in both modes', () => {
@@ -299,8 +291,8 @@ describe('the grouping', () => {
 
 describe('finding a screen that is not in front of you', () => {
   it('finds a hidden screen by name and says it is hidden, rather than pretending it is gone', () => {
-    const hits = searchDestinations('asset labels', 'technician');
-    expect(hits[0]!.destination.route).toBe('/work/labels');
+    const hits = searchDestinations('quotes', 'technician');
+    expect(hits[0]!.destination.route).toBe('/quotes');
     expect(hits[0]!.hidden).toBe(true);
     expect(hits[0]!.matched).toBe('name');
   });
@@ -308,7 +300,7 @@ describe('finding a screen that is not in front of you', () => {
   it('searches the whole app whatever the mode, because a trimmed menu is not a locked one', () => {
     for (const mode of APP_MODES) {
       expect(searchDestinations('quote', mode).map((h) => h.destination.route)).toContain('/site/quote');
-      expect(searchDestinations('asset labels', mode)[0]!.destination.route).toBe('/work/labels');
+      expect(searchDestinations('quotes', mode).map((h) => h.destination.route)).toContain('/quotes');
     }
   });
 

@@ -523,11 +523,10 @@ export default function ScheduleScreen() {
             <Banner
               tone="warn"
               title="Who are you in Simpro?"
-              body="Sign in, or pick yourself, to book or move your blocks."
+              body="Pick yourself to book or move your blocks."
             />
             <Rowed gap={2} style={{ marginTop: t.space(3) }}>
-              <Button title="Sign in" onPress={() => router.push('/signin')} />
-              <Button title="Pick who I am" variant="secondary" onPress={() => router.push('/whoami')} />
+              <Button title="Pick who I am" onPress={() => router.push('/whoami')} />
             </Rowed>
           </Card>
         ) : null}

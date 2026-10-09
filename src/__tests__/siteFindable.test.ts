@@ -300,7 +300,6 @@ describe('every screen that offers a site offers a way to search for it', () => 
   const ALLOWED: Record<string, string> = {
     'app/work/defects.tsx': 'an id-to-name lookup, to put a site under each defect',
     'app/work/outbound.tsx': 'an id-to-site lookup, for the rows already on screen',
-    'app/work/portfolio.tsx': 'hands every site to buildPortfolio, which draws none of them',
     'app/work/reports.tsx': 'an id-to-site lookup, to put a name under each report',
   };
 

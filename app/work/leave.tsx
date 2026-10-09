@@ -207,9 +207,9 @@ export default function BookLeaveScreen() {
         {failed ? <Banner tone="fail" title="Couldn't load your leave" body={failed} /> : null}
 
         {prefs && !employeeId ? (
-          <Card onPress={() => router.push('/signin')}>
-            <Txt weight="700">Sign in first</Txt>
-            <Txt size="sm" tone="muted">Sign in, or pick yourself, to book leave.</Txt>
+          <Card onPress={() => router.push('/whoami')}>
+            <Txt weight="700">Pick yourself first</Txt>
+            <Txt size="sm" tone="muted">Leave goes on your own Simpro schedule.</Txt>
           </Card>
         ) : null}
 

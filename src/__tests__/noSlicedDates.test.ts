@@ -194,6 +194,6 @@ describe('dates handed to a formatter', () => {
     const files = ROOTS.flatMap((r) => walk(r));
     expect(files.length).toBeGreaterThan(150);
     expect(files).toContain('src/export/occupierStatement.ts');
-    expect(files).toContain('app/work/due.tsx');
+    expect(files).toContain('app/work/plan.tsx');
   });
 });

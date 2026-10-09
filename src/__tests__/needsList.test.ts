@@ -1,6 +1,6 @@
 import {
   STATE_LABEL, groupNeeds, markOrdered, moveNeed, needHeadline, needSortKey, needSubtitle,
-  needsCsvRows, openNeedCount, orderableLines, otherWhen, parseNeedLine, sortNeeds, tickNeed,
+  needsCsvRows, openNeedCount, orderEmail, orderableLines, otherWhen, parseNeedLine, sortNeeds, tickNeed,
   withNeedState, type NeedLine,
 } from '@/domain/needsList';
 
@@ -219,5 +219,25 @@ describe('handing the list on', () => {
 
   it('has a word for every state, since a pill with no label is a coloured dot', () => {
     expect(Object.values(STATE_LABEL)).toEqual(['Needed', 'On order', 'Got it']);
+  });
+});
+
+describe('the email that asks the office to order', () => {
+  it('lists each part with its quantity, part number and site, and signs it', () => {
+    const mail = orderEmail([
+      line({ id: 'a', what: '4.5kg ABE extinguisher', quantity: 2, siteName: 'Fictional Tower' }),
+      line({ id: 'b', what: 'Flow meter', partNumber: 'FM-100' }),
+    ], 'A Technician');
+    expect(mail.subject).toBe('Parts to order for A Technician');
+    expect(mail.body).toContain('2 x 4.5kg ABE extinguisher (for Fictional Tower)');
+    expect(mail.body).toContain('1 x Flow meter (part FM-100)');
+    expect(mail.body).toContain('Thanks, A Technician');
+  });
+
+  it('leaves out lines already ordered or got', () => {
+    const mail = orderEmail([line({ id: 'a', what: 'Sounder' }), line({ id: 'b', what: 'Battery', state: 'ordered' })], '');
+    expect(mail.body).toContain('Sounder');
+    expect(mail.body).not.toContain('Battery');
+    expect(mail.subject).toBe('Parts to order');
   });
 });

@@ -174,7 +174,7 @@ export default function SitesScreen() {
                 icon={<MaterialCommunityIcons name="map-marker-radius-outline" size={20} color={t.color.text} />}
               />
               <Button title="New site" onPress={() => router.push('/site/new')} style={{ flex: 1 }} />
-              <Button title="Import" variant="secondary" onPress={() => router.push('/import')} style={{ flex: 1 }} />
+              <Button title="Import" variant="secondary" onPress={() => router.push('/config')} style={{ flex: 1 }} />
             </Rowed>
             {/*
               * On its own row rather than beside Import, because they are

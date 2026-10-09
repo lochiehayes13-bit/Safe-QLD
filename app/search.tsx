@@ -8,7 +8,7 @@ import {
   KIND_LABEL, SEARCH_HINTS, groupHits, isExact, nothingFoundWords, parseQuery, type HitGroup, type SearchHit,
 } from '@/domain/search';
 import { isPhrase, phraseWords, readPhrase } from '@/domain/findPhrase';
-import { readMode, searchDestinations, type DestinationHit } from '@/domain/appMode';
+import { searchDestinations, type DestinationHit } from '@/domain/appMode';
 import { officeEmptyState, type EmptyStateWords } from '@/domain/deviceData';
 import { describeLoadFailure } from '@/domain/loadFailure';
 import { everSynced } from '@/simpro/watermark';
@@ -111,7 +111,7 @@ export default function SearchScreen() {
       // The app's own screens answer to what was typed, not to what the
       // phrase was reduced to: "purchase orders" should still offer the
       // purchase orders screen.
-      setScreens(searchDestinations(query, readMode(prefs.appMode).mode, 4).filter((d) => !d.destination.needsContext));
+      setScreens(searchDestinations(query, 'office', 4).filter((d) => !d.destination.needsContext));
       if (!rows.length && !held) {
         setEmpty(officeEmptyState(
           { held: 0, connected: Boolean(prefs.simproClientId && prefs.simproCompanyId), everSynced: await everSynced() },
@@ -309,7 +309,6 @@ function Screens({ hits }: { hits: DestinationHit[] }) {
             <View style={{ flex: 1 }}>
               <Txt weight="700">{h.destination.label}</Txt>
               <Txt size="sm" tone="muted" numberOfLines={2}>{h.destination.blurb}</Txt>
-              {h.hidden ? <Txt size="xs" tone="faint">Hidden in this mode. Opens from here.</Txt> : null}
             </View>
             <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
           </Rowed>

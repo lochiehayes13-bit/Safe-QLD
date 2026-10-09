@@ -144,7 +144,7 @@ export default function CauseEffectScreen() {
             action={(
               <Button
                 title="Import config"
-                onPress={() => router.push({ pathname: '/import', params: { siteId } })}
+                onPress={() => router.push('/config')}
               />
             )}
           />

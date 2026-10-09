@@ -221,7 +221,6 @@ describe('every search box says it searches the suburb', () => {
     ['the leads', 'app/leads/index.tsx'],
     ['the purchase orders', 'app/orders/index.tsx'],
     ['the day planner', 'app/work/plan.tsx'],
-    ['the label sheet', 'app/work/labels.tsx'],
   ];
 
   const placeholders = (file: string): string[] => [

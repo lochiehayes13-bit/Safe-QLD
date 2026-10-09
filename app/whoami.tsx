@@ -5,11 +5,11 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { loadPrefs, patchPrefs, type Prefs } from '@/app-prefs';
 import type { EmployeeRecord } from '@/db/employeeRepo';
 import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
-import { hasSignInApplication, simproConfigFromPrefs } from '@/simpro/config';
+import { simproConfigFromPrefs } from '@/simpro/config';
 import { prefsForEmployee, prefsForNobody, repairPick, searchEmployees } from '@/simpro/identity';
 import { loadStaffList, markSignInSkipped } from '@/simpro/signInFlow';
 import { useTheme } from '@/theme';
-import { Button, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
+import { Button, Card, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
 import { showAlert } from '@/components/alert';
 
 /**
@@ -61,7 +61,6 @@ export default function WhoAmIScreen() {
 
   const shown = useMemo(() => searchEmployees(people, query), [people, query]);
   const current = people.find((p) => p.id === prefs?.simproEmployeeId);
-  const canSignIn = prefs ? hasSignInApplication(prefs) : true;
 
   const choose = async (e: EmployeeRecord | null) => {
     let next: Prefs;
@@ -158,16 +157,6 @@ export default function WhoAmIScreen() {
                   style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md }}
                 />
               </View>
-              {canSignIn ? (
-                <Button title="Sign in with Simpro instead" variant="ghost" compact onPress={() => router.push('/signin')} />
-              ) : (
-                <Rowed gap={2}>
-                  <Txt size="xs" tone="faint" style={{ flex: 1, lineHeight: 16 }}>
-                    Simpro logins are off on this build. Your name here does the same job.
-                  </Txt>
-                  <Chip label="Why" onPress={() => router.push('/signin')} />
-                </Rowed>
-              )}
               {prefs?.simproEmployeeId ? null : (
                 <Button title="Not now" variant="ghost" compact onPress={() => { void notNow(); }} />
               )}

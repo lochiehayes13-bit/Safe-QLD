@@ -6,7 +6,6 @@ import { LETTERHEAD_HEADER_DATA_URI } from '@/export/letterheadArt';
 import { company } from '@/theme/brand';
 
 import { buildLabelSheet, LABEL_STOCKS } from '@/export/assetLabels';
-import { combinedFlowCertificateHtml, type CombinedFlowInput } from '@/export/combinedFlowCertificate';
 import { criticalDefectNoticeHtml, type NoticeInput } from '@/export/criticalDefectNotice';
 import { effectivenessReportHtml, type EffectivenessReportInput } from '@/export/effectivenessReport';
 import { DEPARTMENT_NOTE, form72Html } from '@/export/form72';
@@ -148,12 +147,6 @@ const occupierInput: OccupierStatementInput = {
     createdAt: '2026-07-01T00:00:00.000Z', updatedAt: '2026-07-01T00:00:00.000Z',
   } as OccupierStatement,
   companyName: 'Safe QLD Pty Ltd', preparedBy: 'A Technician', generatedAt: AT,
-};
-
-const flowInput: CombinedFlowInput = {
-  buildingName: 'An Example Building', testDate: '2026-07-03',
-  hydrantFlowLps: 10, hydrantPressureKpa: 700,
-  equipment: [], testPoints: [], testedBy: 'A Technician',
 };
 
 /*
@@ -351,14 +344,6 @@ const DOCUMENTS: DocumentRow[] = [
       createdAt: '2026-08-10T00:00:00.000Z',
       updatedAt: '2026-08-10T00:00:00.000Z',
     }),
-    furniture: 'full',
-    page: LETTERHEAD_PAGE,
-    pageRules: 1,
-  },
-  {
-    name: 'combined flow test certificate',
-    file: 'combinedFlowCertificate.ts',
-    html: () => combinedFlowCertificateHtml(flowInput),
     furniture: 'full',
     page: LETTERHEAD_PAGE,
     pageRules: 1,

@@ -422,11 +422,10 @@ export default function ClockScreen() {
             <Banner
               tone="warn"
               title="Who are you in Simpro?"
-              body="Sign in, or pick yourself from the staff list, before clocking on."
+              body="Pick yourself from the staff list before clocking on."
             />
             <Rowed gap={2} style={{ marginTop: t.space(3) }}>
-              <Button title="Sign in" onPress={() => router.push('/signin')} />
-              <Button title="Pick who I am" variant="secondary" onPress={() => router.push('/whoami')} />
+              <Button title="Pick who I am" onPress={() => router.push('/whoami')} />
             </Rowed>
           </Card>
         ) : null}

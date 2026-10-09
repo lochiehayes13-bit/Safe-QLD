@@ -349,38 +349,6 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['find', 'search', 'lookup', 'number', 'job number', 'invoice number', 'po', 'part number', 'phone', 'anything'],
   },
   {
-    route: '/work/due', file: 'app/work/due.tsx', tab: 'today', section: 'The day',
-    label: 'Overdue and due', modes: BOTH,
-    streams: ['service'],
-    streamBecause:
-      'Routines past their tolerance window. Construction work is due on a program, not on a '
-      + 'service frequency.',
-    openedFrom: ['/work', '/shortcuts'],
-    blurb: 'Routines past their tolerance window, across every site.',
-    terms: ['due', 'overdue', 'lapsed', 'tolerance', 'schedule'],
-    keptBecause:
-      'It reads as an office list and it is one, but the Work tab lists it and it can be pinned '
-      + 'to the home screen. A row a technician can tap that lands nowhere is worse than the list '
-      + 'being there.',
-  },
-  {
-    route: '/work/promises', file: 'app/work/promises.tsx', tab: 'today', section: 'The day',
-    label: 'Promises', modes: BOTH, openedFrom: ['/work', '/shortcuts'],
-    blurb: 'What you said you would come back for, so it survives the drive home.',
-    terms: ['promise', 'come back', 'follow up', 'owe'],
-  },
-  {
-    route: '/work/recurring', file: 'app/work/recurring.tsx', tab: 'today', section: 'The day',
-    label: 'Recurring failures', modes: BOTH,
-    streams: ['service'],
-    streamBecause:
-      'Devices that keep failing across services, which is a pattern only routine servicing '
-      + 'produces.',
-    openedFrom: ['/shortcuts'],
-    blurb: 'Assets that keep failing, where replacing it a fourth time will not fix it.',
-    terms: ['recurring', 'repeat', 'keeps failing', 'again'],
-  },
-  {
     route: '/work/job/[id]', file: 'app/work/job/[id].tsx', tab: 'today', section: 'The day',
     label: 'Job', needsContext: true, modes: BOTH,
     openedFrom: ['/work/jobs', '/customer/[id]', '/quotes/simpro/[id]', '/invoices/[id]', '/search', '/orders/[id]'],
@@ -490,16 +458,8 @@ export const DESTINATIONS: readonly Destination[] = [
 
   // -- You in Simpro ---------------------------------------------------------
   {
-    route: '/signin', file: 'app/signin.tsx', tab: 'today', section: 'You in Simpro',
-    label: 'Sign in to Simpro', modes: BOTH, openedFrom: ['/settings', '/whoami'],
-    blurb:
-      'The same login as Simpro Mobile, so the app knows who you are and notes you write are '
-      + 'yours in the office system.',
-    terms: ['sign in', 'login', 'log in', 'simpro login', 'account', 'password'],
-  },
-  {
     route: '/whoami', file: 'app/whoami.tsx', tab: 'today', section: 'You in Simpro',
-    label: 'Who you are', modes: BOTH, openedFrom: ['/settings', '/signin', '/work/my-day'],
+    label: 'Who you are', modes: BOTH, openedFrom: ['/settings', '/work/my-day', '/work/clock', '/work/leave'],
     blurb:
       'Pick yourself from the office staff list. It is how a phone says whose it is without a '
       + 'login, and on a build whose Simpro application cannot sign a person in it is the way in.',
@@ -526,15 +486,6 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['new site', 'add site', 'create'],
   },
   {
-    route: '/import', file: 'app/import.tsx', tab: 'sites', section: 'Your sites',
-    label: 'Import', modes: BOTH,
-    streams: ['construction'],
-    streamBecause:
-      'Importing a register in bulk is how a new or newly documented site arrives on the phone.', openedFrom: ['/sites', '/site/[id]', '/shortcuts'],
-    blurb: 'Reads a panel configuration or an asset register, and describes what it cannot parse rather than dismissing it.',
-    terms: ['import', 'config', 'csv', 'panel file', 'register'],
-  },
-  {
     route: '/site/[id]', file: 'app/site/[id].tsx', tab: 'sites', section: 'Your sites',
     label: 'Site', needsContext: true, modes: BOTH,
     openedFrom: [
@@ -550,7 +501,7 @@ export const DESTINATIONS: readonly Destination[] = [
   // way past; these six screens write nothing until somebody says so.
   {
     route: '/config', file: 'app/config/index.tsx', tab: 'sites', section: 'Config Explorer',
-    label: 'Config Explorer', modes: BOTH, openedFrom: ['/sites', '/import', '/shortcuts'],
+    label: 'Config Explorer', modes: BOTH, openedFrom: ['/sites', '/shortcuts', '/site/[id]'],
     blurb: 'Open a panel configuration and read it on the phone. Nothing is written into a site.',
     terms: ['config', 'configuration', 'panel file', 'nle', 'pci', 'ffp', 'util', 'loop explorer',
       'verifire', 'smartconfig', 'config manager', 'open a config'],
@@ -878,12 +829,6 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['hydrant', 'flow', 'pressure', 'booster', 'lps', 'kpa'],
   },
   {
-    route: '/tools/flow-certificate', file: 'app/tools/flow-certificate.tsx', tab: 'tools', section: 'Calculators',
-    label: 'Flow certificate', modes: BOTH, openedFrom: ['/tools'],
-    blurb: 'The combined sprinkler and hydrant certificate, with the litres-per-minute and litres-per-second mix-up done on the page rather than in your head.',
-    terms: ['flow certificate', 'combined', 'sprinkler', 'hydrant', 'pump', 'duty'],
-  },
-  {
     route: '/tools/extinguisher', file: 'app/tools/extinguisher.tsx', tab: 'tools', section: 'Calculators',
     label: 'Extinguishers', modes: BOTH, openedFrom: ['/tools'],
     blurb: 'What it is and what it must never be pointed at, when its next test falls, and whether it is still full.',
@@ -934,12 +879,6 @@ export const DESTINATIONS: readonly Destination[] = [
     label: 'Defect wording', modes: BOTH, openedFrom: ['/tools'],
     blurb: 'The coded wording that goes on a report, and the work that clears it.',
     terms: ['defect', 'wording', 'code', 'critical', 'rectification'],
-  },
-  {
-    route: '/catalogue', file: 'app/catalogue/index.tsx', tab: 'tools', section: 'Reference',
-    label: 'Parts', modes: BOTH, openedFrom: ['/shortcuts', '/tools'],
-    blurb: 'Part numbers, brands and descriptions, searched all at once because you only know one of them.',
-    terms: ['part', 'catalogue', 'part number', 'brand', 'spares'],
   },
 
   // -- Work ------------------------------------------------------------------
@@ -1016,7 +955,7 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/quotes/simpro', file: 'app/quotes/simpro.tsx', tab: 'work', section: 'Records',
-    label: 'Simpro quotes', modes: BOTH, openedFrom: ['/quotes', '/shortcuts', '/customer/[id]', '/site/[id]'],
+    label: 'Simpro quotes', modes: BOTH, openedFrom: ['/quotes', '/customer/[id]', '/site/[id]'],
     blurb: 'The office\'s quotes as Simpro holds them: open, approved, and the job each one became.',
     terms: ['simpro quotes', 'office quotes', 'quote number', 'approved', 'converted', 'sell'],
     keptBecause:
@@ -1127,25 +1066,13 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/work/needs', file: 'app/work/needs.tsx', tab: 'work', section: 'Parts and stock',
-    label: 'Things I need', modes: BOTH, openedFrom: ['/work', '/shortcuts', '/work/purchases'],
+    label: 'Things I need', modes: BOTH, openedFrom: ['/work', '/shortcuts'],
     blurb: 'The running list of parts to get, split into what is wanted now and what is for work still coming.',
     terms: ['need', 'needs', 'parts', 'order', 'shopping list', 'to get', 'checklist', 'flow meter'],
     keptBecause:
       'A list of parts to buy reads as office work and is not: it is written on site by the person '
       + 'who found the thing missing, and every one of these lines currently lives on a dashboard or '
       + 'in somebody\'s phone until it is forgotten.',
-  },
-  {
-    route: '/work/purchases', file: 'app/work/purchases.tsx', tab: 'work', section: 'Parts and stock',
-    label: 'Purchase requests', modes: OFFICE, openedFrom: ['/work', '/work/needs'],
-    // Raising a request from Things I need lands on this screen, in Technician
-    // mode too — hiding the row must not break the middle of that action.
-    stillOpenedFrom: '/work/needs',
-    blurb: 'Parts to order, queued until the phone has signal.',
-    terms: ['purchase', 'order', 'request', 'parts', 'buy'],
-    hiddenBecause:
-      'Ordering is the office\'s job. You still raise a request from Things I need; this is '
-      + 'the list of everybody\'s requests.',
   },
   {
     route: '/orders', file: 'app/orders/index.tsx', tab: 'work', section: 'Parts and stock',
@@ -1179,19 +1106,6 @@ export const DESTINATIONS: readonly Destination[] = [
       + 'it out commits nobody to anything. What the company pays for the part is not on the phone at all.',
   },
   {
-    route: '/work/portfolio', file: 'app/work/portfolio.tsx', tab: 'work', section: 'Planning',
-    label: 'Portfolio health', modes: OFFICE,
-    streams: ['service'],
-    streamBecause:
-      'Portfolio health reads the servicing position across every site at once.', openedFrom: ['/work'],
-    blurb: 'How the whole book is going, with the coverage figure printed before any health figure.',
-    terms: ['portfolio', 'health', 'overview', 'dashboard', 'coverage', 'how are we going'],
-    hiddenBecause:
-      'How 897 sites are going is not a question anybody answers from a plant room, and it is not '
-      + 'actionable by the person standing in one. The site in front of you already shows its own '
-      + 'state in full.',
-  },
-  {
     route: '/work/plan', file: 'app/work/plan.tsx', tab: 'work', section: 'Planning',
     label: 'Plan work', modes: BOTH, openedFrom: ['/work'],
     blurb:
@@ -1199,18 +1113,6 @@ export const DESTINATIONS: readonly Destination[] = [
       + 'whether anyone clocked on, how many assets of each type, and whether the client has it '
       + 'locked in — then put the day on your Simpro schedule. The month planner is the second tab.',
     terms: ['plan', 'planner', 'day', 'build my day', 'month', 'schedule', 'capacity', 'last service', 'history'],
-  },
-  {
-    route: '/work/labels', file: 'app/work/labels.tsx', tab: 'work', section: 'Planning',
-    label: 'Asset labels', modes: OFFICE,
-    streams: ['construction'],
-    streamBecause:
-      'Labelling a register is handover work, done once when the devices go in.', openedFrom: ['/work'],
-    blurb: 'Issues numbers to untagged assets and prints the sheet.',
-    terms: ['labels', 'tags', 'print', 'numbering', 'untagged'],
-    hiddenBecause:
-      'A batch job that ends at a label printer, so it happens in the workshop and not on site. '
-      + 'The numbers it issues are what you scan afterwards.',
   },
 
   {
@@ -1226,12 +1128,6 @@ export const DESTINATIONS: readonly Destination[] = [
     label: 'Settings', root: true, modes: BOTH, openedFrom: [],
     blurb: 'You, the office system, the rate card, storage, and what this device is holding.',
     terms: ['settings', 'setup', 'preferences', 'sync', 'simpro'],
-  },
-  {
-    route: '/settings/mode', file: 'app/settings/mode.tsx', tab: 'settings', section: 'Setup',
-    label: 'Technician or office', modes: BOTH, openedFrom: ['/settings'],
-    blurb: 'Picks which of the two views this device shows, and lists exactly what each one holds back and why.',
-    terms: ['mode', 'technician', 'office', 'hide', 'simplify', 'view'],
   },
 ];
 

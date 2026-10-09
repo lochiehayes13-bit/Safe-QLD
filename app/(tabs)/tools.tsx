@@ -24,7 +24,6 @@ const FIRE: ToolDef[] = [
   { href: '/tools/extinguisher', icon: 'fire-extinguisher', title: 'Extinguishers', body: 'Type, next test and weight check.' },
   { href: '/tools/emergency-lighting', icon: 'lightbulb-outline', title: 'Emergency lighting', body: 'Discharge, exit signs, battery age and spacing.' },
   { href: '/tools/hydrant', icon: 'fire-hydrant', title: 'Hydrant flow test', body: 'Flow, supply at brigade pressure, and the duty.' },
-  { href: '/tools/flow-certificate', icon: 'certificate-outline', title: 'Combined flow certificate', body: 'Sprinkler and hydrant duty on one page.' },
   { href: '/tools/hose-reel', icon: 'hydro-power', title: 'Hose reels', body: 'Reach, flow and next service.' },
   { href: '/tools/fire-door', icon: 'door-closed', title: 'Fire and smoke doors', body: 'Tag, gaps, close and latch.' },
   { href: '/tools/spl', icon: 'volume-high', title: 'Sound level', body: 'Is the warning loud enough in this room?' },
@@ -50,7 +49,6 @@ const REFERENCE: ToolDef[] = [
   { href: '/tools/routines', icon: 'clipboard-list-outline', title: 'Service routines', body: 'What each routine checks, and how often.' },
   { href: '/tools/defects', icon: 'alert-circle-outline', title: 'Defect wording', body: 'Report wording and fix for each defect code.' },
   { href: '/scan', icon: 'qrcode-scan', title: 'Scan a tag', body: 'Open an asset from its label.' },
-  { href: '/catalogue', icon: 'package-variant-closed', title: 'Parts catalogue', body: 'Supplier part numbers and specs.' },
 ];
 
 function Section({ title, tools }: { title: string; tools: ToolDef[] }) {

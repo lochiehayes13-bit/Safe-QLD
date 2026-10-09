@@ -334,9 +334,9 @@ function DayBuilder() {
       {failed ? <Banner tone="fail" title="Could not read the sites" body={failed} /> : null}
 
       {prefs && !employeeId ? (
-        <Card onPress={() => router.push('/signin')}>
-          <Txt weight="700">Sign in as yourself to put a day on the schedule</Txt>
-          <Txt size="sm" tone="muted">The day can still be built and read; booking it needs to know whose schedule it goes on.</Txt>
+        <Card onPress={() => router.push('/whoami')}>
+          <Txt weight="700">Pick yourself to book a day</Txt>
+          <Txt size="sm" tone="muted">You can still build the day.</Txt>
         </Card>
       ) : null}
 

@@ -347,6 +347,22 @@ export function orderableLines(lines: readonly NeedLine[]): OrderableLine[] {
 }
 
 /**
+ * The email that asks the office to order what is wanted now.
+ *
+ * One line per part, with the part number where there is one and the site it
+ * is for, so the person ordering does not have to ring back to ask.
+ */
+export function orderEmail(lines: readonly NeedLine[], from: string): { subject: string; body: string } {
+  const rows = orderableLines(lines).map((l) =>
+    `${l.quantity} x ${l.description}${l.partNumber ? ` (part ${l.partNumber})` : ''}`);
+  const who = from.trim();
+  return {
+    subject: `Parts to order${who ? ` for ${who}` : ''}`,
+    body: [`Please order:`, '', ...rows, '', who ? `Thanks, ${who}` : 'Thanks'].join('\n'),
+  };
+}
+
+/**
  * The list as a spreadsheet the office can work from.
  *
  * Everything, including what has already been got: a list that silently left

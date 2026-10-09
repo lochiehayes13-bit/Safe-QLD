@@ -6,7 +6,6 @@ import {
 } from '@/domain/outboundWork';
 import { qldDate as quoteQldDate } from '@/domain/quote';
 import { qldDate as planQldDate } from '@/domain/workPlan';
-import { qldToday } from '@/domain/portfolio';
 import { qldCalendarDate } from '@/export/form72';
 import { formatAuDate } from '@/export/sheets';
 
@@ -201,7 +200,6 @@ describe('every spelling of the Queensland day agrees', () => {
       expect({ iso, from: 'quote', day: quoteQldDate(iso) }).toEqual({ iso, from: 'quote', day });
       expect({ iso, from: 'workPlan', day: planQldDate(iso) }).toEqual({ iso, from: 'workPlan', day });
       expect({ iso, from: 'form72', day: qldCalendarDate(iso) }).toEqual({ iso, from: 'form72', day });
-      expect({ iso, from: 'portfolio', day: qldToday(iso) }).toEqual({ iso, from: 'portfolio', day });
     }
   });
 

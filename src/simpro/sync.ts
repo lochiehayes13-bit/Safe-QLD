@@ -19,7 +19,7 @@ import { addDays, scheduleWindow } from '@/domain/myDay';
 import { qldIsoDay } from '@/domain/qldTime';
 import {
   upsertJob, getJob, enqueueSync, pendingSync, pendingSyncCount, markSynced, markSyncFailed, markSyncUnknown, abandonSync,
-  claimSync, releaseSync, recoverSending, setPurchaseStatus, type JobRecord,
+  claimSync, releaseSync, recoverSending, type JobRecord,
 } from '@/db/opsRepo';
 import {
   getQuote, heldJobExternalIds, invoiceRowIsWhole, jobDetailIsStale, jobRowFromSimpro, jobsWantingDetail,
@@ -1566,11 +1566,6 @@ export async function queueJobNote(payload: JobNotePayload, options: { contentKe
   return row;
 }
 
-export async function queuePurchaseOrder(payload: PurchaseOrderPayload): Promise<void> {
-  await enqueueSync('purchase-order', payload);
-  flushSoon();
-}
-
 /**
  * Queues one photograph for a job's attachments.
  *
@@ -1748,9 +1743,12 @@ export async function flushQueue(config: SimproConfig): Promise<FlushResult> {
         // just because the read happened before the first went out.
         if (key) markersOnJob.get(p.jobId)?.add(key);
       } else if (item.kind === 'purchase-order') {
-        const p = payload as PurchaseOrderPayload;
-        const order = await api.createPurchaseOrder({ ...p, notes: key ? withMarker(p.notes, key) : p.notes });
-        if (p.requestId) await setPurchaseStatus(p.requestId, 'ordered', order.id);
+        // Ordering from the phone is off: the order body was never proven
+        // against the live build and does not match the shape Simpro reads
+        // back. A row queued before then is closed, not posted.
+        failed++;
+        await abandonSync(item.id, 'Ordering from the app is off. Email the office from Things I need.');
+        continue;
       } else if (item.kind === 'asset-test') {
         const p = payload as OutboundAssetTest;
         await api.postAssetTest(p.externalAssetId, p.result, p.testedAt, p.serviceLevelId);

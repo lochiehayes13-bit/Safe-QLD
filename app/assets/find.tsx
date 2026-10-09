@@ -188,7 +188,7 @@ export default function FindScreen() {
                 <>
                   <H2>Parts</H2>
                   {parts.map((c) => (
-                    <Card key={c.id} onPress={() => router.push({ pathname: '/catalogue', params: { q: c.partNumber } })}>
+                    <Card key={c.id} onPress={() => router.push({ pathname: '/office-catalogue', params: { q: c.partNumber } })}>
                       <Rowed gap={2}>
                         <Txt mono size="sm" tone="accent" weight="700">{c.partNumber}</Txt>
                         <View style={{ flex: 1 }}>
