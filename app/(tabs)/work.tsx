@@ -53,7 +53,7 @@ export default function WorkScreen() {
       rows: [
         { label: 'Waiting to send', sub: 'Queued work and finished services', icon: 'cloud-upload-outline', href: '/work/outbound' },
         { label: 'Timesheets', sub: 'Your weekly hours', icon: 'calendar-clock-outline', href: '/work/timesheets', badge: counts.timesheetsDraft },
-        { label: 'Test sheets', sub: 'Service reports', icon: 'file-document-outline', href: '/work/reports', badge: counts.reportsDraft },
+        { label: 'Test sheets', sub: 'By site and date', icon: 'file-document-outline', href: '/work/reports', badge: counts.reportsDraft },
         { label: 'Quotes', sub: 'Out with clients, and about to lapse', icon: 'file-sign', href: '/quotes' },
         { label: 'Occupier statements', sub: 'Every site, closest deadline first', icon: 'file-certificate-outline', href: '/occupier' },
         { label: 'Baseline data', sub: 'Commissioning records', icon: 'clipboard-text-outline', href: '/work/baselines', badge: counts.baselines },

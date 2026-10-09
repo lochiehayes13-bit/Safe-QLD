@@ -5,6 +5,7 @@ import {
   type ReportBundle,
 } from './sheets';
 import { qldIsoDay } from '@/domain/qldTime';
+import { frequencyLabel } from '@/domain/testSheet';
 import { brand } from '@/theme/brand';
 import { letterheaded } from './letterhead';
 
@@ -230,7 +231,7 @@ export function serviceReportHtml(
 
 <table class="meta">
   ${jobNumber ? `<tr><td>Customer job no.</td><td>${esc(jobNumber)}</td></tr>` : ''}
-  <tr><td>Service type</td><td>${esc(report.frequency)}</td></tr>
+  <tr><td>Service type</td><td>${esc(frequencyLabel(report.frequency))}</td></tr>
   <tr><td>Service date</td><td>${esc(formatAuDate(report.serviceDate))}</td></tr>
   <tr><td>Panel</td><td>${esc(panel ? `${panel.name}${panel.model ? ` (${panel.model})` : ''}` : 'All panels on site')}</td></tr>
   <tr><td>Client</td><td>${esc(reportCustomer(b))}</td></tr>

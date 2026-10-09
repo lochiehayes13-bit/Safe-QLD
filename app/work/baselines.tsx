@@ -32,13 +32,21 @@ export default function BaselinesScreen() {
       setSites(new Map(s.map((x) => [x.id, x])));
     } catch (e) {
       setRecords([]);
-      setFailed(describeLoadFailure(e, 'the baseline records on this device'));
+      setFailed(describeLoadFailure(e, 'the baseline records'));
     }
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const create = async () => {
+    try {
+      await startOne();
+    } catch (e) {
+      showAlert('Not started', describeActionFailure(e, 'start a baseline record'));
+    }
+  };
+
+  const startOne = async () => {
     const all = await listSitePicks();
     if (!all.length) {
       // Not "add a site first": on a device that has never been connected —
@@ -84,10 +92,6 @@ export default function BaselinesScreen() {
       <>
         <Stack.Screen options={{ title: 'Which site?' }} />
         <Screen>
-          <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-            Baseline data records what a system read when it was known good, so later tests have
-            something to be compared against. Pick the building this one is for.
-          </Txt>
           <SitePicker
             sites={picking}
             onChange={(siteId: string) => {
@@ -97,12 +101,12 @@ export default function BaselinesScreen() {
                   const rec = await createBaseline(siteId);
                   router.push({ pathname: '/baseline/[id]', params: { id: rec.id } });
                 } catch (e) {
-                  showAlert('Could not start it', describeActionFailure(e, 'start a baseline record'));
+                  showAlert('Not started', describeActionFailure(e, 'start a baseline record'));
                 }
               })();
             }}
           />
-          <Button title="Never mind" variant="ghost" onPress={() => setPicking(null)} />
+          <Button title="Cancel" variant="ghost" onPress={() => setPicking(null)} />
         </Screen>
       </>
     );
@@ -117,16 +121,21 @@ export default function BaselinesScreen() {
           keyExtractor={(r) => r.id}
           contentContainerStyle={{ padding: t.space(4), gap: t.space(3), paddingBottom: t.space(20) }}
           ListHeaderComponent={(
-            <>
-              <Button title="New baseline record" onPress={create} />
-              {failed ? <Banner tone="fail" title="This list could not be read" body={failed} /> : null}
-            </>
+            <View style={{ gap: t.space(3) }}>
+              <Button title="New baseline record" onPress={() => { void create(); }} />
+              {failed ? (
+                <>
+                  <Banner tone="fail" title="List not loaded" body={failed} />
+                  <Button title="Try again" variant="secondary" onPress={() => { void load(); }} />
+                </>
+              ) : null}
+            </View>
           )}
           ListEmptyComponent={failed ? null : (
             <EmptyState
-          icon="file-table-outline"
+              icon="file-table-outline"
               title="No baseline data yet"
-              body="Baseline data records what the system looked like when it was commissioned, so later services have something to test against."
+              body="Start one here or from a site."
             />
           )}
           renderItem={({ item }) => {
@@ -137,7 +146,7 @@ export default function BaselinesScreen() {
                   <View style={{ flex: 1 }}>
                     <Txt weight="700" numberOfLines={1}>{item.premisesName || sites.get(item.siteId)?.name || 'Untitled'}</Txt>
                     <Txt size="sm" tone="muted">{item.systemType || 'System not recorded'}</Txt>
-                    <Txt size="sm" tone="faint">{formatAuDate(item.testDate)}</Txt>
+                    <Txt size="sm" tone="faint">{item.testDate ? formatAuDate(item.testDate) : 'No test date'}</Txt>
                   </View>
                   <Chip
                     label={`${Math.round(c.fraction * 100)}%`}

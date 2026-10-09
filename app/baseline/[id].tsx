@@ -10,13 +10,14 @@ import {
   addZoneRow, addSpeakerCircuit, canDropLastRow, ZONE_TEST_ROW_COUNT, SPEAKER_CIRCUIT_COUNT,
 } from '@/domain/baseline';
 import { autofillBaseline } from '@/services/baselineAutofill';
+import { dayBox, readDayBox } from '@/domain/dayEntry';
 import type { Site } from '@/domain/types';
 import { baselineSheet } from '@/export/safeqldForms';
 import { shareFile, writeXlsx } from '@/export/files';
 import { notSharedNotice } from '@/export/shareOutcome';
 import { useTheme } from '@/theme';
 import {
-  Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Segmented, Txt,
+  Banner, Button, Card, Divider, Field, Label, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
 import { loadPrefs } from '@/app-prefs';
@@ -102,10 +103,10 @@ export default function BaselineScreen() {
       await saveBaseline(baseline);
       showAlert(
         filled.length ? 'Filled from site data' : 'Nothing to fill',
-        filled.length ? filled.join('\n') : 'Every field the app could fill already has something in it.',
+        filled.length ? filled.join('\n') : 'Every field site data can fill already has a value.',
       );
     } catch (e) {
-      showAlert('Could not fill from the site', describeActionFailure(e, 'fill this form from the site'));
+      showAlert('Not filled', describeActionFailure(e, 'fill this form from the site'));
     } finally {
       setBusy(false);
     }
@@ -135,7 +136,7 @@ export default function BaselineScreen() {
         showAlert(notice.title, notice.body);
       }
     } catch (e) {
-      showAlert('Could not export', describeActionFailure(e, 'export this baseline record'));
+      showAlert('Not exported', describeActionFailure(e, 'export this baseline record'));
     } finally {
       setBusy(false);
     }
@@ -281,14 +282,14 @@ export default function BaselineScreen() {
               <Button
                 title="Add a circuit"
                 variant="ghost"
-                icon="plus"
+                icon={<MaterialCommunityIcons name="plus" size={16} color={t.color.accentText} />}
                 onPress={() => update({ speakerCircuits: addSpeakerCircuit(b.speakerCircuits) })}
               />
               {canDropLastRow(b.speakerCircuits, SPEAKER_CIRCUIT_COUNT) ? (
                 <Button
                   title={`Remove zone ${b.speakerCircuits[b.speakerCircuits.length - 1]!.zone}`}
                   variant="ghost"
-                  icon="minus"
+                  icon={<MaterialCommunityIcons name="minus" size={16} color={t.color.accentText} />}
                   onPress={() => update({ speakerCircuits: b.speakerCircuits.slice(0, -1) })}
                 />
               ) : null}
@@ -340,7 +341,7 @@ export default function BaselineScreen() {
                 <Field label="Capacity" value={b.batteryAh} onChangeText={(v) => update({ batteryAh: v })} keyboardType="decimal-pad" suffix="Ah" />
               </View>
               <View style={{ flex: 1 }}>
-                <Field label="Standby" value={b.batteryStandbyHours} onChangeText={(v) => update({ batteryStandbyHours: v })} keyboardType="numeric" suffix="hr" />
+                <Field label="Standby" value={b.batteryStandbyHours} onChangeText={(v) => update({ batteryStandbyHours: v })} keyboardType="decimal-pad" suffix="hr" />
               </View>
             </Rowed>
             {/*
@@ -367,21 +368,18 @@ export default function BaselineScreen() {
             />
             {!b.fullAlarmCurrentA.trim() || !b.quiescentCurrentA.trim() ? (
               <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-                Measure the quiescent and full alarm currents first — the calculator has nothing to size against
-                without them.
+                Enter both currents first.
               </Txt>
             ) : null}
-            <Field
+            <DayField
               label="Battery manufacture date"
               value={b.batteryManufactureDate}
-              onChangeText={(v) => update({ batteryManufactureDate: v })}
-              placeholder="YYYY-MM-DD"
+              onChange={(day) => update({ batteryManufactureDate: day })}
             />
-            <Field
+            <DayField
               label="Battery install date"
               value={b.batteryInstallDate}
-              onChangeText={(v) => update({ batteryInstallDate: v })}
-              placeholder="YYYY-MM-DD"
+              onChange={(day) => update({ batteryInstallDate: day })}
             />
           </>
         ))}
@@ -404,7 +402,7 @@ export default function BaselineScreen() {
             <Banner
               tone="info"
               title={`Total ${zoneQtyTotal(b.zoneResults)} devices`}
-              body="Fill from site fills this table straight from the imported device list."
+              body="Fill from site uses the imported panel."
             />
             {b.zoneResults.map((z, i) => (
               <View key={z.zone} style={{ gap: t.space(1.5) }}>
@@ -443,28 +441,25 @@ export default function BaselineScreen() {
               <Button
                 title="Add a zone"
                 variant="ghost"
-                icon="plus"
+                icon={<MaterialCommunityIcons name="plus" size={16} color={t.color.accentText} />}
                 onPress={() => update({ zoneResults: addZoneRow(b.zoneResults) })}
               />
               {canDropLastRow(b.zoneResults, ZONE_TEST_ROW_COUNT) ? (
                 <Button
                   title={`Remove Z${b.zoneResults[b.zoneResults.length - 1]!.zone}`}
                   variant="ghost"
-                  icon="minus"
+                  icon={<MaterialCommunityIcons name="minus" size={16} color={t.color.accentText} />}
                   onPress={() => update({ zoneResults: b.zoneResults.slice(0, -1) })}
                 />
               ) : null}
             </Rowed>
-            <Txt size="xs" tone="faint">
-              The printed form stops at {ZONE_TEST_ROW_COUNT} zones because that is what fits the page. Add as many as the building has.
-            </Txt>
           </>
         ))}
 
         {section('SIGN OFF', (
           <>
             <Field label="Tester name(s)" value={b.testerNames} onChangeText={(v) => update({ testerNames: v })} autoCapitalize="words" />
-            <Field label="Test date" value={b.testDate} onChangeText={(v) => update({ testDate: v })} placeholder="YYYY-MM-DD" />
+            <DayField label="Test date" value={b.testDate} onChange={(day) => update({ testDate: day })} />
           </>
         ))}
 
@@ -483,10 +478,36 @@ export default function BaselineScreen() {
 
         <Divider />
         <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-          Saved on this device as you type. Export produces the Safe QLD baseline data workbook.
+          Saves as you type. Export makes the Safe QLD baseline workbook.
         </Txt>
       </Screen>
     </>
+  );
+}
+
+/**
+ * A date box: dd/mm/yyyy on screen, the ISO day stored.
+ *
+ * What is typed stays in the box as typed and is stored only once it reads as
+ * a day; an emptied box stores ''.
+ */
+function DayField({ label, value, onChange }: { label: string; value: string; onChange: (day: string) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const read = draft === null ? null : readDayBox(draft);
+  return (
+    <Field
+      label={label}
+      value={draft ?? dayBox(value)}
+      onChangeText={(v) => {
+        setDraft(v);
+        const next = readDayBox(v);
+        if ('day' in next) onChange(next.day ?? '');
+      }}
+      onBlur={() => { if (read && !('why' in read)) setDraft(null); }}
+      placeholder="dd/mm/yyyy"
+      keyboardType="numeric"
+      hint={read && 'why' in read ? read.why : undefined}
+    />
   );
 }
 

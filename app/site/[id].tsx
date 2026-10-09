@@ -37,6 +37,7 @@ import { RecordGate } from '@/components/RecordGate';
 import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { showsPanelRows, siteCanBeDeleted } from '@/domain/sitePage';
 import { showAlert } from '@/components/alert';
+import { newTestSheetInput } from '@/domain/testSheet';
 
 /** Site detail — the hub every other screen hangs off. */
 export default function SiteScreen() {
@@ -153,19 +154,14 @@ export default function SiteScreen() {
     if (!site) return;
     setCreating(true);
     try {
-      const report = await createReport({
-        siteId: site.id,
-        panelId: panels.length === 1 ? panels[0]!.id : undefined,
-        title: `Service report — ${site.name}`,
-        frequency: 'annual',
-        // The day the service is being carried out in Queensland, which is
-        // what the report is dated with and what it is later found by.
-        serviceDate: qldIsoDay(nowIso()) ?? '',
-        status: 'draft',
-      });
+      // Dated with the Queensland day the service is carried out, which is
+      // what the sheet is later found by.
+      const report = await createReport(newTestSheetInput({
+        siteId: site.id, panelIds: panels.map((p) => p.id), today: qldIsoDay(nowIso()) ?? '',
+      }));
       router.push({ pathname: '/report/[id]', params: { id: report.id } });
     } catch (e) {
-      showAlert('Could not start the test sheet', describeActionFailure(e, 'start the test sheet'));
+      showAlert("Couldn't start the test sheet", describeActionFailure(e, 'start the test sheet'));
     } finally {
       setCreating(false);
     }

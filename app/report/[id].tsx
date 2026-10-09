@@ -11,18 +11,22 @@ import {
 import { queryAssets, setTestSheetEventDetail, type AssetRecord } from '@/db/assetRepo';
 import { getCustomer, listJobsFor, readJobJson, scheduledJobExternalIds } from '@/db/mirrorRepo';
 import { queueDefectNote, type JobRecord } from '@/db/opsRepo';
-import type { CheckRow, Defect, Panel, ServiceReport, Site, TestResult, TestRow } from '@/domain/types';
+import type { CheckRow, Defect, Panel, ServiceFrequency, ServiceReport, Site, TestResult, TestRow } from '@/domain/types';
 import { isServiceable, testRowsFromAssets } from '@/domain/formsFromAssets';
 import { jobToOffer, type JobOffer } from '@/domain/reportJobMatch';
 import { jobIsOpen } from '@/domain/jobPresentation';
 import { qldIsoDay } from '@/domain/qldTime';
+import { TEST_SHEET_FREQUENCIES, frequencyLabel, titleAfterFrequencyChange } from '@/domain/testSheet';
+import { dayBox, readDayBox } from '@/domain/dayEntry';
 import { DEVICE_TYPE_LABEL, DEFAULT_TEST_METHOD } from '@/parsers/deviceType';
 import { SERVICE_ROUTINES, type ServiceRoutine } from '@/seed/serviceRoutines';
 import { assetTypeById, type SystemKind } from '@/seed/assetTypes';
 import {
   SEVERITY_LABEL, defectsForSystem, searchDefects, type DefectCode,
 } from '@/seed/defectLibrary';
-import { checkSheet, defectSheet, reportCoverSheet, testResultSheet, type ReportBundle } from '@/export/sheets';
+import {
+  checkSheet, defectSheet, formatAuDate, reportCoverSheet, testResultSheet, type ReportBundle,
+} from '@/export/sheets';
 import { serviceReportHtml } from '@/export/pdf';
 import { shareFile, writePdf, writeXlsx } from '@/export/files';
 import { notSharedNotice } from '@/export/shareOutcome';
@@ -144,7 +148,7 @@ export default function ReportScreen() {
       setTechnician(r.technicianName ?? prefs.technicianName);
       setOffer(jobToOffer(siteJobs, { siteId: r.siteId, today, scheduledToday: new Set(onSchedule) }));
     } catch (e) {
-      setFailed(describeLoadFailure(e, 'this service report'));
+      setFailed(describeLoadFailure(e, 'this test sheet'));
     }
   }, [id]);
 
@@ -205,34 +209,32 @@ export default function ReportScreen() {
       return {
         jobId: picked,
         why: closed
-          ? `Defects raised here go on Simpro job ${picked}, the job this sheet is filed under — but the office has `
-            + 'closed that job off, so a note on it may not be picked up. Change the job under Finish if this sheet '
-            + 'belongs to a job that is still open.'
-          : `Defects raised here go on Simpro job ${picked}, the job this sheet is filed under. Each one is queued as `
-            + 'its own note and sent as soon as this phone has signal.',
+          ? `Defects go to job ${picked}, which is closed. Change the job under Finish if needed.`
+          : `Defects go to job ${picked}.`,
       };
     }
     if (open.length === 1) {
       const only = open[0]!.externalId!;
       return {
         jobId: only,
-        why: `Defects raised here go on Simpro job ${only} — the only job the office has open at this site. Pick the `
-          + 'job under Finish if this sheet belongs to a different one.',
+        why: `Defects go to job ${only}, the only open job here.`,
       };
     }
     if (open.length > 1) {
       return {
-        why: `The office has ${open.length} jobs open at this site, so the app will not pick one: a fault filed `
-          + 'against the wrong attendance is somebody else\'s work. Defects raised now stay on this phone. Pick the '
-          + 'job under Finish and the ones you raise after that go up on it.',
+        why: `${open.length} open jobs here: pick one under Finish. Until then defects stay on this phone.`,
       };
     }
     return {
-      why: 'The office has no open job at this site, so there is nowhere in Simpro to put a defect raised here. It '
-        + 'still goes on the site\'s defect list and onto the customer\'s report — ring it through, or ask the office '
-        + 'to raise a job.',
+      why: 'No open job here. Defects stay on this phone: ring the office.',
     };
   }, [jobs, report]);
+
+  /** The site's open jobs, named in the job number hint when more than one could be meant. */
+  const openJobNumbers = useMemo(
+    () => jobs.filter((j) => j.externalId && jobIsOpen(j)).map((j) => j.externalId!).slice(0, 6),
+    [jobs],
+  );
 
   /**
    * The row whose failure has not been written up yet.
@@ -338,15 +340,14 @@ export default function ReportScreen() {
           // This is the one thing worth interrupting for, because a technician
           // who is not told will assume the office is dealing with it.
           showAlert(
-            'Defect raised, the office not told',
-            `${describeActionFailure(e, `queue the note for job ${defectJob.jobId}`)}\n\n`
-            + 'The defect is recorded on this phone and on the report. Ring the office about this one.',
+            'Defect saved, office not told',
+            `${describeActionFailure(e, `queue the note for job ${defectJob.jobId}`)}\n\nRing the office about this one.`,
           );
         }
       }
       await load();
     } catch (e) {
-      showAlert('Defect not raised', describeActionFailure(e, 'raising the defect'));
+      showAlert('Defect not raised', describeActionFailure(e, 'raise the defect'));
     }
   };
 
@@ -402,15 +403,14 @@ export default function ReportScreen() {
               : 'This panel has no points yet. Import its configuration first.')
             : assets.length
               ? 'Every asset in the register is already on this sheet.'
-              : 'The register holds no equipment for this site and no panel configuration has been imported. '
-                + 'Sync from Simpro, import a register, or add assets to the site first.',
+              : 'No equipment on record for this site. Sync or import a register first.',
         );
         return;
       }
-      showAlert('Added', `${added.join(' and ')} added to the test sheet.`);
+      showAlert('Added', `${added.join(' and ')} added.`);
       void load();
     } catch (e) {
-      showAlert('Could not add the devices', describeActionFailure(e, 'add the devices to this sheet'));
+      showAlert('Devices not added', describeActionFailure(e, 'add the devices to this sheet'));
     } finally {
       setBusy(false);
     }
@@ -419,16 +419,21 @@ export default function ReportScreen() {
   const addRoutine = async (routine: ServiceRoutine) => {
     if (!report) return;
     const systemChecks = routine.tests.filter((x) => !x.assetTypeId);
-    await addCheckRows(
-      report.id,
-      systemChecks.map((c, i) => ({
-        section: c.section,
-        label: c.label,
-        result: 'untested' as const,
-        unit: c.measurementUnit,
-        sortIndex: checks.length + i,
-      })),
-    );
+    try {
+      await addCheckRows(
+        report.id,
+        systemChecks.map((c, i) => ({
+          section: c.section,
+          label: c.label,
+          result: 'untested' as const,
+          unit: c.measurementUnit,
+          sortIndex: checks.length + i,
+        })),
+      );
+    } catch (e) {
+      showAlert('Checks not added', describeActionFailure(e, 'add the checks'));
+      return;
+    }
     void load();
   };
 
@@ -444,13 +449,20 @@ export default function ReportScreen() {
     record: report,
     setRecord: setReport,
     write: (next, patch) => updateReport(next.id, patch),
-    what: 'report',
+    what: 'test sheet',
     reload: load,
   });
 
   const patchReport = (patch: Partial<ServiceReport>) => {
     if (patch.technicianName !== undefined) setTechnician(patch.technicianName);
     void applyReport(patch);
+  };
+
+  /** A title still on the default follows the frequency, so a monthly sheet is not titled yearly. */
+  const setFrequency = (next: ServiceFrequency) => {
+    if (!report || next === report.frequency) return;
+    const title = titleAfterFrequencyChange(report.title, report.frequency, next, site?.name);
+    patchReport(title ? { frequency: next, title } : { frequency: next });
   };
 
   /**
@@ -495,13 +507,13 @@ export default function ReportScreen() {
 
     showAlert(
       `Use job ${offer.jobNumber}`,
-      `The job would change what is on the report:\n\n${changes.join('\n')}`,
+      `This changes:\n\n${changes.join('\n')}`,
       [
         {
-          text: 'Keep what is typed',
+          text: 'Keep mine',
           onPress: () => patchReport({ jobNumber: offer.jobNumber }),
         },
-        { text: 'Take the job\'s', onPress: () => patchReport(patch) },
+        { text: 'Use the job\'s', onPress: () => patchReport(patch) },
         { text: 'Cancel', style: 'cancel' },
       ],
     );
@@ -553,7 +565,7 @@ export default function ReportScreen() {
   /** The PDF itself, so the share sheet and the job attachment cannot differ. */
   const reportPdf = async () => {
     const b = bundle();
-    if (!b) throw new Error('The report is not loaded.');
+    if (!b) throw new Error('The test sheet is not loaded.');
     const html = serviceReportHtml(b, nowIso(), {
       qdcCompliance: qdcAffirmed,
       inProperWorkingOrder: workingOrder,
@@ -568,13 +580,13 @@ export default function ReportScreen() {
     setBusy(true);
     try {
       const file = await reportPdf();
-      const shared = await shareFile(file, 'Service report');
+      const shared = await shareFile(file, 'Test sheet');
       if (!shared) {
-        const notice = notSharedNotice(file.name, 'report');
+        const notice = notSharedNotice(file.name, 'PDF');
         showAlert(notice.title, notice.body);
       }
     } catch (e) {
-      showAlert('Could not create the PDF', e instanceof Error ? e.message : String(e));
+      showAlert('PDF not made', describeActionFailure(e, 'make the PDF'));
     } finally {
       setBusy(false);
     }
@@ -591,19 +603,19 @@ export default function ReportScreen() {
         checkSheet(b.checkRows),
         defectSheet(b.defects),
       ]);
-      const shared = await shareFile(file, 'Service report');
+      const shared = await shareFile(file, 'Test sheet');
       if (!shared) {
         const notice = notSharedNotice(file.name, 'spreadsheet');
         showAlert(notice.title, notice.body);
       }
     } catch (e) {
-      showAlert('Could not build the spreadsheet', describeActionFailure(e, 'build the spreadsheet'));
+      showAlert('Spreadsheet not made', describeActionFailure(e, 'make the spreadsheet'));
     } finally {
       setBusy(false);
     }
   };
 
-  if (!report) return <RecordGate missing={missing} what="service report" failed={failed} onRetry={() => { void load(); }} />;
+  if (!report) return <RecordGate missing={missing} what="test sheet" failed={failed} onRetry={() => { void load(); }} />;
 
   const offered = offer.jobNumber && report.jobNumber?.trim() !== offer.jobNumber ? offer : null;
 
@@ -616,8 +628,8 @@ export default function ReportScreen() {
             <View style={{ flex: 1 }}>
               <Txt weight="700" numberOfLines={1}>{report.title}</Txt>
               <Txt size="sm" tone="muted">
-                {report.frequency} · {report.serviceDate}
-                {report.jobNumber ? ` · Job ${report.jobNumber}` : ''}
+                {[frequencyLabel(report.frequency), formatAuDate(report.serviceDate), report.jobNumber ? `Job ${report.jobNumber}` : '']
+                  .filter(Boolean).join(' · ')}
               </Txt>
             </View>
             <Chip label={report.status === 'complete' ? 'Complete' : 'Draft'} tone={report.status === 'complete' ? 'pass' : 'warn'} />
@@ -662,14 +674,14 @@ export default function ReportScreen() {
                 </Rowed>
               ) : (
                 <>
-                  <Button title="Add every device to this sheet" onPress={addAllDevices} loading={busy} />
+                  <Button title="Add all devices" onPress={addAllDevices} loading={busy} />
                   <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
                     {report.panelId
                       ? 'The points on this panel.'
                       : assets.length
-                        ? `${assets.filter(isServiceable).length} assets in this site's register, grouped by system and in walk order`
+                        ? `${assets.filter(isServiceable).length} assets from the register, in walk order`
                           + (panel ? ', plus the panel points' : '') + '.'
-                        : 'This site has nothing in its asset register yet. Sync from Simpro or import a register first.'}
+                        : 'No equipment on record. Sync or import a register first.'}
                   </Txt>
                 </>
               )}
@@ -683,8 +695,7 @@ export default function ReportScreen() {
                     {[raiseFor.zoneText, raiseFor.deviceText].filter(Boolean).join(' — ') || raiseFor.pointRef}
                   </Txt>
                   <Txt size="sm" tone="muted" style={{ marginTop: t.space(1), lineHeight: 19 }}>
-                    A failed device with no defect against it does not reach the customer’s report, the site’s defect
-                    list or the office.
+                    Pick the defect for this failure.
                   </Txt>
                   {/*
                     * Where this one is going, said before it is raised rather
@@ -712,7 +723,7 @@ export default function ReportScreen() {
                       </Rowed>
                     </Card>
                   ))}
-                  <Button title="Not a defect — just record the fail" variant="ghost" onPress={() => setRaiseFor(null)} />
+                  <Button title="Fail only" variant="ghost" onPress={() => setRaiseFor(null)} />
                 </Card>
               </View>
             ) : null}
@@ -745,8 +756,7 @@ export default function ReportScreen() {
             {!checks.length ? (
               <>
                 <Txt tone="muted" size="sm" style={{ lineHeight: 20 }}>
-                  Add a routine and its system-level checks come with it — what to do, what counts as a pass, and the defect
-                  raised if it fails.
+                  Add a routine to load its checks.
                 </Txt>
                 {SERVICE_ROUTINES.map((r) => (
                   <Card key={r.id} onPress={() => addRoutine(r)}>
@@ -785,8 +795,33 @@ export default function ReportScreen() {
                 body={readiness.join('\n')}
               />
             ) : (
-              <Banner tone="pass" title="Ready to send" body="Everything the office asks for is filled in." />
+              <Banner tone="pass" title="Ready to send" body="Nothing missing." />
             )}
+
+            <H2>Sheet</H2>
+            <Field label="Title" value={report.title} onChangeText={(v) => patchReport({ title: v })} />
+            <Label>Frequency</Label>
+            <Rowed gap={2} wrap>
+              {[
+                ...TEST_SHEET_FREQUENCIES,
+                // A sheet made before the picker, or as commissioning, keeps showing what it is.
+                ...(TEST_SHEET_FREQUENCIES.some((f) => f.value === report.frequency)
+                  ? []
+                  : [{ value: report.frequency, label: frequencyLabel(report.frequency) }]),
+              ].map((f) => (
+                <Chip
+                  key={f.value}
+                  label={f.label}
+                  selected={report.frequency === f.value}
+                  onPress={() => setFrequency(f.value)}
+                />
+              ))}
+            </Rowed>
+            <DayField
+              label="Service date"
+              value={report.serviceDate}
+              onChange={(day) => patchReport({ serviceDate: day })}
+            />
 
             <H2>Job</H2>
             {offered ? (
@@ -796,12 +831,7 @@ export default function ReportScreen() {
                   {offered.job?.title ? ` — ${offered.job.title}` : ''}
                 </Txt>
                 <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-                  {offered.basis === 'today'
-                    ? 'The one job on today\'s schedule at this site.'
-                    : offered.scheduleKnown
-                      ? 'Nothing on today\'s schedule is at this site; this is the only open job here.'
-                      : 'The schedule has nothing for today, or has not synced yet; this is the only open job at the site.'}
-                  {' '}Accepting it puts the number on the report and takes the customer and site contact from the job.
+                  {offered.basis === 'today' ? 'Booked here today.' : 'Only open job here.'} Fills customer and contact.
                 </Txt>
                 <Button title={`Use job ${offered.jobNumber}`} variant="secondary" compact onPress={() => void acceptJob()} />
               </Card>
@@ -811,7 +841,9 @@ export default function ReportScreen() {
               value={report.jobNumber ?? ''}
               onChangeText={(v) => patchReport({ jobNumber: v })}
               autoCapitalize="characters"
-              hint={offer.reason ?? 'What the office files the report by.'}
+              hint={offer.reason
+                ? `${openJobNumbers.length ? `Open jobs here: ${openJobNumbers.join(', ')}. ` : ''}Type the one this sheet is for.`
+                : 'What the office files it by.'}
             />
             <Field
               label="Customer"
@@ -862,7 +894,7 @@ export default function ReportScreen() {
               value={report.witnessName ?? ''}
               onChangeText={(v) => patchReport({ witnessName: v })}
               autoCapitalize="words"
-              hint="Who witnessed the work and signs below. Often the site contact, not always."
+              hint="Who signs for the site below."
             />
             <Field
               label="Notes"
@@ -873,8 +905,7 @@ export default function ReportScreen() {
 
             <H2>Queensland record of maintenance</H2>
             <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-              These are required by the Building Fire Safety Regulation, separately from the test results. They are what an
-              inspector checks.
+              Building Fire Safety Regulation 2008, s 55.
             </Txt>
 
             <Card>
@@ -901,7 +932,7 @@ export default function ReportScreen() {
               <Label>Certification</Label>
               <Txt size="sm" style={{ marginTop: 6, lineHeight: 20 }}>{CERTIFICATION_STATEMENT}</Txt>
               <Txt size="xs" tone="faint" style={{ marginTop: 6, lineHeight: 17 }}>
-                Signing below is a distinct legal element — recording your name does not satisfy it.
+                Sign below. A typed name does not count.
               </Txt>
             </Card>
 
@@ -932,14 +963,14 @@ export default function ReportScreen() {
               jobExternalId={report.jobExternalId}
               jobTitle={report.jobTitle}
               attachedAt={report.attachedAt}
-              what="service report"
-              filename={`${safeFileName(`${report.title} ${site?.name ?? ''}`.trim(), 'service-report')}.pdf`}
+              what="test sheet"
+              filename={`${safeFileName(`${report.title} ${site?.name ?? ''}`.trim(), 'test-sheet')}.pdf`}
               subject={`${report.title}${site ? ` — ${site.name}` : ''}`}
               buildFile={reportPdf}
               onPickJob={(job: { externalId: string; title?: string } | null) => patchReport({ jobExternalId: job?.externalId, jobTitle: job?.title })}
               onAttached={(at: string | undefined) => patchReport({ attachedAt: at })}
               disabled={report.status !== 'complete'}
-              disabledWhy="Mark the report complete first. A draft on the job file reads as the finished record of a service."
+              disabledWhy="Mark complete to attach it."
             />
 
             {/*
@@ -981,6 +1012,32 @@ export default function ReportScreen() {
         ) : null}
       </Screen>
     </>
+  );
+}
+
+/**
+ * A date box: dd/mm/yyyy on screen, the ISO day stored.
+ *
+ * What is typed stays in the box as typed and is stored only once it reads as
+ * a day (or is emptied), so a half-written date is never saved.
+ */
+function DayField({ label, value, onChange }: { label: string; value: string | undefined; onChange: (day: string) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const read = draft === null ? null : readDayBox(draft);
+  return (
+    <Field
+      label={label}
+      value={draft ?? dayBox(value)}
+      onChangeText={(v) => {
+        setDraft(v);
+        const next = readDayBox(v);
+        if ('day' in next) onChange(next.day ?? '');
+      }}
+      onBlur={() => { if (read && !('why' in read)) setDraft(null); }}
+      placeholder="dd/mm/yyyy"
+      keyboardType="numeric"
+      hint={read && 'why' in read ? read.why : undefined}
+    />
   );
 }
 

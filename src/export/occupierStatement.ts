@@ -204,8 +204,8 @@ ${deadline.due ? `<p class="clock" style="margin-top:14px">
   This document was prepared from the maintenance records held for these premises so that it can be checked and signed
   on site. It is not the regulator's approved form and does not replace it. Where an approved form is required, use the
   form published by the regulator; the content above is intended to transfer to it directly. The business-day count
-  applies Queensland's appointed public holidays as well as weekends; district show holidays are not known to this
-  app, so the real deadline can only be later than the date shown, never earlier.
+  skips weekends and Queensland's appointed public holidays. District show holidays are not counted, so for those the
+  real deadline can only be later than the date shown, never earlier.
 </div>
 
 <div class="footer">

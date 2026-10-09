@@ -4,7 +4,7 @@ import {
 } from '@/domain/occupierForm';
 import type { RegisterSystem } from '@/parsers/assetRegister';
 import type { SystemKind } from '@/seed/assetTypes';
-import { qldIsoDay } from '@/domain/qldTime';
+import { qldDay, qldIsoDay } from '@/domain/qldTime';
 
 /**
  * Checking the occupier statement against the company's own records.
@@ -217,6 +217,9 @@ function inPeriod(dateIso: string, start: string, end: string): boolean {
   return !!d && d >= start && d <= end;
 }
 
+/** A day as the screen shows it, dd/mm/yyyy. */
+const day = (s: string): string => qldDay(s) ?? s;
+
 function describe(n: RecordedNotice): string {
   const where = [n.location?.trim(), n.description?.trim()].filter(Boolean).join(' — ');
   return where || 'a recorded critical defect';
@@ -248,9 +251,8 @@ export function checkStatementAgainstRecords(
     if (!held.length) return [];
     return [{
       kind: 'no-period',
-      message: `The app holds ${held.length} critical defect ${plural(held.length, 'notice', 'notices')} `
-        + 'for this site, and the statement does not say what period it covers, so they cannot be '
-        + 'checked against it. Set the period first.',
+      message: `${held.length} critical defect ${plural(held.length, 'notice', 'notices')} on our file for this site. `
+        + 'Set the period first.',
       contradiction: false,
       defectIds: held.map((n) => n.defectId),
     }];
@@ -283,7 +285,7 @@ export function checkStatementAgainstRecords(
     const row = rowFor(installation);
     const formRef = refFor(installation);
     const ids = held0.map((n) => n.defectId);
-    const listed = held0.map((n) => `${describe(n)} (notice given ${qldIsoDay(n.noticeIssuedAt) ?? n.noticeIssuedAt})`).join('; ');
+    const listed = held0.map((n) => `${describe(n)} (notice ${day(n.noticeIssuedAt)})`).join('; ');
     const count = held0.length;
 
     if (row && row.installed === false) {
@@ -302,11 +304,9 @@ export function checkStatementAgainstRecords(
         kind: 'struck-but-recorded',
         formRef,
         installation,
-        message: `${installation}: the statement says the building does not have this installation, `
-          + `and Safe QLD holds ${count} critical defect ${plural(count, 'notice', 'notices')} `
-          + `against it in this period — ${listed}. Either the row is struck wrongly, or the `
-          + 'defect is recorded against the wrong asset. Struck out, the notice comes off the form '
-          + 'with the row.',
+        message: `${installation}: marked not installed, but our file has ${count} critical defect `
+          + `${plural(count, 'notice', 'notices')} for it this period: ${listed}. Either the row is struck wrongly, `
+          + 'or the defect is recorded against the wrong asset.',
         contradiction: true,
         defectIds: ids,
       });
@@ -318,9 +318,8 @@ export function checkStatementAgainstRecords(
         kind: 'notice-unanswered',
         formRef,
         installation,
-        message: `${installation}: column 3 has not been answered, and the app holds ${count} critical `
-          + `defect ${plural(count, 'notice', 'notices')} issued in this period — ${listed}. `
-          + 'The answer is Yes on our records.',
+        message: `${installation}: notice question not answered. Our file has ${count} this period: `
+          + `${listed}. The answer is Yes on our records.`,
         contradiction: false,
         defectIds: ids,
       });
@@ -332,9 +331,8 @@ export function checkStatementAgainstRecords(
         kind: 'notice-not-declared',
         formRef,
         installation,
-        message: `${installation}: the statement says no critical defect notice was issued in this period, `
-          + `and Safe QLD's own records show ${count} — ${listed}. One of the two is wrong, and the `
-          + 'statement is the one the occupier signs.',
+        message: `${installation}: no notice declared, but our file has ${count} this period: ${listed}. `
+          + 'Check which is right before the occupier signs.',
         contradiction: true,
         defectIds: ids,
       });
@@ -351,10 +349,8 @@ export function checkStatementAgainstRecords(
         kind: 'rectification-not-recorded',
         formRef,
         installation,
-        message: `${installation}: the statement gives ${claimed} as the date of rectification, and `
-          + `${openIds.length} of the ${count} ${plural(count, 'defect', 'defects')} behind it `
-          + `${plural(openIds.length, 'is', 'are')} still open on our file. Either the rectification was `
-          + 'not recorded or the date is not right.',
+        message: `${installation}: rectified ${day(claimed)} on the statement, but ${openIds.length} of the `
+          + `${count} ${plural(count, 'defect', 'defects')} ${plural(openIds.length, 'is', 'are')} still open on our file.`,
         contradiction: true,
         defectIds: openIds,
       });
@@ -369,9 +365,8 @@ export function checkStatementAgainstRecords(
         kind: 'rectification-before-record',
         formRef,
         installation,
-        message: `${installation}: the statement gives ${claimed} as the date of rectification, and our `
-          + `records show the last of these defects rectified on ${latest}. A date before the work was `
-          + 'done understates how long the building was affected.',
+        message: `${installation}: rectified ${day(claimed)} on the statement, but our file has the last `
+          + `of these rectified ${day(latest)}.`,
         contradiction: true,
         defectIds: ids,
       });
@@ -401,14 +396,11 @@ export function checkStatementAgainstRecords(
       formRef: item.ref,
       installation: item.name,
       message: outside.length
-        ? `${item.name}: the statement says a critical defect notice was issued in this period, and `
-          + `the ${plural(outside.length, 'notice', 'notices')} Safe QLD holds for it fall outside `
-          + `it — ${outside.map((n) => qldIsoDay(n.noticeIssuedAt) ?? n.noticeIssuedAt).join(', ')}, against a period `
-          + `of ${start} to ${end}. Either the period is wrong or the answer belongs to a different `
+        ? `${item.name}: notice declared, but ours fall outside the period (${outside.map((n) => day(n.noticeIssuedAt)).join(', ')}; `
+          + `period ${day(start)} to ${day(end)}). Either the period is wrong or the answer belongs to a different `
           + 'statement.'
-        : `${item.name}: the statement says a critical defect notice was issued in this period and `
-          + 'Safe QLD holds no record of one. That is expected where another contractor maintains it — '
-          + 'worth confirming, and the notice has to be attached either way.',
+        : `${item.name}: notice declared, none on our file. Fine if another contractor maintains it. `
+          + 'Attach the notice either way.',
       contradiction: false,
       defectIds: outside.map((n) => n.defectId),
     });
@@ -417,9 +409,8 @@ export function checkStatementAgainstRecords(
   for (const { notice, why } of unattributed) {
     problems.push({
       kind: 'notice-unattributed',
-      message: `A critical defect notice was issued on ${qldIsoDay(notice.noticeIssuedAt) ?? notice.noticeIssuedAt} for `
-        + `${describe(notice)}, and it cannot be filed against a Schedule 2 row: ${why}. `
-        + 'Check the row it belongs to by hand.',
+      message: `Critical defect notice of ${day(notice.noticeIssuedAt)} for ${describe(notice)} is not on a row: `
+        + `${why}. Place it by hand.`,
       contradiction: false,
       defectIds: [notice.defectId],
     });
@@ -444,11 +435,10 @@ export function evidenceSummary(problems: readonly EvidenceProblem[]): string | 
   const bad = contradictions(problems).length;
   const rest = problems.length - bad;
   if (bad && rest) {
-    return `${bad} ${plural(bad, 'answer contradicts', 'answers contradict')} Safe QLD's records, and `
-      + `${rest} ${plural(rest, 'other needs', 'others need')} checking.`;
+    return `${bad} ${plural(bad, 'answer differs', 'answers differ')} from our records; ${rest} to check.`;
   }
   if (bad) {
-    return `${bad} ${plural(bad, 'answer contradicts', 'answers contradict')} Safe QLD's own records.`;
+    return `${bad} ${plural(bad, 'answer differs', 'answers differ')} from our records.`;
   }
-  return `${rest} ${plural(rest, 'answer needs', 'answers need')} checking against Safe QLD's records.`;
+  return `${rest} ${plural(rest, 'answer', 'answers')} to check against our records.`;
 }

@@ -8,7 +8,8 @@ import {
   zoneQtyTotal,
   addZoneRow, addSpeakerCircuit, canDropLastRow,
 } from '@/domain/baseline';
-import { autofillBaseline, describeZoneDevices } from '@/services/baselineAutofill';
+import { ZONE_FILL_LIMIT, autofillBaseline, describeZoneDevices } from '@/services/baselineAutofill';
+import { baselineSheet } from '@/export/safeqldForms';
 import type { Point, Site } from '@/domain/types';
 
 const NOW = '2026-08-31T00:00:00.000Z';
@@ -147,10 +148,29 @@ describe('autofillBaseline', () => {
     expect(baseline.batteryStandbyHours).toBe('24');
   });
 
-  it('warns about zones beyond the form s 32 rows', () => {
+  it('grows the table to the panel s highest zone rather than stopping at 32', () => {
+    // The table takes as many zones as the building has, and the workbook
+    // prints every row, so zone 40 is filled rather than left to note by hand.
     const far = [point({ zoneNumber: 40, deviceType: 'smoke' })];
-    const { filled } = autofillBaseline(emptyBaseline('site-1', 'b1', NOW), { site, zones: [], points: far });
-    expect(filled.some((f) => f.includes('not on the form'))).toBe(true);
+    const { baseline, filled } = autofillBaseline(emptyBaseline('site-1', 'b1', NOW), { site, zones: [], points: far });
+    expect(baseline.zoneResults.map((z) => z.zone).at(-1)).toBe(40);
+    expect(baseline.zoneResults.find((z) => z.zone === 40)).toEqual({ zone: 40, qty: '1', deviceTypes: '1 smoke' });
+    expect(filled).toContain('Table extended to zone 40');
+    // And the workbook prints it: the export has no cut-off at 32.
+    const printed = baselineSheet(baseline).rows.filter((r) => (r[0] as { v?: unknown } | undefined)?.v === '40');
+    expect(printed).toHaveLength(1);
+  });
+
+  it('does not grow the table past the limit for a zone number that looks like a bad import', () => {
+    const silly = [point({ zoneNumber: ZONE_FILL_LIMIT + 750, deviceType: 'smoke' })];
+    const { baseline, filled } = autofillBaseline(emptyBaseline('site-1', 'b1', NOW), { site, zones: [], points: silly });
+    expect(baseline.zoneResults.length).toBe(ZONE_FILL_LIMIT);
+    expect(filled.some((f) => f.includes(`above ${ZONE_FILL_LIMIT} not filled`))).toBe(true);
+  });
+
+  it('leaves the table at its printed size when every zone fits', () => {
+    const { baseline } = autofillBaseline(emptyBaseline('site-1', 'b1', NOW), { site, zones: [], points });
+    expect(baseline.zoneResults.length).toBe(32);
   });
 
   it('does not mutate the record it was given', () => {

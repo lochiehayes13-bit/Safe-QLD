@@ -13,6 +13,7 @@ import type {
 import { DEVICE_TYPE_LABEL } from '@/parsers/deviceType';
 import type { Cell, Row, Sheet } from './xlsx';
 import { qldDay, qldIsoDay } from '@/domain/qldTime';
+import { frequencyLabel } from '@/domain/testSheet';
 
 /**
  * Builds the workbook layouts the app exports.
@@ -231,7 +232,7 @@ export function reportCoverSheet(b: ReportBundle): Sheet {
     ...(siteContact ? [[H('Site contact'), siteContact] as Row] : []),
     [H('Panel'), b.panel ? `${b.panel.name}${b.panel.model ? ` (${b.panel.model})` : ''}` : 'All panels'],
     [],
-    [H('Service type'), report.frequency],
+    [H('Service type'), frequencyLabel(report.frequency)],
     [H('Service date'), formatAuDate(report.serviceDate)],
     [H('Technician'), report.technicianName ?? ''],
     [H('Licence no.'), report.technicianLicence ?? ''],

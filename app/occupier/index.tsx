@@ -3,9 +3,10 @@ import { qldIsoDay } from '@/domain/qldTime';
 import { View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { listOccupierStatements, type OccupierStatement } from '@/db/occupierRepo';
+import { createOccupierStatement, listOccupierStatements, type OccupierStatement } from '@/db/occupierRepo';
+import { listSitePicks, type SitePick } from '@/db/repo';
 import {
-  COMMISSIONER_COPY_BUSINESS_DAYS, STATEMENT_INTERVAL_YEARS, STATEMENT_RETENTION_YEARS,
+  COMMISSIONER_COPY_BUSINESS_DAYS, STATEMENT_RETENTION_YEARS,
   commissionerCopyDeadline, nextStatementDue, qldBusinessDaysBetween,
 } from '@/domain/occupierForm';
 import { formatAuDate } from '@/export/sheets';
@@ -13,9 +14,15 @@ import { nowIso } from '@/db';
 import { siteFallbackWords } from '@/domain/siteMiss';
 import { useTheme } from '@/theme';
 import { SiteMissCards, useSiteMisses } from '@/components/SiteMisses';
+import { SitePicker } from '@/components/SitePicker';
 import {
-  Banner, Card, Chip, EmptyState, Rowed, Screen, SearchBox, StatTile, Txt,
+  Banner, Button, Card, Chip, EmptyState, Rowed, Screen, SearchBox, StatTile, Txt,
 } from '@/components/ui';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
+import { needsSiteState } from '@/domain/deviceData';
+import { loadPrefs } from '@/app-prefs';
+import { everSynced } from '@/simpro/watermark';
+import { showAlert } from '@/components/alert';
 
 /**
  * Every occupier statement, across every site.
@@ -93,6 +100,11 @@ export default function OccupierIndexScreen() {
   const [dutyCapped, setDutyCapped] = useState(false);
   const [typed, setTyped] = useState('');
   const [query, setQuery] = useState('');
+  // A read that threw is not an empty book. Said, with a way to try again.
+  const [failed, setFailed] = useState<string | null>(null);
+  /** The sites to choose from for a new statement, while a choice is being made. */
+  const [picking, setPicking] = useState<SitePick[] | null>(null);
+  const [starting, setStarting] = useState(false);
 
   // The search is a query, so it waits for the typing to stop — the same 200ms
   // every other list in this app settles at.
@@ -102,15 +114,23 @@ export default function OccupierIndexScreen() {
   }, [typed]);
 
   const load = useCallback(async () => {
-    const today = qldIsoDay(nowIso()) ?? '';
-    const [found, unsent] = await Promise.all([
-      listOccupierStatements({ query }),
-      listOccupierStatements({ unsentOnly: true, limit: DUTY_COUNTED }),
-    ]);
-    setPage({ total: found.total, matching: found.matching, capped: found.capped });
-    setRows(found.rows.map((statement) => stateOf(statement, today)));
-    setDuty(unsent.rows.map((statement) => stateOf(statement, today)));
-    setDutyCapped(unsent.capped);
+    setFailed(null);
+    try {
+      const today = qldIsoDay(nowIso()) ?? '';
+      const [found, unsent] = await Promise.all([
+        listOccupierStatements({ query }),
+        listOccupierStatements({ unsentOnly: true, limit: DUTY_COUNTED }),
+      ]);
+      setPage({ total: found.total, matching: found.matching, capped: found.capped });
+      setRows(found.rows.map((statement) => stateOf(statement, today)));
+      setDuty(unsent.rows.map((statement) => stateOf(statement, today)));
+      setDutyCapped(unsent.capped);
+    } catch (e) {
+      setPage(null);
+      setRows([]);
+      setDuty([]);
+      setFailed(describeLoadFailure(e, 'the occupier statements'));
+    }
   }, [query]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
@@ -142,22 +162,82 @@ export default function OccupierIndexScreen() {
   const outstanding = duty.filter((r) => r.state === 'due').length;
   const unsigned = duty.filter((r) => r.state === 'unsigned').length;
 
+  const startFor = async (site: SitePick) => {
+    setStarting(true);
+    try {
+      const rec = await createOccupierStatement(site.id, {
+        premisesName: site.name,
+        premisesAddress: site.address ?? '',
+      });
+      setPicking(null);
+      router.push({ pathname: '/occupier/[id]', params: { id: rec.id } });
+    } catch (e) {
+      showAlert('Statement not started', describeActionFailure(e, 'start the statement'));
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const start = async () => {
+    try {
+      const all = await listSitePicks();
+      if (!all.length) {
+        const prefs = await loadPrefs();
+        const words = needsSiteState(
+          { held: 0, connected: Boolean(prefs.simproClientId && prefs.simproCompanyId), everSynced: await everSynced() },
+          'An occupier statement',
+        );
+        showAlert(words.title, words.body, words.action
+          ? [{ text: words.action.label, onPress: () => router.push(words.action!.route) }, { text: 'Not now', style: 'cancel' }]
+          : undefined);
+        return;
+      }
+      if (all.length === 1) { await startFor(all[0]!); return; }
+      setPicking(all);
+    } catch (e) {
+      showAlert('Statement not started', describeActionFailure(e, 'read the sites'));
+    }
+  };
+
+  if (picking) {
+    return (
+      <Screen>
+        <Stack.Screen options={{ title: 'Which site?' }} />
+        <SitePicker
+          sites={picking}
+          onChange={(siteId: string) => {
+            const site = picking.find((s) => s.id === siteId);
+            if (site) void startFor(site);
+          }}
+        />
+        <Button title="Cancel" variant="ghost" onPress={() => setPicking(null)} disabled={starting} />
+      </Screen>
+    );
+  }
+
   return (
     <Screen>
       <Stack.Screen options={{ title: 'Occupier statements' }} />
 
       <Txt tone="muted" size="sm" style={{ lineHeight: 20 }}>
-        Queensland puts this duty on the occupier, not on us. We prepare it from the year&rsquo;s
-        maintenance so they are signing something they can check, and a copy goes to the
-        commissioner within {COMMISSIONER_COPY_BUSINESS_DAYS} business days.
+        We prepare each statement; the occupier signs it. The Commissioner&rsquo;s copy is due{' '}
+        {COMMISSIONER_COPY_BUSINESS_DAYS} business days after the period end.
       </Txt>
+
+      <Button title="New statement" onPress={() => { void start(); }} loading={starting} />
+
+      {failed ? (
+        <>
+          <Banner tone="fail" title="List not loaded" body={failed} />
+          <Button title="Try again" variant="secondary" onPress={() => { void load(); }} />
+        </>
+      ) : null}
 
       {overdue ? (
         <Banner
           tone="fail"
-          title={`${overdue} statement${overdue === 1 ? '' : 's'} past the commissioner deadline`}
-          body={'Counted from the day each statement was required to be prepared, which is what '
-            + 'section 55A(3) counts from — not from the day it was signed.'}
+          title={`${overdue} statement${overdue === 1 ? '' : 's'} past the Commissioner deadline`}
+          body="Counted from the period end, not the signing date. Building Fire Safety Regulation 2008, s 55A(3)."
         />
       ) : null}
 
@@ -174,12 +254,11 @@ export default function OccupierIndexScreen() {
       </Rowed>
       {dutyCapped ? (
         <Txt size="xs" tone="faint">
-          Counted over the first {DUTY_COUNTED.toLocaleString()} statements the commissioner has not had, so these are at
-          least this many.
+          At least this many.
         </Txt>
       ) : null}
 
-      <SearchBox value={typed} onChange={setTyped} placeholder="A building, a suburb, the occupier or who signed" />
+      <SearchBox value={typed} onChange={setTyped} placeholder="Building, suburb, occupier or signer" />
       {page && page.total ? (
         <Txt size="xs" tone="faint">
           {page.matching.toLocaleString()} of {page.total.toLocaleString()} statement{page.total === 1 ? '' : 's'}
@@ -205,14 +284,13 @@ export default function OccupierIndexScreen() {
             {...(!page.total
               ? {
                 title: 'No occupier statements yet',
-                body: 'One is raised from a site — open the site and choose Occupier statement. It fills '
-                  + "in from that site's own register and defect history.",
+                body: 'Start one here or from a site.',
               }
               : siteHits.length
                 ? siteFallbackWords(siteHits.length, 'statements')
                 : {
                   title: 'Nothing matches',
-                  body: 'Try part of the building’s name, the suburb, or the occupier’s own name.',
+                  body: 'Try the building, suburb or occupier.',
                 })}
           />
           <SiteMissCards sites={siteHits} />
@@ -229,7 +307,7 @@ export default function OccupierIndexScreen() {
               <Txt weight="700">{row.statement.siteName ?? (row.statement.premisesName || 'Unnamed premises')}</Txt>
               <Txt size="sm" tone="muted">
                 {row.statement.periodStart ? `${formatAuDate(row.statement.periodStart)} – ` : ''}
-                {formatAuDate(row.statement.periodEnd) || 'period not set'}
+                {formatAuDate(row.statement.periodEnd) || 'Period not set'}
               </Txt>
             </View>
             <StateChip row={row} />
@@ -238,20 +316,20 @@ export default function OccupierIndexScreen() {
           {row.state === 'overdue' && row.daysLeft !== undefined ? (
             <Txt size="sm" tone="fail">
               {Math.abs(row.daysLeft)} business day{Math.abs(row.daysLeft) === 1 ? '' : 's'} late
-              {row.due ? ` — was due ${formatAuDate(row.due)}` : ''}
+              {row.due ? `, due ${formatAuDate(row.due)}` : ''}
             </Txt>
           ) : null}
 
           {row.state === 'due' && row.due ? (
             <Txt size="sm" tone={row.daysLeft !== undefined && row.daysLeft <= 3 ? 'warn' : 'muted'}>
-              Copy to the commissioner due {formatAuDate(row.due)}
-              {row.daysLeft !== undefined ? ` — ${row.daysLeft} business day${row.daysLeft === 1 ? '' : 's'} left` : ''}
+              Commissioner copy due {formatAuDate(row.due)}
+              {row.daysLeft !== undefined ? ` · ${row.daysLeft} business day${row.daysLeft === 1 ? '' : 's'} left` : ''}
             </Txt>
           ) : null}
 
           {row.state === 'unsigned' ? (
             <Txt size="sm" tone="muted">
-              Not signed yet, so nothing is running against it.
+              Not signed.
             </Txt>
           ) : null}
 
@@ -261,8 +339,7 @@ export default function OccupierIndexScreen() {
 
       {rows.length ? (
         <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-          One statement a year per premises, kept {STATEMENT_RETENTION_YEARS} years. The next one
-          falls {STATEMENT_INTERVAL_YEARS} year after the last.
+          One statement a year per premises. Keep each for {STATEMENT_RETENTION_YEARS} years.
         </Txt>
       ) : null}
       <View style={{ height: t.space(4) }} />
@@ -284,12 +361,13 @@ function StateChip({ row }: { row: Row }) {
  * clock to be looking at.
  */
 function SentLine({ statement }: { statement: OccupierStatement }) {
+  const t = useTheme();
   const next = statement.signedAt
     ? nextStatementDue(qldIsoDay(statement.signedAt) ?? '')
     : undefined;
   return (
     <Rowed gap={2}>
-      <MaterialCommunityIcons name="check-circle-outline" size={16} color="#2E9E5B" />
+      <MaterialCommunityIcons name="check-circle-outline" size={16} color={t.color.pass} />
       <Txt size="sm" tone="muted" style={{ flex: 1 }}>
         Sent {formatAuDate(statement.sentToCommissionerAt ?? undefined)}
         {next?.date ? ` · next due ${formatAuDate(next.date)}` : ''}

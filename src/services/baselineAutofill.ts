@@ -1,7 +1,7 @@
 import type { Point, Site, Zone } from '@/domain/types';
 import { DEVICE_TYPE_LABEL } from '@/parsers/deviceType';
-import type { BaselineData, ZoneTestRow } from '@/domain/baseline';
-import { ZONE_TEST_ROW_COUNT } from '@/domain/baseline';
+import type { BaselineData } from '@/domain/baseline';
+import { addZoneRow } from '@/domain/baseline';
 
 /**
  * Fills the baseline form from data the app already holds.
@@ -12,6 +12,15 @@ import { ZONE_TEST_ROW_COUNT } from '@/domain/baseline';
  * goes stale. Existing entries are never overwritten, so a tech's own wording
  * always wins.
  */
+
+/**
+ * The most zone rows the fill will grow the table to.
+ *
+ * The table takes as many zones as the building has, so a 40-zone panel gets
+ * 40 rows. A zone number past this is almost certainly a bad import, and is
+ * named rather than turned into hundreds of blank rows.
+ */
+export const ZONE_FILL_LIMIT = 250;
 
 /** Order device types appear in the summary — initiating devices first. */
 const TYPE_ORDER = [
@@ -130,6 +139,14 @@ export function autofillBaseline(current: BaselineData, src: AutofillSource): Au
     byZone.set(p.zoneNumber, arr);
   }
 
+  // Rows for zones past the end of the table, up to the highest zone that has
+  // devices, so the fill covers the whole panel rather than the first 32.
+  const highest = Math.min(ZONE_FILL_LIMIT, Math.max(0, ...byZone.keys()));
+  const lastRow = () => b.zoneResults.reduce((top, r) => Math.max(top, r.zone), 0);
+  const rowsBefore = b.zoneResults.length;
+  while (lastRow() < highest) b.zoneResults = addZoneRow(b.zoneResults);
+  const rowsAdded = b.zoneResults.length - rowsBefore;
+
   let zonesFilled = 0;
   for (const row of b.zoneResults) {
     const points = byZone.get(row.zone);
@@ -142,11 +159,11 @@ export function autofillBaseline(current: BaselineData, src: AutofillSource): Au
   }
 
   if (zonesFilled) filled.push(`${zonesFilled} zone test row${zonesFilled === 1 ? '' : 's'}`);
+  if (rowsAdded) filled.push(`Table extended to zone ${lastRow()}`);
 
-  // Zones beyond the form's 32 rows still need recording somewhere.
-  const beyond = [...byZone.keys()].filter((z) => z > ZONE_TEST_ROW_COUNT);
+  const beyond = [...byZone.keys()].filter((z) => z > ZONE_FILL_LIMIT);
   if (beyond.length) {
-    filled.push(`${beyond.length} zone(s) above ${ZONE_TEST_ROW_COUNT} not on the form — record separately`);
+    filled.push(`${beyond.length} zone${beyond.length === 1 ? '' : 's'} above ${ZONE_FILL_LIMIT} not filled: check the import`);
   }
 
   return { baseline: b, filled };

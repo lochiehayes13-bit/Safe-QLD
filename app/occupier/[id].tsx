@@ -13,9 +13,9 @@ import { assetTypeById } from '@/seed/assetTypes';
 import { occupierStatementIssues } from '@/domain/qldCompliance';
 import { occupierEvidenceFromAssets, prefillOccupierRows } from '@/domain/formsFromAssets';
 import {
-  COMMISSIONER_COPY_BUSINESS_DAYS, citeSources, commissionerCopyDeadline, qldBusinessDaysBetween,
-  toFilledRow,
+  COMMISSIONER_COPY_BUSINESS_DAYS, commissionerCopyDeadline, qldBusinessDaysBetween, toFilledRow,
 } from '@/domain/occupierForm';
+import { dayBox, readDayBox } from '@/domain/dayEntry';
 import {
   checkStatementAgainstRecords, contradictions, evidenceSummary, installationForSystem,
   type EvidenceProblem, type RecordedNotice,
@@ -34,7 +34,7 @@ import { RecordGate } from '@/components/RecordGate';
 import { safeFileName } from '@/export/fileNames';
 import { JobFileCard } from '@/components/JobFileCard';
 import { useRecordPatch } from '@/hooks/useRecordPatch';
-import { describeLoadFailure } from '@/domain/loadFailure';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { showAlert } from '@/components/alert';
 
 /**
@@ -51,7 +51,6 @@ import { showAlert } from '@/components/alert';
  * the register is our record of the site and the statement is theirs.
  */
 export default function OccupierStatementScreen() {
-  const t = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [rec, setRec] = useState<OccupierStatement | null>(null);
   // Loaded-and-absent is not the same as still loading. See RecordGate.
@@ -61,12 +60,6 @@ export default function OccupierStatementScreen() {
   const [saving, setSaving] = useState(false);
   const [prefilled, setPrefilled] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
-  // The Commissioner date as it is being typed. Saved only once it reads as a
-  // date: saving every keystroke pushed a half-written one through qldIsoDay,
-  // which returned nothing, which the box then showed as empty — so it could
-  // not be typed into at all.
-  const [sentDraft, setSentDraft] = useState<string | null>(null);
-  const sentBad = sentDraft !== null && sentDraft.trim() !== '' && !qldIsoDay(sentDraft);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -188,34 +181,29 @@ export default function OccupierStatementScreen() {
       await patch({ rows });
       const equipment = evidence.unplaced.map((u) => `${u.count} ${u.label.toLowerCase()}${u.count === 1 ? '' : 's'}`);
       setPrefilled(
-        `${present.size} installation${present.size === 1 ? '' : 's'} found in the register` +
-        (noticed.size ? `, ${noticed.size} with a critical defect notice this period.` : '.') +
+        `${present.size} installation${present.size === 1 ? '' : 's'} on our register` +
+        (noticed.size ? `, ${noticed.size} with a critical defect notice.` : '.') +
         (tickedNotHeld.length
-          ? `\n\nTicked by the occupier but not in Safe QLD's register — left ticked, confirm with the occupier `
-            + `whether another contractor services ${tickedNotHeld.length === 1 ? 'it' : 'them'}: ${tickedNotHeld.join('; ')}.`
+          ? `\n\nTicked but not on our register, left ticked. Check with the occupier: ${tickedNotHeld.join('; ')}.`
           : '') +
         (notHeld.length
-          ? `\n\nNot in Safe QLD's register — check these with the occupier: ${notHeld.join('; ')}.`
+          ? `\n\nNot on our register. Check with the occupier: ${notHeld.join('; ')}.`
           : '') +
         (equipment.length
-          ? `\n\nIn the register but not placed on a row, because the row depends on what it serves: `
-            + `${equipment.join(', ')}. Place ${equipment.length === 1 ? 'it' : 'them'} by hand.`
+          ? `\n\nPlace by hand: ${equipment.join(', ')}.`
           : '') +
         (evidence.unrecognised
-          ? `\n\n${evidence.unrecognised} asset${evidence.unrecognised === 1 ? '' : 's'} of a type the app did not recognise `
-            + `${evidence.unrecognised === 1 ? 'was' : 'were'} not counted.`
+          ? `\n\n${evidence.unrecognised} asset${evidence.unrecognised === 1 ? '' : 's'} of an unknown type not counted.`
           : '') +
         (!evidence.total
-          ? '\n\nThe register holds no equipment for this site, so nothing was proposed from it.'
+          ? '\n\nNo equipment on our register for this site.'
           : '') +
         (unplaced.length
-          ? `\n\n${unplaced.length} critical defect${unplaced.length === 1 ? '' : 's'} could not be `
-            + `put against a row and ${unplaced.length === 1 ? 'is' : 'are'} not on the form: `
-            + `${unplaced.join('; ')}. Place ${unplaced.length === 1 ? 'it' : 'them'} by hand.`
+          ? `\n\nCritical defect${unplaced.length === 1 ? '' : 's'} not on a row. Place by hand: ${unplaced.join('; ')}.`
           : ''),
       );
     } catch (e) {
-      showAlert('Could not prefill', e instanceof Error ? e.message : String(e));
+      showAlert('Not filled', describeActionFailure(e, 'fill from the site records'));
     } finally {
       setSaving(false);
     }
@@ -257,7 +245,7 @@ export default function OccupierStatementScreen() {
         showAlert(notice.title, notice.body);
       }
     } catch (e) {
-      showAlert('Could not produce the statement', e instanceof Error ? e.message : String(e));
+      showAlert('Statement not printed', describeActionFailure(e, 'print the statement'));
     } finally {
       setExporting(false);
     }
@@ -351,18 +339,19 @@ export default function OccupierStatementScreen() {
       <Screen>
         <Banner
           tone="info"
-          title="This is the occupier's declaration, not ours"
-          body="Queensland places the duty to give this statement on the occupier. We prepare it from the year's maintenance so they are signing something they can check, and a copy goes to the Commissioner within ten working days of them signing it."
+          title="Occupier's declaration"
+          body={`We prepare it; the occupier signs it. The Commissioner's copy is due ${COMMISSIONER_COPY_BUSINESS_DAYS} `
+            + 'business days after the period end.'}
         />
 
         {rec.sentToCommissionerAt ? (
           <Banner
             tone="pass"
             title="Copy sent to the Commissioner"
-            body={`Recorded as sent on ${formatAuDate(rec.sentToCommissionerAt)}.`}
+            body={`On ${formatAuDate(rec.sentToCommissionerAt)}.`}
           />
         ) : (
-          <CommissionerDeadline deadline={deadline} daysLeft={daysLeft} />
+          <CommissionerDeadline deadline={deadline} daysLeft={daysLeft} signedDay={qldIsoDay(rec.signedAt ?? undefined)} />
         )}
 
         <H2>Premises and occupier</H2>
@@ -371,12 +360,12 @@ export default function OccupierStatementScreen() {
           <Field label="Address" value={rec.premisesAddress} onChangeText={(v) => void patch({ premisesAddress: v })} multiline />
           <Field label="Occupier" value={rec.occupierName} onChangeText={(v) => void patch({ occupierName: v })} />
           <Field label="Phone" value={rec.occupierPhone} onChangeText={(v) => void patch({ occupierPhone: v })} />
-          <Rowed gap={2}>
+          <Rowed gap={2} align="flex-start">
             <View style={{ flex: 1 }}>
-              <Field label="Period from" value={rec.periodStart} onChangeText={(v) => void patch({ periodStart: v })} placeholder="YYYY-MM-DD" />
+              <DayField label="Period from" value={rec.periodStart} onChange={(day) => void patch({ periodStart: day ?? '' })} />
             </View>
             <View style={{ flex: 1 }}>
-              <Field label="Period to" value={rec.periodEnd} onChangeText={(v) => void patch({ periodEnd: v })} placeholder="YYYY-MM-DD" />
+              <DayField label="Period to" value={rec.periodEnd} onChange={(day) => void patch({ periodEnd: day ?? '' })} />
             </View>
           </Rowed>
         </Card>
@@ -386,8 +375,8 @@ export default function OccupierStatementScreen() {
           <Chip label={`${presentCount} present`} tone={presentCount ? 'default' : 'warn'} />
         </Rowed>
 
-        <Button title="Fill from this site's records" variant="secondary" onPress={prefill} loading={saving} />
-        {prefilled ? <Txt size="xs" tone="muted" style={{ lineHeight: 17 }}>{prefilled} Check every row — the register is our record of the site, this statement is the occupier's.</Txt> : null}
+        <Button title="Fill from site records" variant="secondary" onPress={prefill} loading={saving} />
+        {prefilled ? <Txt size="xs" tone="muted" style={{ lineHeight: 17 }}>{prefilled}{'\n\n'}Check every row with the occupier.</Txt> : null}
 
         {rec.rows.map((row) => (
           <InstallationRow key={row.installation} row={row} onChange={(p) => setRow(row.installation, p)} />
@@ -409,7 +398,7 @@ export default function OccupierStatementScreen() {
             body={issues.join('\n')}
           />
         ) : (
-          <Banner tone="pass" title="Nothing outstanding" body="Every installation marked present has a standard nominated, and every notice given has a rectification date." />
+          <Banner tone="pass" title="Ready to sign" body="Every row is complete." />
         )}
 
         <Card>
@@ -441,30 +430,20 @@ export default function OccupierStatementScreen() {
           onPickJob={(job) => patch({ jobExternalId: job?.externalId ?? null, jobTitle: job?.title ?? null })}
           onAttached={(at) => patch({ attachedAt: at })}
           disabled={!rec.signedAt}
-          disabledWhy="The statement goes on the job once it has been signed. An unsigned copy on a Simpro job reads as the final one."
+          disabledWhy="Attach after the occupier signs."
         />
 
         <Card>
-          <Field
-            label="Copy sent to the Commissioner on"
-            value={sentDraft ?? qldIsoDay(rec.sentToCommissionerAt ?? undefined) ?? ''}
-            onChangeText={(v) => {
-              setSentDraft(v);
-              if (v.trim() === '') { void patch({ sentToCommissionerAt: null }); return; }
-              if (qldIsoDay(v)) void patch({ sentToCommissionerAt: v.trim() });
-            }}
-            onBlur={() => {
-              // A date that reads has been saved, so the draft can go. One that
-              // does not stays on screen with the hint, rather than vanishing.
-              if (sentDraft === null || sentDraft.trim() === '' || qldIsoDay(sentDraft)) setSentDraft(null);
-            }}
-            placeholder="YYYY-MM-DD"
-            hint={sentBad
-              ? 'Not a date — write it as YYYY-MM-DD.'
-              : deadline.due
-                ? `Due ${deadline.due} — ${COMMISSIONER_COPY_BUSINESS_DAYS} business days from when the statement `
-                  + 'was required to be prepared, not from when it was signed.'
-                : `${COMMISSIONER_COPY_BUSINESS_DAYS} business days from when the statement was required to be prepared.`}
+          {/*
+            * Saved only once what is typed reads as a date: saving every
+            * keystroke pushed a half-written one through as nothing, which the
+            * box then showed as empty, so it could not be typed into at all.
+            */}
+          <DayField
+            label="Sent to the Commissioner"
+            value={rec.sentToCommissionerAt ?? undefined}
+            onChange={(day) => void patch({ sentToCommissionerAt: day })}
+            hint={deadline.due ? `Due ${formatAuDate(deadline.due)}.` : undefined}
           />
         </Card>
       </Screen>
@@ -511,7 +490,6 @@ function InstallationRow({
             value={row.nominatedStandard ?? ''}
             onChangeText={(v) => onChange({ nominatedStandard: v })}
             placeholder="e.g. AS 1851-2012"
-            hint="The standard nominated for this installation."
           />
           <Pressable onPress={() => onChange({ criticalDefectNoticeGiven: !row.criticalDefectNoticeGiven })}>
             <Rowed gap={2} align="center">
@@ -524,12 +502,11 @@ function InstallationRow({
             </Rowed>
           </Pressable>
           {row.criticalDefectNoticeGiven ? (
-            <Field
+            <DayField
               label="Rectified on"
-              value={row.rectifiedDate ?? ''}
-              onChangeText={(v) => onChange({ rectifiedDate: v })}
-              placeholder="YYYY-MM-DD"
-              hint={needsDate ? 'A notice with no rectification date will hold up the statement.' : undefined}
+              value={row.rectifiedDate}
+              onChange={(day) => onChange({ rectifiedDate: day ?? undefined })}
+              hint={needsDate ? 'Needed before signing.' : undefined}
             />
           ) : null}
         </View>
@@ -545,23 +522,28 @@ function InstallationRow({
  * the statement was *required to be prepared*, and an occupier who signs late
  * has a deadline that has already run — so the screen says which date it
  * counted from and whether that was the statutory anchor or a fallback. It also
- * says which public holidays it applied and which it could not, because a
- * district show holiday it cannot know pushes the real deadline later, never
- * earlier. Work to this date and you cannot be late.
+ * says which public holidays it applied. A district show holiday it cannot know
+ * pushes the real deadline later, never earlier. Work to this date and you
+ * cannot be late.
  */
 function CommissionerDeadline({
   deadline,
   daysLeft,
+  signedDay,
 }: {
   deadline: ReturnType<typeof commissionerCopyDeadline>;
   daysLeft: number | null;
+  signedDay?: string;
 }) {
   if (!deadline.due) {
     return (
       <Banner
         tone="info"
-        title={`Copy to the Commissioner — ${COMMISSIONER_COPY_BUSINESS_DAYS} business days`}
-        body={deadline.reason ?? 'Not enough is known yet to count from.'}
+        title={`Copy to the Commissioner: ${COMMISSIONER_COPY_BUSINESS_DAYS} business days`}
+        body={deadline.anchorDate
+          ? `No public holidays on file for that year. Count ${COMMISSIONER_COPY_BUSINESS_DAYS} business days from `
+            + `${formatAuDate(deadline.anchorDate)}.`
+          : 'Set the period end to see the due date.'}
       />
     );
   }
@@ -571,32 +553,60 @@ function CommissionerDeadline({
   const applied = deadline.counting?.holidaysApplied ?? [];
   const lines = [
     daysLeft === null
-      ? 'The days remaining could not be counted.'
+      ? null
       : late
-        ? `${Math.abs(daysLeft)} business day${Math.abs(daysLeft) === 1 ? '' : 's'} late. Send the copy and record the date below.`
+        ? `${Math.abs(daysLeft)} business day${Math.abs(daysLeft) === 1 ? '' : 's'} late. Send it and record the date below.`
         : `${daysLeft} business day${daysLeft === 1 ? '' : 's'} left.`,
     deadline.basis === 'signature-fallback'
-      ? 'Counted from the signature because nothing else was known. That is not what section 55A(3) says — '
-        + 'it counts from the day the statement was required to be prepared, so the real deadline may already have passed.'
-      : `Counted from ${deadline.anchorDate ?? 'the required preparation date'}, the day the statement was required to be prepared.`,
-    applied.length
-      ? `Public holidays skipped: ${applied.map((h) => h.name).join(', ')}.`
-      : 'No public holidays fell in the window.',
-    ...(deadline.counting?.caveats ?? []),
-    ...deadline.caveats,
+      ? 'Counted from the signature. Set the period end for the real deadline.'
+      : `Counted from the period end, ${formatAuDate(deadline.anchorDate)}.`,
+    deadline.basis === 'statutory' && signedDay && deadline.anchorDate && signedDay > deadline.anchorDate
+      ? 'Signed late: the clock still runs from the period end.'
+      : null,
+    applied.length ? `Public holidays skipped: ${applied.map((h) => h.name).join(', ')}.` : null,
     deadline.legalRef,
-    // The rule for this app: nothing states a date without saying where the
-    // date comes from and how far that source can be trusted.
-    ...citeSources(deadline.sourceIds).map((src) => `${src.ref} — ${src.confidence} confidence.`),
-  ];
+  ].filter((l): l is string => Boolean(l));
 
   return (
     <Banner
       tone={late ? 'fail' : close ? 'warn' : 'info'}
       title={late
-        ? `Copy to the Commissioner was due ${deadline.due}`
-        : `Copy to the Commissioner due ${deadline.due}`}
+        ? `Copy to the Commissioner was due ${formatAuDate(deadline.due)}`
+        : `Copy to the Commissioner due ${formatAuDate(deadline.due)}`}
       body={lines.join('\n')}
+    />
+  );
+}
+
+/**
+ * A date box: dd/mm/yyyy on screen, the ISO day stored.
+ *
+ * What is typed stays in the box as typed and is stored only once it reads as
+ * a day; an emptied box stores null.
+ */
+function DayField({
+  label, value, onChange, hint,
+}: {
+  label: string;
+  value: string | null | undefined;
+  onChange: (day: string | null) => void;
+  hint?: string;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const read = draft === null ? null : readDayBox(draft);
+  return (
+    <Field
+      label={label}
+      value={draft ?? dayBox(value)}
+      onChangeText={(v) => {
+        setDraft(v);
+        const next = readDayBox(v);
+        if ('day' in next) onChange(next.day);
+      }}
+      onBlur={() => { if (read && !('why' in read)) setDraft(null); }}
+      placeholder="dd/mm/yyyy"
+      keyboardType="numeric"
+      hint={read && 'why' in read ? read.why : hint}
     />
   );
 }

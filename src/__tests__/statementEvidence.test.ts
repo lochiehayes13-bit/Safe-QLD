@@ -151,8 +151,8 @@ describe('when the statement contradicts the file', () => {
       defectIds: ['d1'],
     });
     expect(out[0]!.message).toContain('Level 2 riser — Zone 4 in fault');
-    expect(out[0]!.message).toContain('2025-11-04');
-    expect(out[0]!.message).toContain('the statement is the one the occupier signs');
+    expect(out[0]!.message).toContain('04/11/2025');
+    expect(out[0]!.message).toContain('before the occupier signs');
   });
 
   it('rejects a rectification date for a defect still open on our file', () => {
@@ -186,7 +186,7 @@ describe('when the statement contradicts the file', () => {
 
     expect(out.map((p) => p.kind)).toEqual(['rectification-before-record']);
     expect(out[0]!.contradiction).toBe(true);
-    expect(out[0]!.message).toContain('2025-11-18');
+    expect(out[0]!.message).toContain('18/11/2025');
   });
 
   it('accepts a rectification date that matches ours exactly', () => {
@@ -232,7 +232,7 @@ describe('when the statement contradicts the file', () => {
 
     expect(out.map((p) => p.kind)).toEqual(['struck-but-recorded']);
     expect(out[0]!.contradiction).toBe(true);
-    expect(out[0]!.message).toMatch(/does not have this installation/);
+    expect(out[0]!.message).toMatch(/marked not installed/);
     expect(out[0]!.message).toMatch(/struck wrongly, or the defect is recorded against the wrong asset/);
   });
 
@@ -252,7 +252,7 @@ describe('when the statement contradicts the file', () => {
       notice({ defectId: 'd2', rectifiedAt: '2025-12-02' }),
     ]);
     expect(out.map((p) => p.kind)).toEqual(['rectification-before-record']);
-    expect(out[0]!.message).toContain('2025-12-02');
+    expect(out[0]!.message).toContain('02/12/2025');
   });
 });
 
@@ -273,7 +273,7 @@ describe('when it is something to check rather than something wrong', () => {
     expect(out.map((p) => p.kind)).toEqual(['declared-without-record']);
     expect(out[0]!.contradiction).toBe(false);
     expect(out[0]!.message).toMatch(/another contractor/);
-    expect(out[0]!.message).toMatch(/attached either way/);
+    expect(out[0]!.message).toMatch(/Attach the notice either way/);
   });
 
   it('says a notice it holds falls outside the period rather than claiming none', () => {
@@ -290,8 +290,8 @@ describe('when it is something to check rather than something wrong', () => {
 
     expect(out.map((p) => p.kind)).toEqual(['declared-without-record']);
     expect(out[0]!.contradiction).toBe(false);
-    expect(out[0]!.message).toContain('2025-06-04');
-    expect(out[0]!.message).toMatch(/fall outside it/);
+    expect(out[0]!.message).toContain('04/06/2025');
+    expect(out[0]!.message).toMatch(/fall outside the period/);
     expect(out[0]!.message).toMatch(/period is wrong or the answer belongs to a different statement/);
     expect(out[0]!.defectIds).toEqual(['d1']);
   });
@@ -366,14 +366,14 @@ describe('what a screen says about it', () => {
   it('counts the two kinds separately, because they are not the same news', () => {
     const out = checkStatementAgainstRecords(statement({ rows }), [notice()]);
     expect(evidenceSummary(out))
-      .toBe("1 answer contradicts Safe QLD's records, and 1 other needs checking.");
+      .toBe('1 answer differs from our records; 1 to check.');
   });
 
   it('does not report a contradiction where there is none', () => {
     const out = checkStatementAgainstRecords(statement({
       rows: [{ installation: 'Sprinklers', installed: true, criticalDefectNoticeIssued: true, rectificationDate: '2026-02-04' }],
     }), []);
-    expect(evidenceSummary(out)).toBe("1 answer needs checking against Safe QLD's records.");
+    expect(evidenceSummary(out)).toBe('1 answer to check against our records.');
   });
 
   it('says nothing where there is nothing to say', () => {
@@ -387,7 +387,7 @@ describe('what a screen says about it', () => {
         { installation: 'Fire extinguishers', installed: true, criticalDefectNoticeIssued: false },
       ],
     }), [notice(), notice({ defectId: 'd2', system: 'extinguisher' })]);
-    expect(evidenceSummary(out)).toBe("2 answers contradict Safe QLD's own records.");
+    expect(evidenceSummary(out)).toBe('2 answers differ from our records.');
   });
 });
 

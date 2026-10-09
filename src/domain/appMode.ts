@@ -1003,7 +1003,7 @@ export const DESTINATIONS: readonly Destination[] = [
       'Test sheets are the record a routine service leaves. The install equivalent is the '
       + 'commissioning paperwork, which is on the job.',
     openedFrom: ['/shortcuts', '/work'],
-    blurb: 'Service reports and test sheets.',
+    blurb: 'Test sheets on this phone.',
     terms: ['test sheets', 'reports', 'service reports'],
     keptBecause:
       'The sheet you were filling in this morning is reopened from here. Making a technician '
@@ -1035,7 +1035,7 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/work/baselines', file: 'app/work/baselines.tsx', tab: 'work', section: 'Records',
     label: 'Baseline data', modes: OFFICE, openedFrom: ['/work'],
-    blurb: 'Commissioning records.',
+    blurb: 'Commissioning readings for the system.',
     terms: ['baseline', 'commissioning', 'records'],
     hiddenBecause:
       'This is the all-sites list, and a technician works one site at a time. The record itself '
