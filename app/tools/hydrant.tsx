@@ -10,8 +10,10 @@ import {
   OUTLETS,
   REQUIREMENT_DISCLAIMER,
   REQUIREMENT_REFS,
+  TYPED_DUTY_SOURCE,
   assessHydrant,
   conduitSpec,
+  dutyOrigin,
   flowMeterToLpm,
   frictionLoss,
   headToKpa,
@@ -21,13 +23,15 @@ import {
   projectAvailableFlow,
   projectResidualAtFlow,
   requiredBoostPressure,
-  refToDuty,
+  refOrigin,
   type ConduitId,
+  type DutyOrigin,
   type FlowUnit,
   type Issue,
   type OutletId,
   type RequirementRef,
 } from '@/calc/hydrant';
+import { readNumber, toggleSign } from '@/calc/fieldNumber';
 import { useTheme } from '@/theme';
 import {
   Banner, Card, Chip, Divider, Field, H2, Label, ResultBlock, Rowed, Screen, Segmented, StatTile, Txt,
@@ -68,7 +72,11 @@ const METER_UNITS: { id: FlowUnit; label: string }[] = [
  * calculation downstream answers confidently. Anything that is not entirely a
  * number is NaN, and every function in the calc module refuses a NaN.
  */
-const num = (s: string): number => (/^-?\d*\.?\d+$/.test(s.trim()) ? Number(s.trim()) : Number.NaN);
+const num = (s: string): number => readNumber(s) ?? Number.NaN;
+
+/** "a, b and c". */
+const listed = (items: string[]): string =>
+  items.length > 1 ? `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}` : (items[0] ?? '');
 
 export default function HydrantScreen() {
   const { form72: form72Param } = useLocalSearchParams<{ form72?: string }>();
@@ -89,12 +97,14 @@ export default function HydrantScreen() {
   // Supply curve
   const [staticKpa, setStaticKpa] = useState('');
   const [residualKpa, setResidualKpa] = useState('');
-  const [targetKpa, setTargetKpa] = useState('350');
+  const [targetKpa, setTargetKpa] = useState('');
 
   // Duty
   const [refId, setRefId] = useState<string | null>(null);
-  const [reqFlowLps, setReqFlowLps] = useState('10');
-  const [reqPressure, setReqPressure] = useState('350');
+  /** The duty a loaded Form 72 filled in, cited while the fields still hold it. */
+  const [formDuty, setFormDuty] = useState<DutyOrigin | null>(null);
+  const [reqFlowLps, setReqFlowLps] = useState('');
+  const [reqPressure, setReqPressure] = useState('');
   const [maxOutlet, setMaxOutlet] = useState('');
   const [maxStatic, setMaxStatic] = useState('');
   const [hydrantRef, setHydrantRef] = useState('');
@@ -102,7 +112,7 @@ export default function HydrantScreen() {
   // Losses
   const [conduit, setConduit] = useState<ConduitId>('layflat-hose');
   const [runBore, setRunBore] = useState('65');
-  const [runLength, setRunLength] = useState('30');
+  const [runLength, setRunLength] = useState('');
   const [riseM, setRiseM] = useState('');
 
   const pitotResult = useMemo(
@@ -145,14 +155,27 @@ export default function HydrantScreen() {
   const applyForm = useCallback((form: StoredForm72) => {
     const inputs = hydrantInputsFrom(form);
     if (!hasHydrantInputs(inputs)) {
-      setLoadedFrom({ form, sources: ['This form holds no static, residual, flow or duty figures yet.'] });
+      setLoadedFrom({ form, sources: ['No static, residual, flow or duty on this form yet.'] });
       return;
     }
     if (inputs.staticKpa !== undefined) setStaticKpa(String(inputs.staticKpa));
     if (inputs.residualKpa !== undefined) setResidualKpa(String(inputs.residualKpa));
     if (inputs.flowLpm !== undefined) { setMetered(String(inputs.flowLpm)); setMeterUnit('lpm'); }
     if (inputs.requiredLps !== undefined) { setReqFlowLps(String(inputs.requiredLps)); setRefId(null); }
-    if (inputs.requiredKpa !== undefined) setReqPressure(String(inputs.requiredKpa));
+    if (inputs.requiredKpa !== undefined) {
+      setReqPressure(String(inputs.requiredKpa));
+      setTargetKpa((prev) => (prev.trim() ? prev : String(inputs.requiredKpa)));
+    }
+    setFormDuty(
+      inputs.requiredLps !== undefined && inputs.requiredKpa !== undefined
+        ? {
+          label: 'Form 72 Part E',
+          requirementSource: `Form 72 Part E, ${form.siteName}${form.testDate ? `, ${formatAuDate(form.testDate)}` : ''}`,
+          flowLps: inputs.requiredLps,
+          pressureKpa: inputs.requiredKpa,
+        }
+        : null,
+    );
     if (inputs.riseM !== undefined) setRiseM(String(inputs.riseM));
     if (inputs.hydrantRef) setHydrantRef(inputs.hydrantRef);
     setLoadedFrom({ form, sources: inputs.sources });
@@ -196,7 +219,7 @@ export default function HydrantScreen() {
         {loadedFrom ? (
           <Banner
             tone="info"
-            title={`Filled from Form 72 — ${loadedFrom.form.siteName}${loadedFrom.form.testDate ? `, ${formatAuDate(loadedFrom.form.testDate)}` : ''}`}
+            title={`From Form 72: ${loadedFrom.form.siteName}${loadedFrom.form.testDate ? `, ${formatAuDate(loadedFrom.form.testDate)}` : ''}`}
             body={loadedFrom.sources.join('\n')}
           />
         ) : null}
@@ -206,7 +229,7 @@ export default function HydrantScreen() {
           <Card>
             <Label>Which Form 72</Label>
             {forms.length === 0 && !formsFailed ? (
-              <Txt size="sm" tone="muted" style={{ marginTop: 6 }}>No Form 72 on this phone yet. One is started from a site's Forms.</Txt>
+              <Txt size="sm" tone="muted" style={{ marginTop: 6 }}>No Form 72s on this phone yet.</Txt>
             ) : null}
             {forms.map((f) => (
               <Pressable key={f.id} onPress={() => applyForm(f)} style={{ paddingVertical: 10 }} accessibilityRole="button">
@@ -272,6 +295,9 @@ export default function HydrantScreen() {
           <DutyView
             refId={refId}
             setRefId={setRefId}
+            formDuty={formDuty}
+            targetKpa={targetKpa}
+            setTargetKpa={setTargetKpa}
             reqFlowLps={reqFlowLps}
             setReqFlowLps={setReqFlowLps}
             reqPressure={reqPressure}
@@ -342,21 +368,20 @@ function FlowView({
   return (
     <>
       <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-        Q = 0.0666 × Cd × d² × √P, with d in mm and P in kPa. The coefficient depends on what the water leaves
-        through, and it is the largest single error in a hydrant test — a bare outlet flowed as a nozzle reads 21% high.
+        Pick the outlet type. It sets the coefficient.
       </Txt>
 
       {result === null ? (
-        <ResultBlock label="Flow" value="—" unit="L/s" detail="Enter a pitot reading to calculate the flow." />
+        <ResultBlock label="Flow" value="—" unit="L/s" detail="Enter a pitot reading." />
       ) : isRefused(result) ? (
-        <Banner tone="warn" title="Cannot calculate this flow" body={result.reason} />
+        <Banner tone="warn" title="Can't calculate the flow" body={result.reason} />
       ) : (
         <>
           <ResultBlock
             label="Flow at this outlet"
             value={result.flowLps.toFixed(2)}
             unit="L/s"
-            detail={`${result.flowLpm.toFixed(0)} L/min  ·  ${result.velocityMs.toFixed(1)} m/s at the outlet  ·  Cd ${result.coefficient}`}
+            detail="Q = 0.0666 × Cd × d² × √P (mm, kPa)"
           />
           <Rowed gap={2}>
             <StatTile label="L/min" value={result.flowLpm.toFixed(0)} />
@@ -368,7 +393,7 @@ function FlowView({
 
       {result && !isRefused(result) ? result.issues.map((i, n) => <IssueBanner key={n} issue={i} />) : null}
 
-      <H2>What the water leaves through</H2>
+      <H2>Outlet type</H2>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2), paddingRight: t.space(4) }}>
         {OUTLETS.map((o) => (
           <Chip key={o.id} label={o.label} selected={outlet === o.id} onPress={() => setOutlet(o.id)} />
@@ -384,7 +409,6 @@ function FlowView({
             value={spec.coefficient === null ? 'No coefficient' : `Cd ${spec.coefficient}`}
             source={spec.source}
             url={spec.url}
-            confidence={spec.confidence}
           />
           {spec.note ? (
             <Txt size="xs" tone="faint" style={{ lineHeight: 17, marginTop: 6 }}>{spec.note}</Txt>
@@ -410,8 +434,7 @@ function FlowView({
 
       <H2>Or a metered flow</H2>
       <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-        A flow meter or a standpipe with a calibrated K-factor is the better measurement — nothing to judge by eye.
-        A reading here overrides the pitot calculation everywhere else on this screen.
+        A metered flow overrides the pitot figure.
       </Txt>
       <Rowed gap={2}>
         {METER_UNITS.map((u) => (
@@ -424,18 +447,18 @@ function FlowView({
         onChangeText={setMetered}
         keyboardType="decimal-pad"
         suffix={METER_UNITS.find((u) => u.id === meterUnit)?.label}
-        hint="Set the unit the rig reads in — an imported rig reads US gallons a minute"
+        hint="Match the unit on the rig."
       />
       {metered.trim() !== '' && meteredLpm === null ? (
         <Banner
           tone="warn"
-          title="That meter reading cannot be used"
-          body="Enter it as a number, and check the unit above matches the face of the gauge. A gpm reading treated as L/min turns a comfortable pass into a fail nobody on site can explain."
+          title="Can't use that meter reading"
+          body="Enter a number; check the unit matches the gauge."
         />
       ) : null}
       {meteredLpm !== null && meteredLpm > 0 ? (
         <Txt size="xs" tone="faint">
-          {(meteredLpm / 60).toFixed(2)} L/s · {meteredLpm.toFixed(0)} L/min. This is what the other tabs will use.
+          {(meteredLpm / 60).toFixed(2)} L/s · {meteredLpm.toFixed(0)} L/min. Used on the other tabs.
         </Txt>
       ) : null}
     </>
@@ -463,9 +486,15 @@ function SupplyView({
   measuredFlowLpm: number | null;
   flowSource: string;
 }) {
+  const missing = [
+    staticKpa.trim() === '' ? 'static' : null,
+    residualKpa.trim() === '' ? 'residual' : null,
+    targetKpa.trim() === '' ? 'target residual' : null,
+  ].filter((m): m is string => m !== null);
+
   const projection = useMemo(() => {
     if (measuredFlowLpm === null) return null;
-    if (staticKpa.trim() === '' || residualKpa.trim() === '') return null;
+    if (staticKpa.trim() === '' || residualKpa.trim() === '' || targetKpa.trim() === '') return null;
     return projectAvailableFlow({
       staticKpa: num(staticKpa),
       residualKpa: num(residualKpa),
@@ -477,15 +506,14 @@ function SupplyView({
   return (
     <>
       <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-        Q at the target = Q measured × (Δ target ÷ Δ measured)^0.54. This is the question a hydrant test actually
-        answers: how much water is still there once the pressure is pulled down to what the brigade needs.
+        Flow available at the target pressure.
       </Txt>
 
       {measuredFlowLpm === null ? (
         <Banner
           tone="info"
           title="No measured flow yet"
-          body="Go back to the Flow tab and enter a pitot reading or a metered flow. The projection needs a flow and the pressure it was measured at."
+          body="Enter a pitot reading or metered flow on the Flow tab."
         />
       ) : (
         <Txt size="xs" tone="faint">
@@ -494,16 +522,21 @@ function SupplyView({
       )}
 
       {projection === null ? (
-        <ResultBlock label="Available flow" value="—" unit="L/s" detail="Enter the static and residual pressures." />
+        <ResultBlock
+          label="Available flow"
+          value="—"
+          unit="L/s"
+          detail={missing.length ? `Enter the ${listed(missing)}.` : undefined}
+        />
       ) : isRefused(projection) ? (
-        <Banner tone="warn" title="Cannot project from this test" body={projection.reason} />
+        <Banner tone="warn" title="Can't project from this test" body={projection.reason} />
       ) : (
         <>
           <ResultBlock
             label={`Available at ${num(targetKpa).toFixed(0)} kPa`}
             value={projection.projectedFlowLps.toFixed(2)}
             unit="L/s"
-            detail={`${projection.projectedFlowLpm.toFixed(0)} L/min  ·  drawdown ${projection.measuredDrawdownKpa.toFixed(0)} kPa (${(projection.drawdownFraction * 100).toFixed(0)}% of static)`}
+            detail={`${projection.projectedFlowLpm.toFixed(0)} L/min · drawdown ${(projection.drawdownFraction * 100).toFixed(0)}% of static · Q × (Δ target ÷ Δ test)^0.54`}
           />
           <Rowed gap={2}>
             <StatTile label="Δ measured" value={`${projection.measuredDrawdownKpa.toFixed(0)} kPa`} />
@@ -518,7 +551,7 @@ function SupplyView({
         </>
       )}
 
-      <H2>The two readings</H2>
+      <H2>Readings</H2>
       <Rowed gap={2} align="flex-start">
         <View style={{ flex: 1 }}>
           <Field
@@ -547,17 +580,12 @@ function SupplyView({
         onChangeText={setTargetKpa}
         keyboardType="decimal-pad"
         suffix="kPa"
-        hint="The pressure the answer is wanted at"
+        hint="Usually the duty residual"
       />
 
-      <Card>
-        <Label>Why the drawdown matters</Label>
-        <Txt size="sm" tone="muted" style={{ lineHeight: 20, marginTop: 6 }}>
-          The projection is a curve through two points. If the residual barely moved, those points sit on top of each
-          other and the curve swings on a needle's width — at zero drawdown the answer is arithmetically infinite.
-          Aim to pull the pressure down at least a quarter. Below 5% this screen will not answer at all.
-        </Txt>
-      </Card>
+      <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
+        Pull pressure down 25%+. Under 5% won’t calculate.
+      </Txt>
     </>
   );
 }
@@ -567,6 +595,9 @@ function SupplyView({
 function DutyView({
   refId,
   setRefId,
+  formDuty,
+  targetKpa,
+  setTargetKpa,
   reqFlowLps,
   setReqFlowLps,
   reqPressure,
@@ -583,6 +614,9 @@ function DutyView({
 }: {
   refId: string | null;
   setRefId: (v: string | null) => void;
+  formDuty: DutyOrigin | null;
+  targetKpa: string;
+  setTargetKpa: (v: string) => void;
   reqFlowLps: string;
   setReqFlowLps: (v: string) => void;
   reqPressure: string;
@@ -611,17 +645,15 @@ function DutyView({
    * duty is edited away from it, and the screen says so rather than letting the
    * chip sit there looking authoritative.
    */
-  const chosen =
-    selected && selected.flowLps === num(reqFlowLps) && selected.pressureKpa === num(reqPressure)
-      ? selected
-      : undefined;
+  const selectedOrigin = selected ? refOrigin(selected) : null;
+  const origin = dutyOrigin(num(reqFlowLps), num(reqPressure), [selectedOrigin, formDuty]);
+  const chosen = selected && origin === selectedOrigin ? selected : undefined;
   const editedAway = selected !== undefined && chosen === undefined;
+  const dutyEntered = reqFlowLps.trim() !== '' && reqPressure.trim() !== '';
 
   const assessment = useMemo(() => {
-    if (measuredFlowLpm === null || residualKpa.trim() === '') return null;
-    const source = chosen
-      ? (refToDuty(chosen)?.requirementSource ?? '')
-      : 'Entered by the technician from the building’s fire safety documents';
+    if (measuredFlowLpm === null || residualKpa.trim() === '' || !dutyEntered) return null;
+    const source = origin?.requirementSource ?? TYPED_DUTY_SOURCE;
     return assessHydrant({
       requiredFlowLpm: num(reqFlowLps) * 60,
       requiredResidualKpa: num(reqPressure),
@@ -633,7 +665,7 @@ function DutyView({
       maxStaticKpa: maxStatic.trim() === '' ? undefined : num(maxStatic),
       hydrantRef: hydrantRef.trim() === '' ? undefined : hydrantRef.trim(),
     });
-  }, [measuredFlowLpm, residualKpa, staticKpa, reqFlowLps, reqPressure, maxOutlet, maxStatic, hydrantRef, chosen]);
+  }, [measuredFlowLpm, residualKpa, staticKpa, reqFlowLps, reqPressure, maxOutlet, maxStatic, hydrantRef, origin, dutyEntered]);
 
   /**
    * What the gauge will read at the hydrant when the duty flow is actually being
@@ -641,21 +673,28 @@ function DutyView({
    * curve the projection above uses.
    */
   const atDutyFlow = useMemo(() => {
-    if (measuredFlowLpm === null || staticKpa.trim() === '' || residualKpa.trim() === '') return null;
+    if (measuredFlowLpm === null || staticKpa.trim() === '' || residualKpa.trim() === '' || !dutyEntered) return null;
     return projectResidualAtFlow({
       staticKpa: num(staticKpa),
       residualKpa: num(residualKpa),
       measuredFlowLpm,
       targetFlowLpm: num(reqFlowLps) * 60,
     });
-  }, [measuredFlowLpm, staticKpa, residualKpa, reqFlowLps]);
+  }, [measuredFlowLpm, staticKpa, residualKpa, reqFlowLps, dutyEntered]);
 
   /** Selecting a published reference fills the duty fields; it never assesses on its own. */
   const applyRef = (ref: RequirementRef) => {
     setRefId(ref.id === refId ? null : ref.id);
-    if (ref.id === refId) return;
+    if (ref.id === refId) {
+      // Unpicked: its figures go with it, so they are not recorded as typed.
+      // A duty loaded from a Form 72 comes back.
+      setReqFlowLps(formDuty ? String(formDuty.flowLps) : '');
+      setReqPressure(formDuty ? String(formDuty.pressureKpa) : '');
+      return;
+    }
     if (ref.flowLps !== null) setReqFlowLps(String(ref.flowLps));
     setReqPressure(String(ref.pressureKpa));
+    if (targetKpa.trim() === '') setTargetKpa(String(ref.pressureKpa));
   };
 
   /**
@@ -673,11 +712,11 @@ function DutyView({
       {assessment === null ? (
         <Banner
           tone="info"
-          title="Not enough entered to assess"
-          body="A measured flow (Flow tab) and the residual pressure it was measured at (Supply tab) are the minimum. Add the static as well and a shortfall can be projected rather than guessed."
+          title="Not enough to assess"
+          body={dutyEntered ? 'Needs flow and residual. Add static to project.' : 'Enter the duty below.'}
         />
       ) : isRefused(assessment) ? (
-        <Banner tone="warn" title="Cannot assess this test" body={assessment.reason} />
+        <Banner tone="warn" title="Can't assess this test" body={assessment.reason} />
       ) : (
         <>
           <ResultBlock
@@ -719,7 +758,10 @@ function DutyView({
               />
             </Rowed>
           ) : null}
-          {assessment.issues.map((i, n) => <IssueBanner key={n} issue={i} />)}
+          {/* Where the duty came from is shown under the duty fields. */}
+          {assessment.issues
+            .filter((i) => i.title !== REQUIREMENT_DISCLAIMER)
+            .map((i, n) => <IssueBanner key={n} issue={i} />)}
           {atDutyFlow && !isRefused(atDutyFlow)
             ? atDutyFlow.issues
                 .filter((i) => i.level === 'error')
@@ -728,10 +770,9 @@ function DutyView({
         </>
       )}
 
-      <H2>What is it being checked against?</H2>
+      <H2>Duty</H2>
       <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-        Type the figures off the building's fire safety documents. The references below are published regulator
-        figures offered as a starting point — each says where it came from and where it applies.
+        From the building’s fire safety documents, or pick one.
       </Txt>
 
       <Rowed gap={2} align="flex-start">
@@ -760,10 +801,15 @@ function DutyView({
             onChangeText={setMaxStatic}
             keyboardType="decimal-pad"
             suffix="kPa"
-            hint="Ceiling at no flow — a different figure"
+            hint="Ceiling at no flow"
           />
         </View>
       </Rowed>
+      {dutyEntered ? (
+        <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
+          {origin ? `From: ${origin.label}` : 'Typed in'}
+        </Txt>
+      ) : null}
       <Field label="Hydrant" value={hydrantRef} onChangeText={setHydrantRef} placeholder="HYD-14 level 8" />
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2), paddingRight: t.space(4) }}>
@@ -775,15 +821,14 @@ function DutyView({
       {editedAway ? (
         <Banner
           tone="info"
-          title="The duty no longer matches the reference that was picked"
-          body={`The figures have been edited away from "${selected!.label}", so the result is recorded as entered by the technician rather than measured against that document. Tap it again to go back to its numbers.`}
+          title="Duty edited from the reference"
+          body={`Recorded as typed, not as "${selected!.label}". Tap it to restore.`}
         />
       ) : null}
 
       <H2>Published ceilings</H2>
       <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-        Too much pressure is a defect in the other direction — nobody can hold the hose. These fill the field they were
-        written for, and the two are not the same number.
+        Tap a ceiling to fill its field.
       </Txt>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2), paddingRight: t.space(4) }}>
         {maximums.map((r) => (
@@ -796,8 +841,7 @@ function DutyView({
         ))}
       </ScrollView>
       <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-        A ceiling marked in amber does not say in its own document whether it was written for the flowing or the
-        no-flow reading, so tapping it fills nothing. Read the document and put the figure in the right field.
+        Amber: the document doesn’t say flowing or static. Enter it yourself.
       </Txt>
 
       {chosen ? (
@@ -806,11 +850,11 @@ function DutyView({
           <Txt size="sm" style={{ lineHeight: 19, marginTop: 4 }}>{chosen.scope}</Txt>
           {chosen.note ? <Txt size="xs" tone="faint" style={{ lineHeight: 17, marginTop: 6 }}>{chosen.note}</Txt> : null}
           <Divider />
-          <SourceLine value={chosen.label} source={chosen.source} url={chosen.url} confidence={chosen.confidence} />
+          <SourceLine value={chosen.label} source={chosen.source} url={chosen.url} />
         </Card>
       ) : null}
 
-      <Banner tone="warn" title="This checks against what it was told" body={REQUIREMENT_DISCLAIMER} />
+      <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>{REQUIREMENT_DISCLAIMER}. Not a design check.</Txt>
     </>
   );
 }
@@ -843,9 +887,10 @@ function LossesView({
   const t = useTheme();
   const spec = conduitSpec(conduit);
 
+  const runEntered = runBore.trim() !== '' && runLength.trim() !== '';
   const loss = useMemo(
     () =>
-      measuredFlowLpm === null
+      measuredFlowLpm === null || !runEntered
         ? null
         : frictionLoss({
             flowLpm: measuredFlowLpm,
@@ -853,13 +898,13 @@ function LossesView({
             lengthM: num(runLength),
             conduit,
           }),
-    [measuredFlowLpm, runBore, runLength, conduit],
+    [measuredFlowLpm, runBore, runLength, conduit, runEntered],
   );
 
   const elevationKpa = riseM.trim() === '' ? null : headToKpa(num(riseM));
 
   const boost = useMemo(() => {
-    if (riseM.trim() === '' || loss === null || isRefused(loss)) return null;
+    if (riseM.trim() === '' || targetKpa.trim() === '' || loss === null || isRefused(loss)) return null;
     return requiredBoostPressure({
       requiredResidualKpa: num(targetKpa),
       elevationRiseM: num(riseM),
@@ -870,27 +915,28 @@ function LossesView({
   return (
     <>
       <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-        Hazen-Williams, because it is what the hydraulic calculations behind the building's design used — a figure
-        from here can be compared with them without a translation step. Elevation is at 9.80665 kPa per metre.
+        Hazen-Williams friction; 9.81 kPa per metre rise.
       </Txt>
 
       {measuredFlowLpm === null ? (
-        <Banner tone="info" title="No flow entered" body="Friction loss depends on the flow. Enter one on the Flow tab." />
-      ) : loss === null ? null : isRefused(loss) ? (
-        <Banner tone="warn" title="Cannot estimate friction loss" body={loss.reason} />
+        <Banner tone="info" title="No flow entered" body="Enter a flow on the Flow tab." />
+      ) : loss === null ? (
+        <ResultBlock label="Friction loss over the run" value="—" unit="kPa" detail="Enter the bore and length." />
+      ) : isRefused(loss) ? (
+        <Banner tone="warn" title="Can't estimate friction loss" body={loss.reason} />
       ) : (
         <>
           <ResultBlock
             label="Friction loss over the run"
             value={loss.pressureLossKpa.toFixed(0)}
             unit="kPa"
-            detail={`${loss.lossKpaPerM.toFixed(2)} kPa/m  ·  ${loss.headLossM.toFixed(2)} m head  ·  ${loss.velocityMs.toFixed(1)} m/s  ·  C = ${loss.c}`}
+            detail={`${loss.lossKpaPerM.toFixed(2)} kPa/m · ${loss.headLossM.toFixed(2)} m head · ${loss.velocityMs.toFixed(1)} m/s · C = ${loss.c}`}
           />
           {loss.issues.map((i, n) => <IssueBanner key={n} issue={i} />)}
         </>
       )}
 
-      <H2>The run</H2>
+      <H2>Run</H2>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2), paddingRight: t.space(4) }}>
         {CONDUITS.map((c) => (
           <Chip key={c.id} label={c.label} selected={conduit === c.id} onPress={() => setConduit(c.id)} />
@@ -903,12 +949,10 @@ function LossesView({
             value={spec.cLow === spec.cHigh ? `C = ${spec.cLow}` : `C = ${spec.cLow}–${spec.cHigh}, using ${spec.cLow}`}
             source={spec.source}
             url={spec.url}
-            confidence={spec.confidence}
           />
           {spec.note ? <Txt size="xs" tone="faint" style={{ lineHeight: 17, marginTop: 6 }}>{spec.note}</Txt> : null}
           <Txt size="xs" tone="faint" style={{ lineHeight: 17, marginTop: 6 }}>
-            The low end of the range is applied, because it gives the greater loss. Where the design nominates a C
-            value, that one governs.
+            Uses the low C (more loss). A C in the design governs.
           </Txt>
         </Card>
       ) : null}
@@ -924,17 +968,24 @@ function LossesView({
 
       <H2>Elevation</H2>
       <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-        A hydrant three storeys up is the binding case on most jobs, and the reason has nothing to do with the pump:
-        ten metres of rise costs 98 kPa before a drop of water has moved.
+        Every 10 m of rise costs 98 kPa.
       </Txt>
-      <Field
-        label="Hydrant above the source"
-        value={riseM}
-        onChangeText={setRiseM}
-        keyboardType="decimal-pad"
-        suffix="m"
-        hint="Negative for a basement"
-      />
+      {/* The iPhone's decimal keypad has no minus key, so a basement gets its sign from the ± chip. */}
+      <Rowed gap={2} align="flex-start">
+        <View style={{ flex: 1 }}>
+          <Field
+            label="Hydrant above the source"
+            value={riseM}
+            onChangeText={setRiseM}
+            keyboardType="decimal-pad"
+            suffix="m"
+            hint="Tap ± for a basement"
+          />
+        </View>
+        <View style={{ marginTop: 26 }}>
+          <Chip label="±" selected={riseM.trim().startsWith('-')} onPress={() => setRiseM(toggleSign(riseM))} />
+        </View>
+      </Rowed>
       {elevationKpa !== null ? (
         <Rowed gap={2}>
           <StatTile label="Static lift" value={`${elevationKpa.toFixed(0)} kPa`} />
@@ -942,11 +993,17 @@ function LossesView({
         </Rowed>
       ) : null}
 
+      {riseM.trim() !== '' && targetKpa.trim() === '' && loss !== null && !isRefused(loss) ? (
+        <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
+          Set a target residual on the Supply tab for the booster pressure.
+        </Txt>
+      ) : null}
+
       {boost && isRefused(boost) ? (
         // Shown rather than swallowed. The target residual lives on the Supply
         // tab, so the reason this cannot be worked out is usually on a screen
         // the technician is not looking at.
-        <Banner tone="warn" title="Cannot work out what the booster needs" body={boost.reason} />
+        <Banner tone="warn" title="Can't work out the booster pressure" body={boost.reason} />
       ) : null}
 
       {boost && !isRefused(boost) ? (
@@ -960,8 +1017,7 @@ function LossesView({
           />
           {boost.issues.map((i, n) => <IssueBanner key={n} issue={i} />)}
           <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-            Compare this with the boost pressure on the sign. The sign was calculated for the building as designed,
-            and a later riser extension or a moved test point makes it wrong.
+            Compare with the booster sign.
           </Txt>
         </>
       ) : null}
@@ -971,31 +1027,26 @@ function LossesView({
 
 // ---------------------------------------------------------------------------
 
-/** A value with where it came from and how much to trust it, in one line. */
+/** A value and where it came from. Tap the source to open it. */
 function SourceLine({
   value,
   source,
   url,
-  confidence,
 }: {
   value: string;
   source: string;
   url?: string;
-  confidence: 'high' | 'medium' | 'low';
 }) {
-  const tone = confidence === 'high' ? 'pass' : confidence === 'medium' ? 'muted' : 'warn';
   return (
     <View style={{ gap: 5, marginTop: 6 }}>
-      <Rowed gap={2} wrap>
-        <Txt weight="700">{value}</Txt>
-        <Chip label={`${confidence} confidence`} tone={tone} />
-      </Rowed>
-      <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>{source}</Txt>
+      <Txt weight="700">{value}</Txt>
       {url ? (
-        <Pressable onPress={() => void Linking.openURL(url)} hitSlop={6}>
-          <Txt size="xs" tone="accent" style={{ lineHeight: 17 }}>{url}</Txt>
+        <Pressable onPress={() => void Linking.openURL(url)} hitSlop={6} accessibilityRole="link">
+          <Txt size="xs" tone="accent" style={{ lineHeight: 17 }}>{source}</Txt>
         </Pressable>
-      ) : null}
+      ) : (
+        <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>{source}</Txt>
+      )}
     </View>
   );
 }

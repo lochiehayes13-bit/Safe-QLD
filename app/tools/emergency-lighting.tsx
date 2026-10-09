@@ -1,12 +1,13 @@
 import React, { useMemo, useState } from 'react';
-import { View } from 'react-native';
-import { Stack } from 'expo-router';
+import { Linking, Pressable, View } from 'react-native';
+import { Stack, router } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   BATTERY_DESIGN_LIFE_YEARS,
   KNOWN_CLASSIFICATIONS,
   MINIMUM_DURATION_MINUTES,
   OUTCOME_LABEL,
+  SOURCES,
   TABULATED_HEIGHTS_M,
   assessDischarge,
   batteryAdvice,
@@ -28,7 +29,7 @@ import {
 } from '@/domain/emergencyLighting';
 import { useTheme } from '@/theme';
 import {
-  Banner, Card, Chip, Divider, EmptyState, Field, H2, Label, ResultBlock, Rowed, Screen, Segmented, StatTile, Txt,
+  Banner, Button, Card, Chip, Divider, EmptyState, Field, H2, Label, ResultBlock, Rowed, Screen, Segmented, StatTile, Txt,
 } from '@/components/ui';
 
 /**
@@ -38,15 +39,17 @@ import {
  * a technician has at the top of the ladder are always the same four: did this
  * one pass, is that sign close enough to be read, is the battery old enough to
  * explain what I just saw, and is there anything like enough light in this
- * room. Each has its own tab, and each shows where its numbers came from — the
- * point of this screen is that no figure appears on it without its source and
- * how much that source is worth.
+ * room. Each has its own tab, and each shows where its numbers came from.
  */
 
 type Mode = 'discharge' | 'sign' | 'battery' | 'spacing';
 
 export default function EmergencyLightingScreen() {
   const [mode, setMode] = useState<Mode>('discharge');
+  // One install date for the whole screen. It is asked for on the discharge
+  // tab, where it changes the advice, and on the battery tab, where it is the
+  // whole answer; typed on either, it is the same date on both.
+  const [installedOn, setInstalledOn] = useState('');
 
   return (
     <>
@@ -62,14 +65,20 @@ export default function EmergencyLightingScreen() {
             { value: 'spacing', label: 'Spacing' },
           ]}
         />
-        {mode === 'discharge' ? <DischargeView /> : null}
+        {mode === 'discharge' ? <DischargeView installedOn={installedOn} setInstalledOn={setInstalledOn} /> : null}
         {mode === 'sign' ? <SignView /> : null}
-        {mode === 'battery' ? <BatteryView /> : null}
+        {mode === 'battery' ? <BatteryView installedOn={installedOn} setInstalledOn={setInstalledOn} /> : null}
         {mode === 'spacing' ? <SpacingView /> : null}
       </Screen>
     </>
   );
 }
+
+/** A field's text, read as a number only when it is used. Blank is not zero. */
+const num = (text: string): number => {
+  const trimmed = text.trim();
+  return trimmed ? Number(trimmed) : Number.NaN;
+};
 
 // ---------------------------------------------------------------------------
 // Discharge test
@@ -92,12 +101,17 @@ const OUTCOME_TONE: Record<DischargeOutcome, 'pass' | 'warn' | 'fail'> = {
   unreadable: 'warn',
 };
 
-function DischargeView() {
+function DischargeView({
+  installedOn,
+  setInstalledOn,
+}: {
+  installedOn: string;
+  setInstalledOn: (v: string) => void;
+}) {
   const t = useTheme();
   const [achieved, setAchieved] = useState('');
   const [ending, setEnding] = useState<TestEnding>('extinguished');
   const [rated, setRated] = useState('');
-  const [installedOn, setInstalledOn] = useState('');
   const [supply, setSupply] = useState<SupplyType>('single-point');
   const [operatingMode, setOperatingMode] = useState<OperatingMode>('non-sustained');
   const [role, setRole] = useState<FittingRole>('emergency-luminaire');
@@ -107,9 +121,9 @@ function DischargeView() {
   const verdict = useMemo(
     () =>
       assessDischarge({
-        achievedMinutes: ending === 'never-lit' ? 0 : Number(achieved.trim()),
+        achievedMinutes: ending === 'never-lit' ? 0 : num(achieved),
         ending,
-        ratedMinutes: rated.trim() ? Number(rated.trim()) : undefined,
+        ratedMinutes: rated.trim() ? num(rated) : undefined,
       }),
     [achieved, ending, rated],
   );
@@ -126,10 +140,7 @@ function DischargeView() {
 
   return (
     <>
-      <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-        Remove normal supply, time how long the fitting stays lit, and record how the test ended. How it ended is what
-        separates a pass from a test that was simply stopped.
-      </Txt>
+      <Txt size="sm" tone="muted">Isolate supply, time it, record how it ended.</Txt>
 
       <Segmented
         value={ending}
@@ -145,12 +156,11 @@ function DischargeView() {
         <Rowed gap={2} align="flex-start">
           <View style={{ flex: 1 }}>
             <Field
-              label={ending === 'extinguished' ? 'Illuminated for' : 'Test ended at'}
+              label={ending === 'extinguished' ? 'Lit for' : 'Stopped at'}
               value={achieved}
               onChangeText={setAchieved}
               keyboardType="decimal-pad"
               suffix="min"
-              placeholder="90"
             />
           </View>
           <View style={{ flex: 1 }}>
@@ -161,24 +171,16 @@ function DischargeView() {
               keyboardType="numeric"
               suffix="min"
               placeholder={String(MINIMUM_DURATION_MINUTES)}
-              hint="Off the fitting, if it says"
+              hint="Off the fitting label."
             />
           </View>
         </Rowed>
       ) : (
-        <Banner
-          tone="info"
-          title="Confirm the supply was actually removed"
-          body="Half the fittings recorded as never illuminating turn out to have been on a circuit that was never isolated. Check that before this becomes a defect."
-        />
+        <Banner tone="info" title="Check isolation" body="Check the circuit was actually isolated." />
       )}
 
       {!entered ? (
-        <EmptyState
-          icon="pencil-outline"
-          title="Enter the result"
-          body="Minutes illuminated and how the test ended. Nothing is assumed from a blank."
-        />
+        <EmptyState icon="pencil-outline" title="Enter the result" body="Minutes lit and how it ended." />
       ) : (
         <>
           <ResultBlock
@@ -203,21 +205,21 @@ function DischargeView() {
 
           {verdict.reason ? <Banner tone="warn" title="No verdict" body={verdict.reason} /> : null}
 
-          {!verdict.requiredFromRating && verdict.outcome !== 'unreadable' ? (
-            <Banner
-              tone="info"
-              title={`Held to the ${MINIMUM_DURATION_MINUTES}-minute code minimum`}
-              body="Either no rated duration was entered, or one below the code minimum was — a rating cannot lower what a fitting has to achieve. A fail against this is a fail on any rating; a pass only shows it met the floor."
-            />
-          ) : null}
-
           {verdict.defectCode ? (
-            <Card>
+            <Card style={{ gap: t.space(1.5) }}>
               <Rowed gap={2}>
                 <Chip label={verdict.defectCode} tone="fail" />
                 <Txt size="sm" weight="700" style={{ flex: 1 }}>Defect to raise</Txt>
               </Rowed>
-              <Txt size="sm" tone="muted" style={{ marginTop: 6, lineHeight: 19 }}>{verdict.rectification}</Txt>
+              <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{verdict.rectification}</Txt>
+              <Button
+                title="Raise defect"
+                variant="secondary"
+                compact
+                onPress={() =>
+                  router.push({ pathname: '/work/defect/new', params: { code: verdict.defectCode ?? '' } })
+                }
+              />
             </Card>
           ) : null}
 
@@ -234,7 +236,7 @@ function DischargeView() {
         onChangeText={setInstalledOn}
         placeholder="d/m/yyyy"
         autoCapitalize="none"
-        hint="Optional. Age changes what the test result means, and what to do about it."
+        hint="Optional."
       />
       {age && !age.known ? <Banner tone="warn" title="Date not read" body={`${age.reason} ${age.whatToDo}`} /> : null}
       {age?.known ? (
@@ -251,7 +253,7 @@ function DischargeView() {
         </Card>
       ) : null}
 
-      <H2>What kind of fitting</H2>
+      <H2>Fitting type</H2>
       <Segmented
         value={supply}
         onChange={setSupply}
@@ -291,10 +293,10 @@ function DischargeView() {
         <Label>Isolate at</Label>
         <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{profile.isolationPoint}</Txt>
         <Divider />
-        <Label>What is tested</Label>
+        <Label>Test</Label>
         {profile.whatIsTested.map((line) => <Bullet key={line} text={line} />)}
         <Divider />
-        <Label>How a failure is rectified</Label>
+        <Label>If it fails</Label>
         {profile.howAFailureIsRectified.map((line) => <Bullet key={line} text={line} />)}
       </Card>
       {profile.cautions.map((c) => <Banner key={c} tone="warn" title="Watch this" body={c} />)}
@@ -310,26 +312,22 @@ function DischargeView() {
 
 function SignView() {
   const t = useTheme();
-  const [height, setHeight] = useState('150');
+  const [height, setHeight] = useState('');
   const [illumination, setIllumination] = useState<SignIllumination>('internally-illuminated');
   const [distance, setDistance] = useState('');
 
   const sign = useMemo(
-    () => exitSignViewingDistance({ pictogramHeightMm: Number(height.trim()), illumination }),
+    () => exitSignViewingDistance({ pictogramHeightMm: num(height), illumination }),
     [height, illumination],
   );
   const placement = useMemo(
-    () => (sign.known && distance.trim() ? checkSignPlacement(Number(distance.trim()), sign) : undefined),
+    () => (sign.known && distance.trim() ? checkSignPlacement(num(distance), sign) : undefined),
     [sign, distance],
   );
 
   return (
     <>
-      <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-        Measure the green running-man element itself, top to bottom — not the housing and not the whole sign face.
-        The answer comes off published bands, so a size between two of them reads as the smaller band rather than as a
-        number in between.
-      </Txt>
+      <Txt size="sm" tone="muted">Measure the running-man symbol height only.</Txt>
 
       <Segmented
         value={illumination}
@@ -345,14 +343,15 @@ function SignView() {
         label="Pictogram height"
         value={height}
         onChangeText={setHeight}
-        keyboardType="numeric"
+        keyboardType="decimal-pad"
         suffix="mm"
-        placeholder="150"
       />
 
-      {!sign.known ? (
+      {!height.trim() ? (
+        <EmptyState icon="exit-run" title="Enter the pictogram height" body="Top to bottom of the running man." />
+      ) : !sign.known ? (
         <>
-          <Banner tone="warn" title="This app will not answer that" body={sign.reason} />
+          <Banner tone="warn" title="Can't calculate" body={sign.reason} />
           <Card>
             <Label>What to do</Label>
             <Txt size="sm" tone="muted" style={{ marginTop: 4, lineHeight: 19 }}>{sign.whatToDo}</Txt>
@@ -366,38 +365,30 @@ function SignView() {
             value={String(sign.maxViewingDistanceM)}
             unit="m"
             tone={sign.sourcesAgree ? 'accent' : 'warn'}
-            detail={
-              sign.cappedBy
-                ? sign.cappedBy
-                : sign.sourcesAgree
-                  ? 'Every publication consulted gives this figure for a pictorial element of this size.'
-                  : 'The strictest of the readings below. A sign inside this is inside all of them.'
-            }
+            detail={sign.cappedBy ?? (sign.sourcesAgree ? undefined : 'Strictest published reading.')}
           />
 
-          <Card>
-            <Label>Readings consulted</Label>
-            {sign.candidates.map((c) => (
-              <View key={`${c.sourceId}-${c.maxViewingDistanceM}`} style={{ paddingVertical: t.space(1.5) }}>
-                <Rowed gap={2}>
+          {!sign.sourcesAgree ? (
+            <Card>
+              <Label>Sources differ</Label>
+              {sign.candidates.map((c) => (
+                <View key={`${c.sourceId}-${c.maxViewingDistanceM}`} style={{ paddingVertical: t.space(1.5) }}>
                   <Txt size="md" weight="700" mono>{c.maxViewingDistanceM} m</Txt>
-                  <Chip
-                    label={`${c.confidence} confidence`}
-                    tone={c.confidence === 'high' ? 'pass' : c.confidence === 'medium' ? 'accent' : 'warn'}
-                  />
-                </Rowed>
-                <Txt size="xs" tone="muted" style={{ marginTop: 3, lineHeight: 17 }}>{c.reading}</Txt>
-              </View>
-            ))}
-          </Card>
+                  <Txt size="xs" tone="muted" style={{ marginTop: 3, lineHeight: 17 }}>
+                    {c.reading} {SOURCES[c.sourceId].ref}
+                  </Txt>
+                </View>
+              ))}
+            </Card>
+          ) : null}
 
           <Field
-            label="Furthest a person must read it from"
+            label="Furthest viewing point"
             value={distance}
             onChangeText={setDistance}
             keyboardType="decimal-pad"
             suffix="m"
-            hint="Measured along the path of travel"
+            hint="Along the path of travel."
           />
 
           {placement && !placement.known ? (
@@ -411,14 +402,14 @@ function SignView() {
                   ? 'Within the viewing distance'
                   : placement.verdict === 'exceeds'
                     ? 'Beyond the viewing distance'
-                    : 'Cannot be called either way'
+                    : 'Between the published limits'
               }
               body={placement.reason ? `${placement.statement} ${placement.reason}` : placement.statement}
             />
           ) : null}
 
           <Card>
-            <Label>What governs</Label>
+            <Label>Governing clause</Label>
             <Txt size="sm" tone="muted" style={{ marginTop: 4, lineHeight: 19 }}>{sign.governing}</Txt>
           </Card>
           {sign.notes.map((n) => (
@@ -435,8 +426,13 @@ function SignView() {
 // Battery age
 // ---------------------------------------------------------------------------
 
-function BatteryView() {
-  const [installedOn, setInstalledOn] = useState('');
+function BatteryView({
+  installedOn,
+  setInstalledOn,
+}: {
+  installedOn: string;
+  setInstalledOn: (v: string) => void;
+}) {
   const [life, setLife] = useState('');
 
   const result = useMemo(
@@ -445,7 +441,7 @@ function BatteryView() {
         ? batteryAge({
             installedOn,
             at: new Date(),
-            designLifeYears: life.trim() ? Number(life.trim()) : undefined,
+            designLifeYears: life.trim() ? num(life) : undefined,
           })
         : undefined,
     [installedOn, life],
@@ -453,16 +449,13 @@ function BatteryView() {
 
   return (
     <>
-      <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-        Dates are read d/m/yyyy. A date with the month first is rejected rather than guessed at.
-      </Txt>
-
       <Field
         label="Battery installed"
         value={installedOn}
         onChangeText={setInstalledOn}
         placeholder="d/m/yyyy"
         autoCapitalize="none"
+        hint="Enter dates as d/m/yyyy."
       />
       <Field
         label="Design life"
@@ -471,12 +464,12 @@ function BatteryView() {
         keyboardType="decimal-pad"
         suffix="years"
         placeholder={String(BATTERY_DESIGN_LIFE_YEARS)}
-        hint="The manufacturer's own figure, where the datasheet gives one. Lithium iron phosphate packs are published well beyond four years."
+        hint="From the datasheet, if it gives one."
       />
 
       {!result ? (
         <EmptyState
-          icon="calendar-edit" title="Enter the install date" body="Off the fitting, the battery label, or the register." />
+          icon="calendar-edit" title="Enter the install date" body="From the fitting, battery label or register." />
       ) : !result.known ? (
         <>
           <Banner tone="warn" title="Date not read" body={result.reason} />
@@ -506,8 +499,7 @@ function BatteryView() {
           <Banner tone="info" title="Age is not a defect" body={result.caveat} />
           {!result.designLifeFromManufacturer ? (
             <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-              Using the generic {BATTERY_DESIGN_LIFE_YEARS}-year design life for a self-contained emergency luminaire.
-              Enter the manufacturer's own figure where the datasheet gives one.
+              Generic {BATTERY_DESIGN_LIFE_YEARS}-year design life. Enter the datasheet figure if there is one.
             </Txt>
           ) : null}
           <SourceList ids={result.sourceIds} />
@@ -521,38 +513,42 @@ function BatteryView() {
 // Spacing sense-check
 // ---------------------------------------------------------------------------
 
+const EDITIONS: { value: SpacingEdition; label: string }[] = [
+  { value: '2005', label: 'AS/NZS 2293.1:2005' },
+  { value: '2018', label: 'AS/NZS 2293.1:2018' },
+];
+
 function SpacingView() {
   const t = useTheme();
   const [length, setLength] = useState('');
   const [width, setWidth] = useState('');
   const [count, setCount] = useState('');
-  const [heightM, setHeightM] = useState(3);
-  const [classification, setClassification] = useState<string>('D40');
-  const [edition, setEdition] = useState<SpacingEdition>('2018');
+  // Nothing is picked for the technician. Class, height and edition all change
+  // the answer, so each one is chosen before a count is shown.
+  const [heightM, setHeightM] = useState<number | undefined>(undefined);
+  const [classification, setClassification] = useState<string | undefined>(undefined);
+  const [edition, setEdition] = useState<SpacingEdition | undefined>(undefined);
 
-  const ready = length.trim() && width.trim() && count.trim();
+  const roomEntered = !!(length.trim() && width.trim() && count.trim());
+  const picked = heightM !== undefined && classification !== undefined && edition !== undefined;
   const result = useMemo(
     () =>
-      ready
+      roomEntered && picked
         ? spacingSenseCheck({
-            roomLengthM: Number(length.trim()),
-            roomWidthM: Number(width.trim()),
-            mountingHeightM: heightM,
-            classification,
-            edition,
-            installedCount: Number(count.trim()),
+            roomLengthM: num(length),
+            roomWidthM: num(width),
+            mountingHeightM: heightM!,
+            classification: classification!,
+            edition: edition!,
+            installedCount: num(count),
           })
         : undefined,
-    [ready, length, width, count, heightM, classification, edition],
+    [roomEntered, picked, length, width, count, heightM, classification, edition],
   );
 
   return (
     <>
-      <Banner
-        tone="warn"
-        title="A sense-check, not a design"
-        body="This asks whether the number of fittings already in a room is anywhere near plausible. It is not a lighting design, it has no standing, and nothing may be added, moved or omitted on the strength of it."
-      />
+      <Banner tone="warn" title="Rough check only, not a lighting design" />
 
       <Rowed gap={2} align="flex-start">
         <View style={{ flex: 1 }}>
@@ -566,7 +562,7 @@ function SpacingView() {
         </View>
       </Rowed>
 
-      <Label>Classification, off the datasheet</Label>
+      <Label>Classification (datasheet)</Label>
       <Rowed gap={2} wrap>
         {KNOWN_CLASSIFICATIONS.map((c) => (
           <Chip key={c} label={c} selected={c === classification} onPress={() => setClassification(c)} />
@@ -580,31 +576,28 @@ function SpacingView() {
         ))}
       </Rowed>
 
-      <Segmented
-        value={edition}
-        onChange={setEdition}
-        options={[
-          { value: '2005', label: 'AS/NZS 2293.1:2005' },
-          { value: '2018', label: 'AS/NZS 2293.1:2018' },
-        ]}
-      />
-      <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-        The edition is never assumed. The two do not agree — a D80 fitting at 2.4 m may sit 22.0 m from the next one
-        under the 2005 edition and only 13.2 m under 2018.
-      </Txt>
+      <Label>Edition</Label>
+      <Rowed gap={2} wrap>
+        {EDITIONS.map((e) => (
+          <Chip key={e.value} label={e.label} selected={e.value === edition} onPress={() => setEdition(e.value)} />
+        ))}
+      </Rowed>
+      <Txt size="xs" tone="faint">Pick the edition the building was designed to.</Txt>
 
-      {!result ? (
+      {!roomEntered ? (
         <EmptyState
-          icon="floor-plan" title="Enter the room" body="Length, width and how many emergency luminaires are in it. Exit signs on their own do not count." />
-      ) : !result.known ? (
+          icon="floor-plan" title="Enter the room" body="Length, width and emergency lights in it. Not exit signs." />
+      ) : !picked ? (
+        <Txt size="sm" tone="muted">Pick the classification, mounting height and edition.</Txt>
+      ) : result && !result.known ? (
         <>
-          <Banner tone="warn" title="This app will not answer that" body={result.reason} />
+          <Banner tone="warn" title="Can't calculate" body={result.reason} />
           <Card>
             <Label>What to do</Label>
             <Txt size="sm" tone="muted" style={{ marginTop: 4, lineHeight: 19 }}>{result.whatToDo}</Txt>
           </Card>
         </>
-      ) : (
+      ) : result?.known ? (
         <>
           <ResultBlock
             label={result.plausible ? 'Plausible' : 'Looks short'}
@@ -618,14 +611,15 @@ function SpacingView() {
             <StatTile label="Each covers" value={`${result.areaPerFittingM2} m²`} />
           </Rowed>
           <Card>
-            <Label>Read this before it goes anywhere</Label>
+            <Label>Notes</Label>
             <View style={{ marginTop: t.space(1) }}>
-              {result.caveats.map((c) => <Bullet key={c} text={c} />)}
+              {/* The first caveat is the "not a design" line, already the banner at the top. */}
+              {result.caveats.slice(1).map((c) => <Bullet key={c} text={c} />)}
             </View>
           </Card>
           <SourceList ids={result.sourceIds} />
         </>
-      )}
+      ) : null}
     </>
   );
 }
@@ -642,47 +636,28 @@ function Bullet({ text }: { text: string }) {
   );
 }
 
-/**
- * Every source behind whatever is on screen, with its confidence.
- *
- * Shown rather than tucked into a comment because the difference between the
- * regulator's own published clause and a supplier's blog is exactly what a
- * technician needs before quoting a figure to a client.
- */
+/** Each source on one line, and the line opens it. */
 function SourceList({ ids }: { ids: SourceId[] }) {
   const t = useTheme();
   const sources = citeSources(ids);
   if (!sources.length) return null;
   return (
-    <>
-      <H2>Sources</H2>
-      <Card>
-        {sources.map((s, i) => (
-          <View key={s.id}>
-            {i > 0 ? <Divider /> : null}
-            <View style={{ paddingVertical: t.space(1.5) }}>
-              <Rowed gap={2}>
-                <Chip
-                  label={s.confidence}
-                  tone={s.confidence === 'high' ? 'pass' : s.confidence === 'medium' ? 'accent' : 'warn'}
-                />
-                <Txt size="sm" weight="700" style={{ flex: 1 }}>{s.ref}</Txt>
-              </Rowed>
-              <Txt size="xs" tone="muted" style={{ marginTop: 4, lineHeight: 17 }}>{s.what}</Txt>
-              <Txt size="xs" tone="faint" style={{ marginTop: 3, lineHeight: 17 }}>{s.basis}</Txt>
-              <Txt size="xs" tone="accent" mono style={{ marginTop: 3 }}>{s.url}</Txt>
-            </View>
-          </View>
-        ))}
-        <Divider />
-        <Rowed gap={2} align="flex-start" style={{ paddingTop: t.space(1) }}>
-          <MaterialCommunityIcons name="information-outline" size={16} color={t.color.textFaint} />
-          <Txt size="xs" tone="faint" style={{ flex: 1, lineHeight: 17 }}>
-            No text, table or schedule from AS/NZS 2293 is reproduced in this app. Clause and table numbers point at the
-            office copy, which is what governs.
-          </Txt>
-        </Rowed>
-      </Card>
-    </>
+    <Card style={{ gap: t.space(0.5) }}>
+      <Label>Sources</Label>
+      {sources.map((s) => (
+        <Pressable
+          key={s.id}
+          accessibilityRole="link"
+          onPress={() => void Linking.openURL(s.url).catch(() => undefined)}
+          hitSlop={6}
+          style={{ minHeight: 44, justifyContent: 'center' }}
+        >
+          <Rowed gap={2}>
+            <Txt size="sm" tone="accent" style={{ flex: 1, lineHeight: 19 }}>{s.ref}</Txt>
+            <MaterialCommunityIcons name="open-in-new" size={16} color={t.color.accentText} />
+          </Rowed>
+        </Pressable>
+      ))}
+    </Card>
   );
 }

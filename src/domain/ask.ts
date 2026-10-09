@@ -113,7 +113,7 @@ export const CALCULATORS: CalculatorDef[] = [
   },
   {
     title: 'Device addressing',
-    body: 'DIP switches, Apollo XPERT cards and rotary dials across twelve protocols, with the trap each one carries.',
+    body: 'DIP switches, Apollo XPERT cards and rotary dials across 13 protocols.',
     route: '/tools/dipswitch',
     terms: ['address', 'dip', 'dipswitch', 'xpert', 'rotary', 'loop address', 'addressing'],
   },

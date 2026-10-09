@@ -86,7 +86,7 @@ export const SOURCES: Record<SourceId, Source> = {
     what:
       'That fire hose reel coverage is worked out as the hose run plus a hose stream, that the hose has a maximum '
       + 'length, and that a minimum discharge is specified against an inlet pressure and a nominal hose diameter',
-    ref: 'AS 2441-2005 (incorporating Amendment No. 1), Installation of fire hose reels — Clause 10.2 (system coverage), Table 6.1 (the minimum discharge and supply pipe size table), Clause 12 (commissioning)',
+    ref: 'AS 2441-2005, Clauses 10.2 and 12, Table 6.1',
     url: 'https://store.standards.org.au/product/as-2441-2005',
     confidence: 'high',
     basis:
@@ -98,7 +98,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'as-nzs-1221': {
     id: 'as-nzs-1221',
     what: 'That the reel, hose and nozzle are a certified product assembly and that the unwind test belongs to the product standard rather than to the installation standard',
-    ref: 'AS/NZS 1221, Fire hose reels',
+    ref: 'AS/NZS 1221 Fire hose reels',
     url: 'https://store.standards.org.au/product/as-nzs-1221-1997',
     confidence: 'medium',
     basis:
@@ -109,7 +109,7 @@ export const SOURCES: Record<SourceId, Source> = {
   as1851: {
     id: 'as1851',
     what: 'That fire hose reels carry a routine service regime with a six-monthly, a yearly and a five-yearly activity',
-    ref: 'AS 1851-2012, Routine service of fire protection systems and equipment',
+    ref: 'AS 1851-2012 Routine service',
     url: 'https://www.standards.org.au/standards-catalogue/standard-details?designation=as-1851-2012',
     confidence: 'medium',
     basis:
@@ -126,7 +126,7 @@ export const SOURCES: Record<SourceId, Source> = {
       'When a hose reel system is required at all: where internal fire hydrants are installed, or where they are not, '
       + 'in a fire compartment over 500 m²; that a reel is located within 4 m of an exit; that coverage is to AS 2441; '
       + 'and which classes are exempt',
-    ref: 'National Construction Code 2022, Volume One, Part E1, Clause E1D3 (fire hose reels)',
+    ref: 'NCC 2022 Volume One, Clause E1D3',
     url: 'https://ncc.abcb.gov.au/editions/ncc-2022/adopted/volume-one/e-services-and-equipment/part-e1-fire-fighting-equipment',
     confidence: 'high',
     basis:
@@ -138,7 +138,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'qdc-mp61': {
     id: 'qdc-mp61',
     what: 'That fire hose reels are a prescribed fire safety installation in Queensland and appear by name on the annual occupier statement',
-    ref: 'Queensland Development Code, Mandatory Part 6.1 — Maintenance of fire safety installations, Schedules 1 and 2',
+    ref: 'QDC MP 6.1, Schedules 1 and 2',
     url: 'https://www.business.qld.gov.au/industries/building-property-development/building-construction/laws-codes-standards/queensland-development-code/current-parts',
     confidence: 'high',
     basis:
@@ -149,7 +149,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'alexon-reels': {
     id: 'alexon-reels',
     what: 'The 0.33 L/s minimum discharge, the 4 m hose stream, the 36 m fully extended hose length, siting within 4 m of an exit and the spindle mounting height range',
-    ref: 'Alexon (Australian fire contractor), fire hose reel testing and requirements',
+    ref: 'Alexon, fire hose reel testing',
     url: 'https://www.alexon.com.au/fire-hose-reels',
     confidence: 'low',
     basis:
@@ -161,7 +161,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'firehosereels-au': {
     id: 'firehosereels-au',
     what: 'The competing claim that the minimum discharge is 0.45 L/s at 220 kPa, and that hose is supplied in 30 m and 36 m lengths at 19 mm bore',
-    ref: 'firehosereels.com.au, information about fire hose reels',
+    ref: 'firehosereels.com.au',
     url: 'https://www.firehosereels.com.au/firehosereels.htm',
     confidence: 'low',
     basis:
@@ -193,10 +193,7 @@ export function citeSources(ids: SourceId[]): Source[] {
  * six-monthly Safe QLD runs. A wrong section number on a record of maintenance
  * is a wrong citation on a statutory document, so none is printed.
  */
-export const AS1851_SECTION_NOT_ESTABLISHED =
-  'This app does not print an AS 1851-2012 section or item number for fire hose reels. The public sources it can '
-  + 'reach disagree on which section they sit in, and some of them place the flow test yearly rather than '
-  + 'six-monthly. Cite the section from the purchased copy, not from here.';
+export const AS1851_SECTION_NOT_ESTABLISHED = 'Check the AS 1851 section for hose reels in the office copy.';
 
 /**
  * The Queensland consequence of an overdue hose reel routine.
@@ -206,9 +203,7 @@ export const AS1851_SECTION_NOT_ESTABLISHED =
  * declaring the named installations have been maintained.
  */
 export const QLD_PRESCRIBED_NOTE =
-  'Fire hose reels are a prescribed fire safety installation under QDC MP 6.1 and appear by name on the Schedule 2 '
-  + 'occupier statement. An outstanding routine is not only an open defect on this register — it is a line the '
-  + 'occupier is signing a declaration about, and the declaration is annual whether or not the work was done.';
+  'Prescribed under QDC MP 6.1 and named on the annual occupier statement. Overdue work makes that statement untrue.';
 
 // ===========================================================================
 // Refusals
@@ -242,6 +237,9 @@ const isMeasurement = (n: unknown): n is number =>
 const round1 = (n: number) => Math.round(n * 10) / 10;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+/** First letter up, so a statement built from lower-cased labels reads as a sentence. */
+const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
 // ===========================================================================
 // Coverage
 // ===========================================================================
@@ -268,10 +266,7 @@ export const COMMON_HOSE_LENGTHS_M = [18, 24, 30, 36];
  * arithmetic cannot be rendered anywhere without it.
  */
 export const COVERAGE_IS_NOT_A_DESIGN =
-  'This is a sense-check, not a design. The radius is a straight line and the standard measures the hose run along '
-  + 'the floor, so every wall, doorway, partition and rack between the reel and the far corner makes this figure '
-  + 'optimistic. A reel count from a floor area is an order-of-magnitude check on what is already installed; the real '
-  + 'number comes off a plan with the obstructions drawn on it, and that is a hydraulic design task, not a service one.';
+  'A straight line on a bare floor. Walls, racks and doorways cut it down; the real count comes off a plan.';
 
 export interface Coverage {
   hoseLengthM: number;
@@ -308,18 +303,16 @@ export function coverage(hoseLengthM: number, throwM: number = NOMINAL_THROW_M):
   if (!isFinitePositive(hoseLengthM)) {
     return {
       known: false,
-      reason: 'No usable hose length was supplied, so there is no radius to work out.',
-      whatToDo:
-        'Read the length off the reel or off the register. Do not estimate it by eye from a wound reel — a 30 m and a '
-        + '36 m reel look the same on the wall and the difference is 84 m² of floor.',
+      reason: 'No hose length entered.',
+      whatToDo: 'Measure the hose on the reel. A 30 m and a 36 m reel look the same on the wall.',
       sourceIds: ['as2441'],
     };
   }
   if (typeof throwM !== 'number' || !Number.isFinite(throwM) || throwM < 0) {
     return {
       known: false,
-      reason: 'The hose stream allowance supplied is not a usable distance.',
-      whatToDo: `Leave it at the ${NOMINAL_THROW_M} m default unless you have a reason and a source for a different one.`,
+      reason: 'The stream allowance is not a usable distance.',
+      whatToDo: `Leave it at ${NOMINAL_THROW_M} m.`,
       sourceIds: ['as2441', 'alexon-reels'],
     };
   }
@@ -332,15 +325,13 @@ export function coverage(hoseLengthM: number, throwM: number = NOMINAL_THROW_M):
   const overLength = hoseLengthM > MAX_HOSE_LENGTH_M;
   if (overLength) {
     notes.push(
-      `The hose measures ${round1(hoseLengthM)} m, which is longer than the ${MAX_HOSE_LENGTH_M} m maximum AS 2441 `
-      + 'Clause 10.2 allows. The reach below is what it physically covers, not what it is permitted to cover. Raise it '
-      + 'as a finding: an over-length hose is a pressure loss problem as well as a compliance one.',
+      `Hose is ${round1(hoseLengthM)} m, over the ${MAX_HOSE_LENGTH_M} m maximum in AS 2441 Clause 10.2. `
+      + 'Raise it as a finding.',
     );
   }
   if (throwM !== NOMINAL_THROW_M) {
     notes.push(
-      `A hose stream allowance of ${round1(throwM)} m has been used instead of the ${NOMINAL_THROW_M} m this app is `
-      + 'sourced for. Nothing here supports that figure — record where it came from before it reaches a report.',
+      `Stream allowance of ${round1(throwM)} m used, not ${NOMINAL_THROW_M} m. Record where it came from.`,
     );
   }
 
@@ -413,10 +404,8 @@ export function estimateReels(
   if (!isFinitePositive(floorAreaM2)) {
     return {
       known: false,
-      reason: 'No usable floor area was supplied, so no reel count can be sense-checked against it.',
-      whatToDo:
-        'Use the area of the fire compartment the reels serve, not the whole building. Coverage is a per-compartment '
-        + 'question and a building-wide area produces a number that means nothing.',
+      reason: 'No floor area entered.',
+      whatToDo: 'Use the fire compartment the reels serve, not the whole building.',
       sourceIds: ['ncc-e1d3', 'as2441'],
     };
   }
@@ -431,16 +420,13 @@ export function estimateReels(
 
   const notes = [...cov.notes];
   notes.push(
-    'The bare-floor minimum is a true lower bound — no arrangement of reels this size covers this area with fewer. '
-    + 'The grid figure is not a lower bound: it is what a square grid needs, and a hexagonal layout covers more floor '
-    + 'per reel than a square one does. Neither accounts for a wall, a doorway, a rack or a change of level, and '
-    + 'every one of those adds reels rather than removing them.',
+    'Bare-floor minimum: fewer reels cannot cover this area. Grid estimate: a square layout. Walls, racks and level '
+    + 'changes add reels.',
   );
   if (floorAreaM2 > 500) {
     notes.push(
-      'This compartment is over 500 m². Under NCC 2022 Clause E1D3 that is the floor area at which a hose reel system '
-      + 'is required in a new building even with no internal hydrants installed. An existing building may lawfully '
-      + 'differ under the approval it was built to — this is a prompt to check the approval, not a defect.',
+      'Over 500 m². NCC 2022 Clause E1D3 requires hose reels here in a new building. Check the approval; on its own '
+      + 'this is not a defect.',
     );
   }
 
@@ -449,14 +435,12 @@ export function estimateReels(
   if (typeof installed === 'number' && Number.isFinite(installed) && installed >= 0) {
     if (installed < idealMinimum) {
       shortfallStatement =
-        `${installed} reel${installed === 1 ? '' : 's'} on ${round1(floorAreaM2)} m² cannot reach the whole floor even `
-        + 'on a bare slab with the reels placed perfectly. This is arithmetic rather than a judgement about the '
-        + 'building, and it holds however the reels are arranged.';
+        `${installed} reel${installed === 1 ? '' : 's'} on ${round1(floorAreaM2)} m² cannot reach the whole floor, `
+        + 'however they are placed.';
     } else {
       notes.push(
-        `${installed} reel${installed === 1 ? ' is' : 's are'} installed, which is at or above the bare-floor `
-        + 'minimum. That is not a finding either way: whether they actually cover the floor depends on where they '
-        + 'are, which needs a plan.',
+        `${installed} reel${installed === 1 ? ' is' : 's are'} installed, at or above the bare-floor minimum. `
+        + 'Coverage depends on where they are.',
       );
     }
   }
@@ -527,17 +511,11 @@ export const PUBLISHED_DUTIES: DutySpec[] = [
     minimumFlowLitresPerSecond: 0.33,
     atInletPressureKpa: 220,
     pressureMeasuredAt:
-      'At the inlet to the reel assembly, not at the nozzle. A gauge on the nozzle end of 36 m of 19 mm hose reads a '
-      + 'long way below the inlet, and treating that reading as the duty fails a reel that is doing its job. AS 2441 '
-      + 'Table 6.1 also states a tolerance on this pressure which is not reproduced here — read it from the office '
-      + 'copy before arguing about a marginal result.',
+      'Pressure at the inlet to the reel assembly, not at the nozzle. Tolerance: AS 2441 Table 6.1.',
     confidence: 'low',
     sourceIds: ['alexon-reels', 'as2441', 'firehosereels-au'],
     disagreement:
-      'One Australian trade source reached states 0.45 L/s at 220 kPa rather than 0.33 L/s. It agrees with no other '
-      + 'source and with neither the licensed copy of AS 2441 nor the figure the industry quotes. It is recorded so '
-      + 'that a technician who is quoted 0.45 knows where it comes from. Test against the figure in the building’s '
-      + 'own baseline data, and where there is none, against 0.33 L/s.',
+      'Some suppliers quote 0.45 L/s at 220 kPa. Use the baseline figure, or 0.33 L/s where there is none.',
   },
 ];
 
@@ -556,13 +534,8 @@ export function publishedDuty(nominalHoseDiameterMm: number): DutySpec | Refused
   if (found) return found;
   return {
     known: false,
-    reason:
-      `No publicly citable minimum discharge figure was found for a ${nominalHoseDiameterMm} mm hose reel. AS 2441 `
-      + 'Table 6.1 specifies one, but this app will not transcribe a row of a copyright table it cannot also cite to a '
-      + 'public source.',
-    whatToDo:
-      'Read the figure from the purchased copy of AS 2441 Table 6.1, or from the building’s baseline data, and enter '
-      + 'it as the duty. The duty is an input to this tool by design.',
+    reason: `No published duty for a ${nominalHoseDiameterMm} mm reel. It is in AS 2441 Table 6.1.`,
+    whatToDo: 'Enter it from the office copy or the baseline data.',
     sourceIds: ['as2441'],
   };
 }
@@ -639,20 +612,16 @@ export function checkFlow(input: FlowCheckInput): FlowCheck | Refused {
   if (!hasDuty) {
     return {
       known: false,
-      reason: 'No duty was supplied, so there is nothing to test the reel against.',
-      whatToDo:
-        'Take the duty from the building’s baseline data, or from AS 2441 Table 6.1 for the nominal hose diameter '
-        + 'fitted. This app will not assume one — a pass against an assumed duty is a tick with nothing behind it.',
+      reason: 'No duty entered.',
+      whatToDo: 'Enter the duty from the baseline data or AS 2441 Table 6.1.',
       sourceIds: ['as2441', 'alexon-reels'],
     };
   }
   if (!hasMeasurement) {
     return {
       known: false,
-      reason: 'Nothing was measured, so no verdict can be given.',
-      whatToDo:
-        'Run the hose out fully and measure at the nozzle. A flow taken with the hose still on the reel is not the '
-        + 'test — the friction loss of the wound hose is the thing being checked.',
+      reason: 'Nothing measured yet.',
+      whatToDo: 'Run the hose out fully and measure at the nozzle. Flow with hose still on the reel is not the test.',
       sourceIds: ['as2441'],
     };
   }
@@ -692,7 +661,7 @@ export function checkFlow(input: FlowCheckInput): FlowCheck | Refused {
   const requiredKpa = isFinitePositive(input.dutyPressureKpa) ? input.dutyPressureKpa : undefined;
 
   const pressure: ComponentCheck = {
-    label: 'Running pressure at the reel inlet',
+    label: 'Pressure at the reel inlet',
     unit: 'kPa',
     measured: measuredKpa !== undefined ? round1(measuredKpa) : undefined,
     required: requiredKpa !== undefined ? round1(requiredKpa) : undefined,
@@ -715,44 +684,23 @@ export function checkFlow(input: FlowCheckInput): FlowCheck | Refused {
   let statement: string;
   if (failed.length) {
     verdict = 'fail';
-    statement = `${failed.map((c) => c.label.toLowerCase()).join(' and ')} below the duty supplied.`;
+    statement = `${sentence(failed.map((c) => c.label.toLowerCase()).join(' and '))} below the duty.`;
   } else if (missing.length) {
     verdict = 'undetermined';
     statement =
-      `${missing.map((c) => c.label.toLowerCase()).join(' and ')} was not measured, so this reel has not been proved `
-      + 'against its duty. What was measured passed; that is not the same thing.';
+      `${sentence(missing.map((c) => c.label.toLowerCase()).join(' and '))} not measured. Not proved against the duty.`;
   } else {
     verdict = 'pass';
-    statement = 'Met the duty supplied, on every figure measured against it.';
+    statement = 'Met the duty.';
   }
 
   if (flow.verdict === 'pass' && pressure.verdict === 'no-duty') {
-    notes.push(
-      'Only a flow duty was supplied. The duty is a flow held at a pressure — a reel can pass on flow and still be '
-      + 'unable to hold pressure with a second reel running, which is the case the supply is sized for.',
-    );
-  }
-  if (measuredLpm !== undefined) {
-    notes.push(
-      `${round2(measuredLpm)} L/min is ${round2(measuredLpm / SECONDS_PER_MINUTE)} L/s. Duties for hose reels are `
-      + 'published in L/s and gauges read L/min; getting the two the wrong way round is a factor of sixty.',
-    );
+    notes.push('Only a flow duty was supplied. Check the pressure holds as well.');
   }
   if (measuredKpa !== undefined) {
-    notes.push(
-      'The pressure figure must be the running pressure taken while water is flowing. Static pressure with the nozzle '
-      + 'shut proves nothing about a reel and is usually much higher.',
-    );
-    notes.push(
-      'It must also be read at the inlet to the reel, because that is where the published duty is quoted. A gauge on '
-      + 'the nozzle end of 36 m of hose reads far lower, and comparing that against an inlet figure fails a reel for '
-      + 'the friction loss the flow test already accounts for.',
-    );
+    notes.push('Running pressure with water flowing, read at the inlet to the reel. Not static, not at the nozzle.');
   }
-  notes.push(
-    'Test at the hydraulically most disadvantaged reel. A reel next to the riser will pass on almost any supply and '
-    + 'says nothing about the one at the end of the run.',
-  );
+  notes.push('Test at the hydraulically most disadvantaged reel.');
 
   return {
     flow,
@@ -1337,12 +1285,8 @@ export const ACTIVITY_SPECS: Record<HoseReelActivity, ActivitySpec> = {
     label: 'Six-monthly',
     intervalMonths: 6,
     purpose:
-      'The operational check: water at the nozzle, flow against the duty, hose and nozzle condition over its length, '
-      + 'the reel turning freely, and the reel accessible and signed. It answers "would an occupant get water on a '
-      + 'fire with this today".',
-    doesNotCover:
-      'It puts no test pressure into the hose. A hose can pass every six-monthly for five years and still fail the '
-      + 'moment it is pressure tested, because running pressure is not test pressure.',
+      'Water at the nozzle, flow against the duty, hose and nozzle condition, reel turns freely, access and signage.',
+    doesNotCover: 'No test pressure goes into the hose. A hose can pass every six-monthly and fail its pressure test.',
     evidence:
       "Safe QLD's own hose reel register carries a six-monthly column, populated on 802 of the 804 reels in the "
       + 'export of 1/9/2026. The interval is the interval the company runs; the AS 1851 section and item behind it '
@@ -1354,13 +1298,8 @@ export const ACTIVITY_SPECS: Record<HoseReelActivity, ActivitySpec> = {
     activity: 'yearly',
     label: 'Yearly',
     intervalMonths: 12,
-    purpose:
-      'The annual attendance the register carries alongside the six-monthlies. On this book it is where the flow '
-      + 'test is recorded on the reels that have an annual flow test column filled in at all.',
-    doesNotCover:
-      'It is not the pressure test and it is not one of the six-monthlies. Its own scope is the weakest thing in '
-      + 'this module: what the yearly consists of is not established from any source this app can cite, only that '
-      + 'the register runs one. Treat the scope as unknown and work to the office copy of the routine.',
+    purpose: 'The annual attendance on the register. Some reels record their flow test here.',
+    doesNotCover: 'Not the pressure test and not a six-monthly. Work to the office copy of the routine.',
     evidence:
       "Safe QLD's own hose reel register carries a yearly column, populated on 791 of the 804 reels in the export of "
       + '1/9/2026, and a separate annual flow test column on 85 of them. Several public sources reached also place '
@@ -1373,13 +1312,8 @@ export const ACTIVITY_SPECS: Record<HoseReelActivity, ActivitySpec> = {
     activity: 'five-yearly',
     label: 'Five-yearly',
     intervalMonths: 60,
-    purpose:
-      'The integrity check: the hose run out to its full length, inspected along the whole run, and pressure tested. '
-      + 'It answers "will this hose still hold pressure", which is a question about the hose itself rather than about '
-      + 'the water supply.',
-    doesNotCover:
-      'It is not a substitute for the six-monthlies or the yearly either. A hose tested in March says nothing about '
-      + 'a stop valve somebody shuts in July.',
+    purpose: 'Hose run out to full length, inspected along the run and pressure tested.',
+    doesNotCover: 'Does not replace the six-monthly or yearly. A stop valve can be shut the week after.',
     evidence:
       "Safe QLD's own hose reel register carries a five-yearly column, populated on 630 of the 804 reels in the "
       + 'export of 1/9/2026 — the 174 blanks are reels with no pressure test on record, which is the finding this '
@@ -1409,8 +1343,7 @@ export function discharges(performed: HoseReelActivity, obligation: HoseReelActi
 }
 
 export const ACTIVITIES_ARE_INDEPENDENT =
-  'The six-monthly, the yearly and the five-yearly are separate activities with separate records. Attending a reel '
-  + 'for one does not satisfy any other, and two of them carried out on the same day are two records, not one.';
+  'Six-monthly, yearly and five-yearly are separate records. One never covers another, even on the same day.';
 
 // ===========================================================================
 // When the next one falls due
@@ -1541,12 +1474,8 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
   if (!commissioned && !firstService && !lastDone) {
     return {
       known: false,
-      reason:
-        `Nothing readable to count from: no commissioning date, no first service and no record of the last `
-        + `${spec.label.toLowerCase()}.`,
-      whatToDo:
-        'Read the commissioning tag on the reel — AS 2441 Clause 12 requires the month and year of commissioning to be '
-        + 'marked on an accessible fixed part of the assembly. Where there is no tag, that absence is itself a finding.',
+      reason: 'No date to count from.',
+      whatToDo: 'Read the commissioning tag on the reel (AS 2441 Clause 12). No tag is a finding.',
       sourceIds: ['as2441', 'as1851'],
     };
   }
@@ -1561,10 +1490,8 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
   if (anchor.earliest > today) {
     return {
       known: false,
-      reason: `The anchor date reads ${anchor.label}, which is in the future.`,
-      whatToDo:
-        'Re-read it. A two-digit year read as the wrong century is the usual cause, and the register needs correcting '
-        + 'at the source system rather than here.',
+      reason: `${anchor.label} is in the future.`,
+      whatToDo: 'Check the year, and fix the register if it is wrong there.',
       sourceIds: ['as2441'],
     };
   }
@@ -1572,21 +1499,14 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
   if (lastDone && lastDone.latest < anchor.earliest) {
     return {
       known: false,
-      reason:
-        `The last ${spec.label.toLowerCase()} reads ${lastDone.label}, which is before the anchor of ${anchor.label}.`,
-      whatToDo:
-        'One of the two dates is wrong. Do not schedule from either until the register is corrected — an asset '
-        + 'scheduled off a bad anchor reads as compliant for years.',
+      reason: `The last ${spec.label.toLowerCase()} (${lastDone.label}) is before commissioning (${anchor.label}).`,
+      whatToDo: 'One date is wrong. Fix the register first; a bad anchor reads as compliant for years.',
       sourceIds: ['as1851'],
     };
   }
 
   if (anchoredTo === 'last-service') {
-    notes.push(
-      'No commissioning date and no first service were readable, so this is counted forward from the last service. Any '
-      + 'lateness already in the record is carried forward with it, which is exactly the drift the anchor rule exists '
-      + 'to prevent. Read the commissioning tag off the reel and re-assess.',
-    );
+    notes.push('Counted from the last service, so any lateness carries forward. Read the commissioning tag.');
   }
 
   // Which occurrence the last service discharged.
@@ -1638,10 +1558,7 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
 
   const missedOccurrences = Math.max(0, dueByNow - occurrence + 1);
   if (missedOccurrences > 1) {
-    notes.push(
-      `${missedOccurrences} occurrences of the ${spec.label.toLowerCase()} have fallen due since the last recorded `
-      + 'one. The date given is the oldest one still outstanding, not the most recent.',
-    );
+    notes.push(`${missedOccurrences} ${spec.label.toLowerCase()} services missed. The date shown is the oldest one owed.`);
   }
   // A first service IS a record of this activity — it is what "first service"
   // means. Reading `everRecorded` off `lastDone` alone put "no six-monthly has
@@ -1650,21 +1567,12 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
   // reads.
   const everRecorded = !!lastDone || anchoredTo === 'first-service';
   if (!everRecorded) {
-    notes.push(
-      `No ${spec.label.toLowerCase()} has ever been recorded against this reel. The date given is the first one due `
-      + 'after the anchor, which on an old installation will be a long way in the past — and it is.',
-    );
+    notes.push(`No ${spec.label.toLowerCase()} has ever been recorded on this reel.`);
   }
   if (due.precision !== 'day') {
-    notes.push(
-      `The anchor was recorded as "${anchor.raw}" — ${anchor.precision === 'month' ? 'a month' : 'a year'} with no day `
-      + `— so the next one falls due within ${due.label} rather than on a particular date. No day has been invented.`,
-    );
+    notes.push(`Recorded as "${anchor.raw}", so it falls due within ${due.label}, not on a set day.`);
   }
-  notes.push(
-    'No tolerance window has been applied. The AS 1851 Section 6 tolerances this app holds are for detection and alarm '
-    + 'systems; what a hose reel routine is allowed is not established here, so none is assumed.',
-  );
+  notes.push('No tolerance window applied.');
   notes.push(ACTIVITIES_ARE_INDEPENDENT);
 
   return {
@@ -1673,10 +1581,10 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
     anchoredTo,
     anchorNote:
       anchoredTo === 'commissioning'
-        ? `Counted from commissioning, ${anchor.label}. Occurrence ${occurrence} since the reel went in.`
+        ? `Counted from commissioning, ${anchor.label}.`
         : anchoredTo === 'first-service'
-          ? `Counted from the first recorded ${spec.label.toLowerCase()}, ${anchor.label}. Occurrence ${occurrence} since.`
-          : `Counted from the last service, ${anchor.label}, because no earlier anchor was readable.`,
+          ? `Counted from the first ${spec.label.toLowerCase()}, ${anchor.label}.`
+          : `Counted from the last service, ${anchor.label}.`,
     occurrence,
     due,
     state,

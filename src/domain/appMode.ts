@@ -322,7 +322,7 @@ export const DESTINATIONS: readonly Destination[] = [
     // picker at /shortcuts is, because that one always does. The photo button
     // is the exception: it is not a pinned module and it always renders, and
     // it holds its route in the component rather than on the screen.
-    blurb: 'The question bar over everything the app holds, and the modules you chose, in your order.',
+    blurb: 'Your modules, search, and anything running against a clock.',
     terms: ['home', 'today', 'start', 'hub', 'front page'],
   },
   {
@@ -330,13 +330,13 @@ export const DESTINATIONS: readonly Destination[] = [
     // A site and a customer open it scoped to their own jobs — the way in a
     // technician on site actually uses.
     label: 'Jobs', modes: BOTH, openedFrom: ['/work', '/shortcuts', '/site/[id]', '/customer/[id]'],
-    blurb: 'Scheduled and outstanding work, urgent first.',
+    blurb: 'Scheduled and open jobs, urgent first.',
     terms: ['job', 'jobs', 'work order', 'scheduled', 'urgent'],
   },
   {
     route: '/work/route', file: 'app/work/route.tsx', tab: 'today', section: 'The day',
     label: "Today's run", modes: BOTH, openedFrom: ['/work'],
-    blurb: 'The day ordered by where the work is, with the distances marked as straight-line.',
+    blurb: 'Jobs in order of distance.',
     terms: ['run', 'route', 'order', 'driving', 'nearest', 'travel'],
   },
   {
@@ -345,55 +345,51 @@ export const DESTINATIONS: readonly Destination[] = [
     label: 'Find anything', modes: BOTH, openedFrom: ['/', '/shortcuts'],
     // Its results open record screens by the routes held in the domain
     // module it maps over, the same arrangement as the module picker.
-    blurb: 'One box over every job, invoice, order, quote, site, customer, contact, part and supplier the phone holds.',
+    blurb: 'Jobs, sites, customers, invoices, orders and parts.',
     terms: ['find', 'search', 'lookup', 'number', 'job number', 'invoice number', 'po', 'part number', 'phone', 'anything'],
   },
   {
     route: '/work/job/[id]', file: 'app/work/job/[id].tsx', tab: 'today', section: 'The day',
     label: 'Job', needsContext: true, modes: BOTH,
     openedFrom: ['/work/jobs', '/customer/[id]', '/quotes/simpro/[id]', '/invoices/[id]', '/search', '/orders/[id]'],
-    blurb: 'The site briefing: what is already broken, and what the last person found.',
+    blurb: 'One job: the work, the site, notes and photos.',
     terms: ['job', 'briefing', 'attendance'],
   },
   {
     route: '/swms', file: 'app/swms/index.tsx', tab: 'today', section: 'Before you start',
     label: 'Safe work method statements', modes: BOTH, openedFrom: ['/shortcuts'],
-    blurb:
-      'The statement for today’s work, chosen from what is due at the site, read step by step with '
-      + 'the crew and signed on the phone.',
+    blurb: 'Safe work method statements, signed on the phone.',
     terms: ['swms', 'jsea', 'jsa', 'safe work', 'method statement', 'safety', 'hazard', 'risk', 'permit', 'high risk'],
   },
   {
     route: '/swms/new', file: 'app/swms/new.tsx', tab: 'today', section: 'Before you start',
     label: 'New statement', modes: BOTH, openedFrom: ['/swms'],
-    blurb:
-      'Pick the job, say what the work is, and the statements it needs come up ticked. Take off '
-      + 'anything that does not apply.',
+    blurb: 'Pick the job and the work. The statements it needs come up ticked.',
     terms: ['swms', 'jsea', 'new', 'start', 'builder', 'safe work', 'method statement', 'today'],
   },
   {
     route: '/swms/[id]', file: 'app/swms/[id].tsx', tab: 'today', section: 'Before you start',
     label: 'The statement', needsContext: true, modes: BOTH, openedFrom: ['/swms'],
-    blurb: 'One day’s statement: the steps, this site’s own answers, and everybody’s signature.',
+    blurb: 'One day’s statement: the steps, the site answers and the signatures.',
     terms: ['swms', 'jsea', 'sign', 'steps', 'hazards', 'controls'],
   },
   {
     route: '/work/impairments', file: 'app/work/impairments.tsx', tab: 'today', section: 'Against a clock',
     label: 'Impairments', modes: BOTH, openedFrom: ['/work'],
-    blurb: 'Systems currently out of service, with the clock running on each.',
+    blurb: 'Systems out of service, with the clock on each.',
     terms: ['impairment', 'isolation', 'out of service', 'isolated'],
   },
   {
     route: '/impairment/new', file: 'app/impairment/new.tsx', tab: 'today', section: 'Against a clock',
     label: 'Declare an impairment', modes: BOTH, openedFrom: ['/work/impairments', '/shortcuts'],
-    blurb: 'Takes a system out of service, and starts the clock and the obligations with it.',
+    blurb: 'Log a system out of service.',
     terms: ['impairment', 'declare', 'isolate', 'shut down', 'out of service'],
   },
   {
     route: '/impairment/[id]', file: 'app/impairment/[id].tsx', tab: 'today', section: 'Against a clock',
     label: 'Live impairment', needsContext: true, modes: BOTH,
     openedFrom: ['/', '/work/impairments'],
-    blurb: 'One impairment, its elapsed time, and what has to happen before it can close.',
+    blurb: 'One impairment, its time out of service, and what closes it.',
     terms: ['impairment', 'elapsed', 'restore', 'reinstate'],
   },
   {
@@ -404,7 +400,7 @@ export const DESTINATIONS: readonly Destination[] = [
     // defect but does not open the notice; `auditLinks` is what caught that
     // claim being written down.
     openedFrom: ['/'],
-    blurb: 'The written notice the occupier is owed within 24 hours, counting down.',
+    blurb: 'The written notice the occupier is owed within 24 hours.',
     terms: ['notice', 'critical', 'occupier', '24 hours', 'commissioner'],
   },
   {
@@ -413,9 +409,7 @@ export const DESTINATIONS: readonly Destination[] = [
     // The big orange button on the home screen, which is not a pinned module
     // and so is not covered by the /shortcuts row above. It is written down
     // here because it is the only way in.
-    blurb:
-      'Pick photographs of a job worth showing, check them, write a line about them and send them '
-      + 'in one go.',
+    blurb: 'Good photos of fire systems, sent for the website.',
     terms: ['photo', 'photos', 'photograph', 'picture', 'website', 'marketing', 'upload', 'camera'],
     keptBecause:
       'A technician standing in front of a tidy booster is the only person who can take the '
@@ -425,9 +419,7 @@ export const DESTINATIONS: readonly Destination[] = [
     route: '/shortcuts', file: 'app/shortcuts.tsx', opensVia: 'src/domain/modules.ts',
     tab: 'today', section: 'Setup',
     label: 'All modules', modes: BOTH, openedFrom: ['/'],
-    blurb:
-      'Every module in the app by group, to open or to pin to this technician\'s home screen. '
-      + 'Their phone only — nobody else\'s changes.',
+    blurb: 'Every module, to open or pin to your home screen.',
     terms: ['shortcuts', 'home', 'tiles', 'favourites', 'customise', 'pin', 'modules', 'everything'],
   },
 
@@ -435,23 +427,19 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/work/rfi', file: 'app/work/rfi.tsx', tab: 'today', section: 'Ask the office',
     label: 'Ask the office', modes: BOTH, openedFrom: ['/shortcuts', '/work/job/[id]'],
-    blurb:
-      'A question to your supervisor by email, with the job and site in the subject, and noted '
-      + 'on the job in Simpro when there is one.',
+    blurb: 'A question to the office about a job.',
     terms: ['rfi', 'request for information', 'question', 'ask', 'supervisor', 'held up'],
   },
   {
     route: '/work/leave', file: 'app/work/leave.tsx', tab: 'today', section: 'Ask the office',
     label: 'Book leave', modes: BOTH, openedFrom: ['/shortcuts'],
-    blurb:
-      'Annual, sick, RDO or unpaid: pick the day and it goes onto your own Simpro schedule '
-      + 'as a seven-to-three block, so the roster and Simpro Mobile both show it.',
+    blurb: 'Book days off onto your Simpro schedule.',
     terms: ['leave', 'annual', 'sick', 'rdo', 'holiday', 'day off', 'unpaid', 'book', 'roster'],
   },
   {
     route: '/suggest', file: 'app/suggest.tsx', tab: 'today', section: 'Ask the office',
     label: 'Suggest a change', modes: BOTH, openedFrom: ['/shortcuts'],
-    blurb: 'An idea or a fault with the app, emailed to the suggestions address.',
+    blurb: 'An idea or a fault with the app.',
     terms: ['suggest', 'suggestion', 'feedback', 'idea', 'bug', 'improve', 'wrong'],
   },
 
@@ -460,15 +448,13 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/whoami', file: 'app/whoami.tsx', tab: 'today', section: 'You in Simpro',
     label: 'Who you are', modes: BOTH, openedFrom: ['/settings', '/work/my-day', '/work/clock', '/work/leave'],
-    blurb:
-      'Pick yourself from the office staff list. It is how a phone says whose it is without a '
-      + 'login, and on a build whose Simpro application cannot sign a person in it is the way in.',
+    blurb: 'Pick yourself from the Simpro staff list.',
     terms: ['who am i', 'employee', 'technician', 'name', 'identity', 'pick', 'staff list'],
   },
   {
     route: '/work/my-day', file: 'app/work/my-day.tsx', tab: 'today', section: 'You in Simpro',
     label: 'My day', modes: BOTH, openedFrom: ['/shortcuts'],
-    blurb: 'The jobs the office has scheduled for you, today, tomorrow and the weeks ahead.',
+    blurb: 'What you are booked on today and ahead.',
     terms: ['my day', 'my jobs', 'schedule', 'roster', 'today', 'tomorrow', 'scheduled for me'],
   },
 
@@ -476,13 +462,13 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/sites', file: 'app/(tabs)/sites.tsx', tab: 'sites', section: 'Your sites',
     label: 'Sites', root: true, modes: BOTH, openedFrom: [],
-    blurb: 'Every site on the book, searched by name, address or client.',
+    blurb: 'Every site, by name, address or client.',
     terms: ['site', 'sites', 'building', 'customer', 'address'],
   },
   {
     route: '/site/new', file: 'app/site/new.tsx', tab: 'sites', section: 'Your sites',
     label: 'New site', modes: BOTH, openedFrom: ['/sites'],
-    blurb: 'Creates a site by hand — no configuration file needed to start using the app.',
+    blurb: 'Add a site by hand, with its address.',
     terms: ['new site', 'add site', 'create'],
   },
   {
@@ -492,7 +478,7 @@ export const DESTINATIONS: readonly Destination[] = [
       '/sites', '/work/job/[id]', '/customer/[id]', '/quotes/simpro/[id]', '/search', '/contacts/[id]', '/leads',
       '/config/[id]', '/config/compare',
     ],
-    blurb: 'One site: its systems, its history, its paperwork, and the pack that hands it to another technician.',
+    blurb: 'One site: jobs, assets, defects and paperwork.',
     terms: ['site', 'building', 'pack'],
   },
   // -- Config Explorer -------------------------------------------------------
@@ -502,64 +488,64 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/config', file: 'app/config/index.tsx', tab: 'sites', section: 'Config Explorer',
     label: 'Config Explorer', modes: BOTH, openedFrom: ['/sites', '/shortcuts', '/site/[id]'],
-    blurb: 'Open a panel configuration and read it on the phone. Nothing is written into a site.',
+    blurb: 'Open and read a panel config.',
     terms: ['config', 'configuration', 'panel file', 'nle', 'pci', 'ffp', 'util', 'loop explorer',
       'verifire', 'smartconfig', 'config manager', 'open a config'],
   },
   {
     route: '/config/[id]', file: 'app/config/[id].tsx', tab: 'sites', section: 'Config Explorer',
     label: 'A configuration', needsContext: true, modes: BOTH, openedFrom: ['/config'],
-    blurb: 'What one file holds: its panels, loops, zones and logic, and where it can be written in.',
+    blurb: 'One config: panels, loops, zones and logic.',
     terms: ['config', 'panel', 'loops', 'zones'],
   },
   {
     route: '/config/points', file: 'app/config/points.tsx', tab: 'sites', section: 'Config Explorer',
     label: 'Devices in a configuration', needsContext: true, modes: BOTH,
     openedFrom: ['/config/[id]', '/config/verify'],
-    blurb: 'Every point in the file, searchable by text, address, zone or what it is.',
+    blurb: 'Every point in the file, by text, address or zone.',
     terms: ['devices', 'points', 'addresses', 'device list'],
   },
   {
     route: '/config/verify', file: 'app/config/verify.tsx', tab: 'sites', section: 'Config Explorer',
     label: 'Check a configuration', needsContext: true, modes: BOTH, openedFrom: ['/config/[id]'],
-    blurb: 'What is wrong with the file, and — just as plainly — what could not be checked and why.',
+    blurb: 'What is wrong with the file, and what could not be checked.',
     terms: ['check', 'verify', 'duplicate address', 'zone text', 'findings', 'errors'],
   },
   {
     route: '/config/logic', file: 'app/config/logic.tsx', tab: 'sites', section: 'Config Explorer',
     label: 'Cause and effect in a configuration', needsContext: true, modes: BOTH, openedFrom: ['/config/[id]'],
-    blurb: 'The logic as the panel holds it, with the equation each rule was read from.',
+    blurb: 'The logic as the panel holds it.',
     terms: ['cause and effect', 'matrix', 'logic', 'equations', 'c&e'],
   },
   {
     route: '/config/compare', file: 'app/config/compare.tsx', tab: 'sites', section: 'Config Explorer',
     label: 'Compare a configuration', needsContext: true, modes: BOTH, openedFrom: ['/config/[id]'],
-    blurb: 'The file against what the register holds: what is new, what has gone, what was relabelled.',
+    blurb: 'The file against the register: new, gone and changed.',
     terms: ['compare', 'difference', 'changed', 'what changed', 'diff'],
   },
   {
     route: '/config/raw', file: 'app/config/raw.tsx', tab: 'sites', section: 'Config Explorer',
     label: 'Inside a configuration file', needsContext: true, modes: BOTH, openedFrom: ['/config/[id]'],
-    blurb: 'The vendor tool\u2019s own tables, row by row, including the ones this app does not read.',
+    blurb: 'The vendor tool’s own tables, row by row.',
     terms: ['raw', 'tables', 'inside', 'sqlite', 'structure', 'what is in the file'],
   },
   {
     route: '/scan', file: 'app/scan.tsx', tab: 'sites', section: 'In front of you',
     label: 'Scan a tag', modes: BOTH, openedFrom: ['/tools'],
-    blurb: 'Reads a tag and finds the asset, the serial or the catalogue part behind it.',
+    blurb: 'Open an asset from its label.',
     terms: ['scan', 'qr', 'barcode', 'tag', 'label'],
   },
   {
     route: '/assets/find', file: 'app/assets/find.tsx', tab: 'sites', section: 'In front of you',
     label: 'Find an asset', modes: BOTH, openedFrom: ['/shortcuts'],
-    blurb: 'One box across assets, imported points and the parts catalogue, because you only ever know one identifier.',
+    blurb: 'Search assets by tag, serial or location.',
     terms: ['find', 'search asset', 'serial', 'part number', 'code'],
   },
   {
     route: '/assets/[id]', file: 'app/assets/[id].tsx', tab: 'sites', section: 'In front of you',
     label: 'Asset', needsContext: true, modes: BOTH,
     openedFrom: ['/assets/find', '/scan', '/site/assets'],
-    blurb: 'What it is, and the timeline that says whether it can be trusted.',
+    blurb: 'One asset and its history.',
     terms: ['asset', 'device', 'history', 'timeline'],
   },
   {
@@ -567,7 +553,7 @@ export const DESTINATIONS: readonly Destination[] = [
     // Needs the site even though the screen will let you pick one: an asset
     // filed against no site is a record nobody finds again.
     label: 'Add an asset', needsContext: true, modes: BOTH, openedFrom: ['/site/assets'],
-    blurb: 'Adds one by hand, with the attributes its own type calls for.',
+    blurb: 'Add an asset to a site.',
     terms: ['new asset', 'add device', 'register'],
   },
   {
@@ -578,14 +564,14 @@ export const DESTINATIONS: readonly Destination[] = [
       'A routine is the AS 1851 service of a system that is already in and already commissioned. A '
       + 'construction crew commissions; they do not run the six-monthly.',
     openedFrom: ['/site/[id]'],
-    blurb: 'Turns a service routine into work: the app finds the assets it applies to, you answer each check.',
+    blurb: 'Record an AS 1851 routine, check by check.',
     terms: ['routine', 'service', 'run', 'monthly', 'annual', 'test'],
   },
   {
     route: '/work/defect/new', file: 'app/work/defect/new.tsx', tab: 'sites', section: 'In front of you',
     label: 'Raise a defect', modes: BOTH,
     openedFrom: ['/shortcuts', '/work/defects', '/site/defects', '/assets/[id]'],
-    blurb: 'System, component, defect — the library supplies the severity, the wording and the work to clear it.',
+    blurb: 'Pick the code. Wording and severity fill in.',
     terms: ['defect', 'fault', 'raise', 'report a fault', 'broken'],
   },
   {
@@ -602,19 +588,19 @@ export const DESTINATIONS: readonly Destination[] = [
       'Bulk testing works down a register that exists. On a new install the register is being '
       + 'built, not swept.',
     openedFrom: ['/site/[id]'],
-    blurb: 'Walk the register and test every asset in turn, failing the ones that fail.',
+    blurb: 'Test every asset on the register in turn.',
     terms: ['bulk test', 'test assets', 'fail', 'walk'],
   },
   {
     route: '/site/points', file: 'app/site/points.tsx', tab: 'sites', section: 'This site',
     label: 'Points', needsContext: true, modes: BOTH, openedFrom: ['/site/[id]'],
-    blurb: 'Every point off the panel configuration, with its zone text on the row.',
+    blurb: 'Every point from the panel config, with its zone.',
     terms: ['points', 'loop', 'zone text', 'addresses', 'panel'],
   },
   {
     route: '/site/zones', file: 'app/site/zones.tsx', tab: 'sites', section: 'This site',
     label: 'Zone chart', needsContext: true, modes: BOTH, openedFrom: ['/site/[id]'],
-    blurb: 'Prints the chart for the panel door, built from the configuration imported off that panel.',
+    blurb: 'The zone chart for the panel door.',
     terms: ['zone chart', 'zones', 'panel door', 'print'],
   },
   {
@@ -632,7 +618,7 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/site/quote', file: 'app/site/quote.tsx', tab: 'sites', section: 'This site',
     label: 'Quote', needsContext: true, modes: OFFICE, openedFrom: ['/site/[id]'],
-    blurb: 'Prices the rectification work from the defect list and the rate card.',
+    blurb: 'Price the rectification work from the defects.',
     terms: ['quote', 'price', 'rectification', 'sell', 'estimate'],
     hiddenBecause:
       'A quote carries cost and margin, and a number given on the spot commits the company to '
@@ -645,32 +631,31 @@ export const DESTINATIONS: readonly Destination[] = [
     // Running a routine ends in `router.back()`, not in the sheet, so it is
     // not an opener however much it feels like one.
     openedFrom: ['/site/[id]', '/work/reports'],
-    blurb: 'The service report: one tap per device, everything else behind a tab so the list stays the screen.',
+    blurb: 'One service report, device by device.',
     terms: ['test sheet', 'report', 'service report', 'results'],
   },
   {
     route: '/site/form72', file: 'app/site/form72.tsx', tab: 'sites', section: 'Paperwork',
     label: 'Form 72s', needsContext: true, modes: BOTH, openedFrom: ['/site/[id]'],
-    blurb: 'The Form 72s held for this site. Opened without one it goes to the job picker, '
-      + 'because the form is nearly always raised against a job.',
+    blurb: 'Hydrant and sprinkler Form 72. Part A fills from the job.',
     terms: ['form 72', 'certificate', 'occupier', 'qfes'],
   },
   {
     route: '/form72/new', file: 'app/form72/new.tsx', tab: 'sites', section: 'Paperwork',
     label: 'Start a Form 72', modes: BOTH, openedFrom: ['/site/form72', '/work/job/[id]'],
-    blurb: 'Pick the job the test was done under, and Part A fills itself in from it.',
+    blurb: 'Pick the job. Part A fills from it.',
     terms: ['form 72', 'new', 'hydrant test', 'start', 'raise'],
   },
   {
     route: '/form72/[id]', file: 'app/form72/[id].tsx', tab: 'sites', section: 'Paperwork',
     label: 'Form 72', needsContext: true, modes: BOTH, openedFrom: ['/site/form72', '/form72/new'],
-    blurb: "One Form 72, laid out part for part in the department's own order and signed on site.",
+    blurb: 'One Form 72, part by part, signed on site.',
     terms: ['form 72', 'sign', 'declaration', 'booster', 'hydrant test'],
   },
   {
     route: '/occupier/[id]', file: 'app/occupier/[id].tsx', tab: 'sites', section: 'Paperwork',
     label: 'Occupier statement', needsContext: true, modes: BOTH, openedFrom: ['/site/[id]'],
-    blurb: "The annual statement, arriving already filled in from the year's own work.",
+    blurb: 'The annual statement, filled from the year’s work.',
     terms: ['occupier statement', 'annual', 'prescribed installation', 'declaration'],
   },
   {
@@ -681,14 +666,14 @@ export const DESTINATIONS: readonly Destination[] = [
       'An effectiveness assessment weighs a maintained system against what it is supposed to do. It '
       + 'is a servicing judgement.',
     openedFrom: ['/site/[id]'],
-    blurb: 'Not a service: recommendations and observations, and nothing found here is a defect.',
+    blurb: 'Recommendations and observations, not defects.',
     terms: ['assessment', 'effectiveness', 'recommendation', 'observation', 'audit'],
   },
   {
     route: '/baseline/[id]', file: 'app/baseline/[id].tsx', tab: 'sites', section: 'Paperwork',
     label: 'Baseline data', needsContext: true, modes: BOTH,
     openedFrom: ['/site/[id]', '/work/baselines'],
-    blurb: 'The commissioning record, saved on every keystroke so a lock screen costs nothing.',
+    blurb: 'One commissioning record, saved as you type.',
     terms: ['baseline', 'commissioning', 'as installed'],
   },
 
@@ -696,10 +681,7 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/map', file: 'app/(tabs)/map.tsx', tab: 'map', section: 'The map',
     label: 'Map', root: true, modes: BOTH, openedFrom: [],
-    blurb:
-      'Every place we service, jobs coloured by state, open quotes and recent invoices, a search '
-      + 'over our sites and any place at all, and whether the place you are looking at is a '
-      + 'customer of ours.',
+    blurb: 'Every site on a map, with directions.',
     terms: ['map', 'waze', 'navigate', 'directions', 'sites map', 'where', 'google maps', 'customer', 'place'],
   },
 
@@ -707,19 +689,19 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/tools', file: 'app/(tabs)/tools.tsx', tab: 'tools', section: 'Calculators',
     label: 'Tools', root: true, modes: BOTH, openedFrom: [],
-    blurb: 'Every calculation and reference a technician looks up on site, all of it offline.',
+    blurb: 'Calculators and reference, all offline.',
     terms: ['tools', 'calculator', 'calculators'],
   },
   {
     route: '/tools/battery', file: 'app/tools/battery.tsx', tab: 'tools', section: 'Calculators',
     label: 'FIP battery', modes: BOTH, openedFrom: ['/tools'],
-    blurb: 'Sizes a standby battery from a load schedule rather than from two total-current boxes.',
+    blurb: 'Standby and alarm load to battery size. VESDA included.',
     terms: ['battery', 'standby', 'ah', 'quiescent', 'alarm current', 'fip'],
   },
   {
     route: '/tools/voltdrop', file: 'app/tools/voltdrop.tsx', tab: 'tools', section: 'Calculators',
     label: 'Cable volt drop', modes: BOTH, openedFrom: ['/tools'],
-    blurb: 'Whether the device at the far end of a long run still sees enough voltage to operate in alarm.',
+    blurb: 'Volts at the far end of the run.',
     terms: ['volt drop', 'cable', 'sounder', 'run', 'voltage'],
   },
   {
@@ -730,7 +712,7 @@ export const DESTINATIONS: readonly Destination[] = [
       'Sizing a run is design work. A service technician replacing a like-for-like run has the '
       + 'existing size; picking a new one is an install decision.',
     openedFrom: ['/tools'],
-    blurb: 'The four checks that decide a cable, run against the office\'s own capacity tables rather than against figures nobody can account for.',
+    blurb: 'Capacity, volt drop, breaker and fault, to AS/NZS 3008.',
     terms: ['cable', 'sizing', 'current carrying capacity', 'ccc', 'as 3008', 'as 3000', 'derating', 'submain', 'wiring rules'],
   },
   {
@@ -739,9 +721,7 @@ export const DESTINATIONS: readonly Destination[] = [
     streams: ['construction'],
     streamBecause:
       'The wiring rules tables themselves: derating, grouping, installation methods. Design inputs.', openedFrom: ['/tools', '/tools/cable'],
-    blurb:
-      'Every numbered table in AS/NZS 3008.1.1 and the sizing tables of AS/NZS 3000, searched by what is '
-      + 'in the column headings rather than by table number.',
+    blurb: 'AS/NZS 3008 and AS/NZS 3000 tables.',
     terms: ['as 3008', 'as 3000', 'wiring rules', 'table', 'tables', 'current carrying capacity', 'derating',
       'volt drop', 'reactance', 'resistance', 'earth fault loop', 'maximum demand', 'appendix c', 'standard'],
   },
@@ -753,7 +733,7 @@ export const DESTINATIONS: readonly Destination[] = [
       'Fault loop impedance and earthing are proved when a circuit is installed, not when a '
       + 'detector is serviced.',
     openedFrom: ['/tools'],
-    blurb: 'The check a long run fails silently: too little fault current to move the magnetic element, so the device takes seconds.',
+    blurb: 'Loop impedance, trip check, max run and earth size.',
     terms: ['fault loop', 'zs', 'ze', 'impedance', 'disconnection', 'earth', 'earthing', 'adiabatic', 'as 3000'],
   },
   {
@@ -762,49 +742,49 @@ export const DESTINATIONS: readonly Destination[] = [
     streams: ['construction'],
     streamBecause:
       'Maximum demand sizes a supply. Nothing in a routine service changes the supply.', openedFrom: ['/tools'],
-    blurb: 'Per phase rather than averaged, because the supply is sized on its worst phase and averaging trips a main.',
+    blurb: 'Maximum demand per phase.',
     terms: ['maximum demand', 'diversity', 'main switch', 'supply', 'phase balance', 'as 3000'],
   },
   {
     route: '/tools/ohms', file: 'app/tools/ohms.tsx', tab: 'tools', section: 'Calculators',
     label: 'Electrical', modes: BOTH, openedFrom: ['/tools'],
-    blurb: "Ohm's law, power and battery runtime — the arithmetic that turns up daily.",
+    blurb: "Ohm's law, power and battery runtime.",
     terms: ['ohms law', 'volts', 'amps', 'watts', 'runtime', 'power'],
   },
   {
     route: '/tools/converter', file: 'app/tools/converter.tsx', tab: 'tools', section: 'Calculators',
     label: 'Unit converter', modes: BOTH, openedFrom: ['/tools'],
-    blurb: 'Shows every unit at once, because on site the question is what this is in everything else.',
+    blurb: 'Pressure, flow, volume, temperature and more.',
     terms: ['convert', 'units', 'kpa', 'psi', 'litres', 'metres'],
   },
   {
     route: '/tools/resistor', file: 'app/tools/resistor.tsx', tab: 'tools', section: 'Calculators',
     label: 'Resistor decoder', modes: BOTH, openedFrom: ['/tools'],
-    blurb: 'Bands to a value with an unknown part in your hand, and a value back to bands before you fit one.',
+    blurb: 'Colour bands to ohms and back.',
     terms: ['resistor', 'bands', 'colour code', 'ohms', '4k7'],
   },
   {
     route: '/tools/dipswitch', file: 'app/tools/dipswitch.tsx', tab: 'tools', section: 'Calculators',
     label: 'Device address', modes: BOTH, openedFrom: ['/tools'],
-    blurb: 'Draws the switch bank, so what is in your hand can be matched against what the panel expects.',
+    blurb: 'DIP switches, XPERT cards and rotary dials.',
     terms: ['address', 'dip switch', 'dipswitch', 'loop', 'protocol'],
   },
   {
     route: '/tools/detector-age', file: 'app/tools/detector-age.tsx', tab: 'tools', section: 'Calculators',
     label: 'Detector age', modes: BOTH, openedFrom: ['/tools'],
-    blurb: 'Reads the date code off a head and returns every year it could be, rather than the likeliest one.',
+    blurb: 'Date code to age and replacement.',
     terms: ['detector age', 'date code', 'head', 'service life', 'replace'],
   },
   {
     route: '/tools/eol', file: 'app/tools/eol.tsx', tab: 'tools', section: 'Calculators',
     label: 'End of line', modes: BOTH, openedFrom: ['/tools'],
-    blurb: 'End-of-line values per panel and per circuit, each with its source, because one universal table would be wrong on most sites.',
+    blurb: 'EOL values by panel and circuit.',
     terms: ['end of line', 'eol', 'resistor', 'monitoring', 'circuit'],
   },
   {
     route: '/tools/hose-reel', file: 'app/tools/hose-reel.tsx', tab: 'tools', section: 'Calculators',
     label: 'Hose reels', modes: BOTH, openedFrom: ['/tools'],
-    blurb: 'Whether the reel reaches the back of the room, whether it made its duty, and which service is next.',
+    blurb: 'Reach, flow and next service.',
     terms: ['hose reel', 'reel', 'coverage', 'reach', 'flow', 'nozzle'],
     keptBecause:
       'A hose reel is the only asset on the book whose whole job is a distance, and nobody checks '
@@ -813,37 +793,37 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/tools/fire-door', file: 'app/tools/fire-door.tsx', tab: 'tools', section: 'Calculators',
     label: 'Fire and smoke doors', modes: BOTH, openedFrom: ['/tools'],
-    blurb: 'What the tag says, whether the gap passes, whether it closed and latched, and what to write down.',
+    blurb: 'Tag, gaps, close and latch.',
     terms: ['fire door', 'smoke door', 'door', 'gap', 'clearance', 'latch', 'self closing', 'tag'],
   },
   {
     route: '/tools/spl', file: 'app/tools/spl.tsx', tab: 'tools', section: 'Calculators',
     label: 'Sound pressure level', modes: BOTH, openedFrom: ['/tools'],
-    blurb: 'What the reading on the meter has to beat, with the assumption behind the answer printed above it.',
+    blurb: 'Is the warning loud enough in this room?',
     terms: ['spl', 'sound', 'db', 'decibel', 'loud', 'sounder', 'ewis'],
   },
   {
     route: '/tools/hydrant', file: 'app/tools/hydrant.tsx', tab: 'tools', section: 'Calculators',
     label: 'Hydrant flow test', modes: BOTH, openedFrom: ['/tools'],
-    blurb: 'Flow measured, supply worked back to the pressure the brigade needs, then the losses that explain a marginal result.',
+    blurb: 'Flow, supply at brigade pressure, and the duty.',
     terms: ['hydrant', 'flow', 'pressure', 'booster', 'lps', 'kpa'],
   },
   {
     route: '/tools/extinguisher', file: 'app/tools/extinguisher.tsx', tab: 'tools', section: 'Calculators',
     label: 'Extinguishers', modes: BOTH, openedFrom: ['/tools'],
-    blurb: 'What it is and what it must never be pointed at, when its next test falls, and whether it is still full.',
+    blurb: 'Type, next test and weight check.',
     terms: ['extinguisher', 'co2', 'dry chemical', 'pressure test', 'weigh'],
   },
   {
     route: '/tools/emergency-lighting', file: 'app/tools/emergency-lighting.tsx', tab: 'tools', section: 'Calculators',
     label: 'Emergency lighting', modes: BOTH, openedFrom: ['/tools'],
-    blurb: 'Pass or fail, how far a sign can be read from, whether the battery age explains it, and whether the room has anything like enough light.',
+    blurb: 'Discharge, exit signs, battery age and spacing.',
     terms: ['emergency lighting', 'exit sign', 'discharge', 'lux', 'viewing distance'],
   },
   {
     route: '/library/law', file: 'app/library/law.tsx', tab: 'tools', section: 'Reference',
     label: 'Fire safety regulation', modes: BOTH, openedFrom: ['/library'],
-    blurb: 'The Building Fire Safety Regulation indexed by who has to do what, with the words that decide reproduced.',
+    blurb: 'Building Fire Safety Regulation 2008, by who must act.',
     terms: ['regulation', 'bfsr', 'law', 'legislation', 'section 49', 'critical defect',
       'occupier', 'penalty', 'statutory'],
     keptBecause:
@@ -854,13 +834,13 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/library', file: 'app/library/index.tsx', tab: 'tools', section: 'Reference',
     label: 'Standards', modes: BOTH, openedFrom: ['/', '/tools', '/shortcuts'],
-    blurb: 'The clause index and your own imported documents, searched the way the question gets asked, offline.',
+    blurb: 'Search every standard and your own PDFs.',
     terms: ['standard', 'standards', 'clause', 'as 1851', 'as 1670', 'library'],
   },
   {
     route: '/library/[id]', file: 'app/library/[id].tsx', tab: 'tools', section: 'Reference',
     label: 'One standard', needsContext: true, modes: BOTH, openedFrom: ['/library'],
-    blurb: 'Clause by clause in plain English, saying nothing at all where nobody has written it up.',
+    blurb: 'One standard and its clauses.',
     terms: ['clause', 'standard', 'index'],
   },
   {
@@ -871,13 +851,13 @@ export const DESTINATIONS: readonly Destination[] = [
       'The AS 1851 service routines and their frequencies. Nothing on a construction job runs to '
       + 'them.',
     openedFrom: ['/tools'],
-    blurb: 'What you are actually meant to do here, and why, with the source of every check named.',
+    blurb: 'What each service routine checks, and how often.',
     terms: ['routine', 'monthly', 'annual', 'checks', 'what to do'],
   },
   {
     route: '/tools/defects', file: 'app/tools/defects.tsx', tab: 'tools', section: 'Reference',
     label: 'Defect wording', modes: BOTH, openedFrom: ['/tools'],
-    blurb: 'The coded wording that goes on a report, and the work that clears it.',
+    blurb: 'Report wording and fix for each defect code.',
     terms: ['defect', 'wording', 'code', 'critical', 'rectification'],
   },
 
@@ -885,20 +865,20 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/work', file: 'app/(tabs)/work.tsx', tab: 'work', section: 'Records',
     label: 'Work', root: true, modes: BOTH, openedFrom: [],
-    blurb: 'Everything that produces a record the office needs.',
+    blurb: 'Jobs, records and parts.',
     terms: ['work', 'records'],
   },
   {
     route: '/work/defects', file: 'app/work/defects.tsx', tab: 'work', section: 'Records',
     label: 'Defects', modes: BOTH, openedFrom: ['/work'],
-    blurb: 'Raised, quoted and outstanding, aged in days so a list feels as urgent as it is.',
+    blurb: 'Raised, quoted and open, oldest first.',
     terms: ['defects', 'outstanding', 'open', 'faults'],
   },
   {
     route: '/quote/[id]', file: 'app/quote/[id].tsx', tab: 'work', section: 'Records',
     label: 'Quote', needsContext: true, modes: OFFICE,
     openedFrom: ['/quotes'],
-    blurb: 'One quote, re-read: what was in it, printed again, emailed again, accepted or declined.',
+    blurb: 'One quote: reprint, email, accepted or declined.',
     terms: ['quote', 'quotation', 'accepted', 'declined', 'reprint', 'expiry'],
     hiddenBecause:
       'What is out with a client and what it is worth. The number commits the company, and a '
@@ -909,15 +889,13 @@ export const DESTINATIONS: readonly Destination[] = [
     route: '/defect/[id]', file: 'app/defect/[id].tsx', tab: 'work', section: 'Records',
     label: 'Defect', needsContext: true, modes: BOTH,
     openedFrom: ['/work/defects', '/site/defects'],
-    blurb:
-      'One defect, still editable: the wording, where it is, how bad, photographs added afterwards, '
-      + 'and those photographs onto a Simpro job any day after the fact.',
+    blurb: 'One defect: wording, location, severity and photos.',
     terms: ['defect', 'fault', 'edit', 'photo', 'rectify', 'reword', 'severity'],
   },
   {
     route: '/work/outbound', file: 'app/work/outbound.tsx', tab: 'work', section: 'Records',
     label: 'Waiting to send', modes: BOTH, openedFrom: ['/work'],
-    blurb: 'Work queued for Simpro, and finished services to send.',
+    blurb: 'What is queued for Simpro.',
     terms: ['send', 'office', 'simpro', 'push', 'upload', 'sync', 'job note', 'waiting', 'queue', 'outbound'],
     keptBecause:
       'A technician is the only person who knows the service is finished, and the office finding '
@@ -933,7 +911,7 @@ export const DESTINATIONS: readonly Destination[] = [
       'The occupier statement is the annual declaration about maintained systems, and it is signed '
       + 'off the year of servicing behind it.',
     openedFrom: ['/work'],
-    blurb: 'Every occupier statement across every site, ordered by what is closest to being late.',
+    blurb: 'The annual statement, checked against the defects.',
     terms: ['occupier', 'statement', 'commissioner', 'annual statement', 'schedule 2', 'declaration'],
     keptBecause:
       'A statement signed and never sent looks, from the site screen, exactly like one that was '
@@ -946,7 +924,7 @@ export const DESTINATIONS: readonly Destination[] = [
     // The office's quotes carry a switch to these, and it works in Technician
     // mode too — hiding the row must not turn that switch into a dead end.
     stillOpenedFrom: '/quotes/simpro',
-    blurb: 'Every quote across every site, ordered by what needs an answer soonest.',
+    blurb: 'Out with clients, and about to lapse.',
     terms: ['quotes', 'quotations', 'price', 'accepted', 'expired', 'lapsed', 'out with clients'],
     hiddenBecause:
       'A quote carries cost and margin, and the answer to "what did we quote for this?" given on '
@@ -956,7 +934,7 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/quotes/simpro', file: 'app/quotes/simpro.tsx', tab: 'work', section: 'Records',
     label: 'Simpro quotes', modes: BOTH, openedFrom: ['/quotes', '/customer/[id]', '/site/[id]'],
-    blurb: 'The office\'s quotes as Simpro holds them: open, approved, and the job each one became.',
+    blurb: 'The office’s quotes in Simpro.',
     terms: ['simpro quotes', 'office quotes', 'quote number', 'approved', 'converted', 'sell'],
     keptBecause:
       'The figure on one of these is the office\'s own, already sent to the customer, so reading it '
@@ -967,13 +945,13 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/quotes/simpro/[id]', file: 'app/quotes/simpro/[id].tsx', tab: 'work', section: 'Records',
     label: 'Simpro quote', needsContext: true, modes: BOTH, openedFrom: ['/quotes/simpro', '/customer/[id]', '/search'],
-    blurb: 'One quote as the office holds it: the sections and lines, the notes, the files, and the job it became.',
+    blurb: 'One Simpro quote: lines, notes, files and the job it became.',
     terms: ['quote', 'simpro', 'lines', 'sections', 'attachments', 'converted'],
   },
   {
     route: '/invoices', file: 'app/invoices/index.tsx', tab: 'work', section: 'Records',
     label: 'Invoices', modes: BOTH, openedFrom: ['/shortcuts', '/customer/[id]', '/site/[id]'],
-    blurb: 'Two years of the office\'s invoices, unpaid first, with what is still owed on each.',
+    blurb: 'Invoices, unpaid first.',
     terms: ['invoices', 'invoice', 'unpaid', 'owing', 'paid', 'billing', 'balance due'],
     keptBecause:
       'Whether a site has paid is the first thing a customer raises when a technician turns up, '
@@ -983,34 +961,34 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/invoices/[id]', file: 'app/invoices/[id].tsx', tab: 'work', section: 'Records',
     label: 'Invoice', needsContext: true, modes: BOTH, openedFrom: ['/invoices', '/work/job/[id]', '/customer/[id]', '/search'],
-    blurb: 'One invoice: what it bills, for whom, when it is due, and how much of it has been paid.',
+    blurb: 'One invoice: what it bills, when it is due, what is paid.',
     terms: ['invoice', 'balance', 'due', 'paid', 'jobs billed'],
   },
   {
     route: '/customer/[id]', file: 'app/customer/[id].tsx', tab: 'work', section: 'Records',
     label: 'Customer', needsContext: true, modes: BOTH,
     openedFrom: ['/work/job/[id]', '/quotes/simpro/[id]', '/invoices/[id]', '/site/[id]', '/search', '/contacts/[id]'],
-    blurb: 'A customer as the office holds them: who to ring, their sites, and their jobs, quotes and invoices.',
+    blurb: 'A customer: contacts, sites, jobs, quotes and invoices.',
     terms: ['customer', 'client', 'company', 'contact', 'sites', 'who to ring'],
   },
   {
     route: '/contacts', file: 'app/contacts/index.tsx', tab: 'work', section: 'Records',
     // A site and a customer open it scoped to their own people.
     label: 'Contacts', modes: BOTH, openedFrom: ['/shortcuts', '/site/[id]', '/customer/[id]'],
-    blurb: 'Everyone the office has a number for, searched by name, number, email or role. Ring or text from the row.',
+    blurb: 'Ring, text or email anyone the office has.',
     terms: ['contacts', 'people', 'phone', 'ring', 'call', 'text', 'sms', 'email', 'building manager', 'who to ring'],
   },
   {
     route: '/contacts/[id]', file: 'app/contacts/[id].tsx', tab: 'work', section: 'Records',
     label: 'Contact', needsContext: true, modes: BOTH,
     openedFrom: ['/contacts', '/search', '/site/[id]', '/customer/[id]'],
-    blurb: 'One person: ring, text or email in a tap, and the sites and customers they belong to.',
+    blurb: 'One person: ring, text or email, and their sites.',
     terms: ['contact', 'person', 'ring', 'text', 'email', 'position'],
   },
   {
     route: '/leads', file: 'app/leads/index.tsx', tab: 'work', section: 'Records',
     label: 'Leads', modes: BOTH, openedFrom: ['/search'],
-    blurb: 'The work the office is chasing before it is a quote, by stage, each opening the site it names.',
+    blurb: 'Sales leads synced from Simpro.',
     terms: ['leads', 'lead', 'prospect', 'sales', 'chasing', 'follow up'],
     keptBecause:
       'A lead is a salesperson\'s record and reads as office work, but it carries no price — only a site, a '
@@ -1025,7 +1003,7 @@ export const DESTINATIONS: readonly Destination[] = [
       'Test sheets are the record a routine service leaves. The install equivalent is the '
       + 'commissioning paperwork, which is on the job.',
     openedFrom: ['/shortcuts', '/work'],
-    blurb: 'Every service report on this device, newest first.',
+    blurb: 'Service reports and test sheets.',
     terms: ['test sheets', 'reports', 'service reports'],
     keptBecause:
       'The sheet you were filling in this morning is reopened from here. Making a technician '
@@ -1035,13 +1013,13 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/work/clock', file: 'app/work/clock.tsx', tab: 'work', section: 'Records',
     label: 'Clock on', modes: BOTH, openedFrom: ['/work', '/shortcuts'],
-    blurb: 'On when you start a job, off when you finish; the hours go to the Simpro job as a schedule block.',
+    blurb: 'Clock on and off jobs. Hours go to Simpro.',
     terms: ['clock on', 'clock off', 'hours', 'job hours', 'travel', 'break', 'schedule block', 'timesheet'],
   },
   {
     route: '/work/timesheets', file: 'app/work/timesheets.tsx', tab: 'work', section: 'Records',
     label: 'Timesheets', modes: BOTH, openedFrom: ['/shortcuts', '/work'],
-    blurb: 'Your week, the attendances in it, and the sign-off that ends it.',
+    blurb: 'Your week, filled from your schedule or typed.',
     terms: ['timesheet', 'hours', 'week', 'pay', 'attendance'],
     keptBecause:
       'Named as an office feature, kept anyway: a technician\'s own hours are the one payroll '
@@ -1051,13 +1029,13 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/timesheet/[id]', file: 'app/timesheet/[id].tsx', tab: 'work', section: 'Records',
     label: 'One week', needsContext: true, modes: BOTH, openedFrom: ['/work/timesheets'],
-    blurb: "A week's attendances, and behind a tap what they are worth as an estimate.",
+    blurb: 'Your hours and leave for one week.',
     terms: ['timesheet', 'week', 'attendances', 'value'],
   },
   {
     route: '/work/baselines', file: 'app/work/baselines.tsx', tab: 'work', section: 'Records',
     label: 'Baseline data', modes: OFFICE, openedFrom: ['/work'],
-    blurb: 'Commissioning records across every site.',
+    blurb: 'Commissioning records.',
     terms: ['baseline', 'commissioning', 'records'],
     hiddenBecause:
       'This is the all-sites list, and a technician works one site at a time. The record itself '
@@ -1067,7 +1045,7 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/work/needs', file: 'app/work/needs.tsx', tab: 'work', section: 'Parts and stock',
     label: 'Things I need', modes: BOTH, openedFrom: ['/work', '/shortcuts'],
-    blurb: 'The running list of parts to get, split into what is wanted now and what is for work still coming.',
+    blurb: 'Parts to get, now and for coming work.',
     terms: ['need', 'needs', 'parts', 'order', 'shopping list', 'to get', 'checklist', 'flow meter'],
     keptBecause:
       'A list of parts to buy reads as office work and is not: it is written on site by the person '
@@ -1078,7 +1056,7 @@ export const DESTINATIONS: readonly Destination[] = [
     route: '/orders', file: 'app/orders/index.tsx', tab: 'work', section: 'Parts and stock',
     // A supplier opens it scoped to their orders; a job card may too.
     label: 'Purchase orders', modes: BOTH, openedFrom: ['/shortcuts', '/vendors/[id]'],
-    blurb: 'What the office has ordered, from whom, for which job, and whether it has arrived. Quantities, never prices.',
+    blurb: 'What the office has ordered, and if it has arrived.',
     terms: ['purchase orders', 'po', 'orders', 'supplier', 'vendor', 'received', 'on order', 'delivery'],
     keptBecause:
       '"Has the part for this job been ordered, and is it here yet" is asked on site, of the technician, '
@@ -1087,19 +1065,19 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/orders/[id]', file: 'app/orders/[id].tsx', tab: 'work', section: 'Parts and stock',
     label: 'Purchase order', needsContext: true, modes: BOTH, openedFrom: ['/orders', '/search', '/vendors/[id]'],
-    blurb: 'One order: the supplier, the job, the reference and dates, and each line with what was ordered and what has arrived.',
+    blurb: 'One order and its lines.',
     terms: ['purchase order', 'po', 'lines', 'received', 'supplier', 'reference'],
   },
   {
     route: '/vendors/[id]', file: 'app/vendors/[id].tsx', tab: 'work', section: 'Parts and stock',
     label: 'Supplier', needsContext: true, modes: BOTH, openedFrom: ['/orders/[id]', '/search'],
-    blurb: 'A supplier as the office holds them: who to ring, where they are, and the orders open with them.',
+    blurb: 'A supplier: contacts and open orders.',
     terms: ['supplier', 'vendor', 'ring', 'counter', 'orders with'],
   },
   {
     route: '/office-catalogue', file: 'app/office-catalogue/index.tsx', tab: 'work', section: 'Parts and stock',
     label: 'Office catalogue', modes: BOTH, openedFrom: ['/shortcuts', '/search'],
-    blurb: 'The office\'s own parts list with its sell prices, by part number or name, with the number a tap away from the clipboard.',
+    blurb: "The office's parts list with sell prices.",
     terms: ['office catalogue', 'simpro catalogue', 'part number', 'sell price', 'parts', 'materials', 'copy'],
     keptBecause:
       'The sell price on a part is the office\'s own figure, already on every quote a customer has seen; reading '
@@ -1108,17 +1086,14 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/work/plan', file: 'app/work/plan.tsx', tab: 'work', section: 'Planning',
     label: 'Plan work', modes: BOTH, openedFrom: ['/work'],
-    blurb:
-      'Build tomorrow site by site — what was done there last time, by whom, how long it took, '
-      + 'whether anyone clocked on, how many assets of each type, and whether the client has it '
-      + 'locked in — then put the day on your Simpro schedule. The month planner is the second tab.',
+    blurb: 'Build a day and book it in Simpro.',
     terms: ['plan', 'planner', 'day', 'build my day', 'month', 'schedule', 'capacity', 'last service', 'history'],
   },
 
   {
     route: '/work/schedule', file: 'app/work/schedule.tsx', tab: 'work', section: 'On the tools',
     label: 'Schedule', modes: BOTH, openedFrom: ['/work', '/work/my-day', '/shortcuts'],
-    blurb: "The team's day and yours, and the three things you can do to it from the phone: book on, move, take off.",
+    blurb: "Your day and the team's. Book yourself on.",
     terms: ['schedule', 'calendar', 'book', 'book me on', 'roster', 'team', 'blocks', 'move', 'who is where'],
   },
 
@@ -1126,7 +1101,7 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/settings', file: 'app/(tabs)/settings.tsx', tab: 'settings', section: 'Setup',
     label: 'Settings', root: true, modes: BOTH, openedFrom: [],
-    blurb: 'You, the office system, the rate card, storage, and what this device is holding.',
+    blurb: 'Your details, Simpro and this device.',
     terms: ['settings', 'setup', 'preferences', 'sync', 'simpro'],
   },
 ];

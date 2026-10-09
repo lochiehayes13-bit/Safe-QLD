@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { Linking, Pressable, ScrollView, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
@@ -17,6 +17,7 @@ import {
   chargeTolerance,
   citeSources,
   classifyTypeText,
+  formatAuDate,
   intervalsFor,
   isRefused,
   nextDue,
@@ -26,7 +27,6 @@ import {
   weighingIsPrimaryCheck,
   type ClassSuitability,
   type ConditionFinding,
-  type Confidence,
   type ExtinguisherType,
   type FireClass,
   type ServiceActivity,
@@ -47,10 +47,10 @@ import {
  * four tabs: what is this thing and what must it never be pointed at, when is
  * the next test on it, is it still full, and does what I can see condemn it.
  *
- * Every figure shows where it came from and how much that source is worth,
- * because the two things this screen is most likely to be used for — telling a
- * client their kitchen unit is the wrong type, and telling them a cylinder is
- * out of test — are both arguments, and an argument needs a citation.
+ * Every figure shows where it came from, because the two things this screen is
+ * most likely to be used for — telling a client their kitchen unit is the wrong
+ * type, and telling them a cylinder is out of test — are both arguments, and an
+ * argument needs a citation.
  */
 
 type Mode = 'type' | 'due' | 'weight' | 'condition';
@@ -146,8 +146,11 @@ const SUITABILITY_TONE: Record<Suitability, 'pass' | 'warn' | 'fail' | 'muted'> 
   prohibited: 'fail',
 };
 
-const CONFIDENCE_TONE = (c: Confidence): 'pass' | 'accent' | 'warn' =>
-  c === 'high' ? 'pass' : c === 'medium' ? 'accent' : 'warn';
+/** A field's text, read as a number only when it is used. Blank is not zero. */
+const num = (text: string): number => {
+  const trimmed = text.trim();
+  return trimmed ? Number(trimmed) : Number.NaN;
+};
 
 function TypeView({ type }: { type: ExtinguisherType }) {
   const t = useTheme();
@@ -197,10 +200,10 @@ function TypeView({ type }: { type: ExtinguisherType }) {
         <Bullet
           text={
             weighingIsPrimaryCheck(type)
-              ? 'No pressure gauge. Weighing is the only evidence this one is full.'
+              ? 'No gauge. Only weighing proves it full.'
               : profile.hasPressureGauge === null
-                ? 'Whether this one carries a gauge depends on the model. Look before deciding how to check it.'
-                : 'Pressure gauge fitted. Weigh it as well where the gauge is doubtful — a leaked unit re-pressurised with air still reads in the green.'
+                ? 'Gauge depends on the model. Check whether it has one.'
+                : 'Gauge fitted. Weigh it too if the gauge looks doubtful; a leaked unit topped up with air still reads green.'
           }
         />
       </Card>
@@ -211,7 +214,6 @@ function TypeView({ type }: { type: ExtinguisherType }) {
           <Rowed gap={2}>
             <Txt size="lg" weight="700" style={{ flex: 1 }}>{spec.label}</Txt>
             <Chip label={`${spec.intervalMonths} months`} tone="accent" />
-            <Chip label={spec.confidence} tone={CONFIDENCE_TONE(spec.confidence)} />
           </Rowed>
           <View style={{ marginTop: t.space(1.5) }}>
             {spec.what.map((w) => (
@@ -220,7 +222,7 @@ function TypeView({ type }: { type: ExtinguisherType }) {
           </View>
           {spec.dispute ? (
             <View style={{ marginTop: t.space(2) }}>
-              <Banner tone="warn" title="The sources disagree" body={spec.dispute} />
+              <Banner tone="warn" title="Sources differ" body={spec.dispute} />
             </View>
           ) : null}
         </Card>
@@ -229,8 +231,8 @@ function TypeView({ type }: { type: ExtinguisherType }) {
       <Card>
         <Label>Pressure test</Label>
         <Txt size="sm" tone="muted" style={{ marginTop: 4, lineHeight: 19 }}>
-          {pressure.intervalMonths} months, counted from the date of manufacture stamped on the cylinder and never from
-          the last service. {pressure.note}
+          {pressure.intervalMonths} months from the manufacture date on the cylinder, not the last service.{' '}
+          {pressure.note}
         </Txt>
       </Card>
 
@@ -251,7 +253,7 @@ function TypeView({ type }: { type: ExtinguisherType }) {
                 <Txt size="xs" tone={options.length ? 'accent' : 'warn'} weight="700" style={{ marginTop: 4 }}>
                   {options.length
                     ? `Rated: ${options.map((o) => PROFILES[o].shortLabel).join(', ')}`
-                    : 'Nothing in this list is rated for it. A purpose-made agent is required.'}
+                    : 'Nothing here is rated for it. Use a purpose-made agent.'}
                 </Txt>
               </View>
             </View>
@@ -259,14 +261,14 @@ function TypeView({ type }: { type: ExtinguisherType }) {
         })}
       </Card>
 
-      <H2>Read a register descriptor</H2>
+      <H2>Read a register entry</H2>
       <Field
-        label="Extinguisher type cell"
+        label="Register type"
         value={typeText}
         onChangeText={setTypeText}
         placeholder="9.0kg ABE"
         autoCapitalize="characters"
-        hint="Paste what the register says and see whether it is enough to identify the asset."
+        hint="Paste the register entry."
       />
       {guess ? (
         isRefused(guess) ? (
@@ -275,7 +277,7 @@ function TypeView({ type }: { type: ExtinguisherType }) {
           <Banner
             tone="pass"
             title={PROFILES[guess.type].label}
-            body={`Matched on "${guess.matched}" — ${guess.confidence} confidence. ${prohibitionLine(guess.type)}`}
+            body={`Matched "${guess.matched}". ${prohibitionLine(guess.type)}`}
           />
         )
       ) : null}
@@ -323,10 +325,9 @@ function ClassRow({ entry }: { entry: ClassSuitability }) {
             <Txt size="xs" tone="muted" style={{ marginTop: 4, lineHeight: 17 }}>{entry.consequence}</Txt>
           ) : null}
           {entry.dispute ? (
-            <Txt size="xs" tone="warn" style={{ marginTop: 4, lineHeight: 17 }}>Sources disagree: {entry.dispute}</Txt>
+            <Txt size="xs" tone="warn" style={{ marginTop: 4, lineHeight: 17 }}>Sources differ: {entry.dispute}</Txt>
           ) : null}
         </View>
-        <Chip label={entry.confidence} tone={CONFIDENCE_TONE(entry.confidence)} />
       </Rowed>
     </View>
   );
@@ -374,24 +375,24 @@ function DueView({ type }: { type: ExtinguisherType }) {
         value={manufactured}
         onChangeText={setManufactured}
         placeholder="1/6/2015"
-        hint="Stamped on the cylinder. This is the anchor — the schedule counts from here, not from the last service."
+        hint="Stamped on the cylinder."
       />
       <Field
         label="Last done"
         value={lastDone}
         onChangeText={setLastDone}
         placeholder="Jun-25"
-        hint='Day, month or year — whatever the record actually says. "Jun-25" is read as a month and stays a month.'
+        hint="Day, month or year."
       />
 
       {!entered ? (
         <EmptyState
           icon="calendar-edit"
           title="Enter a date"
-          body="The date stamped on the cylinder is the one that matters. Without it the schedule can only be counted forward from the last service, which carries any lateness with it."
+          body="Enter the manufacture date on the cylinder."
         />
       ) : isRefused(result!) ? (
-        <Banner tone="warn" title="Cannot be worked out" body={`${result!.reason} ${result!.whatToDo}`} />
+        <Banner tone="warn" title="Can't calculate" body={`${result!.reason} ${result!.whatToDo}`} />
       ) : (
         <>
           <ResultBlock
@@ -401,7 +402,7 @@ function DueView({ type }: { type: ExtinguisherType }) {
             detail={
               result!.due.precision === 'day'
                 ? `${result!.state === 'overdue' ? `${Math.abs(result!.daysUntil.latest)} days late` : `${result!.daysUntil.earliest} days away`} · ${result!.anchorNote}`
-                : `Due within this ${result!.due.precision === 'month' ? 'month' : 'year'}, not on a particular day. ${result!.anchorNote}`
+                : `Due within this ${result!.due.precision === 'month' ? 'month' : 'year'}, not on a set day. ${result!.anchorNote}`
             }
           />
 
@@ -419,19 +420,11 @@ function DueView({ type }: { type: ExtinguisherType }) {
             />
           </Rowed>
 
-          {result!.anchoredTo === 'last-service' ? (
-            <Banner
-              tone="warn"
-              title="Counted from the last service, not the cylinder"
-              body="No date of manufacture was readable, so any lateness already in this record is carried forward. Read the stamp off the base or the neck and enter it."
-            />
-          ) : null}
-
           <Card>
             <Label>Window</Label>
             <View style={{ marginTop: t.space(1.5), gap: t.space(1) }}>
-              <WorkingLine label="Earliest it could fall" value={result!.due.earliest} />
-              <WorkingLine label="Latest it could fall" value={result!.due.latest} />
+              <WorkingLine label="Earliest" value={formatAuDate(result!.due.earliest)} />
+              <WorkingLine label="Latest" value={formatAuDate(result!.due.latest)} />
               <WorkingLine label="Interval" value={`${result!.intervalMonths} months`} />
             </View>
           </Card>
@@ -455,30 +448,34 @@ function DueView({ type }: { type: ExtinguisherType }) {
 
 function WeightView({ type }: { type: ExtinguisherType }) {
   const t = useTheme();
+  const [plateTolerance, setPlateTolerance] = useState('');
   const [tare, setTare] = useState('');
   const [gross, setGross] = useState('');
   const [nominal, setNominal] = useState('');
-  const [plateTolerance, setPlateTolerance] = useState('');
 
+  // The plate figure comes first and nothing is judged without it. No
+  // tolerance is held for any type, so every type gets its verdict from the
+  // figure on its own plate, and none gets one before that is entered.
+  const plateEntered = plateTolerance.trim().length > 0;
   const tolerance = useMemo(
-    () => chargeTolerance(type, plateTolerance.trim() ? Number(plateTolerance.trim()) : undefined),
-    [type, plateTolerance],
+    () => (plateEntered ? chargeTolerance(type, num(plateTolerance)) : undefined),
+    [type, plateTolerance, plateEntered],
   );
 
-  const entered = tare.trim().length > 0 && gross.trim().length > 0;
+  const weighed = tare.trim().length > 0 && gross.trim().length > 0;
 
   const result = useMemo(
     () =>
-      entered
+      plateEntered && weighed
         ? checkCharge({
             type,
-            tareGrams: Math.round(Number(tare.trim())),
-            grossGrams: Math.round(Number(gross.trim())),
-            nominalChargeGrams: nominal.trim() ? Math.round(Number(nominal.trim())) : undefined,
-            manufacturerTolerancePercent: plateTolerance.trim() ? Number(plateTolerance.trim()) : undefined,
+            tareGrams: num(tare),
+            grossGrams: num(gross),
+            nominalChargeGrams: nominal.trim() ? num(nominal) : undefined,
+            manufacturerTolerancePercent: num(plateTolerance),
           })
         : undefined,
-    [type, tare, gross, nominal, plateTolerance, entered],
+    [type, tare, gross, nominal, plateTolerance, plateEntered, weighed],
   );
 
   // Three answers, not two. Where the profile does not know whether this type
@@ -492,68 +489,51 @@ function WeightView({ type }: { type: ExtinguisherType }) {
         tone={primary === false ? 'info' : 'warn'}
         title={
           primary === true
-            ? 'The scale is the only check on this type'
+            ? 'Weighing is the only check'
             : primary === false
-              ? 'The gauge is the primary check on this type'
-              : 'Whether this one has a gauge depends on the model'
+              ? 'The gauge is the main check'
+              : 'Gauge depends on the model'
         }
         body={
           primary === true
-            ? 'A carbon dioxide extinguisher carries no pressure gauge. Nothing but the mass says whether it is full.'
+            ? 'No pressure gauge on a CO₂ unit. Only the weight shows it is full.'
             : primary === false
-              ? 'This type has a gauge. Weighing is a second opinion on it, and worth taking — a unit that leaked and was re-pressurised with air still reads in the green.'
-              : 'Look at the unit before deciding how to check it. This app does not know whether this type carries a gauge, and will not assume one is there.'
+              ? 'Weigh it as well: a leaked unit topped up with air still reads green.'
+              : 'Check whether it has a gauge.'
         }
       />
 
+      <Field
+        label="Plate tolerance"
+        value={plateTolerance}
+        onChangeText={setPlateTolerance}
+        keyboardType="decimal-pad"
+        suffix="% of charge"
+        hint="Off the extinguisher's plate."
+      />
       <Rowed gap={2} align="flex-start">
         <View style={{ flex: 1 }}>
-          <Field label="Tare" value={tare} onChangeText={setTare} keyboardType="numeric" suffix="g" hint="Empty mass, stamped" />
+          <Field label="Tare" value={tare} onChangeText={setTare} keyboardType="numeric" suffix="g" hint="Stamped on it" />
         </View>
         <View style={{ flex: 1 }}>
-          <Field label="Gross" value={gross} onChangeText={setGross} keyboardType="numeric" suffix="g" hint="On the scales now" />
+          <Field label="Gross" value={gross} onChangeText={setGross} keyboardType="numeric" suffix="g" hint="On the scales" />
         </View>
       </Rowed>
-      <Rowed gap={2} align="flex-start">
-        <View style={{ flex: 1 }}>
-          <Field label="Nominal charge" value={nominal} onChangeText={setNominal} keyboardType="numeric" suffix="g" hint="Off the label" />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Field
-            label="Plate tolerance"
-            value={plateTolerance}
-            onChangeText={setPlateTolerance}
-            keyboardType="decimal-pad"
-            suffix="%"
-            hint="If the label states one"
-          />
-        </View>
-      </Rowed>
+      <Field
+        label="Nominal charge"
+        value={nominal}
+        onChangeText={setNominal}
+        keyboardType="numeric"
+        suffix="g"
+        hint="Off the label."
+      />
 
-      {isRefused(tolerance) ? (
-        <Banner tone="warn" title="No tolerance held for this type" body={`${tolerance.reason} ${tolerance.whatToDo}`} />
-      ) : (
-        <Card>
-          <Rowed gap={2}>
-            <Label>Tolerance applied</Label>
-            <Chip label={tolerance.confidence} tone={CONFIDENCE_TONE(tolerance.confidence)} />
-          </Rowed>
-          <Txt size="xl" weight="700" style={{ marginTop: 4 }}>±{tolerance.percentOfCharge}% of charge</Txt>
-          <Txt size="xs" tone={tolerance.origin === 'manufacturer-plate' ? 'accent' : 'muted'} weight="700" style={{ marginTop: 4 }}>
-            {tolerance.origin === 'manufacturer-plate'
-              ? "Read off this extinguisher's plate — the figure that governs"
-              : 'Held by this app, and not an Australian figure'}
-          </Txt>
-          <Txt size="xs" tone="faint" style={{ marginTop: 4, lineHeight: 17 }}>{tolerance.caveat}</Txt>
-        </Card>
-      )}
-
-      {!entered ? (
-        <EmptyState
-          icon="scale"
-          title="Weigh it"
-          body="Tare off the stamping, gross off the scales, both in grams. A kilogram figure entered here reads as a very light extinguisher."
-        />
+      {!plateEntered ? (
+        <EmptyState icon="scale" title="Enter the plate tolerance" body="No verdict without it." />
+      ) : tolerance && isRefused(tolerance) ? (
+        <Banner tone="warn" title="Check the tolerance" body={`${tolerance.reason} ${tolerance.whatToDo}`} />
+      ) : !weighed ? (
+        <EmptyState icon="scale" title="Weigh it" body="Tare and gross, both in grams." />
       ) : isRefused(result!) ? (
         <Banner tone="fail" title="No verdict" body={`${result!.reason} ${result!.whatToDo}`} />
       ) : (
@@ -578,10 +558,7 @@ function WeightView({ type }: { type: ExtinguisherType }) {
               tone={result!.state === 'within-tolerance' ? 'pass' : 'fail'}
             />
           </Rowed>
-          <Card>
-            <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>{result!.toleranceCaveat}</Txt>
-          </Card>
-          <SourceList ids={result!.sourceIds} />
+          <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>{result!.toleranceCaveat}</Txt>
         </>
       )}
 
@@ -594,7 +571,7 @@ function WeightView({ type }: { type: ExtinguisherType }) {
 // Does what I can see condemn it
 // ---------------------------------------------------------------------------
 
-const INSPECTED: { value: 'yes' | 'no'; label: string }[] = [
+const INSPECTED: { value: 'yes' | 'no' | ''; label: string }[] = [
   { value: 'yes', label: 'Inspected' },
   { value: 'no', label: 'Not inspected' },
 ];
@@ -611,7 +588,9 @@ const INSPECTED: { value: 'yes' | 'no'; label: string }[] = [
  */
 function ConditionView({ type }: { type: ExtinguisherType }) {
   const t = useTheme();
-  const [inspected, setInspected] = useState<'yes' | 'no'>('yes');
+  // Nothing is assumed: no verdict shows until the technician says whether the
+  // unit was inspected.
+  const [inspected, setInspected] = useState<'yes' | 'no' | ''>('');
   const [ticked, setTicked] = useState<ConditionFinding[]>([]);
 
   const rules = Object.values(CONDITION_RULES);
@@ -629,25 +608,25 @@ function ConditionView({ type }: { type: ExtinguisherType }) {
     <>
       <Segmented value={inspected} onChange={setInspected} options={INSPECTED} />
 
-      <ResultBlock
-        label="Verdict"
-        value={
-          assessment.verdict === 'condemn'
-            ? 'Condemn'
-            : assessment.verdict === 'serviceable'
-              ? 'Serviceable'
-              : 'Undetermined'
-        }
-        tone={tone}
-        detail={assessment.statement}
-      />
-
-      {assessment.needsJudgement.length ? (
-        <Banner
-          tone="warn"
-          title="A person has to decide these"
-          body="This app will not settle them from a checkbox. Decide on site, photograph it, and record the decision against the asset."
+      {!inspected ? (
+        <Txt size="sm" tone="muted">Pick inspected or not, then tick what you found.</Txt>
+      ) : (
+        <ResultBlock
+          label="Verdict"
+          value={
+            assessment.verdict === 'condemn'
+              ? 'Condemn'
+              : assessment.verdict === 'serviceable'
+                ? 'Serviceable'
+                : 'Undetermined'
+          }
+          tone={tone}
+          detail={assessment.statement}
         />
+      )}
+
+      {inspected && assessment.needsJudgement.length ? (
+        <Banner tone="warn" title="Decide these on site" body="Photograph it and record the decision." />
       ) : null}
 
       <H2>What was found</H2>
@@ -665,7 +644,7 @@ function ConditionView({ type }: { type: ExtinguisherType }) {
         </View>
         <Divider />
         <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-          Red condemns the asset, amber is a judgement nobody can make from a form, blue is a defect the body survives.
+          Red condemns it, amber is a call on site, blue is a repairable defect.
         </Txt>
       </Card>
 
@@ -677,7 +656,6 @@ function ConditionView({ type }: { type: ExtinguisherType }) {
               label={rule.outcome === 'condemn' ? 'Condemn' : rule.outcome === 'judgement' ? 'Judgement' : 'Repairable'}
               tone={rule.outcome === 'condemn' ? 'fail' : rule.outcome === 'judgement' ? 'warn' : 'accent'}
             />
-            <Chip label={rule.confidence} tone={CONFIDENCE_TONE(rule.confidence)} />
           </Rowed>
           <Txt size="xs" tone="muted" style={{ marginTop: 4, lineHeight: 17 }}>{rule.reason}</Txt>
           <Txt size="xs" tone="accent" style={{ marginTop: 4, lineHeight: 17 }}>{rule.action}</Txt>
@@ -687,12 +665,12 @@ function ConditionView({ type }: { type: ExtinguisherType }) {
       {assessment.unrecognised.length ? (
         <Banner
           tone="warn"
-          title="A finding with no rule behind it"
-          body={`${assessment.unrecognised.join(', ')}. It has not been dropped — the asset is undetermined until a person rules on it and the finding is added to the rules.`}
+          title="No rule for this"
+          body={`${assessment.unrecognised.join(', ')}. Decide on site.`}
         />
       ) : null}
 
-      <SourceList ids={assessment.sourceIds} />
+      {inspected ? <SourceList ids={assessment.sourceIds} /> : null}
     </>
   );
 }
@@ -719,46 +697,28 @@ function WorkingLine({ label, value }: { label: string; value: string }) {
   );
 }
 
-/**
- * Every source behind whatever is on screen, with its confidence.
- *
- * Shown rather than tucked into a comment, and for a specific reason on this
- * screen: the two figures most likely to be quoted off it — the carbon dioxide
- * pressure test interval and the charge tolerance — are the two this app is
- * least sure of. A technician who reads "low" beside them will go and check,
- * which is the whole intent.
- */
+/** Each source on one line, and the line opens it. */
 function SourceList({ ids }: { ids: SourceId[] }) {
   const t = useTheme();
   const sources = citeSources(ids);
   if (!sources.length) return null;
   return (
-    <>
-      <H2>Sources</H2>
-      <Card>
-        {sources.map((s, i) => (
-          <View key={s.id}>
-            {i > 0 ? <Divider /> : null}
-            <View style={{ paddingVertical: t.space(1.5) }}>
-              <Rowed gap={2}>
-                <Chip label={s.confidence} tone={CONFIDENCE_TONE(s.confidence)} />
-                <Txt size="sm" weight="700" style={{ flex: 1 }}>{s.ref}</Txt>
-              </Rowed>
-              <Txt size="xs" tone="muted" style={{ marginTop: 4, lineHeight: 17 }}>{s.what}</Txt>
-              <Txt size="xs" tone="faint" style={{ marginTop: 3, lineHeight: 17 }}>{s.basis}</Txt>
-              <Txt size="xs" tone="accent" mono style={{ marginTop: 3 }}>{s.url}</Txt>
-            </View>
-          </View>
-        ))}
-        <Divider />
-        <Rowed gap={2} align="flex-start" style={{ paddingTop: t.space(1) }}>
-          <MaterialCommunityIcons name="information-outline" size={16} color={t.color.textFaint} />
-          <Txt size="xs" tone="faint" style={{ flex: 1, lineHeight: 17 }}>
-            No text, table or schedule from AS 1851 or AS/NZS 1841 is reproduced in this app. Clause, table and part
-            numbers point at the office copy, which is what governs.
-          </Txt>
-        </Rowed>
-      </Card>
-    </>
+    <Card style={{ gap: t.space(0.5) }}>
+      <Label>Sources</Label>
+      {sources.map((s) => (
+        <Pressable
+          key={s.id}
+          accessibilityRole="link"
+          onPress={() => void Linking.openURL(s.url).catch(() => undefined)}
+          hitSlop={6}
+          style={{ minHeight: 44, justifyContent: 'center' }}
+        >
+          <Rowed gap={2}>
+            <Txt size="sm" tone="accent" style={{ flex: 1, lineHeight: 19 }}>{s.ref}</Txt>
+            <MaterialCommunityIcons name="open-in-new" size={16} color={t.color.accentText} />
+          </Rowed>
+        </Pressable>
+      ))}
+    </Card>
   );
 }

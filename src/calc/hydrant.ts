@@ -155,17 +155,17 @@ export const OUTLETS: OutletSpec[] = [
   {
     id: 'rounded',
     label: 'Rounded outlet',
-    geometry: 'Throat rounded where it meets the barrel; no lip to catch a fingernail on.',
+    geometry: 'Throat rounded where it meets the barrel; no lip.',
     coefficient: 0.9,
     source: 'WSRB Guide to Hydrant Flow Testing, restating the NFPA 291 coefficients',
     url: WSRB_URL,
     confidence: 'medium',
-    note: 'Widely published and long established, but restated by an insurance advisory rather than measured on this outlet.',
+    note: 'Long-established figure, restated by an insurance advisory.',
   },
   {
     id: 'square-edged',
     label: 'Square-edged outlet',
-    geometry: 'Outlet cut square and flush with the inside of the barrel — the most common case.',
+    geometry: 'Cut square and flush with the inside of the barrel. The most common case.',
     coefficient: 0.8,
     source: 'WSRB Guide to Hydrant Flow Testing, restating the NFPA 291 coefficients',
     url: WSRB_URL,
@@ -188,17 +188,17 @@ export const OUTLETS: OutletSpec[] = [
     source: 'WSRB Guide to Hydrant Flow Testing',
     url: WSRB_URL,
     confidence: 'medium',
-    note: 'Use the straightener manufacturer’s own figure in preference to this one where they publish it.',
+    note: 'Use the straightener maker’s figure if published.',
   },
   {
     id: 'smooth-bore-nozzle',
     label: 'Smooth-bore nozzle',
-    geometry: 'A tapered smooth-bore tip on a standpipe or branch — measure the tip bore, not the hose.',
+    geometry: 'Tapered smooth-bore tip on a standpipe or branch. Measure the tip bore, not the hose.',
     coefficient: 0.97,
     source: 'QRFS, on published smooth-bore and playpipe coefficients',
     url: QRFS_PLAYPIPE_URL,
     confidence: 'low',
-    note: 'Trade publication, not a manufacturer’s test certificate. Published values sit between 0.96 and 0.98.',
+    note: 'Trade figure. Published values run 0.96 to 0.98.',
   },
   {
     id: 'short-playpipe',
@@ -214,11 +214,9 @@ export const OUTLETS: OutletSpec[] = [
     label: 'Not identified',
     geometry: 'The outlet geometry has not been established.',
     coefficient: null,
-    source: 'No source — deliberately no value.',
+    source: 'No source, so no value.',
     confidence: 'low',
-    note:
-      'A pitot flow cannot be calculated without a coefficient. Identify the geometry, or use a flow meter, ' +
-      'or enter a coefficient from the equipment documentation.',
+    note: 'No coefficient, no pitot flow. Identify the outlet or use a flow meter.',
   },
 ];
 
@@ -251,7 +249,7 @@ export const PITOT_CONSTANT_METRIC = (Math.PI / 4) * 1e-6 * Math.sqrt(2) * 60000
  */
 export const PITOT_MIN_RELIABLE_KPA = psiToKpa(10);
 export const PITOT_MAX_RELIABLE_KPA = psiToKpa(30);
-const PITOT_WINDOW_URL = 'https://blog.qrfs.com/370-nfpa-guidance-on-fire-hydrant-testing/';
+// Source: https://blog.qrfs.com/370-nfpa-guidance-on-fire-hydrant-testing/
 
 export interface PitotFlowInput {
   /** Pitot gauge reading, kPa. */
@@ -291,7 +289,7 @@ export function pitotFlow(input: PitotFlowInput): PitotFlow | Refused {
     return refuse('Enter a pitot pressure and an outlet diameter.');
   }
   if (pitotKpa < 0) {
-    return refuse('A pitot reading below zero is not a flow. Check the gauge is zeroed and reading gauge pressure.');
+    return refuse('Pitot reading below zero. Check the gauge is zeroed.');
   }
   if (outletDiameterMm <= 0) {
     return refuse('Outlet diameter must be greater than zero.');
@@ -315,10 +313,7 @@ export function pitotFlow(input: PitotFlowInput): PitotFlow | Refused {
       return refuse(`No outlet type "${input.outlet}" is held, so no coefficient can be applied.`);
     }
     if (spec.coefficient === null) {
-      return refuse(
-        `No discharge coefficient is sourced for "${spec.label}", so the flow cannot be calculated. ` +
-          'Identify the outlet geometry, flow it through a meter, or enter the coefficient from the equipment documentation.',
-      );
+      return refuse(`No coefficient for "${spec.label}". Identify the outlet geometry or use a flow meter.`);
     }
     coefficient = spec.coefficient;
     coefficientSource = spec.source;
@@ -338,25 +333,21 @@ export function pitotFlow(input: PitotFlowInput): PitotFlow | Refused {
     issues.push({
       level: 'warning',
       title: `Pitot reading below ${round(PITOT_MIN_RELIABLE_KPA, 0)} kPa`,
-      detail:
-        'Below about 10 psi the stream does not fill the outlet, so the reading understates the flow by an amount ' +
-        `nobody can quantify afterwards. Open a larger outlet or flow more of them. Source: ${PITOT_WINDOW_URL}`,
+      detail: 'The stream does not fill the outlet and reads low. Flow more outlets. Source: NFPA 291.',
     });
   }
   if (pitotKpa > PITOT_MAX_RELIABLE_KPA) {
     issues.push({
       level: 'warning',
       title: `Pitot reading above ${round(PITOT_MAX_RELIABLE_KPA, 0)} kPa`,
-      detail:
-        'Holding a pitot tube steady and central in a jet this hard is difficult, and an off-centre tube reads low. ' +
-        `Consider a smaller outlet or a flow meter. Source: ${PITOT_WINDOW_URL}`,
+      detail: 'Hard to hold the pitot central in a jet this strong; off-centre reads low. Source: NFPA 291.',
     });
   }
   if (coefficientConfidence === 'low') {
     issues.push({
       level: 'info',
       title: 'Discharge coefficient is second-hand',
-      detail: `${coefficientSource}. Prefer the equipment manufacturer's own figure where one is published.`,
+      detail: `${coefficientSource}. Use the maker's own figure if published.`,
     });
   }
 
@@ -461,10 +452,7 @@ export function kFactorFlow(input: KFactorFlowInput): KFactorFlow | Refused {
   if (pressureKpa < 0) return refuse('Pressure at the device cannot be negative.');
   const factor = K_UNIT_TO_LPM_PER_SQRT_KPA[input.kUnit];
   if (factor === undefined) {
-    return refuse(
-      'The units of the K-factor have not been stated. L/min per √bar and L/min per √kPa differ by a factor of ten, ' +
-        'so the figure cannot be used until the data sheet is read.',
-    );
+    return refuse('K-factor units not stated. Per √bar and per √kPa differ by 10; check the data sheet.');
   }
 
   const kKpa = k * factor;
@@ -578,9 +566,7 @@ export const CONDUITS: ConduitSpec[] = [
     source: 'Derived from Australian Fire Hose SBR800 published friction loss at 25, 38, 65 and 70 mm',
     url: AFH_HOSE_URL,
     confidence: 'medium',
-    note:
-      'Back-solved from the manufacturer’s own measured loss figures, not published as a C value. ' +
-      'A worn or badly coupled length will do worse than any of this.',
+    note: 'Back-solved from the maker’s measured loss. Worn hose loses more.',
   },
   { id: 'cast-iron-new', label: 'Cast iron, new, unlined', cLow: 130, cHigh: 130, source: BENTLEY_C_SOURCE, url: BENTLEY_C_URL, confidence: 'medium' },
   {
@@ -591,7 +577,7 @@ export const CONDUITS: ConduitSpec[] = [
     source: BENTLEY_C_SOURCE,
     url: BENTLEY_C_URL,
     confidence: 'medium',
-    note: 'Age matters more than material on old reticulation — tuberculation roughly halves C over forty years.',
+    note: 'Tuberculation roughly halves C over forty years.',
   },
   { id: 'cast-iron-40yr', label: 'Cast iron, about 40 years old', cLow: 64, cHigh: 83, source: BENTLEY_C_SOURCE, url: BENTLEY_C_URL, confidence: 'medium' },
   { id: 'galvanised-iron', label: 'Galvanised iron', cLow: 120, cHigh: 120, source: BENTLEY_C_SOURCE, url: BENTLEY_C_URL, confidence: 'medium' },
@@ -654,8 +640,8 @@ export function frictionLoss(input: FrictionLossInput): FrictionLoss | Refused {
     // near 200 — the smoothest material in the table is 161.
     if (input.cOverride > HW_C_IMPLAUSIBLE_ABOVE) {
       return refuse(
-        `A Hazen-Williams C of ${input.cOverride} is not a real conduit — the smoothest material held here is ` +
-          `${Math.max(...CONDUITS.map((x) => x.cHigh))}. Check for a misplaced decimal point.`,
+        `C of ${input.cOverride} is too high (smoothest held is ${Math.max(...CONDUITS.map((x) => x.cHigh))}). ` +
+          'Check the decimal point.',
       );
     }
     c = input.cOverride;
@@ -664,10 +650,7 @@ export function frictionLoss(input: FrictionLossInput): FrictionLoss | Refused {
   } else {
     const spec = input.conduit ? conduitSpec(input.conduit) : undefined;
     if (!spec) {
-      return refuse(
-        'No material selected, so no roughness coefficient applies. Friction loss cannot be estimated without one — ' +
-          'pick the material or enter the C value from the design.',
-      );
+      return refuse('Pick a material or enter the C value from the design.');
     }
     c = spec.cLow;
     cSource = spec.source;
@@ -694,25 +677,21 @@ export function frictionLoss(input: FrictionLossInput): FrictionLoss | Refused {
     issues.push({
       level: 'warning',
       title: `Velocity ${round(velocityMs, 1)} m/s is above the Hazen-Williams band`,
-      detail:
-        `Hazen-Williams is fitted for roughly ${HW_VELOCITY_MIN_MS}–${HW_VELOCITY_MAX_MS} m/s and understates loss ` +
-        'above it. Treat this figure as a floor, not an estimate.',
+      detail: `Hazen-Williams fits ${HW_VELOCITY_MIN_MS} to ${HW_VELOCITY_MAX_MS} m/s and reads low above it. Treat this as a floor.`,
     });
   }
   if (flowLpm > 0 && velocityMs < HW_VELOCITY_MIN_MS) {
     issues.push({
       level: 'info',
       title: `Velocity ${round(velocityMs, 2)} m/s is below the Hazen-Williams band`,
-      detail: 'The loss is small enough at this velocity that the error hardly matters, but the fit is outside its range.',
+      detail: 'Outside the fitted range, but the loss is small here.',
     });
   }
   if (input.cOverride === undefined && input.conduit === 'layflat-hose') {
     issues.push({
       level: 'info',
       title: 'Hose C value is derived, not published',
-      detail:
-        'Back-solved from Australian Fire Hose’s published SBR800 loss figures. Another hose, or a tired one, will do worse. ' +
-        `Source: ${AFH_HOSE_URL}`,
+      detail: 'Back-solved from Australian Fire Hose SBR800 loss figures. Other or worn hose loses more.',
     });
   }
 
@@ -749,7 +728,7 @@ export const DRAWDOWN_EXPONENT = 0.54;
  */
 export const RECOMMENDED_DRAWDOWN_FRACTION = 0.25;
 export const MINIMUM_USABLE_DRAWDOWN_FRACTION = 0.05;
-const NFPA291_DRAWDOWN_URL = 'https://blog.qrfs.com/370-nfpa-guidance-on-fire-hydrant-testing/';
+// Source: https://blog.qrfs.com/370-nfpa-guidance-on-fire-hydrant-testing/
 
 export interface ProjectionInput {
   /** Pressure at the test hydrant with nothing flowing, kPa. */
@@ -793,28 +772,24 @@ export interface Projection {
 export function projectAvailableFlow(input: ProjectionInput): Projection | Refused {
   const { staticKpa, residualKpa, measuredFlowLpm, targetResidualKpa } = input;
   if (![staticKpa, residualKpa, measuredFlowLpm, targetResidualKpa].every(Number.isFinite)) {
-    return refuse('Enter static pressure, residual pressure, measured flow and the target residual.');
+    return refuse('Enter static, residual, flow and target residual.');
   }
-  if (staticKpa <= 0) return refuse('Static pressure must be above zero — there is nothing to draw down.');
-  if (measuredFlowLpm <= 0) return refuse('A projection needs a measured flow greater than zero.');
+  if (staticKpa <= 0) return refuse('Static must be above zero.');
+  if (measuredFlowLpm <= 0) return refuse('Measured flow must be above zero.');
   if (residualKpa < 0) {
     // Not the same refusal as a residual above static, and worth its own. A
     // negative residual is a typed minus sign; left alone it inflates the
     // drawdown past 100% of static and every projection off it reads low, which
     // is a fail nobody can account for on a system that was fine.
-    return refuse('A residual below zero is not a gauge reading. Check the sign on the figure entered.');
+    return refuse('Residual below zero. Check the sign.');
   }
   if (residualKpa > staticKpa) {
-    return refuse(
-      'The residual read higher than the static. Either the hydrant was not flowing when the residual was taken, ' +
-        'the two readings came from different gauges, or the gauge is faulty.',
-    );
+    return refuse('Residual is higher than the static. Check it was flowing and the same gauge was used.');
   }
-  if (targetResidualKpa < 0) return refuse('Target residual pressure cannot be negative.');
+  if (targetResidualKpa < 0) return refuse('Target residual cannot be negative.');
   if (targetResidualKpa > staticKpa) {
     return refuse(
-      `The target residual of ${round(targetResidualKpa, 0)} kPa is above the static of ${round(staticKpa, 0)} kPa. ` +
-        'The supply never reaches that pressure, at any flow.',
+      `Target ${round(targetResidualKpa, 0)} kPa is above the ${round(staticKpa, 0)} kPa static. The supply never reaches it.`,
     );
   }
 
@@ -823,15 +798,11 @@ export function projectAvailableFlow(input: ProjectionInput): Projection | Refus
   const drawdownFraction = measuredDrawdownKpa / staticKpa;
 
   if (measuredDrawdownKpa <= 0) {
-    return refuse(
-      'The residual did not move off the static, so the supply curve cannot be established from this test. ' +
-        'Flow more water — the pressure has to come down before anything can be projected from it.',
-    );
+    return refuse('The residual did not move off the static. Flow more water and retest.');
   }
   if (drawdownFraction < MINIMUM_USABLE_DRAWDOWN_FRACTION) {
     return refuse(
-      `The residual only fell ${round(drawdownFraction * 100, 1)}% below static. A projection off a drawdown that ` +
-        'small is dominated by gauge error and would be a number, not an answer. Flow more outlets and retest.',
+      `Residual only fell ${round(drawdownFraction * 100, 1)}% below static. Too small to project; flow more outlets and retest.`,
     );
   }
 
@@ -842,20 +813,17 @@ export function projectAvailableFlow(input: ProjectionInput): Projection | Refus
     issues.push({
       level: 'warning',
       title: `Drawdown of ${round(drawdownFraction * 100, 1)}% is below the recommended 25%`,
-      detail:
-        'NFPA 291 asks for the residual to fall at least a quarter below static before projecting from it. ' +
-        `This result will be sensitive to a few kPa of gauge error. Source: ${NFPA291_DRAWDOWN_URL}`,
+      detail: 'A few kPa of gauge error moves this result. Source: NFPA 291.',
     });
   }
   const extrapolating = targetResidualKpa < residualKpa;
   if (extrapolating) {
     issues.push({
       level: 'info',
-      title: 'This is an extrapolation, not an interpolation',
+      title: 'Extrapolated past the test',
       detail:
-        `The target residual of ${round(targetResidualKpa, 0)} kPa is below the ${round(residualKpa, 0)} kPa actually ` +
-        'measured, so the curve is being extended past the data. It assumes the supply keeps behaving the same way, ' +
-        'which a partly shut valve or a pump cut-in will not.',
+        `Target ${round(targetResidualKpa, 0)} kPa is below the ${round(residualKpa, 0)} kPa measured. ` +
+        'A part-shut valve or pump cut-in will throw it.',
     });
   }
 
@@ -883,7 +851,7 @@ export function projectResidualAtFlow(
   const probe = projectAvailableFlow({ ...input, targetResidualKpa: 0 });
   if (isRefused(probe)) return probe;
   if (!Number.isFinite(input.targetFlowLpm) || input.targetFlowLpm < 0) {
-    return refuse('Enter the flow the residual is wanted at.');
+    return refuse('Enter the flow.');
   }
   const measuredDrawdown = input.staticKpa - input.residualKpa;
   const drawdownAtTarget = measuredDrawdown * Math.pow(input.targetFlowLpm / input.measuredFlowLpm, 1 / DRAWDOWN_EXPONENT);
@@ -893,9 +861,7 @@ export function projectResidualAtFlow(
     issues.push({
       level: 'error',
       title: 'The supply runs out before that flow',
-      detail:
-        `Drawing ${round(input.targetFlowLpm / 60, 1)} L/s would take the residual below zero on this curve — the ` +
-        'supply cannot deliver it at any usable pressure.',
+      detail: `${round(input.targetFlowLpm / 60, 1)} L/s takes the residual below zero on this curve.`,
     });
   }
   return { ok: true, residualKpa: round(residualKpa, 1), issues };
@@ -933,7 +899,7 @@ export interface SupplyChain {
 export function pressureAtHydrant(input: SupplyChainInput): SupplyChain | Refused {
   const { sourceKpa, elevationRiseM } = input;
   if (![sourceKpa, elevationRiseM].every(Number.isFinite)) {
-    return refuse('Enter the source pressure and the height of the hydrant above it.');
+    return refuse('Enter the source pressure and the rise to the hydrant.');
   }
   const friction = input.frictionLossKpa ?? 0;
   if (!Number.isFinite(friction) || friction < 0) return refuse('Friction loss cannot be negative.');
@@ -948,14 +914,14 @@ export function pressureAtHydrant(input: SupplyChainInput): SupplyChain | Refuse
       title: 'Nothing arrives at the hydrant',
       detail:
         `${round(sourceKpa, 0)} kPa will not lift water ${round(elevationRiseM, 1)} m and cover ${round(friction, 0)} kPa ` +
-        'of friction. At this flow the outlet is dry.',
+        'of friction. The outlet is dry at this flow.',
     });
   }
   if (input.frictionLossKpa === undefined) {
     issues.push({
       level: 'info',
       title: 'Friction not included',
-      detail: 'This is the static lift only. Add the friction loss along the run for the flowing case.',
+      detail: 'Static lift only. Add the friction loss for the flowing case.',
     });
   }
 
@@ -1003,7 +969,7 @@ export interface BoostRequirement {
 export function requiredBoostPressure(input: BoostRequirementInput): BoostRequirement | Refused {
   const { requiredResidualKpa, elevationRiseM, frictionLossKpa } = input;
   if (![requiredResidualKpa, elevationRiseM, frictionLossKpa].every(Number.isFinite)) {
-    return refuse('Enter the required residual, the rise to the hydrant and the friction loss along the run.');
+    return refuse('Enter the target residual, the rise and the friction loss.');
   }
   if (requiredResidualKpa < 0) return refuse('Required residual pressure cannot be negative.');
   if (frictionLossKpa < 0) return refuse('Friction loss cannot be negative.');
@@ -1019,9 +985,7 @@ export function requiredBoostPressure(input: BoostRequirementInput): BoostRequir
     {
       level: 'info',
       title: 'Friction is at the design flow',
-      detail:
-        'The friction term has to be the loss at the flow the duty calls for, not at the flow that happened to be ' +
-        'running. Loss rises as roughly the square of flow, so halving the flow quarters it.',
+      detail: 'Use the friction loss at the duty flow. Loss rises with roughly the square of flow.',
     },
   ];
 
@@ -1042,12 +1006,7 @@ export function requiredBoostPressure(input: BoostRequirementInput): BoostRequir
 /**
  * Printed wherever a requirement figure is offered, and worth reading in full.
  */
-export const REQUIREMENT_DISCLAIMER =
-  'These are published figures collected from regulators, each with its jurisdiction and scope. They are not a ' +
-  'design table and they are not a substitute for the standard or for the building’s own approved documents. The ' +
-  'flow and pressure a particular building must achieve depend on its classification, its water supply and its ' +
-  'approval, and only the fire safety documents for that building settle it. This app checks the test against the ' +
-  'duty it was told to check against — it does not certify a design.';
+export const REQUIREMENT_DISCLAIMER = 'Checked against the duty entered';
 
 export interface RequirementRef {
   id: string;
@@ -1101,7 +1060,7 @@ const DFES_ORG5_SOURCE = 'DFES (Western Australia) FES Commissioner’s Operatio
 export const REQUIREMENT_REFS: RequirementRef[] = [
   {
     id: 'qld-construction-feed',
-    label: 'Feed hydrant — 10 L/s at 200 kPa',
+    label: 'Feed hydrant: 10 L/s at 200 kPa',
     flowLps: 10,
     pressureKpa: 200,
     jurisdiction: 'Queensland',
@@ -1113,7 +1072,7 @@ export const REQUIREMENT_REFS: RequirementRef[] = [
   },
   {
     id: 'qld-construction-attack',
-    label: 'Attack hydrant, unassisted — 10 L/s at 350 kPa',
+    label: 'Attack, unassisted: 10 L/s at 350 kPa',
     flowLps: 10,
     pressureKpa: 350,
     jurisdiction: 'Queensland',
@@ -1122,11 +1081,11 @@ export const REQUIREMENT_REFS: RequirementRef[] = [
     url: QFD_E1D16_URL,
     confidence: 'high',
     kind: 'minimum',
-    note: 'The same document treats 10 L/s at 700 kPa boosted, or 5 L/s at 700 kPa with an on-site pump set, as equivalent.',
+    note: 'Same document accepts 10 L/s at 700 kPa boosted, or 5 L/s at 700 kPa with a pump set.',
   },
   {
     id: 'qld-construction-boosted',
-    label: 'Attack hydrant, boosted — 10 L/s at 700 kPa',
+    label: 'Attack, boosted: 10 L/s at 700 kPa',
     flowLps: 10,
     pressureKpa: 700,
     jurisdiction: 'Queensland',
@@ -1138,7 +1097,7 @@ export const REQUIREMENT_REFS: RequirementRef[] = [
   },
   {
     id: 'qld-construction-pumpset',
-    label: 'With on-site pump set — 5 L/s at 700 kPa',
+    label: 'With pump set: 5 L/s at 700 kPa',
     flowLps: 5,
     pressureKpa: 700,
     jurisdiction: 'Queensland',
@@ -1150,7 +1109,7 @@ export const REQUIREMENT_REFS: RequirementRef[] = [
   },
   {
     id: 'qld-construction-max-static',
-    label: 'Maximum static at any outlet, pump running — 1300 kPa',
+    label: 'Max static, pump running: 1300 kPa',
     flowLps: null,
     pressureKpa: 1300,
     jurisdiction: 'Queensland',
@@ -1163,7 +1122,7 @@ export const REQUIREMENT_REFS: RequirementRef[] = [
   },
   {
     id: 'qld-construction-max-discharge',
-    label: 'Maximum discharge at any outlet at design flow — 1200 kPa',
+    label: 'Max at outlet, design flow: 1200 kPa',
     flowLps: null,
     pressureKpa: 1200,
     jurisdiction: 'Queensland',
@@ -1173,11 +1132,11 @@ export const REQUIREMENT_REFS: RequirementRef[] = [
     confidence: 'high',
     kind: 'maximum',
     appliesAt: 'design-flow',
-    note: 'A ceiling on hose handling, not a target. A hydrant that over-pressurises is a defect in the other direction.',
+    note: 'A ceiling for hose handling, not a target.',
   },
   {
     id: 'wa-dfes-attack-min',
-    label: 'Attack hydrant — minimum 700 kPa at the required flow',
+    label: 'Attack hydrant: min 700 kPa',
     flowLps: null,
     pressureKpa: 700,
     jurisdiction: 'Western Australia',
@@ -1189,7 +1148,7 @@ export const REQUIREMENT_REFS: RequirementRef[] = [
   },
   {
     id: 'wa-dfes-attack-max',
-    label: 'Attack hydrant — maximum 1200 kPa',
+    label: 'Attack hydrant: max 1200 kPa',
     flowLps: null,
     pressureKpa: 1200,
     jurisdiction: 'Western Australia',
@@ -1199,9 +1158,7 @@ export const REQUIREMENT_REFS: RequirementRef[] = [
     confidence: 'high',
     kind: 'maximum',
     appliesAt: 'unstated',
-    note:
-      'The guideline states one maximum for attack hydrants and does not say whether it is measured flowing or at ' +
-      'rest, so this app does not decide for it. Read the document before applying it to either reading.',
+    note: 'Does not say flowing or static. Read the guideline before applying it.',
   },
 ];
 
@@ -1224,8 +1181,49 @@ export function refToDuty(ref: RequirementRef): { requiredFlowLpm: number; requi
   return {
     requiredFlowLpm: ref.flowLps * 60,
     requiredResidualKpa: ref.pressureKpa,
-    requirementSource: `${ref.label} — ${ref.source} (${ref.jurisdiction}). ${ref.url}`,
+    requirementSource: `${ref.label}. ${ref.source} (${ref.jurisdiction}). ${ref.url}`,
   };
+}
+
+/**
+ * Where the figures in the duty fields came from, when they were filled for
+ * the technician rather than typed: a published reference, or the Form 72 the
+ * test was loaded from.
+ */
+export interface DutyOrigin {
+  /** Short name shown under the duty fields. */
+  label: string;
+  /** Recorded on the result. */
+  requirementSource: string;
+  flowLps: number;
+  pressureKpa: number;
+}
+
+/** Recorded on the result when the duty was typed rather than filled. */
+export const TYPED_DUTY_SOURCE = 'Entered by the technician';
+
+/** A minimum reference as a duty origin. Null for a ceiling or a pressure-only figure. */
+export function refOrigin(ref: RequirementRef): DutyOrigin | null {
+  const duty = refToDuty(ref);
+  if (!duty || ref.flowLps === null) return null;
+  return { label: ref.label, requirementSource: duty.requirementSource, flowLps: ref.flowLps, pressureKpa: ref.pressureKpa };
+}
+
+/**
+ * The origin the duty fields still match, if any.
+ *
+ * A filled duty is cited only while the fields hold its own figures. Edit
+ * either and the result is recorded as typed, so a result never names a
+ * document it was not checked against.
+ */
+export function dutyOrigin(
+  flowLps: number,
+  pressureKpa: number,
+  candidates: (DutyOrigin | null | undefined)[],
+): DutyOrigin | undefined {
+  return candidates.find(
+    (c): c is DutyOrigin => !!c && c.flowLps === flowLps && c.pressureKpa === pressureKpa,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1315,10 +1313,7 @@ export function assessHydrant(input: AssessmentInput): Assessment | Refused {
   if (requiredResidualKpa < 0) return refuse('The required residual pressure cannot be negative.');
   if (measuredFlowLpm < 0 || measuredResidualKpa < 0) return refuse('Measured flow and residual cannot be negative.');
   if (!input.requirementSource || !input.requirementSource.trim()) {
-    return refuse(
-      'No source recorded for the required duty. The assessment is only meaningful against a stated requirement, ' +
-        'so the figure has to say where it came from.',
-    );
+    return refuse('No source recorded for the duty.');
   }
   // A figure that was typed and cannot be read is not the same as one that was
   // never taken, and the difference is the whole safety of what follows. Every
@@ -1333,16 +1328,13 @@ export function assessHydrant(input: AssessmentInput): Assessment | Refused {
     ] as const
   ).find(([, value]) => value !== undefined && !Number.isFinite(value));
   if (unreadable) {
-    return refuse(
-      `The ${unreadable[0]} entered is not a number, so it has not been checked. Clear the field or correct it — ` +
-        'a reading that is dropped in silence is the one that turns into a pass nobody meant to give.',
-    );
+    return refuse(`The ${unreadable[0]} is not a number. Fix or clear it.`);
   }
   if (input.maxOutletKpa !== undefined && input.maxOutletKpa <= 0) {
-    return refuse('A maximum outlet pressure of zero or less is not a ceiling any hydrant can meet.');
+    return refuse('Maximum flowing pressure must be above zero.');
   }
   if (input.maxStaticKpa !== undefined && input.maxStaticKpa <= 0) {
-    return refuse('A maximum static pressure of zero or less is not a ceiling any hydrant can meet.');
+    return refuse('Maximum static pressure must be above zero.');
   }
 
   const issues: Issue[] = [];
@@ -1358,9 +1350,8 @@ export function assessHydrant(input: AssessmentInput): Assessment | Refused {
       level: 'error',
       title: 'Outlet pressure above the permitted maximum',
       detail:
-        `${round(measuredResidualKpa, 0)} kPa at the outlet while flowing, against a stated maximum of ` +
-        `${round(input.maxOutletKpa, 0)} kPa. An over-pressurised outlet is a hose-handling hazard and a defect in ` +
-        'its own right, whatever the flow did. The ceiling applies at the design flow, so check that this test ran at it.',
+        `${round(measuredResidualKpa, 0)} kPa flowing, over the ${round(input.maxOutletKpa, 0)} kPa maximum. ` +
+        'A defect whatever the flow did. Check the test ran at design flow.',
     });
   }
   if (input.maxStaticKpa !== undefined && input.staticKpa !== undefined && input.staticKpa > input.maxStaticKpa) {
@@ -1368,16 +1359,14 @@ export function assessHydrant(input: AssessmentInput): Assessment | Refused {
     issues.push({
       level: 'error',
       title: 'Static pressure above the permitted maximum',
-      detail:
-        `${round(input.staticKpa, 0)} kPa with nothing flowing, against a stated maximum of ` +
-        `${round(input.maxStaticKpa, 0)} kPa.`,
+      detail: `${round(input.staticKpa, 0)} kPa at no flow, over the ${round(input.maxStaticKpa, 0)} kPa maximum.`,
     });
   }
   if (input.maxStaticKpa !== undefined && input.staticKpa === undefined) {
     issues.push({
       level: 'warning',
-      title: 'No static recorded to check against the static ceiling',
-      detail: 'A maximum static pressure was given but no static reading was, so that limit was not checked.',
+      title: 'Static ceiling not checked',
+      detail: 'Enter the static reading to check it.',
     });
   }
   // A static above the *flowing* ceiling is not by itself a defect: the no-flow
@@ -1393,9 +1382,8 @@ export function assessHydrant(input: AssessmentInput): Assessment | Refused {
       level: 'warning',
       title: 'Static is above the flowing ceiling, which is a different limit',
       detail:
-        `The static of ${round(input.staticKpa, 0)} kPa is above the ${round(input.maxOutletKpa, 0)} kPa maximum that ` +
-        'applies while flowing. That is not a fail on its own — the no-flow limit is usually the higher figure — but ' +
-        'this assessment was not given one, so it has not been checked. Enter the static ceiling as well.',
+        `Static ${round(input.staticKpa, 0)} kPa is over the ${round(input.maxOutletKpa, 0)} kPa flowing ceiling. ` +
+        'Not a fail on its own. Enter the static ceiling to check it.',
     });
   }
 
@@ -1415,8 +1403,8 @@ export function assessHydrant(input: AssessmentInput): Assessment | Refused {
     // strongest number on the record rather than replacing it with a curve.
     availableAtRequiredKpa = round(measuredFlowLpm, 1);
     summary =
-      `${round(measuredFlowLpm / 60, 2)} L/s flowed at ${round(measuredResidualKpa, 0)} kPa residual, against a duty of ` +
-      `${round(requiredFlowLpm / 60, 2)} L/s at ${round(requiredResidualKpa, 0)} kPa. The duty was demonstrated directly.`;
+      `${round(measuredFlowLpm / 60, 2)} L/s at ${round(measuredResidualKpa, 0)} kPa against a duty of ` +
+      `${round(requiredFlowLpm / 60, 2)} L/s at ${round(requiredResidualKpa, 0)} kPa. Duty demonstrated directly.`;
   } else if (input.staticKpa !== undefined) {
     const projection = projectAvailableFlow({
       staticKpa: input.staticKpa,
@@ -1427,8 +1415,8 @@ export function assessHydrant(input: AssessmentInput): Assessment | Refused {
     if (isRefused(projection)) {
       verdict = 'indeterminate';
       summary =
-        `The duty was not demonstrated and could not be projected to: ${projection.reason} ` +
-        'Retest with a larger flow, or record the result as inconclusive.';
+        `Duty not demonstrated and cannot be projected. ${projection.reason} ` +
+        'Retest with more flow, or record as inconclusive.';
       issues.push({
         level: 'warning',
         title: 'Could not project to the required residual',
@@ -1441,29 +1429,26 @@ export function assessHydrant(input: AssessmentInput): Assessment | Refused {
       const meets = projection.projectedFlowLpm >= requiredFlowLpm;
       verdict = meets ? 'pass' : 'fail';
       summary =
-        `Projected ${round(projection.projectedFlowLpm / 60, 2)} L/s available at ${round(requiredResidualKpa, 0)} kPa, ` +
+        `Projected ${round(projection.projectedFlowLpm / 60, 2)} L/s at ${round(requiredResidualKpa, 0)} kPa ` +
         `against a duty of ${round(requiredFlowLpm / 60, 2)} L/s. ` +
-        (meets ? 'The duty is met on projection.' : 'The duty is not met.');
+        (meets ? 'Duty met on projection.' : 'Duty not met.');
       issues.push({
         level: 'info',
         title: 'Result is projected, not demonstrated',
         detail:
-          `The test flowed ${round(measuredFlowLpm / 60, 2)} L/s at ${round(measuredResidualKpa, 0)} kPa; the figure at ` +
-          'the required residual is derived from the supply curve. Flowing the duty outright is the stronger record.',
+          `Test flowed ${round(measuredFlowLpm / 60, 2)} L/s at ${round(measuredResidualKpa, 0)} kPa. ` +
+          'Flowing the duty outright is the stronger record.',
       });
     }
   } else {
     verdict = 'indeterminate';
     summary =
       `${round(measuredFlowLpm / 60, 2)} L/s at ${round(measuredResidualKpa, 0)} kPa does not meet the duty of ` +
-      `${round(requiredFlowLpm / 60, 2)} L/s at ${round(requiredResidualKpa, 0)} kPa, and without a static reading ` +
-      'there is no supply curve to project along. Record the static and retest.';
+      `${round(requiredFlowLpm / 60, 2)} L/s at ${round(requiredResidualKpa, 0)} kPa. Record the static and retest.`;
     issues.push({
       level: 'warning',
       title: 'No static pressure recorded',
-      detail:
-        'Static is the second point the supply curve needs. Without it the only question that can be answered is ' +
-        'whether the duty was flowed outright, and it was not.',
+      detail: 'Static is needed to project the supply curve.',
     });
   }
 
@@ -1473,13 +1458,13 @@ export function assessHydrant(input: AssessmentInput): Assessment | Refused {
   // demonstrated over-pressure any less demonstrated.
   if (overPressure) {
     verdict = 'fail';
-    summary += ' It fails on maximum pressure regardless of the flow result.';
+    summary += ' Fails on maximum pressure regardless of the flow result.';
   }
 
   issues.push({
     level: 'info',
-    title: 'Checked against a supplied requirement',
-    detail: `${input.requirementSource} — ${REQUIREMENT_DISCLAIMER}`,
+    title: REQUIREMENT_DISCLAIMER,
+    detail: input.requirementSource,
   });
 
   return {

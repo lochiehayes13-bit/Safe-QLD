@@ -3,7 +3,7 @@ import { Pressable, ScrollView, View } from 'react-native';
 import { Stack } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import {
-  PROTOCOLS, XPERT_PIPS, addressToRemovedPips, addressToRotary, addressToSwitches,
+  PROTOCOLS, XPERT_PIPS, addressToRemovedPips, addressToRotary, addressToSwitches, checkTarget,
   removedPipsToAddress, rotaryToAddress, switchesToAddress, switchesToPattern,
   validateAddress, type AddressingMethod, type Protocol,
 } from '@/calc/dipswitch';
@@ -20,27 +20,36 @@ export default function DipswitchScreen() {
   const t = useTheme();
   const [protocol, setProtocol] = useState<Protocol>(PROTOCOLS[0]!);
   const [method, setMethod] = useState<AddressingMethod>('dip');
-  const [switches, setSwitches] = useState<boolean[]>(() => addressToSwitches(11, 8));
-  const [removed, setRemoved] = useState<number[]>([1, 2, 8]);
-  const [tens, setTens] = useState(1);
-  const [units, setUnits] = useState(1);
+  const [switches, setSwitches] = useState<boolean[]>(() => addressToSwitches(0, 8));
+  const [removed, setRemoved] = useState<number[]>([]);
+  const [tens, setTens] = useState(0);
+  const [units, setUnits] = useState(0);
   const [target, setTarget] = useState('');
 
   const width = protocol.switchCount ?? 8;
+  const programmer = method === 'programmer';
+  const typed = useMemo(() => checkTarget(target, protocol), [target, protocol]);
 
-  const address = useMemo(() => {
+  // With a service tool there is nothing to read off the device, so the
+  // address is whatever the technician is about to program.
+  const address = useMemo<number | undefined>(() => {
     if (method === 'dip') return switchesToAddress(switches, width);
     if (method === 'xpert7' || method === 'xpert8') return removedPipsToAddress(removed);
     if (method === 'rotary') return rotaryToAddress(tens, units);
-    return 0;
-  }, [method, switches, width, removed, tens, units]);
+    return typed?.ok ? typed.address : undefined;
+  }, [method, switches, width, removed, tens, units, typed]);
 
-  const issues = useMemo(() => validateAddress(address, protocol, method), [address, protocol, method]);
+  const issues = useMemo(
+    () => (address === undefined ? [] : validateAddress(address, protocol, method)),
+    [address, protocol, method],
+  );
   const errors = issues.filter((i) => i.level === 'error');
+  // Shown in the result itself, so it is not repeated as a banner.
+  const unaddressed = address === 0;
 
   const applyTarget = () => {
-    const n = parseInt(target, 10);
-    if (!Number.isFinite(n)) return;
+    if (!typed?.ok) return;
+    const n = typed.address;
     void Haptics.selectionAsync();
     setSwitches(addressToSwitches(n, 8));
     setRemoved(addressToRemovedPips(n, method === 'xpert8'));
@@ -55,6 +64,8 @@ export default function DipswitchScreen() {
     setMethod(p.methods[0] ?? 'dip');
   };
 
+  const punched = [...removed].sort((a, b) => a - b);
+
   return (
     <>
       <Stack.Screen options={{ title: 'Device address' }} />
@@ -67,9 +78,13 @@ export default function DipswitchScreen() {
 
         <ResultBlock
           label="Address"
-          value={String(address)}
-          tone={errors.length ? 'fail' : 'accent'}
-          detail={`${protocol.label} · valid ${protocol.minAddress} to ${protocol.maxAddress} · up to ${protocol.maxDevicesPerLoop} devices per loop`}
+          value={address === undefined ? '—' : String(address)}
+          tone={address === undefined || unaddressed ? 'muted' : errors.length ? 'fail' : 'accent'}
+          detail={
+            unaddressed
+              ? errors[0]?.message
+              : `Valid ${protocol.minAddress} to ${protocol.maxAddress} · ${protocol.maxDevicesPerLoop} devices per loop`
+          }
         />
 
         {protocol.methods.length > 1 ? (
@@ -85,10 +100,17 @@ export default function DipswitchScreen() {
 
         <Rowed gap={2} align="flex-end">
           <View style={{ flex: 1 }}>
-            <Field label="Set to address" value={target} onChangeText={setTarget} keyboardType="numeric" placeholder="e.g. 11" />
+            <Field
+              label={programmer ? 'Address to program' : 'Set to address'}
+              value={target}
+              onChangeText={setTarget}
+              keyboardType="numeric"
+              placeholder={`${protocol.minAddress} to ${protocol.maxAddress}`}
+            />
           </View>
-          <Chip label="Apply" onPress={applyTarget} selected />
+          {programmer ? null : <Chip label="Apply" onPress={applyTarget} selected={typed?.ok === true} />}
         </Rowed>
+        {typed && !typed.ok ? <Banner tone="fail" title={typed.message} /> : null}
 
         {method === 'dip' ? (
           <>
@@ -119,7 +141,7 @@ export default function DipswitchScreen() {
             <H2>XPERT card</H2>
             <Card>
               <Txt size="sm" tone="muted" style={{ marginBottom: t.space(3), lineHeight: 19 }}>
-                Punch out the pips shown filled. The address is the sum of what you remove — the opposite of a DIP switch.
+                Punch out the dashed pips. Address = sum removed.
               </Txt>
               <XpertCard
                 removed={removed}
@@ -129,6 +151,9 @@ export default function DipswitchScreen() {
                   setRemoved((prev) => (prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]));
                 }}
               />
+              <Txt weight="700" style={{ textAlign: 'center', marginTop: t.space(3) }}>
+                {punched.length ? `Punch out: ${punched.join(', ')}` : 'Tap a pip to mark it removed'}
+              </Txt>
             </Card>
           </>
         ) : null}
@@ -137,7 +162,7 @@ export default function DipswitchScreen() {
           <>
             <H2>Rotary dials</H2>
             <Card>
-              <Label>Tens — sixteen positions, not ten</Label>
+              <Label>Tens (0–15)</Label>
               <Rowed gap={1.5} wrap style={{ marginTop: t.space(2) }}>
                 {Array.from({ length: 16 }, (_, i) => (
                   <Chip key={i} label={String(i)} selected={tens === i} onPress={() => setTens(i)} />
@@ -154,22 +179,24 @@ export default function DipswitchScreen() {
           </>
         ) : null}
 
-        {method === 'programmer' ? (
+        {programmer ? (
           <Banner
             tone="info"
-            title="No switches on this protocol"
-            body={protocol.notes}
+            title="Set with the service tool"
+            body={address === undefined ? 'Type the address to program above.' : `Program address ${address}.`}
           />
         ) : null}
 
-        {issues.map((issue, i) => (
-          <Banner
-            key={i}
-            tone={issue.level === 'error' ? 'fail' : issue.level === 'warning' ? 'warn' : 'info'}
-            title={issue.level === 'error' ? 'Not a valid address' : issue.level === 'warning' ? 'Watch for this' : 'Worth knowing'}
-            body={issue.message}
-          />
-        ))}
+        {issues
+          .filter((issue) => !(unaddressed && issue.level === 'error'))
+          .map((issue, i) => (
+            <Banner
+              key={i}
+              tone={issue.level === 'error' ? 'fail' : issue.level === 'warning' ? 'warn' : 'info'}
+              title={issue.level === 'error' ? 'Not a valid address' : issue.level === 'warning' ? 'Warning' : 'Note'}
+              body={issue.message}
+            />
+          ))}
 
         <Card>
           <Label>{protocol.label}</Label>

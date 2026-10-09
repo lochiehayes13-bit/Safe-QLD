@@ -4,6 +4,7 @@ import {
   addressToRemovedPips,
   addressToRotary,
   addressToSwitches,
+  checkTarget,
   patternToSwitches,
   protocolById,
   removedPipsToAddress,
@@ -184,8 +185,17 @@ describe('validation', () => {
       .toBe(true);
   });
 
-  it('warns that Hochiki switch 8 is not an address bit', () => {
-    expect(validateAddress(10, hochiki, 'dip').some((i) => i.message.includes('switch 8') || i.message.includes('1 to 7'))).toBe(true);
+  it('says in the Hochiki notes that switch 8 is not an address bit', () => {
+    expect(hochiki.notes).toContain('1 to 7');
+  });
+
+  it('does not repeat the protocol notes as a banner on every address', () => {
+    // The notes card already carries these. Repeating them under every
+    // address is two copies of one fact on a small screen.
+    for (const id of ['notifier_flashscan', 'tyco_mx', 'brooks_firetracker', 'simplex_idnet']) {
+      const p = protocolById(id)!;
+      expect({ id, issues: validateAddress(12, p, p.methods[0]!) }).toEqual({ id, issues: [] });
+    }
   });
 
   it('tells you the Hochiki base sounder address', () => {
@@ -256,5 +266,41 @@ describe('protocol table integrity', () => {
     expect(hochiki?.switchCount).toBe(7);
     expect(hochiki?.physicalSwitchCount).toBe(8);
     expect(hochiki?.notes).toMatch(/depends on the device|varies by device/i);
+  });
+});
+
+describe('typed target address', () => {
+  const apollo = protocolById('apollo_xp95')!;
+
+  it('is nothing while the box is blank', () => {
+    expect(checkTarget('', apollo)).toBeUndefined();
+    expect(checkTarget('  ', apollo)).toBeUndefined();
+  });
+
+  it('accepts an address inside the range', () => {
+    expect(checkTarget('72', apollo)).toEqual({ ok: true, address: 72 });
+    expect(checkTarget(' 126 ', apollo)).toEqual({ ok: true, address: 126 });
+  });
+
+  it('refuses an address above the maximum instead of wrapping it to the switch width', () => {
+    // 200 on eight bits is 11001000; the seven address switches read that back
+    // as 72, a different valid address.
+    expect(switchesToAddress(addressToSwitches(200, 8), 7)).toBe(72);
+    const r = checkTarget('200', apollo);
+    expect(r).toEqual({ ok: false, message: 'Apollo XP95 takes 1 to 126.' });
+  });
+
+  it('refuses one past every protocol maximum, and zero', () => {
+    for (const p of PROTOCOLS) {
+      expect(checkTarget(String(p.maxAddress + 1), p)?.ok).toBe(false);
+      expect(checkTarget('0', p)?.ok).toBe(false);
+      expect(checkTarget(String(p.maxAddress), p)).toEqual({ ok: true, address: p.maxAddress });
+    }
+  });
+
+  it('refuses anything that is not a whole number', () => {
+    for (const text of ['12.5', '-3', '1e2', 'abc']) {
+      expect(checkTarget(text, apollo)).toEqual({ ok: false, message: 'Whole numbers only.' });
+    }
   });
 });

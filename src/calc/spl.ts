@@ -88,22 +88,12 @@ export interface ClauseRef {
 // ---------------------------------------------------------------------------
 
 export const CALCULATION_BASIS =
-  'Free-field, point-source arithmetic. Level is taken to fall by 6 dB for every doubling of '
-  + 'distance from the device, with no reflections, no absorption, no directivity and no allowance '
-  + 'for the shape of the room. Nothing here is measured.';
+  'Free field: level drops 6 dB per doubling of distance. No reflections or absorption.';
 
 export const REVERBERANT_LIMIT =
-  'A real room is not free field. Past the critical distance — where reflected sound equals direct '
-  + 'sound — level stops falling and flattens out, which in a hard-surfaced corridor or stairwell '
-  + 'happens within a few metres. Beyond that point this estimate reads low, and it says nothing '
-  + 'about intelligibility, which reverberation ruins long before level does. A corridor can be '
-  + 'loud enough and still be a corridor nobody can understand.';
+  'In hard rooms and corridors the level stops falling after a few metres. Reads low there.';
 
-export const NOT_AN_ACOUSTIC_ASSESSMENT =
-  'This is a field sense-check, not an acoustic assessment. It is not a design calculation, not a '
-  + 'verification of compliance with AS 1670.1 or AS 1670.4, and not a substitute for a measurement '
-  + 'taken with a sound level meter at the point that matters. A pass here means the arithmetic does '
-  + 'not rule coverage out; it does not mean the system complies.';
+export const NOT_AN_ACOUSTIC_ASSESSMENT = 'Estimate only. Confirm with a meter.';
 
 /**
  * Distance beyond which the free-field estimate is reported as out of its depth
@@ -224,29 +214,23 @@ export function regimeCautions(space: SpaceKind, distanceM: number, referenceDis
 
   if (distanceM < referenceDistanceM) {
     out.push(
-      `The listening position is closer than the ${referenceDistanceM} m the device is rated at. `
-      + 'Within a device’s own near field the level does not follow the inverse square law at all, '
-      + 'so this figure is an extrapolation the physics does not support.',
+      `Closer than the ${referenceDistanceM} m rating distance, in the near field. The estimate won't hold.`,
     );
   }
 
   if (space === 'corridor') {
     out.push(
-      'A corridor is not free field. Sound is channelled rather than radiated, reflections arrive '
-      + 'from every hard surface, and level falls far more slowly than this calculation says. Expect '
-      + 'the meter to read higher than this and the speech to be worse.',
+      'A corridor is not free field. Expect the meter to read higher and speech to be worse.',
     );
   } else if (space !== 'outdoors' && distanceM > FREE_FIELD_INDOOR_LIMIT_M) {
     out.push(
-      `Past about ${FREE_FIELD_INDOOR_LIMIT_M} m indoors the reverberant field usually dominates and `
-      + 'level stops falling the way this calculation assumes. Treat the result as a floor, not an estimate.',
+      `Past ${FREE_FIELD_INDOOR_LIMIT_M} m indoors the reverberant field takes over. Treat this as a floor.`,
     );
   }
 
   if (space === 'outdoors') {
     out.push(
-      'Outdoors is the one case free field roughly describes, but wind, ground reflection and '
-      + 'distance-dependent air absorption all bite over long runs.',
+      'Wind, ground reflection and air absorption cut the level over long runs.',
     );
   }
 
@@ -348,31 +332,28 @@ export interface AmbientRemoval {
  */
 export function removeAmbient(totalDb: number, ambientDb: number): AmbientRemoval {
   if (![totalDb, ambientDb].every(Number.isFinite)) {
-    return { ok: false, error: 'Both a total reading and an ambient reading are needed.' };
+    return { ok: false, error: 'Enter both readings.' };
   }
   if (totalDb <= ambientDb) {
     return {
       ok: false,
       error:
-        `A total of ${round1(totalDb)} dB with the alarm running cannot be at or below the `
-        + `${round1(ambientDb)} dB ambient. Either the alarm was not sounding, the ambient reading was `
-        + 'taken somewhere else, or the meter moved. Re-take both at the same point.',
+        `${round1(totalDb)} dB with the alarm on cannot be at or below the ${round1(ambientDb)} dB ambient. `
+        + 'Re-take both at the same point.',
     };
   }
   if (totalDb - ambientDb < MIN_SEPARATION_FOR_SUBTRACTION_DB) {
     return {
       ok: false,
       error:
-        `The alarm lifted the reading by only ${round1(totalDb - ambientDb)} dB, which is inside the `
-        + 'tolerance of a field meter. The signal level cannot be worked out from these two readings — '
-        + 'but a difference this small is itself the finding: the alarm is inaudible over the ambient here.',
+        `The alarm only added ${round1(totalDb - ambientDb)} dB, inside the tolerance of a field meter. `
+        + 'It is inaudible over the ambient here.',
     };
   }
 
   const db = round1(10 * Math.log10(10 ** (totalDb / 10) - 10 ** (ambientDb / 10)));
   const caution = totalDb - ambientDb < 3
-    ? 'The signal is close to the ambient, so a tenth of a decibel of meter error moves this answer '
-      + 'by a decibel or more. Treat it as approximate.'
+    ? 'Signal is close to the ambient. Treat this as approximate.'
     : undefined;
   return { ok: true, db, caution };
 }
@@ -475,73 +456,44 @@ export interface SplRequirement {
   clauses: ClauseRef[];
 }
 
+/**
+ * The floor, the margin over ambient and the ceiling, as the office confirmed
+ * them against a licensed copy of AS 1670.1. Clause number and figures only;
+ * the clause text is not reproduced.
+ */
+const AS_1670_1_SOURCE = 'AS 1670.1:2018 clause 3.22.3';
+const AS_1670_1_URL = 'https://store.standards.org.au/product/as-1670-1-2018';
+
+const fromAs16701 = (value: number): SourcedDb => ({
+  value,
+  source: AS_1670_1_SOURCE,
+  url: AS_1670_1_URL,
+  confidence: 'high',
+});
+
 export const SPL_REQUIREMENTS: Record<OccupancyKind, SplRequirement> = {
   'non-sleeping': {
     kind: 'non-sleeping',
     label: 'Normally occupied area',
-    minimumDb: {
-      value: 65,
-      source: TRADE_SOURCE,
-      url: TRADE_SOURCE_URL,
-      confidence: 'low',
-      note: UNVERIFIED_NOTE,
-    },
-    maximumDb: {
-      value: 105,
-      source: TRADE_SOURCE,
-      url: TRADE_SOURCE_URL,
-      confidence: 'low',
-      note:
-        `${UNVERIFIED_NOTE} A ceiling exists because a warning signal loud enough to hurt drives people `
-        + 'away from the signal rather than towards the exit.',
-    },
-    marginAboveAmbientDb: {
-      value: 10,
-      source: TRADE_SOURCE,
-      url: TRADE_SOURCE_URL,
-      confidence: 'low',
-      note: UNVERIFIED_NOTE,
-    },
+    minimumDb: fromAs16701(65),
+    maximumDb: fromAs16701(105),
+    marginAboveAmbientDb: fromAs16701(10),
     ambientAveragingSeconds: {
       value: 60,
       source: TRADE_SOURCE,
       url: TRADE_SOURCE_URL,
       confidence: 'low',
-      note:
-        `${UNVERIFIED_NOTE} It matters on site: the ambient is an average, not the peak the meter `
-        + 'happened to catch when a roller door went up.',
+      note: UNVERIFIED_NOTE,
     },
-    measurementPoint:
-      'Anywhere in the alarm zone a person would normally be, at about head height. Our reading of '
-      + 'the requirement, not the standard’s wording.',
+    measurementPoint: 'Anywhere a person would normally be in the zone, at head height.',
     clauses: [AS_1670_1, AS_1670_4],
   },
   sleeping: {
     kind: 'sleeping',
     label: 'Sleeping area',
-    minimumDb: {
-      value: 75,
-      source: TRADE_SOURCE,
-      url: TRADE_SOURCE_URL,
-      confidence: 'low',
-      note:
-        `${UNVERIFIED_NOTE} The higher floor is there because the signal has to wake someone, not `
-        + 'merely be heard by someone awake.',
-    },
-    maximumDb: {
-      value: 105,
-      source: TRADE_SOURCE,
-      url: TRADE_SOURCE_URL,
-      confidence: 'low',
-      note: UNVERIFIED_NOTE,
-    },
-    marginAboveAmbientDb: {
-      value: 10,
-      source: TRADE_SOURCE,
-      url: TRADE_SOURCE_URL,
-      confidence: 'low',
-      note: UNVERIFIED_NOTE,
-    },
+    minimumDb: fromAs16701(75),
+    maximumDb: fromAs16701(105),
+    marginAboveAmbientDb: fromAs16701(10),
     ambientAveragingSeconds: {
       value: 60,
       source: TRADE_SOURCE,
@@ -549,21 +501,22 @@ export const SPL_REQUIREMENTS: Record<OccupancyKind, SplRequirement> = {
       confidence: 'low',
       note: UNVERIFIED_NOTE,
     },
-    measurementPoint:
-      'At the bedhead, with every door on the path from the device closed. Closing the doors is the '
-      + 'whole point of the check — an open-door reading passes rooms that fail at night.',
+    measurementPoint: 'At the bedhead, with the doors on the path closed.',
     clauses: [AS_1670_1, AS_1670_4],
   },
 };
 
+/** The one-line source shown under the result. */
+export const SPL_SOURCE_NOTE =
+  `${AS_1670_1_SOURCE}: ${SPL_REQUIREMENTS['non-sleeping'].minimumDb.value} dB(A) min, or `
+  + `${SPL_REQUIREMENTS['non-sleeping'].marginAboveAmbientDb!.value} dB over ambient if higher. `
+  + `${SPL_REQUIREMENTS.sleeping.minimumDb.value} dB(A) at the bedhead. `
+  + `${SPL_REQUIREMENTS['non-sleeping'].maximumDb!.value} dB(A) max.`;
+
 /** The intelligibility requirement, which level alone does not answer. */
 export const INTELLIGIBILITY_CLAUSE = AS_1670_4_INTELLIGIBILITY;
 
-export const INTELLIGIBILITY_NOTE =
-  'Level and intelligibility are different requirements measured different ways. A speech system '
-  + 'that is loud enough can still fail intelligibility, and no amount of level fixes it — '
-  + 'reverberation is usually the cause and more output makes it worse. Intelligibility is measured '
-  + 'with an STI meter, which this tool does not replace.';
+export const INTELLIGIBILITY_NOTE = 'Loud enough is not the same as intelligible. Test speech with an STI meter.';
 
 /**
  * The NCC concession that lets a sole-occupancy unit be assessed from outside
@@ -608,15 +561,8 @@ export const SOU_DOOR_CONCESSIONS: SouDoorConcession[] = [
 ];
 
 export const QFES_CONCESSION_POSITION =
-  'Queensland reads this concession narrowly, and the reason is a cross-reference rather than a '
-  + 'judgement call. The concession at NCC Specification E2.2a clause 7(b) is written to apply only '
-  + 'to a system installed under clause 4(b), which puts smoke detectors in each unit. A clause 5 '
-  + 'system is allowed to use smoke alarms in the units instead of detectors, so on QFES’ reading it '
-  + 'never satisfies clause 4(b) and the concession does not reach it — meaning the level has to be '
-  + 'measured inside the unit against AS 1670.1 clause 3.22. QFES states it asked the ABCB to confirm '
-  + 'this in writing and had no reply, so it is an interpretation rather than a settled point. The '
-  + 'statement is version 12/2021 and predates the NCC 2022 renumbering; check it is still current '
-  + 'before relying on it.';
+  'QFES (12/2021): the clause 7(b) door concession only covers clause 4(b) systems, with detectors in '
+  + 'each unit. For a clause 5 system, measure inside the unit to AS 1670.1 clause 3.22.';
 
 // ---------------------------------------------------------------------------
 // Barriers
@@ -761,11 +707,21 @@ export type Coverage = CoverageResult | { ok: false; error: string };
 export function coverageVerdict(input: CoverageInput): Coverage {
   const { ratedDb, referenceDistanceM, distanceM, ambientDb, requiredMarginDb } = input;
 
-  if (![ratedDb, referenceDistanceM, distanceM, ambientDb, requiredMarginDb].every(Number.isFinite)) {
-    return { ok: false, error: 'A rated output, a reference distance, a distance, an ambient level and a required margin are all needed.' };
+  const missing = (
+    [
+      ['rated output', ratedDb],
+      ['rating distance', referenceDistanceM],
+      ['distance', distanceM],
+      ['ambient', ambientDb],
+      ['margin', requiredMarginDb],
+    ] as const
+  ).filter(([, v]) => !Number.isFinite(v)).map(([name]) => name);
+  if (missing.length) {
+    const list = missing.length === 1 ? missing[0] : `${missing.slice(0, -1).join(', ')} and ${missing[missing.length - 1]}`;
+    return { ok: false, error: `Enter ${list}.` };
   }
   if (requiredMarginDb < 0) {
-    return { ok: false, error: 'A required margin below zero would let a signal quieter than the ambient pass.' };
+    return { ok: false, error: 'Margin cannot be below zero.' };
   }
 
   const requirement = SPL_REQUIREMENTS[input.occupancy];
@@ -773,7 +729,7 @@ export function coverageVerdict(input: CoverageInput): Coverage {
 
   const directDb = directLevelDb({ ratedDb, referenceDistanceM, distanceM, space: input.space });
   if (directDb === undefined) {
-    return { ok: false, error: 'Distances must be greater than zero — the inverse square law says nothing at the device itself.' };
+    return { ok: false, error: 'Distances must be above zero. The inverse square law fails at the device.' };
   }
   const directCautions = regimeCautions(input.space ?? 'enclosed-room', distanceM, referenceDistanceM);
 
@@ -788,12 +744,11 @@ export function coverageVerdict(input: CoverageInput): Coverage {
       return {
         ok: false,
         error:
-          `No attenuation figure is held for "${id}". Nothing is assumed for walls, floors, glazing or `
-          + 'shutters, because no source was found for them. Measure through it instead.',
+          `No attenuation figure for "${id}". Measure through it instead.`,
       };
     }
     barrierLossDb += b.lossDb.value;
-    barrierNotes.push(`${b.label}: −${b.lossDb.value} dB, ${b.lossDb.source} (${b.lossDb.confidence} confidence, indicative).`);
+    barrierNotes.push(`${b.label}: −${b.lossDb.value} dB, indicative only. Source: ${b.lossDb.source}.`);
   }
 
   // A source the technician entered that could not be read is not a source of
@@ -805,8 +760,7 @@ export function coverageVerdict(input: CoverageInput): Coverage {
     return {
       ok: false,
       error:
-        'One of the other sources at this position is not a readable level. Give every source a '
-        + 'number or take it off the list — a source that cannot be read is not a source of zero.',
+        'Another source is not a number. Fix it or remove it; it is not a source of zero.',
     };
   }
 
@@ -824,14 +778,11 @@ export function coverageVerdict(input: CoverageInput): Coverage {
   const bindingExact = Math.max(floorDb, ambientThresholdDb);
   const bindingThresholdDb = round1(bindingExact);
   const bindingReason = ambientThresholdDb > floorDb
-    ? `The ambient of ${round1(ambientDb)} dB(A) plus the ${round1(requiredMarginDb)} dB margin sets the pass mark, `
-      + `above the ${floorDb} dB(A) floor for a ${requirement.label.toLowerCase()}. A quieter room would not help; `
-      + 'this one needs either more output or less noise.'
+    ? `Ambient ${round1(ambientDb)} dB(A) + ${round1(requiredMarginDb)} dB sets the pass mark, above the `
+      + `${floorDb} dB(A) floor. Needs more output or less noise.`
     : ambientThresholdDb === floorDb
-      ? `The ${floorDb} dB(A) floor for a ${requirement.label.toLowerCase()} and the ambient plus margin land on the `
-        + 'same number, so either would decide it. Any more noise in this room and the margin takes over.'
-      : `The ${floorDb} dB(A) floor for a ${requirement.label.toLowerCase()} sets the pass mark, above the `
-        + `${round1(ambientThresholdDb)} dB(A) the ambient and margin would ask for.`;
+      ? `The ${floorDb} dB(A) floor and ambient + margin are the same number.`
+      : `The ${floorDb} dB(A) floor sets the pass mark.`;
 
   // The verdict is taken on the exact figures and only then rounded down for
   // display, so a room 0.04 dB short is reported short. Rounding a shortfall to
@@ -848,16 +799,13 @@ export function coverageVerdict(input: CoverageInput): Coverage {
 
   if (requiredMarginDb < (requirement.marginAboveAmbientDb?.value ?? 0)) {
     cautions.push(
-      `The margin used here (${round1(requiredMarginDb)} dB) is below the ${requirement.marginAboveAmbientDb!.value} dB `
-      + 'understood to apply. The verdict is against your figure, not that one.',
+      `Margin of ${round1(requiredMarginDb)} dB is below the ${requirement.marginAboveAmbientDb!.value} dB required. `
+      + 'The verdict is against your figure.',
     );
   }
 
   if (requirement.ambientAveragingSeconds) {
-    cautions.push(
-      `The ambient is meant to be an average over about ${requirement.ambientAveragingSeconds.value} seconds. `
-      + 'A single reading taken while a compressor was running sets a pass mark the room can never meet.',
-    );
+    cautions.push(`Ambient should be a ${requirement.ambientAveragingSeconds.value} s average, not a peak.`);
   }
 
   if (input.occupancy === 'sleeping') {
@@ -865,16 +813,8 @@ export function coverageVerdict(input: CoverageInput): Coverage {
   }
 
   if (tooLoud) {
-    cautions.push(
-      `The estimate is above the ${ceiling} dB(A) ceiling. A signal that loud drives people away from it `
-      + 'and can make speech unintelligible, so it fails for being too loud rather than too quiet.',
-    );
+    cautions.push(`Above the ${ceiling} dB(A) ceiling. Fails for being too loud.`);
   }
-
-  cautions.push(
-    `The pass mark itself is ${requirement.minimumDb.confidence} confidence: ${requirement.minimumDb.source}. `
-    + 'Confirm it against a licensed copy of the standard before it goes in a report.',
-  );
 
   return {
     ok: true,

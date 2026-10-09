@@ -5,6 +5,7 @@ import {
   QFES_CONCESSION_POSITION,
   SOU_DOOR_CONCESSIONS,
   SPL_REQUIREMENTS,
+  SPL_SOURCE_NOTE,
   addLevels,
   barrier,
   coverageVerdict,
@@ -286,15 +287,22 @@ describe('requirement thresholds', () => {
     expect(SPL_REQUIREMENTS.sleeping.measurementPoint).toContain('bedhead');
   });
 
-  it('marks every figure taken from trade commentary as low confidence', () => {
-    // These agree with each other and with every technician who quotes them,
-    // but they are commentary on a standard rather than the standard. Calling
-    // them verified would be a false statement about our own evidence.
+  it('takes the floor, the margin and the ceiling from AS 1670.1 clause 3.22.3', () => {
+    // Confirmed by the office against a licensed copy, so they carry the
+    // standard as their source and no "unverified" marking.
     for (const req of Object.values(SPL_REQUIREMENTS)) {
-      expect(req.minimumDb.confidence).toBe('low');
-      expect(req.minimumDb.note).toContain('Confirm against a licensed copy');
-      expect(req.maximumDb!.confidence).toBe('low');
+      for (const figure of [req.minimumDb, req.maximumDb!, req.marginAboveAmbientDb!]) {
+        expect(figure.source).toBe('AS 1670.1:2018 clause 3.22.3');
+        expect(figure.confidence).toBe('high');
+        expect(figure.note).toBeUndefined();
+      }
     }
+  });
+
+  it('states every figure and the clause in one short source line', () => {
+    expect(SPL_SOURCE_NOTE).toBe(
+      'AS 1670.1:2018 clause 3.22.3: 65 dB(A) min, or 10 dB over ambient if higher. 75 dB(A) at the bedhead. 105 dB(A) max.',
+    );
   });
 
   it('cites clause numbers and the publisher, and carries no clause text', () => {
@@ -570,11 +578,11 @@ describe('coverageVerdict', () => {
   });
 
   it('carries the confidence of its own pass mark into every verdict', () => {
-    // A pass decided against an unverified threshold is not the same thing as
-    // a pass, and the report has to be able to tell the difference.
+    // The pass mark is the standard's own figure now, so no caution asks for
+    // it to be checked against a licensed copy.
     const r = pass({ ...SOUNDER, distanceM: 10, ambientDb: 55, occupancy: 'non-sleeping', requiredMarginDb: 10 });
-    expect(r.thresholdConfidence).toBe('low');
-    expect(r.cautions.join(' ')).toContain('licensed copy');
+    expect(r.thresholdConfidence).toBe('high');
+    expect(r.cautions.join(' ')).not.toContain('licensed copy');
   });
 
   it('states on every result that this is not an acoustic assessment', () => {
@@ -582,7 +590,7 @@ describe('coverageVerdict', () => {
     // arithmetic must never be read as a measurement or a compliance finding.
     const r = pass({ ...SOUNDER, distanceM: 10, ambientDb: 55, occupancy: 'non-sleeping', requiredMarginDb: 10 });
     expect(r.disclaimer).toBe(NOT_AN_ACOUSTIC_ASSESSMENT);
-    expect(r.disclaimer).toContain('not a verification of compliance');
+    expect(r.disclaimer).toBe('Estimate only. Confirm with a meter.');
   });
 
   it('reminds a sleeping-area check that the doors have to be shut', () => {
@@ -620,5 +628,21 @@ describe('sourceList', () => {
     expect(trade.length).toBeGreaterThan(0);
     expect(qfes.every((r) => r.confidence === 'high')).toBe(true);
     expect(trade.every((r) => r.confidence === 'low')).toBe(true);
+  });
+});
+
+describe('a coverage check before the figures are in', () => {
+  it('gives no verdict until the technician has entered their own figures, and names what is missing', () => {
+    const blank = coverageVerdict({
+      ratedDb: Number.NaN, referenceDistanceM: 1, distanceM: Number.NaN, ambientDb: Number.NaN,
+      occupancy: 'non-sleeping', requiredMarginDb: 10,
+    });
+    expect(blank).toEqual({ ok: false, error: 'Enter rated output, distance and ambient.' });
+
+    const noAmbient = coverageVerdict({
+      ratedDb: 100, referenceDistanceM: 1, distanceM: 8, ambientDb: Number.NaN,
+      occupancy: 'non-sleeping', requiredMarginDb: 10,
+    });
+    expect(noAmbient).toEqual({ ok: false, error: 'Enter ambient.' });
   });
 });

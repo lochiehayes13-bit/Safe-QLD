@@ -241,6 +241,13 @@ describe('serviceLife', () => {
     expect(verdict.label).toContain('Age alone is not a defect');
   });
 
+  it('says the age and the years left in one short line', () => {
+    const inside = serviceLife(reading, new Date('2020-01-29T00:00:00Z'));
+    expect(inside.label).toBe(`${inside.ageYears} years old. ${inside.yearsLeft} years left of a 10-year recommended life.`);
+    const past = serviceLife(reading, new Date('2026-07-03T00:00:00Z'));
+    expect(past.label).toBe('10.4 years old. Past the 10-year recommended age. Age alone is not a defect.');
+  });
+
   it('counts the years remaining while a head is still inside it', () => {
     const verdict = serviceLife(reading, new Date('2020-01-01T00:00:00Z'));
     expect(verdict.past).toBe(false);

@@ -290,7 +290,7 @@ describe('maintenance intervals', () => {
     // A vague interval is not turned into a checklist. The purchased copy of
     // Section 10 governs the method; this app carries the frequency.
     const yearly = intervalsFor('dry-chemical-abe').find((i) => i.activity === 'yearly')!;
-    expect(yearly.what.join(' ')).toContain('not established in this app');
+    expect(yearly.what.join(' ')).toContain('office copy of Section 10');
     expect(yearly.confidence).toBe('medium');
   });
 
@@ -421,8 +421,8 @@ describe('nextDue — the anchor rule', () => {
     if (isRefused(r)) throw new Error(r.reason);
     expect(r.anchoredTo).toBe('last-service');
     expect(r.due.earliest).toBe('2026-02-01');
-    expect(r.anchorNote).toContain('because no date of manufacture was readable');
-    expect(r.notes.join(' ')).toContain('drift the anchor rule exists to prevent');
+    expect(r.anchorNote).toContain('Counted from the last service');
+    expect(r.notes.join(' ')).toContain('lateness carries forward');
   });
 
   it('states that no tolerance window has been applied, on every answer it gives', () => {
@@ -431,7 +431,7 @@ describe('nextDue — the anchor rule', () => {
     // assumed and the reader is not left to discover that.
     const r = nextDue({ activity: 'six-monthly', type: 'water', lastDone: '1/6/2026', today: TODAY });
     if (isRefused(r)) throw new Error(r.reason);
-    expect(r.notes.join(' ')).toContain('No tolerance window has been applied');
+    expect(r.notes.join(' ')).toContain('No tolerance window applied');
     expect(r.state).toBe('upcoming');
     expect(r.due.earliest).toBe('2026-12-01');
   });
@@ -465,7 +465,7 @@ describe('nextDue — dates recorded to a month, and no further', () => {
     expect(r.due.earliest).toBe('2030-06-01');
     expect(r.due.latest).toBe('2030-06-30');
     expect(r.due.label).toBe('June 2030');
-    expect(r.notes.join(' ')).toContain('No day has been invented');
+    expect(r.notes.join(' ')).toContain('not on a set day');
   });
 
   it('decides overdue against the end of the window, so a month-precision record is never called late early', () => {
@@ -628,7 +628,7 @@ describe('assessCondition', () => {
   it('passes an inspected asset with nothing found, and fences what that covers', () => {
     const a = assessCondition({ type: 'dry-chemical-abe', findings: [], inspected: true });
     expect(a.verdict).toBe('serviceable');
-    expect(a.statement).toContain('not a statement about the inside of the body');
+    expect(a.statement).toContain('only seen at the five-yearly');
   });
 
   it('separates a consumable defect from a condemnation', () => {
@@ -646,7 +646,7 @@ describe('assessCondition', () => {
     const a = assessCondition({ type: 'water', findings: ['sat-in-a-flood'], inspected: true });
     expect(a.verdict).toBe('undetermined');
     expect(a.unrecognised).toEqual(['sat-in-a-flood']);
-    expect(a.statement).toContain('no rule for');
+    expect(a.statement).toContain('No rule for');
   });
 
   it('lets a condemnation outrank an outstanding judgement rather than deferring', () => {
@@ -685,6 +685,7 @@ describe('checkCharge', () => {
       tareGrams: 8200,
       grossGrams: 11600,
       nominalChargeGrams: 3500,
+      manufacturerTolerancePercent: 10,
     });
     if (isRefused(r)) throw new Error(r.reason);
     expect(r.actualChargeGrams).toBe(3400);
@@ -692,36 +693,37 @@ describe('checkCharge', () => {
     expect(r.differencePercent).toBe(-2.9);
   });
 
-  it('fails a CO2 extinguisher that has leaked past the tolerance, and names where the tolerance came from', () => {
-    // The figure is North American, from a manual written to NFPA 10. It is
-    // used because a CO2 unit has no gauge and nothing Australian this app can
-    // reach states one — and the reader is told exactly that.
+  it('fails a CO2 extinguisher that has leaked past the tolerance on its plate', () => {
     const r = checkCharge({
       type: 'carbon-dioxide',
       tareGrams: 8200,
       grossGrams: 11100,
       nominalChargeGrams: 3500,
+      manufacturerTolerancePercent: 10,
     });
     if (isRefused(r)) throw new Error(r.reason);
     expect(r.state).toBe('undercharged');
-    expect(r.confidence).toBe('low');
-    expect(r.toleranceCaveat).toContain('Not an Australian figure');
-    expect(r.sourceIds).toContain('nfpa10-co2-charge');
+    expect(r.toleranceOrigin).toBe('manufacturer-plate');
+    expect(r.statement).toContain('Recharge it');
   });
 
-  it('refuses to judge a powder extinguisher against a tolerance it does not have', () => {
-    // The refusal the task turns on. Borrowing the CO2 figure would be a made
-    // up pass or fail on 43% of the book.
-    const r = checkCharge({
-      type: 'dry-chemical-abe',
-      tareGrams: 3200,
-      grossGrams: 7600,
-      nominalChargeGrams: 4500,
-    });
-    expect(isRefused(r)).toBe(true);
-    if (!isRefused(r)) return;
-    expect(r.reason).toContain('will not borrow one from another type');
-    expect(r.whatToDo).toContain('label or plate');
+  it('gives no verdict on any type, CO2 included, until the plate tolerance is entered', () => {
+    // The Weight tab asks for the plate tolerance first. No figure is held for
+    // any type, so nothing is borrowed or assumed: blank is a refusal, and the
+    // same weights with the plate figure entered get a verdict on every type.
+    for (const type of ALL_TYPES) {
+      const blank = checkCharge({ type, tareGrams: 3200, grossGrams: 7600, nominalChargeGrams: 4500 });
+      expect(isRefused(blank)).toBe(true);
+      if (!isRefused(blank)) return;
+      expect(blank.code).toBe('no-charge-tolerance');
+      expect(blank.whatToDo).toBe('Enter the tolerance from the plate.');
+      expect(blank.sourceIds).toEqual([]);
+
+      const withPlate = checkCharge({
+        type, tareGrams: 3200, grossGrams: 7600, nominalChargeGrams: 4500, manufacturerTolerancePercent: 5,
+      });
+      expect(isRefused(withPlate)).toBe(false);
+    }
   });
 
   it("uses the manufacturer's own tolerance where the plate states one, and treats it as the figure that governs", () => {
@@ -753,14 +755,7 @@ describe('checkCharge', () => {
     if (isRefused(r)) throw new Error(r.reason);
     expect(r.toleranceOrigin).toBe('manufacturer-plate');
     expect(r.sourceIds).toEqual([]);
-    expect(r.toleranceCaveat).toContain('no document is cited');
-
-    // The app's own held figure keeps its citation, and it is the North
-    // American one.
-    const held = checkCharge({ type: 'carbon-dioxide', tareGrams: 8200, grossGrams: 11600, nominalChargeGrams: 3500 });
-    if (isRefused(held)) throw new Error(held.reason);
-    expect(held.toleranceOrigin).toBe('app-held');
-    expect(held.sourceIds).toEqual(['nfpa10-co2-charge']);
+    expect(r.toleranceCaveat).toContain('From the plate');
   });
 
   it('refuses a mass that is not a whole number of grams instead of doing float arithmetic on it', () => {
@@ -796,6 +791,7 @@ describe('checkCharge', () => {
       tareGrams: 8200,
       grossGrams: 11600,
       labelledFullGrossGrams: 11700,
+      manufacturerTolerancePercent: 10,
     });
     if (isRefused(r)) throw new Error(r.reason);
     expect(r.expectedChargeGrams).toBe(3500);
@@ -838,6 +834,7 @@ describe('checkCharge', () => {
       tareGrams: 8200,
       grossGrams: 11700,
       nominalChargeGrams: 3500,
+      manufacturerTolerancePercent: 10,
     });
     if (isRefused(r)) throw new Error(r.reason);
     expect(Number.isInteger(r.actualChargeGrams)).toBe(true);
@@ -1004,9 +1001,10 @@ describe('sources', () => {
     expect(SOURCES['co2-ten-year-claim'].confidence).toBe('low');
   });
 
-  it('says out loud that the charge tolerance it holds is not Australian', () => {
-    expect(SOURCES['nfpa10-co2-charge'].confidence).toBe('low');
-    expect(SOURCES['nfpa10-co2-charge'].basis).toContain('Not Australian');
+  it('holds no charge tolerance of its own, so cites nothing for one', () => {
+    // The North American CO2 figure is gone: the plate on the extinguisher is
+    // the only tolerance a verdict is given against.
+    expect(Object.keys(SOURCES)).not.toContain('nfpa10-co2-charge');
   });
 
   it('resolves the ids every result carries, without repeating one', () => {

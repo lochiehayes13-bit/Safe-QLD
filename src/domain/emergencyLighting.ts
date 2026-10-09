@@ -76,7 +76,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'ncc-e4': {
     id: 'ncc-e4',
     what: 'Which buildings must have emergency lighting and exit signs, and that AS/NZS 2293.1 governs them',
-    ref: 'NCC 2022 Volume One, Part E4 (E4D2 emergency lighting, E4D5 exit signs, E4D8 design and operation)',
+    ref: 'NCC 2022 Volume One, Part E4 (E4D2, E4D5, E4D8)',
     url: 'https://ncc.abcb.gov.au/editions/ncc-2022/adopted/volume-one/8-south-australia/e4-visibility-emergency-exit-signs-and-warning-systems',
     confidence: 'high',
     basis: "The regulator's own published code text.",
@@ -84,7 +84,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'ncc-spec-e48': {
     id: 'ncc-spec-e48',
     what: 'Photoluminescent exit signs: the 24 m viewing distance cap, the 1.3× pictorial element rule, and the 90-minute luminance requirement',
-    ref: 'NCC Specification E4.8 (NCC 2022 Specification 25), Clauses 3(a), 3(b), 4(b), 4(c), 5',
+    ref: 'NCC Specification E4.8 (NCC 2022 Specification 25)',
     url: 'https://ncc.abcb.gov.au/editions/2019/ncc-2019-volume-one/section-e-services-and-equipment/specification-e48',
     confidence: 'high',
     basis: "The regulator's own published specification, with clause numbers.",
@@ -92,7 +92,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'as2293-1': {
     id: 'as2293-1',
     what: 'System design: exit sign requirements sit in Section 5, with pictorial element dimensions in Table 5.1; spacing tables are keyed to luminaire classification and mounting height',
-    ref: 'AS/NZS 2293.1:2018 (and :2005), Section 5, Table 5.1; spacing tables Section 5 / Appendices E and F',
+    ref: 'AS/NZS 2293.1, Section 5, Table 5.1',
     url: 'https://www.standards.org.au/standards-catalogue/standard-details?designation=as-nzs-2293-1-2018',
     confidence: 'high',
     basis:
@@ -102,7 +102,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'as2293-2': {
     id: 'as2293-2',
     what: 'Routine service and maintenance: the six-monthly discharge test for the full rated duration, and the annual inspection',
-    ref: 'AS/NZS 2293.2 (routine service and maintenance)',
+    ref: 'AS/NZS 2293.2 Routine service',
     url: 'https://www.standards.org.au/standards-catalogue/standard-details?designation=as-nzs-2293-2-2019',
     confidence: 'high',
     basis: 'The existence and interval of the activity, not its wording. Transcribe the method from the purchased copy.',
@@ -120,7 +120,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'abb-stanilite-class': {
     id: 'abb-stanilite-class',
     what: 'How luminaire classifications (Class A to E, per axis C0/C90) are assigned and used, and that replacing a fitting with a lesser class can make a building non-compliant',
-    ref: 'ABB / Stanilite, "Emergency lighting classification and spacing tables", 9AKK106930A3720, September 2018',
+    ref: 'ABB Stanilite, classification and spacing tables, 2018',
     url: 'https://library.e.abb.com/public/236d816924fb4b838757d6792fd8c639/Information_Emergency-lighting-classification-and-spacing-tables_B.pdf',
     confidence: 'medium',
     basis:
@@ -130,7 +130,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'iec-60598-2-22': {
     id: 'iec-60598-2-22',
     what: 'The four-year operational design life of the battery in a self-contained emergency luminaire',
-    ref: 'IEC 60598-2-22 / AS 60598.2.22, adopted in the UK as BS EN 60598-2-22:2014+A1:2020',
+    ref: 'IEC 60598-2-22 / AS 60598.2.22',
     url: 'https://store.accuristech.com/products/preview/2076925',
     confidence: 'medium',
     basis:
@@ -140,7 +140,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'atts-intervals': {
     id: 'atts-intervals',
     what: 'The 90-minute discharge test and the six-monthly / twelve-monthly service intervals as the trade applies them',
-    ref: 'ATTS Facilities Maintenance, testing intervals, citing AS/NZS 2293.2 clauses 3.2.2 and 3.2.3',
+    ref: 'ATTS, testing intervals (AS/NZS 2293.2 Cl 3.2.2, 3.2.3)',
     url: 'https://www.atts.com.au/help/what-are-the-testing-intervals',
     confidence: 'low',
     basis: 'Second-hand trade guidance. Corroborates the interval; confirm the method against the purchased standard.',
@@ -148,7 +148,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'legrand-exit-viewing': {
     id: 'legrand-exit-viewing',
     what: 'Maximum exit sign viewing distance for a 100 mm, 150 mm and 200 mm pictorial element',
-    ref: 'Legrand Australia, Emergency Lighting Catalogue, "Exit sign viewing distances"',
+    ref: 'Legrand, Emergency Lighting Catalogue',
     url: 'https://assets.legrand.com/webf/au/au_en_%20Emergency%20Lighting%20Catalogue.pdf',
     confidence: 'medium',
     basis:
@@ -159,7 +159,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'hochiki-as2293': {
     id: 'hochiki-as2293',
     what: 'The same viewing distance bands, and the band above them, from a second manufacturer',
-    ref: 'Hochiki Australia, A General Guide to AS 2293, "Maximum Exit Sign Viewing Distance Categories"',
+    ref: 'Hochiki, A General Guide to AS 2293',
     url: 'http://www.hochikiaustralia.com/media/uploads/documentdownloads/Hochiki_AS_Firescape_Guide_to_AS2293.pdf',
     confidence: 'medium',
     basis:
@@ -170,7 +170,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'elecas-design': {
     id: 'elecas-design',
     what: 'Design conventions: the 0.2 lux general and 1 lux stairway bases, and that one luminaire may not serve more than 500 m²',
-    ref: 'Elecas emergency lighting design guide, referencing AS/NZS 2293.1',
+    ref: 'Elecas, emergency lighting design guide',
     url: 'https://elecas.com.au/design-guide/emergency-lighting',
     confidence: 'low',
     basis: 'Second-hand trade guidance. Used only for a sense-check, never for a design.',
@@ -245,7 +245,7 @@ const ROLE_LABEL: Record<FittingRole, string> = {
 };
 
 const SUPPLY_LABEL: Record<SupplyType, string> = {
-  'single-point': 'single-point (self-contained)',
+  'single-point': 'single point',
   'centrally-supplied': 'centrally supplied',
 };
 
@@ -263,73 +263,42 @@ export function classify(c: Classification): ClassificationProfile {
   const isSign = c.role === 'exit-sign' || c.role === 'combined';
 
   const whatIsTested: string[] = [
-    'Remove normal supply and time how long the fitting stays illuminated, to the full duration required of it.',
+    'Isolate normal supply and time how long it stays lit, to the full duration.',
   ];
   const rectify: string[] = [];
   const cautions: string[] = [];
 
   if (central) {
-    whatIsTested.push(
-      'Confirm the luminaire itself illuminates on the emergency supply — it holds no battery, so what is being '
-      + 'proved here is the sub-circuit and the lamp, not a battery.',
-    );
-    whatIsTested.push(
-      'Test the central unit separately: its battery, charger and changeover are one asset serving many luminaires.',
-    );
-    rectify.push(
-      'A luminaire that stays dark while others on the same central system light is a fault at that luminaire — lamp, '
-      + 'driver, or its sub-circuit.',
-    );
-    rectify.push(
-      'A whole group going dark together is the central unit, not the fittings. Raise the defect against the central '
-      + 'system and record how many luminaires it serves.',
-    );
-    cautions.push(
-      'Do not raise a battery defect against a centrally-supplied luminaire. It has no battery, and the quote will be '
-      + 'for a part that is not there.',
-    );
+    whatIsTested.push('Confirm it lights on the emergency supply. No battery here: this proves the sub-circuit and lamp.');
+    whatIsTested.push('Test the central unit separately: battery, charger and changeover.');
+    rectify.push('One luminaire dark while others light: its lamp, driver or sub-circuit.');
+    rectify.push('A whole group dark together: the central unit. Raise it there, with the number of luminaires on it.');
+    cautions.push('No battery defect on a centrally supplied luminaire. It has no battery.');
   } else {
-    whatIsTested.push(
-      "Check the fitting's own charge indicator is lit once normal supply is restored, and again at the end of the "
-      + 'recharge period.',
-    );
-    rectify.push('Replace the battery, or the whole fitting where the battery is not a serviceable part.');
-    rectify.push(
-      'A battery that fails well inside its design life points at the charger or at a fitting left sitting on test, '
-      + 'not at the battery. Replacing the battery alone will put the same fitting back on the defect list.',
-    );
+    whatIsTested.push('Check the charge indicator is lit once supply is restored, and again after the recharge period.');
+    rectify.push('Replace the battery, or the fitting if the battery is not serviceable.');
+    rectify.push('A battery failing well inside its design life: check the charger, or a fitting left on test.');
   }
 
   if (sustained) {
-    whatIsTested.push('Confirm the fitting is illuminated on normal supply before the test begins.');
-    rectify.push(
-      'A sustained fitting has a lamp that runs on normal supply as well as on emergency. One of the two can fail on '
-      + 'its own, so confirm both states after any repair.',
-    );
+    whatIsTested.push('Confirm it is lit on normal supply before the test.');
+    rectify.push('The lamp runs on normal and emergency supply. Check both after any repair.');
   } else {
-    cautions.push(
-      'Non-sustained: this fitting is dark by design until the supply fails. It cannot be checked by looking at it, '
-      + 'and a register entry of "condition OK" against one of these means nothing without a discharge test.',
-    );
+    cautions.push('Non-sustained: dark until the supply fails. It cannot be checked by looking at it.');
   }
 
   if (isSign) {
-    whatIsTested.push(
-      'Confirm the legend is legible and unobscured, and that the direction shown matches the actual path of travel.',
-    );
-    rectify.push(
-      'A sign pointing the wrong way is a defect of the sign, not of the lighting, and is rectified by changing the '
-      + 'legend or the sign — no amount of battery work fixes it.',
-    );
+    whatIsTested.push('Legend legible and unobscured, and the arrow matching the path of travel.');
+    rectify.push('A sign pointing the wrong way needs a new legend or sign; no amount of battery work fixes it.');
   }
 
   return {
     ...c,
-    label: `${ROLE_LABEL[c.role]} — ${SUPPLY_LABEL[c.supply]}, ${c.mode}`,
+    label: `${ROLE_LABEL[c.role]}, ${SUPPLY_LABEL[c.supply]}, ${c.mode}`,
     visibleFailureOnNormalSupply: sustained,
     commonModeFailureRisk: central,
     isolationPoint: central
-      ? 'At the central emergency lighting unit, or the sub-circuit it feeds. Not at the fitting.'
+      ? 'At the central emergency lighting unit or its sub-circuit. Not at the fitting.'
       : "At the fitting's own test facility or its local sub-circuit.",
     whatIsTested,
     howAFailureIsRectified: rectify,
@@ -381,10 +350,8 @@ export function requiredDuration(ratedMinutes?: number): RequiredDuration {
         minutes: MINIMUM_DURATION_MINUTES,
         fromRating: false,
         note:
-          `A rated duration of ${ratedMinutes} minutes was entered, which is below the `
-          + `${MINIMUM_DURATION_MINUTES}-minute code minimum, so the minimum has been used instead. A rating cannot `
-          + 'lower what a fitting has to achieve. Check the figure came off the fitting, and if it really is rated '
-          + 'below the minimum that is a finding about the fitting rather than about this test.',
+          `Rated ${ratedMinutes} min is below the ${MINIMUM_DURATION_MINUTES}-minute code minimum, so `
+          + `${MINIMUM_DURATION_MINUTES} applies. Check the label; a fitting rated that low is a finding.`,
         sourceIds: ['ncc-e4', 'atts-intervals'],
       };
     }
@@ -399,9 +366,8 @@ export function requiredDuration(ratedMinutes?: number): RequiredDuration {
     minutes: MINIMUM_DURATION_MINUTES,
     fromRating: false,
     note:
-      `Rated duration not recorded, so the ${MINIMUM_DURATION_MINUTES}-minute code minimum has been used. A fail `
-      + 'against this is a fail on any rating; a pass only shows the fitting met the floor. Record the rating off the '
-      + 'fitting and re-assess.',
+      `Rated duration not recorded: held to the ${MINIMUM_DURATION_MINUTES}-minute code minimum. Record the rating `
+      + 'and re-assess.',
     sourceIds: ['ncc-e4', 'atts-intervals'],
   };
 }
@@ -500,8 +466,8 @@ export function assessDischarge(input: DischargeInput): DischargeVerdict {
     return {
       ...base,
       outcome: 'unreadable',
-      statement: 'Discharge test not assessed — the duration recorded is not a number of minutes.',
-      reason: `"${String(achieved)}" is not a duration. Re-enter the minutes the fitting stayed illuminated.`,
+      statement: 'Not assessed: the duration is not a number.',
+      reason: `"${String(achieved)}" is not a duration. Enter the minutes it stayed lit.`,
     };
   }
   // A day of run time is a transcription error — seconds typed into a minutes
@@ -512,8 +478,8 @@ export function assessDischarge(input: DischargeInput): DischargeVerdict {
       ...base,
       outcome: 'unreadable',
       achievedMinutes: achieved,
-      statement: 'Discharge test not assessed — the duration recorded is longer than a day.',
-      reason: `${achieved} minutes is over 24 hours. Check whether seconds or a clock time was entered instead of a duration.`,
+      statement: 'Not assessed: longer than a day.',
+      reason: `${achieved} minutes is over 24 hours. Check for seconds or a clock time.`,
     };
   }
 
@@ -527,11 +493,10 @@ export function assessDischarge(input: DischargeInput): DischargeVerdict {
       ...base,
       outcome: 'unreadable',
       achievedMinutes: 0,
-      statement: 'Discharge test not assessed — the record contradicts itself.',
+      statement: 'Not assessed: the record contradicts itself.',
       reason:
-        `A fitting recorded as "${input.ending === 'still-lit' ? 'still illuminated' : 'extinguished'}" cannot also `
-        + 'have run for zero minutes. If it never came on when the supply was removed, record it as never illuminated '
-        + '— that is a different defect with a different fix.',
+        `"${input.ending === 'still-lit' ? 'Still lit' : 'Went out'}" with zero minutes. If it never came on, record it `
+        + 'as never lit.',
     };
   }
 
@@ -541,10 +506,8 @@ export function assessDischarge(input: DischargeInput): DischargeVerdict {
         ...base,
         outcome: 'unreadable',
         achievedMinutes: achieved,
-        statement: 'Discharge test not assessed — the record contradicts itself.',
-        reason:
-          `The fitting is recorded as never illuminating, but with ${achieved} minutes of run time against it. `
-          + 'One of the two is wrong.',
+        statement: 'Not assessed: the record contradicts itself.',
+        reason: `Recorded as never lit, but with ${achieved} minutes of run time. One of the two is wrong.`,
       };
     }
     return {
@@ -554,16 +517,12 @@ export function assessDischarge(input: DischargeInput): DischargeVerdict {
       achievedMinutes: 0,
       marginMinutes: -required.minutes,
       percentOfRequired: 0,
-      statement: 'Fitting did not illuminate on loss of normal supply.',
+      statement: 'Did not light on loss of normal supply.',
       defectCode: 'EEL-FIT-002',
       rectification:
-        'Not a battery at end of life. Check the lamp or LED module, the driver, the battery connection, and that '
-        + 'normal supply was actually removed from this fitting before the test was called. Replace the fitting where '
-        + 'the cause is internal to it.',
-      notes: [
-        ...base.notes,
-        'This is a different defect from a fitting that lit and went out early, and it is quoted differently.',
-      ],
+        'Not a battery at end of life. Check the lamp, driver and battery connection, and that normal supply was '
+        + 'actually removed.',
+      notes: [...base.notes, 'A different defect from a fitting that went out early, and quoted differently.'],
     };
   }
 
@@ -579,10 +538,8 @@ export function assessDischarge(input: DischargeInput): DischargeVerdict {
         achievedMinutes: achieved,
         marginMinutes,
         percentOfRequired,
-        statement:
-          `Illuminated for ${achieved} minutes against ${required.minutes} required, and still illuminated when the `
-          + 'test was ended.',
-        notes: [...base.notes, 'The fitting was still lit at the end, so the reserve beyond this point is unknown but positive.'],
+        statement: `Lit for ${achieved} min against ${required.minutes} required, and still lit when stopped.`,
+        notes: [...base.notes, 'Still lit at the end, so the reserve beyond this point is unknown.'],
       };
     }
     return {
@@ -591,17 +548,9 @@ export function assessDischarge(input: DischargeInput): DischargeVerdict {
       achievedMinutes: achieved,
       marginMinutes,
       percentOfRequired,
-      statement:
-        `Discharge test stopped at ${achieved} minutes of the ${required.minutes} required, with the fitting still `
-        + 'illuminated. No verdict.',
-      reason:
-        `Stopping at ${achieved} minutes proves the fitting lasts at least that long and nothing more. It has not `
-        + `passed and it has not failed. Re-run the test for the full ${required.minutes} minutes.`,
-      notes: [
-        ...base.notes,
-        'Recording this as a pass would be a false statement about a life safety system on the strength of a test that '
-        + 'was never finished.',
-      ],
+      statement: `Stopped at ${achieved} of ${required.minutes} min, still lit. No verdict.`,
+      reason: `Not passed and not failed. Re-run for the full ${required.minutes} minutes.`,
+      notes: base.notes,
     };
   }
 
@@ -615,12 +564,11 @@ export function assessDischarge(input: DischargeInput): DischargeVerdict {
       marginMinutes,
       percentOfRequired,
       statement:
-        `Illuminated for ${achieved} minutes and extinguished, ${round1(required.minutes - achieved)} minutes short of `
-        + `the ${required.minutes} required (${percentOfRequired}% of the required duration).`,
+        `Lit for ${achieved} min, then went out: ${round1(required.minutes - achieved)} minutes short of `
+        + `${required.minutes} (${percentOfRequired}%).`,
       defectCode: 'EEL-FIT-001',
       rectification:
-        'The fitting works but will not hold up. Replace the battery, or the fitting where the battery is not a '
-        + 'serviceable part, then re-test for the full duration.',
+        'Replace the battery, or the fitting if the battery is not serviceable. Re-test for the full duration.',
       notes: base.notes,
     };
   }
@@ -633,16 +581,9 @@ export function assessDischarge(input: DischargeInput): DischargeVerdict {
       achievedMinutes: achieved,
       marginMinutes,
       percentOfRequired,
-      statement:
-        `Illuminated for ${achieved} minutes against ${required.minutes} required, then extinguished — a pass with `
-        + `${marginMinutes} minutes in hand.`,
-      rectification:
-        'No defect today. Flag the fitting for battery replacement at or before the next service: a battery with this '
-        + 'little reserve will be short of the duration in six months.',
-      notes: [
-        ...base.notes,
-        `Counted as marginal because the reserve is under the ${margin}-minute margin used here.`,
-      ],
+      statement: `Lit for ${achieved} min against ${required.minutes} required: ${marginMinutes} minutes in hand.`,
+      rectification: 'No defect today. Plan the battery replacement before the next service.',
+      notes: [...base.notes, `Marginal: under ${margin} minutes in hand.`],
     };
   }
 
@@ -653,9 +594,7 @@ export function assessDischarge(input: DischargeInput): DischargeVerdict {
     achievedMinutes: achieved,
     marginMinutes,
     percentOfRequired,
-    statement:
-      `Illuminated for ${achieved} minutes against ${required.minutes} required, then extinguished — a pass with `
-      + `${marginMinutes} minutes in hand.`,
+    statement: `Lit for ${achieved} min against ${required.minutes} required: ${marginMinutes} minutes in hand.`,
     notes: base.notes,
   };
 }
@@ -663,10 +602,10 @@ export function assessDischarge(input: DischargeInput): DischargeVerdict {
 export const OUTCOME_LABEL: Record<DischargeOutcome, string> = {
   pass: 'Pass',
   'marginal-pass': 'Marginal pass',
-  'failed-early': 'Failed — extinguished early',
-  'no-illumination': 'Failed — did not illuminate',
-  inconclusive: 'No verdict — test not completed',
-  unreadable: 'No verdict — record cannot be read',
+  'failed-early': 'Fail: went out early',
+  'no-illumination': 'Fail: did not light',
+  inconclusive: 'No verdict: not finished',
+  unreadable: 'No verdict: check the entry',
 };
 
 // ===========================================================================
@@ -800,8 +739,8 @@ function candidatesFor(band: ViewingBand, capM?: number): ViewingCandidate[] {
     return {
       maxViewingDistanceM: capped,
       reading:
-        `A pictorial element from ${band.fromMm} mm to under ${band.toMm} mm is published as a ${uncapped} m sign.`
-        + (capped < uncapped ? ` Held to ${capped} m here by the photoluminescent cap.` : ''),
+        `${band.fromMm} to under ${band.toMm} mm: ${uncapped} m`
+        + (capped < uncapped ? `, capped at ${capped} m (photoluminescent).` : '.'),
       sourceId: id,
       confidence: SOURCES[id].confidence,
     };
@@ -849,10 +788,8 @@ export function exitSignViewingDistance(args: {
   ) {
     return {
       known: false,
-      reason: `"${String(illumination)}" is not a kind of exit sign this app has a viewing distance for.`,
-      whatToDo:
-        'Record the sign as internally illuminated, externally illuminated or photoluminescent. The three are held '
-        + 'to different distances and the difference is roughly double, so it cannot be assumed.',
+      reason: `"${String(illumination)}" is not a sign type with a viewing distance.`,
+      whatToDo: 'Record it as internal, external or photoluminescent. The distances differ by about double.',
       sourceIds: ['as2293-1'],
     };
   }
@@ -860,8 +797,8 @@ export function exitSignViewingDistance(args: {
   if (!Number.isFinite(h) || h <= 0) {
     return {
       known: false,
-      reason: `"${String(h)}" is not a pictogram height in millimetres.`,
-      whatToDo: 'Measure the green running-man element itself, top to bottom, not the whole sign or its housing.',
+      reason: `"${String(h)}" is not a pictogram height in mm.`,
+      whatToDo: 'Measure the running-man symbol height only.',
       sourceIds: ['as2293-1'],
     };
   }
@@ -870,13 +807,9 @@ export function exitSignViewingDistance(args: {
     return {
       known: false,
       reason:
-        'No Australian source for the viewing distance of an externally illuminated sign could be found. The only '
-        + 'multiplier available (100 × pictogram height) comes from United Kingdom guidance describing BS 5266 and '
-        + 'ISO 3864, which is not AS/NZS 2293.1.',
-      whatToDo:
-        'Read Table 5.1 of AS/NZS 2293.1 in the office copy and enter the tabulated distance directly. Do not apply '
-        + 'the internally illuminated figure to an externally illuminated sign — it is roughly double, and would put a '
-        + 'sign twice as far from the exit as the standard allows.',
+        'No published Australian figure for an externally illuminated sign. The 100 × height rule is UK guidance '
+        + '(BS 5266, ISO 3864).',
+      whatToDo: 'Read AS/NZS 2293.1 Table 5.1 in the office copy. Do not use the internal figure; it is about double.',
       sourceIds: ['as2293-1', 'ncc-e4'],
     };
   }
@@ -888,17 +821,13 @@ export function exitSignViewingDistance(args: {
     return {
       known: false,
       reason: isPhotoluminescent
-        ? `A photoluminescent sign's elements have to be ${PHOTOLUMINESCENT_ELEMENT_FACTOR} times the tabulated `
-          + `dimensions, so a ${h} mm element counts as ${effectiveMm} mm — below the `
-          + `${MIN_TABULATED_PICTOGRAM_MM} mm smallest element any source consulted bands.`
-        : `A ${h} mm pictogram is below the ${MIN_TABULATED_PICTOGRAM_MM} mm smallest element any source consulted `
-          + 'bands.',
+        ? `Photoluminescent elements count at 1/${PHOTOLUMINESCENT_ELEMENT_FACTOR}: ${h} mm counts as ${effectiveMm} mm, `
+          + `below the ${MIN_TABULATED_PICTOGRAM_MM} mm smallest band.`
+        : `${h} mm is below the ${MIN_TABULATED_PICTOGRAM_MM} mm smallest band.`,
       whatToDo: isPhotoluminescent
-        ? `The smallest photoluminescent element this app can answer for is ${Math.ceil(MIN_TABULATED_PICTOGRAM_MM * PHOTOLUMINESCENT_ELEMENT_FACTOR)} mm. `
-          + 'Below that, read Table 5.1 of AS/NZS 2293.1 with NCC Specification 25 Clause 4(b) beside it — a sign this '
-          + 'small is very likely not compliant at all, which is a finding in its own right.'
-        : 'Read Table 5.1 of AS/NZS 2293.1 directly. A sign this small is very likely not a compliant exit sign at all, '
-          + 'which is a finding in its own right.',
+        ? `Smallest photoluminescent element covered: ${Math.ceil(MIN_TABULATED_PICTOGRAM_MM * PHOTOLUMINESCENT_ELEMENT_FACTOR)} mm. `
+          + 'Check AS/NZS 2293.1 Table 5.1 with NCC Spec 25 Clause 4(b). A sign this small is likely non-compliant.'
+        : 'Check AS/NZS 2293.1 Table 5.1. A sign this small is likely non-compliant.',
       sourceIds: ['as2293-1', 'ncc-spec-e48', 'legrand-exit-viewing'],
     };
   }
@@ -912,12 +841,8 @@ export function exitSignViewingDistance(args: {
   if (!band) {
     return {
       known: false,
-      reason:
-        `A ${h} mm pictogram is above the ${MAX_TABULATED_PICTOGRAM_MM} mm top of the bands both sources publish.`,
-      whatToDo:
-        'Beyond their tables both publications hand off to a formula neither of them prints. Read Table 5.1 of '
-        + 'AS/NZS 2293.1 directly, or take the viewing distance printed on the sign face — every exit sign is required '
-        + 'to carry it.',
+      reason: `${h} mm is above the ${MAX_TABULATED_PICTOGRAM_MM} mm top band.`,
+      whatToDo: 'Read AS/NZS 2293.1 Table 5.1, or use the distance printed on the sign face.',
       sourceIds: ['as2293-1', 'legrand-exit-viewing', 'hochiki-as2293'],
     };
   }
@@ -933,39 +858,21 @@ export function exitSignViewingDistance(args: {
   if (isPhotoluminescent) {
     notes.push(
       cappedByRegulator
-        ? `The size of this sign would give ${band.maxViewingDistanceM} m; the ${PHOTOLUMINESCENT_CAP_M} m `
-          + 'photoluminescent ceiling decides it instead. A ceiling is not a permission — the sign still has to earn '
-          + 'the distance it is placed at.'
-        : `The size of this sign decides it, not the ${PHOTOLUMINESCENT_CAP_M} m photoluminescent ceiling, which is `
-          + 'not reached here.',
+        ? `Size gives ${band.maxViewingDistanceM} m; the ${PHOTOLUMINESCENT_CAP_M} m photoluminescent ceiling applies. `
+          + 'A ceiling is not a permission.'
+        : `Size decides it; the ${PHOTOLUMINESCENT_CAP_M} m photoluminescent ceiling is not reached.`,
     );
     notes.push(
-      `Clause 4(b) requires the pictorial elements of a photoluminescent sign to be ${PHOTOLUMINESCENT_ELEMENT_FACTOR} `
-      + `times the AS/NZS 2293.1 Table 5.1 dimensions. That has been applied: the ${h} mm element measured counts as `
-      + `${effectiveMm} mm. It is why a photoluminescent sign reads from closer than an internally illuminated one of `
-      + 'the same size.',
+      `NCC Spec 25 Clause 4(b): photoluminescent elements must be ${PHOTOLUMINESCENT_ELEMENT_FACTOR} × Table 5.1, so `
+      + `${h} mm counts as ${effectiveMm} mm.`,
     );
-    notes.push(
-      'Still unchecked: the photoluminescent border of at least 15 mm around the elements, and the charging '
-      + 'requirement — at least 100 lux at the face from a dedicated source of at least 4000 K. A sign in a dark '
-      + 'corridor fails on that before viewing distance matters.',
-    );
+    notes.push('Also check the 15 mm border, and at least 100 lux on the face from a dedicated 4000 K source.');
   }
   if (!agree) {
-    notes.push(
-      `The sources disagree: ${answer} m on one reading and ${largest.maxViewingDistanceM} m on the other. The `
-      + `smaller is answered with, so a sign inside ${answer} m is inside both. Between ${answer} m and `
-      + `${largest.maxViewingDistanceM} m this app cannot say.`,
-    );
+    notes.push(`Sources differ: ${answer} m and ${largest.maxViewingDistanceM} m. ${answer} m is used.`);
   }
-  notes.push(
-    `Read as a band, not a ratio: anything from ${band.fromMm} mm to under ${band.toMm} mm is the same sign for this `
-    + 'purpose. Interpolating between the bands would put a sign further from the exit than either publication allows.',
-  );
-  notes.push(
-    "Both readings come from manufacturers' own guides to AS/NZS 2293.1, not from the standard. Table 5.1 governs and "
-    + 'is the only thing that settles it — check the office copy before this goes in a report.',
-  );
+  notes.push(`Read as a band, not a ratio: ${band.fromMm} to under ${band.toMm} mm is the same sign.`);
+  notes.push("From manufacturers' own guides to AS/NZS 2293.1. Table 5.1 governs.");
 
   return {
     known: true,
@@ -976,15 +883,12 @@ export function exitSignViewingDistance(args: {
     sourcesAgree: agree,
     ...(cappedByRegulator
       ? {
-        cappedBy:
-          `NCC Specification E4.8 Clause 5 (NCC 2022 Specification 25) — ${PHOTOLUMINESCENT_CAP_M} m for `
-          + 'photoluminescent exit signs',
+        cappedBy: `Capped at ${PHOTOLUMINESCENT_CAP_M} m for photoluminescent signs, NCC Spec 25 Clause 5.`,
       }
       : {}),
     governing: isPhotoluminescent
-      ? 'NCC Specification E4.8 Clauses 3(a), 4(b) and 5 (NCC 2022 Specification 25), with AS/NZS 2293.1 Table 5.1 '
-        + 'behind Clause 4(b)'
-      : 'AS/NZS 2293.1 Table 5.1 (pictorial element dimensions), cited by NCC Part E4 clause E4D8',
+      ? 'NCC Spec 25 Clauses 3(a), 4(b) and 5, with AS/NZS 2293.1 Table 5.1'
+      : 'AS/NZS 2293.1 Table 5.1, via NCC E4D8',
     notes,
     sourceIds: isPhotoluminescent
       ? ['ncc-spec-e48', ...band.sourceIds, 'as2293-1']
@@ -1020,7 +924,7 @@ export function checkSignPlacement(distanceM: number, sign: ViewingDistance): Pl
     return {
       known: false,
       reason: `"${String(distanceM)}" is not a distance in metres.`,
-      whatToDo: 'Measure from the furthest point a person needs to see the sign from, along the path of travel.',
+      whatToDo: 'Measure from the furthest viewing point, along the path of travel.',
       sourceIds: sign.sourceIds,
     };
   }
@@ -1030,8 +934,8 @@ export function checkSignPlacement(distanceM: number, sign: ViewingDistance): Pl
   if (!limits.length || !limits.every((l) => Number.isFinite(l))) {
     return {
       known: false,
-      reason: 'This sign carries no sourced viewing distance to check against.',
-      whatToDo: 'Work out the viewing distance for the sign first, or read it off the sign face.',
+      reason: 'No viewing distance to check against.',
+      whatToDo: 'Work out the viewing distance first, or read it off the sign face.',
       sourceIds: sign.sourceIds ?? ['as2293-1'],
     };
   }
@@ -1045,7 +949,7 @@ export function checkSignPlacement(distanceM: number, sign: ViewingDistance): Pl
       distanceM,
       strictestLimitM: strictest,
       mostGenerousLimitM: generous,
-      statement: `${distanceM} m is within the ${strictest} m limit on every reading consulted.`,
+      statement: `${distanceM} m is within the ${strictest} m limit on every reading.`,
     };
   }
   if (distanceM > generous) {
@@ -1055,9 +959,7 @@ export function checkSignPlacement(distanceM: number, sign: ViewingDistance): Pl
       distanceM,
       strictestLimitM: strictest,
       mostGenerousLimitM: generous,
-      statement:
-        `${distanceM} m exceeds the ${generous} m limit on every reading consulted. A larger sign, or a second sign, `
-        + 'is needed.',
+      statement: `${distanceM} m is beyond the ${generous} m limit on every reading. A larger sign, or a second sign, is needed.`,
     };
   }
   return {
@@ -1066,10 +968,8 @@ export function checkSignPlacement(distanceM: number, sign: ViewingDistance): Pl
     distanceM,
     strictestLimitM: strictest,
     mostGenerousLimitM: generous,
-    statement: `${distanceM} m falls between the ${strictest} m and ${generous} m limits the sources give.`,
-    reason:
-      'The sources consulted disagree over this range, so this app will not call it either way. Read AS/NZS 2293.1 '
-      + 'Table 5.1 for this pictogram height.',
+    statement: `${distanceM} m is between the ${strictest} m and ${generous} m published limits.`,
+    reason: 'Sources differ here. Check AS/NZS 2293.1 Table 5.1 for this size.',
   };
 }
 
@@ -1210,7 +1110,7 @@ export function spacingSenseCheck(args: {
       return {
         known: false,
         reason: `"${String(value)}" is not a room ${name} in metres.`,
-        whatToDo: 'Enter the room as a rectangle in metres. An irregular space has to be broken into rectangles first.',
+        whatToDo: 'Enter the room as a rectangle in metres. Split odd shapes into rectangles.',
         sourceIds: ['clevertronics-spacing'],
       };
     }
@@ -1219,17 +1119,15 @@ export function spacingSenseCheck(args: {
     return {
       known: false,
       reason: `"${String(installedCount)}" is not a number of fittings.`,
-      whatToDo: 'Count the emergency luminaires in this room. Exit signs on their own do not count towards it.',
+      whatToDo: 'Count the emergency lights in the room. Exit signs alone do not count.',
       sourceIds: ['clevertronics-spacing'],
     };
   }
   if (args.edition !== '2005' && args.edition !== '2018') {
     return {
       known: false,
-      reason: `"${String(args.edition)}" is not an edition of AS/NZS 2293.1 this app has spacing data for.`,
-      whatToDo:
-        'State which edition the installation was designed to — 2005 or 2018. They give different answers, by up to '
-        + 'nine metres at low mounting heights, so this cannot be assumed.',
+      reason: `"${String(args.edition)}" is not an edition with spacing data.`,
+      whatToDo: 'Pick 2005 or 2018. They differ by up to nine metres at low mounting heights.',
       sourceIds: ['clevertronics-spacing'],
     };
   }
@@ -1238,8 +1136,8 @@ export function spacingSenseCheck(args: {
       known: false,
       reason: `No spacing data for classification "${args.classification}".`,
       whatToDo:
-        `Read the classification off the luminaire's datasheet. This app has ${KNOWN_CLASSIFICATIONS.join(', ')} only, `
-        + 'from one manufacturer, on the 0.2 lux basis. Anything else has to come from the fitting’s own tables.',
+        `Read the class off the datasheet. Covered: ${KNOWN_CLASSIFICATIONS.join(', ')} on the 0.2 lux basis. `
+        + 'Otherwise use the fitting’s own tables.',
       sourceIds: ['clevertronics-spacing', 'abb-stanilite-class'],
     };
   }
@@ -1249,8 +1147,8 @@ export function spacingSenseCheck(args: {
       known: false,
       reason: `No spacing figure for ${classification} at a mounting height of ${mountingHeightM} m.`,
       whatToDo:
-        `The tables carry ${TABULATED_HEIGHTS_M.join(', ')} m and nothing between. Measure the mounting height to the `
-        + 'nearest tabulated value and use that, or read the fitting’s own table. This app will not interpolate.',
+        `Listed heights: ${TABULATED_HEIGHTS_M.join(', ')} m, with no interpolation. Use the nearest one or the `
+        + 'fitting’s own table.',
       sourceIds: ['clevertronics-spacing'],
     };
   }
@@ -1263,20 +1161,15 @@ export function spacingSenseCheck(args: {
   const areaPerFittingM2 = installedCount > 0 ? round1(areaM2 / installedCount) : areaM2;
 
   const caveats = [
-    'A sense-check only. This is not a lighting design, it has no standing, and no fitting may be added, moved or '
-    + 'omitted on the strength of it.',
-    'It assumes an empty rectangle on a regular grid. Obstructions, room shape, ceiling voids, surface reflectances '
-    + 'and the actual paths of travel are all ignored, and every one of them changes the answer.',
-    'It uses the 0.2 lux general-area basis. Stairways, flights and landings are assessed at 1 lux and need closer '
-    + 'spacing than anything here.',
-    'It says nothing about the fittings within 2 m of exit doors, direction changes, intersections and changes of '
-    + 'level that are required regardless of spacing.',
+    'Rough check only, not a lighting design. Do not add, move or omit fittings on it.',
+    'Assumes an empty rectangle on a regular grid. Obstructions and room shape change it.',
+    'Uses 0.2 lux for general areas. Stairs and landings need 1 lux and closer spacing.',
+    'Does not cover fittings needed within 2 m of exit doors, turns, intersections and level changes.',
   ];
   if (installedCount > 0 && areaPerFittingM2 > MAX_AREA_PER_LUMINAIRE_M2) {
     caveats.push(
-      `Each fitting is covering about ${areaPerFittingM2} m². Trade guidance puts a ceiling of `
-      + `${MAX_AREA_PER_LUMINAIRE_M2} m² per luminaire regardless of what the spacing tables allow — worth checking `
-      + 'against the design.',
+      `Each fitting covers about ${areaPerFittingM2} m². Trade guidance caps it at ${MAX_AREA_PER_LUMINAIRE_M2} m² `
+      + 'per luminaire; check the design.',
     );
   }
 
@@ -1299,11 +1192,10 @@ export function spacingSenseCheck(args: {
     areaPerFittingM2,
     statement:
       installedCount >= expectedMinimumCount
-        ? `${installedCount} fittings in ${areaM2} m² is plausible: a grid at the ${spacing} m maximum spacing for a `
-          + `${classification} fitting at ${mountingHeightM} m would need at least ${expectedMinimumCount}.`
-        : `${installedCount} fittings in ${areaM2} m² looks short by ${shortfall}: a grid at the ${spacing} m maximum `
-          + `spacing for a ${classification} fitting at ${mountingHeightM} m would need at least `
-          + `${expectedMinimumCount}. Worth raising for a designer to look at.`,
+        ? `${installedCount} fittings in ${areaM2} m² is plausible: a ${spacing} m grid for ${classification} at `
+          + `${mountingHeightM} m needs at least ${expectedMinimumCount}.`
+        : `${installedCount} fittings in ${areaM2} m² looks short by ${shortfall}: a ${spacing} m grid for `
+          + `${classification} at ${mountingHeightM} m needs at least ${expectedMinimumCount}. Raise it for a designer.`,
     caveats,
     sourceIds: ['clevertronics-spacing', 'abb-stanilite-class', 'elecas-design', 'as2293-1'],
   };
@@ -1323,10 +1215,7 @@ export function spacingSenseCheck(args: {
  */
 export const BATTERY_DESIGN_LIFE_YEARS = 4;
 
-export const BATTERY_LIFE_CAVEAT =
-  'Age alone is not a defect. A battery past its design life that still holds the full duration is compliant, and a '
-  + 'battery inside its design life that does not is not. The discharge test decides; the age only says what to '
-  + 'expect.';
+export const BATTERY_LIFE_CAVEAT = 'Age alone is not a defect. The discharge test decides.';
 
 /**
  * Reads a date the Australian way, and refuses anything else.
@@ -1412,10 +1301,8 @@ export function batteryAge(args: {
   if (!parsed) {
     return {
       known: false,
-      reason: `"${args.installedOn}" is not a date this app will read.`,
-      whatToDo:
-        'Enter the install date as d/m/yyyy or yyyy-mm-dd. A date with the month first is rejected rather than '
-        + 'guessed at — 4/13/2020 has no thirteenth month, and 4/12/2020 would be read as 4 December.',
+      reason: `"${args.installedOn}" is not a date.`,
+      whatToDo: 'Enter it as d/m/yyyy. Month-first dates are not accepted: 4/12/2020 is 4 December.',
       sourceIds: ['iec-60598-2-22'],
     };
   }
@@ -1424,7 +1311,7 @@ export function batteryAge(args: {
     return {
       known: false,
       reason: `An install date of ${formatAuDate(isoDate(parsed.y, parsed.m, parsed.d))} is in the future.`,
-      whatToDo: 'Check the date on the fitting or in the register. A future date is usually a year typed wrong.',
+      whatToDo: 'Check the year on the fitting or in the register.',
       sourceIds: ['iec-60598-2-22'],
     };
   }
@@ -1459,9 +1346,8 @@ export function batteryAge(args: {
     pastDesignLife: past,
     yearsRemaining: remaining,
     statement: past
-      ? `${ageYears} years old — past the ${life}-year design life, which was reached on ${formatAuDate(expected)}.`
-      : `${ageYears} years old — ${remaining} years inside the ${life}-year design life, which is reached on `
-        + `${formatAuDate(expected)}.`,
+      ? `${ageYears} years old, past the ${life}-year design life (reached ${formatAuDate(expected)}).`
+      : `${ageYears} years old, ${remaining} years left of the ${life}-year design life (${formatAuDate(expected)}).`,
     caveat: BATTERY_LIFE_CAVEAT,
     sourceIds: fromManufacturer ? ['as2293-2'] : ['iec-60598-2-22', 'as2293-2'],
   };
@@ -1495,15 +1381,13 @@ export function batteryAdvice(verdict: DischargeVerdict, ageResult?: BatteryAge 
     return {
       action: 'investigate',
       statement: 'Find out why it did not light before ordering anything.',
-      reasoning:
-        'A fitting that never illuminated has not shown a battery problem. Lamp, driver, battery connection, or a '
-        + 'supply that was never actually removed are all more likely, and a new battery fixes none of them.',
+      reasoning: 'Lamp, driver, battery lead or supply not isolated are more likely; a new battery fixes none of them.',
     };
   }
   if (verdict.outcome === 'inconclusive' || verdict.outcome === 'unreadable') {
     return {
       action: 'unknown',
-      statement: 'No advice — the fitting has not been tested to a result.',
+      statement: 'No advice: the fitting has not been tested to a result.',
       reasoning: verdict.reason ?? 'The discharge test did not produce a verdict.',
     };
   }
@@ -1511,31 +1395,23 @@ export function batteryAdvice(verdict: DischargeVerdict, ageResult?: BatteryAge 
     if (age && !age.pastDesignLife) {
       return {
         action: 'investigate',
-        statement:
-          `Replace the battery, and find out why a ${age.ageYears}-year-old battery failed inside its `
-          + `${age.designLifeYears}-year design life.`,
-        reasoning:
-          'Premature failure is usually the charger, a fitting left on test, or heat — not the battery. Replacing the '
-          + 'battery alone will put this fitting back on the defect list at the next service.',
+        statement: `Replace the battery, and find out why a ${age.ageYears}-year-old battery failed early.`,
+        reasoning: 'Early failure is usually the charger, a fitting left on test, or heat.',
       };
     }
     return {
       action: 'replace-now',
-      statement: 'Replace the battery, or the fitting where the battery is not serviceable, and re-test in full.',
+      statement: 'Replace the battery, or the fitting if the battery is not serviceable, and re-test in full.',
       reasoning: age
-        ? `The battery is ${age.ageYears} years old, past its ${age.designLifeYears}-year design life, and no longer `
-          + 'holds the required duration. Both facts point the same way.'
-        : 'The battery no longer holds the required duration. That is the defect, whatever its age.',
+        ? `${age.ageYears} years old, past its ${age.designLifeYears}-year design life, and short of the duration.`
+        : 'It no longer holds the required duration, whatever its age.',
     };
   }
   if (verdict.outcome === 'marginal-pass') {
     return {
       action: 'replace-planned',
       statement: 'Not a defect today. Plan the battery replacement before the next service.',
-      reasoning:
-        `The fitting reached the required duration with ${verdict.marginMinutes ?? 0} minutes in hand. Six months of `
-        + 'further ageing will take that away, so this is cheaper to do with the next scheduled attendance than as a '
-        + 'return visit for a defect.',
+      reasoning: `${verdict.marginMinutes ?? 0} minutes in hand. Cheaper at the next visit than on a return trip.`,
     };
   }
   // A clear pass.
@@ -1549,7 +1425,7 @@ export function batteryAdvice(verdict: DischargeVerdict, ageResult?: BatteryAge 
   return {
     action: 'none',
     statement: 'No action.',
-    reasoning: 'The fitting holds the required duration and the battery is inside its design life.',
+    reasoning: 'Holds the duration, and the battery is inside its design life.',
   };
 }
 

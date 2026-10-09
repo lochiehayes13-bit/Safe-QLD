@@ -43,7 +43,7 @@ export const PROTOCOLS: Protocol[] = [
     minAddress: 1, maxAddress: 126, switchCount: 7,
     methods: ['xpert7', 'dip'],
     maxDevicesPerLoop: 126,
-    notes: 'Detectors are addressed by the XPERT card in the base; call points and interfaces use a 7-way DIL switch. Seven bits could encode 127, but Apollo stop at 126.',
+    notes: 'Detectors use the XPERT card in the base. Call points and interfaces use a 7-way DIL switch. Max 126, not 127.',
   },
   {
     id: 'apollo_discovery',
@@ -51,7 +51,7 @@ export const PROTOCOLS: Protocol[] = [
     minAddress: 1, maxAddress: 126, switchCount: 7,
     methods: ['xpert7', 'dip'],
     maxDevicesPerLoop: 126,
-    notes: 'Shares the XP95 addressing scheme and the same 126 limit.',
+    notes: 'Addressed the same as XP95. Max 126.',
   },
   {
     id: 'apollo_coreprotocol',
@@ -59,7 +59,7 @@ export const PROTOCOLS: Protocol[] = [
     minAddress: 1, maxAddress: 254, switchCount: 8,
     methods: ['xpert8', 'programmer'],
     maxDevicesPerLoop: 254,
-    notes: 'Exceeding 126 needs the whole chain — XPERT 8 base, XPERT 8 card, Soteria head and a CoreProtocol panel. On an XP95 or Discovery base the 128 pip is ignored and the device caps at 126.',
+    notes: 'XPERT 8 card or programmer. On an XP95 or Discovery base the 128 pip is ignored.',
   },
   {
     id: 'hochiki_esp',
@@ -68,7 +68,7 @@ export const PROTOCOLS: Protocol[] = [
     physicalSwitchCount: 8,
     methods: ['dip', 'programmer'],
     maxDevicesPerLoop: 127,
-    notes: 'The DIL block has eight switches but only the first seven set the address. What the eighth does depends on the device — on some bases it controls the LED, on some modules it disables monitoring — so check that device\u2019s own documentation rather than assuming. Unlike Apollo, 127 is valid.',
+    notes: 'Only switches 1 to 7 set the address. Switch 8 varies by device; check its manual. 127 is valid.',
   },
   {
     id: 'simplex_idnet',
@@ -76,7 +76,7 @@ export const PROTOCOLS: Protocol[] = [
     minAddress: 1, maxAddress: 250, switchCount: 8,
     methods: ['dip'],
     maxDevicesPerLoop: 250,
-    notes: 'Simplex state that DIP position 1 is the least significant bit. Eight switches could encode 255, but the supported range stops at 250.',
+    notes: 'Switch 1 is the lowest bit. Max 250.',
   },
   {
     id: 'simplex_mapnet2',
@@ -84,7 +84,7 @@ export const PROTOCOLS: Protocol[] = [
     minAddress: 1, maxAddress: 127, switchCount: 8,
     methods: ['dip'],
     maxDevicesPerLoop: 127,
-    notes: 'Earlier Simplex protocol, addressed the same way as IDNet but capped at 127.',
+    notes: 'Addressed the same as IDNet. Max 127.',
   },
   {
     id: 'ampac_firefinder',
@@ -92,7 +92,7 @@ export const PROTOCOLS: Protocol[] = [
     minAddress: 1, maxAddress: 126, switchCount: 7,
     methods: ['xpert7', 'dip'],
     maxDevicesPerLoop: 126,
-    notes: 'Ampac loops run Apollo protocol devices and follow the same addressing.',
+    notes: 'Apollo protocol devices. Addressed the same as XP95.',
   },
   {
     id: 'notifier_flashscan',
@@ -100,7 +100,7 @@ export const PROTOCOLS: Protocol[] = [
     minAddress: 1, maxAddress: 159, switchCount: null,
     methods: ['rotary'],
     maxDevicesPerLoop: 159,
-    notes: 'Rotary decade dials. Detectors and modules hold separate address spaces on the same loop, so detector 12 and module 12 are not a clash.',
+    notes: 'Detectors and modules have separate addresses. Detector 12 and module 12 do not clash.',
   },
   {
     id: 'notifier_clip',
@@ -108,7 +108,7 @@ export const PROTOCOLS: Protocol[] = [
     minAddress: 1, maxAddress: 99, switchCount: null,
     methods: ['rotary'],
     maxDevicesPerLoop: 99,
-    notes: 'Identical hardware to FlashScan but the panel protocol caps addresses at 99.',
+    notes: 'Same hardware as FlashScan. Max 99 in CLIP mode.',
   },
   {
     id: 'pertronic_f220',
@@ -116,7 +116,7 @@ export const PROTOCOLS: Protocol[] = [
     minAddress: 1, maxAddress: 159, switchCount: null,
     methods: ['rotary'],
     maxDevicesPerLoop: 159,
-    notes: 'Rotary decade addressing, not Apollo — a common misconception.',
+    notes: 'Rotary decade dials, not Apollo.',
   },
   {
     id: 'pertronic_f100a',
@@ -128,7 +128,7 @@ export const PROTOCOLS: Protocol[] = [
     // The lower figure is the safe one to be unsure with: too low costs a
     // second look at the manual, too high hands out an address the panel
     // cannot poll and sends someone hunting a fault that is not there.
-    notes: 'Listed separately from the F220 and F120A because the smaller panel does not carry their loop capacity. Confirm the ceiling for your firmware against the panel manual before addressing above 99.',
+    notes: 'Max 99. Check the panel manual before going higher.',
   },
   {
     id: 'tyco_mx',
@@ -136,7 +136,7 @@ export const PROTOCOLS: Protocol[] = [
     minAddress: 1, maxAddress: 250, switchCount: null,
     methods: ['programmer'],
     maxDevicesPerLoop: 250,
-    notes: 'No switches. Programmed with the MX service tool. Devices ship at address 255, which is deliberately invalid so the panel can spot an unaddressed replacement.',
+    notes: 'Set with the MX service tool. New devices ship at 255, which the panel shows as unaddressed.',
   },
   {
     id: 'brooks_firetracker',
@@ -144,7 +144,7 @@ export const PROTOCOLS: Protocol[] = [
     minAddress: 1, maxAddress: 255, switchCount: null,
     methods: ['programmer'],
     maxDevicesPerLoop: 255,
-    notes: 'Addressed with the Brooks address setting tool.',
+    notes: 'Set with the Brooks address setting tool.',
   },
 ];
 
@@ -266,75 +266,62 @@ export function validateAddress(address: number, protocol: Protocol, method: Add
   const issues: AddressIssue[] = [];
 
   if (address === 0) {
-    issues.push({
-      level: 'error',
-      message: 'Address 0 is not a device address. Every switch off, or a card with all pips intact, means the device is unaddressed — a panel reports it as under-addressed, not as device zero.',
-    });
+    issues.push({ level: 'error', message: '0 means unaddressed. Set 1 or higher.' });
   } else if (address < protocol.minAddress || address > protocol.maxAddress) {
     issues.push({
       level: 'error',
-      message: `${protocol.label} accepts ${protocol.minAddress} to ${protocol.maxAddress}. ${address} is outside that range.`,
+      message: `${protocol.label} takes ${protocol.minAddress} to ${protocol.maxAddress}. ${address} is outside that range.`,
     });
   }
 
-  if ((protocol.id === 'apollo_xp95' || protocol.id === 'apollo_discovery' || protocol.id === 'ampac_firefinder') && address === 127) {
+  if (protocol.id === 'hochiki_esp' && address >= 1 && address <= 127) {
     issues.push({
-      level: 'error',
-      message: 'Seven bits can encode 127, but Apollo XP95 and Discovery stop at 126 — there is no 127 row in the manufacturer chart.',
+      level: 'info',
+      message: `A base sounder on this device takes address ${address + 127} (sensor address + 127).`,
     });
-  }
-
-  if (protocol.id === 'hochiki_esp') {
-    issues.push({
-      level: 'warning',
-      message: 'The DIL block has eight switches but only 1 to 7 set the address — including the eighth in the sum puts the address 128 too high. What the eighth switch does varies by device (LED behaviour on some bases, monitoring on some modules), so read it off that device\u2019s documentation.',
-    });
-    if (address >= 1 && address <= 127) {
-      issues.push({
-        level: 'info',
-        message: `A base sounder on this device takes address ${address + 127} automatically — the sensor address plus 127.`,
-      });
-    }
   }
 
   if (method === 'xpert7' || method === 'xpert8') {
-    issues.push({
-      level: 'warning',
-      message: 'An XPERT card is the inverse of a DIP switch: punch out the pips listed. Removal is permanent, so a wrongly punched card has to be replaced.',
-    });
-    issues.push({
-      level: 'info',
-      message: 'The card lives in the base, not the head. Swapping a detector keeps the address; swapping a base changes it.',
-    });
+    issues.push({ level: 'warning', message: 'Removal is permanent. A wrongly punched card must be replaced.' });
+    issues.push({ level: 'info', message: 'The card stays with the base. A new head keeps the address; a new base does not.' });
   }
 
   if (method === 'rotary' && address > 99) {
     issues.push({
       level: 'warning',
-      message: 'The tens dial has sixteen positions, not ten. Some modules ship with a moulded stop that has to be removed to set above 99.',
-    });
-  }
-
-  if (protocol.id === 'notifier_flashscan') {
-    issues.push({
-      level: 'info',
-      message: 'Detectors and modules hold separate address spaces on the same loop, so detector 12 and module 12 are not a clash.',
-    });
-  }
-
-  if (protocol.id === 'tyco_mx') {
-    issues.push({
-      level: 'info',
-      message: 'MX devices ship at 255, which is intentionally invalid. Valid configured addresses are 1 to 250; anything above reports as over-addressed.',
+      message: 'Some modules have a moulded stop on the tens dial. Remove it to set above 99.',
     });
   }
 
   if (protocol.id === 'apollo_coreprotocol' && address > 126) {
     issues.push({
       level: 'warning',
-      message: 'Above 126 needs the full CoreProtocol chain — XPERT 8 base and card, a Soteria head and a CoreProtocol panel. On an XP95 or Discovery base the 128 pip is ignored.',
+      message: 'Above 126 needs the full CoreProtocol chain: XPERT 8 base and card, Soteria head, CoreProtocol panel.',
     });
   }
 
   return issues;
+}
+
+/** What the "Set to address" box holds, checked before anything is moved. */
+export type TargetCheck =
+  | { ok: true; address: number }
+  | { ok: false; message: string };
+
+/**
+ * Reads a typed target address against the protocol's range.
+ *
+ * Undefined while the box is blank. Anything outside the range is refused
+ * rather than written to the switches, because an 8-bit pattern for 200 on a
+ * 7-switch device reads back as 72, a different valid address.
+ */
+export function checkTarget(text: string, protocol: Protocol): TargetCheck | undefined {
+  const s = text.trim();
+  if (!s) return undefined;
+  if (!/^\d+$/.test(s)) return { ok: false, message: 'Whole numbers only.' };
+  const address = Number(s);
+  if (address < protocol.minAddress || address > protocol.maxAddress) {
+    return { ok: false, message: `${protocol.label} takes ${protocol.minAddress} to ${protocol.maxAddress}.` };
+  }
+  return { ok: true, address };
 }

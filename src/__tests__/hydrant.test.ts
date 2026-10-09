@@ -6,8 +6,10 @@ import {
   OUTLETS,
   PITOT_CONSTANT_METRIC,
   REQUIREMENT_REFS,
+  TYPED_DUTY_SOURCE,
   assessHydrant,
   barToKpa,
+  dutyOrigin,
   conduitSpec,
   flowMeterToLpm,
   frictionLoss,
@@ -21,6 +23,7 @@ import {
   projectAvailableFlow,
   projectResidualAtFlow,
   psiToKpa,
+  refOrigin,
   refToDuty,
   requiredBoostPressure,
   requirementRef,
@@ -845,11 +848,13 @@ describe('assessHydrant', () => {
     expect(r.reason).toMatch(/source/i);
   });
 
-  it('carries the requirement and the disclaimer through to the result', () => {
+  it('carries the requirement and where it came from through to the result', () => {
     const r = assessHydrant({ ...duty, measuredFlowLpm: 620, measuredResidualKpa: 360 });
     if (isRefused(r)) throw new Error(r.reason);
     expect(r.requirementSource).toBe(duty.requirementSource);
-    expect(r.issues.some((i) => i.detail.includes('does not certify a design'))).toBe(true);
+    expect(r.issues).toContainEqual({
+      level: 'info', title: 'Checked against the duty entered', detail: duty.requirementSource,
+    });
   });
 
   it('labels the result with the hydrant it came from when one is given', () => {
@@ -983,5 +988,36 @@ describe('the reference tables', () => {
   it('returns nothing for an outlet or material it does not hold', () => {
     expect(outletSpec('storz' as never)).toBeUndefined();
     expect(conduitSpec('unobtainium' as never)).toBeUndefined();
+  });
+});
+
+describe('where the duty in the fields came from', () => {
+  const attack = refOrigin(requirementRef('qld-construction-attack')!)!;
+  const fromForm = {
+    label: 'Form 72 Part E',
+    requirementSource: 'Form 72 Part E, Fictional Tower',
+    flowLps: 10,
+    pressureKpa: 410,
+  };
+
+  it('names a picked reference only while the fields still hold its figures', () => {
+    expect(attack).toMatchObject({ flowLps: 10, pressureKpa: 350, label: 'Attack, unassisted: 10 L/s at 350 kPa' });
+    expect(dutyOrigin(10, 350, [attack, fromForm])).toBe(attack);
+    // Edited away from it: recorded as typed, not as the reference.
+    expect(dutyOrigin(5, 350, [attack, fromForm])).toBeUndefined();
+  });
+
+  it('names the Form 72 a duty was loaded from, and drops it once edited', () => {
+    expect(dutyOrigin(10, 410, [null, fromForm])).toBe(fromForm);
+    expect(dutyOrigin(10, 400, [null, fromForm])).toBeUndefined();
+  });
+
+  it('treats blank fields as typed, never as a reference', () => {
+    expect(dutyOrigin(Number.NaN, Number.NaN, [attack, fromForm])).toBeUndefined();
+    expect(TYPED_DUTY_SOURCE).toBe('Entered by the technician');
+  });
+
+  it('has no duty origin for a ceiling', () => {
+    expect(refOrigin(requirementRef('qld-construction-max-static')!)).toBeNull();
   });
 });

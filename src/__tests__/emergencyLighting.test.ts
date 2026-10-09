@@ -185,7 +185,7 @@ describe('assessDischarge — refusals', () => {
     const v = assessDischarge({ achievedMinutes: 60, ending: 'still-lit' });
     expect(v.outcome).toBe('inconclusive');
     expect(v.passed).toBeUndefined();
-    expect(v.reason).toContain('has not passed and it has not failed');
+    expect(v.reason).toContain('Not passed and not failed');
   });
 
   it('leaves passed undefined rather than false wherever there is no verdict', () => {
@@ -493,7 +493,7 @@ describe('checkSignPlacement', () => {
     const c = checkSignPlacement(27, disputed);
     if (!c.known) throw new Error('expected a check');
     expect(c.verdict).toBe('uncertain');
-    expect(c.reason).toContain('will not call it either way');
+    expect(c.reason).toContain('Sources differ here');
   });
 
   it('refuses a sign carrying no readings at all rather than calling everything within', () => {
@@ -612,7 +612,7 @@ describe('spacingSenseCheck', () => {
     const r = spacingSenseCheck({ ...base, mountingHeightM: 2.55, roomLengthM: 20, roomWidthM: 10, installedCount: 2 });
     expect(r.known).toBe(false);
     if (r.known) throw new Error('expected a refusal');
-    expect(r.whatToDo).toContain('will not interpolate');
+    expect(r.whatToDo).toContain('no interpolation');
     expect(r.reason).toContain('2.55');
   });
 
@@ -736,7 +736,7 @@ describe('batteryAge', () => {
     expect(r.known).toBe(false);
     if (r.known) throw new Error('expected a refusal');
     expect(r.whatToDo).toContain('d/m/yyyy');
-    expect(r.whatToDo).toContain('rejected rather than');
+    expect(r.whatToDo).toContain('Month-first dates are not accepted');
   });
 
   it('refuses an install date in the future rather than reporting a negative age', () => {

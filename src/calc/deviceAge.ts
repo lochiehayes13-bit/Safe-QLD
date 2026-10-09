@@ -51,7 +51,7 @@ export interface FormatSpec {
 export const FORMATS: Record<CodeFormat, FormatSpec> = {
   'system-sensor': {
     id: 'system-sensor',
-    label: 'System Sensor / Notifier — 4-digit date code',
+    label: 'System Sensor / Notifier: 4-digit date code',
     brands: ['system sensor', 'notifier', 'honeywell'],
     source: "System Sensor date code explanation, and Safe QLD's own effectiveness reporting",
     confidence: 'high',
@@ -59,7 +59,7 @@ export const FORMATS: Record<CodeFormat, FormatSpec> = {
   },
   'hochiki-serial': {
     id: 'hochiki-serial',
-    label: 'Hochiki — 9-digit serial',
+    label: 'Hochiki: 9-digit serial',
     brands: ['hochiki'],
     source: 'Hochiki Europe application note AP093/ISS1/OCT06, Product Serial & Batch Numbers',
     confidence: 'high',
@@ -67,7 +67,7 @@ export const FORMATS: Record<CodeFormat, FormatSpec> = {
   },
   'hochiki-batch': {
     id: 'hochiki-batch',
-    label: 'Hochiki — 4-digit batch',
+    label: 'Hochiki: 4-digit batch',
     brands: ['hochiki'],
     source: 'Hochiki Europe application note AP093/ISS1/OCT06, Product Serial & Batch Numbers',
     confidence: 'high',
@@ -75,7 +75,7 @@ export const FORMATS: Record<CodeFormat, FormatSpec> = {
   },
   'apollo-mmyy': {
     id: 'apollo-mmyy',
-    label: 'Apollo — MMYY with a batch suffix',
+    label: 'Apollo: MMYY with a batch suffix',
     brands: ['apollo'],
     source: 'Trade supplier guidance, not an Apollo publication',
     confidence: 'low',
@@ -83,7 +83,7 @@ export const FORMATS: Record<CodeFormat, FormatSpec> = {
   },
   'apollo-yymmdd': {
     id: 'apollo-yymmdd',
-    label: 'Apollo — YYMMDD',
+    label: 'Apollo: YYMMDD',
     brands: ['apollo'],
     source: 'Trade supplier guidance, not an Apollo publication',
     confidence: 'low',
@@ -91,7 +91,7 @@ export const FORMATS: Record<CodeFormat, FormatSpec> = {
   },
   'apollo-week-year': {
     id: 'apollo-week-year',
-    label: 'Apollo sounders — week and year',
+    label: 'Apollo sounders: week and year',
     brands: ['apollo'],
     source: 'Trade supplier guidance, not an Apollo publication',
     confidence: 'low',
@@ -317,14 +317,14 @@ export function readDateCode(code: string, options: ReadOptions = {}): DateReadi
     const years = new Set(out.map((r) => r.year));
     for (const r of out) {
       if (years.size > 1) {
-        r.notes.push('The year is one digit, so this code repeats every ten years. An install or commissioning date settles it.');
+        r.notes.push('One-digit year: the code repeats every ten years. The install year settles it.');
       }
     }
   }
   const formats = new Set(out.map((r) => r.format));
   if (formats.size > 1) {
     for (const r of out) {
-      r.notes.push('More than one manufacturer’s format fits these digits. Read the make off the head before using a date.');
+      r.notes.push('More than one manufacturer’s format fits. Set the make from the head.');
     }
   }
   return out;
@@ -341,7 +341,7 @@ export function readDateCode(code: string, options: ReadOptions = {}): DateReadi
 export const RECOMMENDED_LIFE_YEARS = 10;
 
 export const LIFE_SOURCE =
-  'A manufacturer recommendation, not an AS 1851 requirement. AS 1851 sets no replacement age for point detectors.';
+  'Manufacturer recommendation. AS 1851 sets no replacement age for point detectors.';
 
 /** Age in years to one decimal, which is the precision a report should quote. */
 export function ageYears(reading: DateReading, at: Date): number {
@@ -371,7 +371,7 @@ export function serviceLife(
     past,
     yearsLeft: past ? 0 : Math.round((lifeYears - age) * 10) / 10,
     label: past
-      ? `${age} years old — past the ${lifeYears}-year recommended replacement age. Age alone is not a defect.`
-      : `${age} years old — ${Math.round((lifeYears - age) * 10) / 10} years inside the ${lifeYears}-year recommended replacement age.`,
+      ? `${age} years old. Past the ${lifeYears}-year recommended age. Age alone is not a defect.`
+      : `${age} years old. ${Math.round((lifeYears - age) * 10) / 10} years left of a ${lifeYears}-year recommended life.`,
   };
 }

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View } from 'react-native';
+import { Linking, Pressable, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
@@ -21,9 +21,9 @@ import {
   formatAuDate,
   latchingApplies,
   parseFrl,
+  readingsFromFields,
   requiredSignWording,
   tagRequirement,
-  type Confidence,
   type DoorOutcome,
   type DoorType,
   type FloorCovering,
@@ -33,11 +33,13 @@ import {
   type ReleasePosition,
   type SealState,
   type SourceId,
+  type TagParticularKey,
+  type TagParticulars,
   type TagState,
 } from '@/domain/fireDoor';
 import { useTheme } from '@/theme';
 import {
-  Banner, Card, Chip, Divider, EmptyState, Field, H2, Label, ResultBlock, Rowed, Screen, Segmented, StatTile, Txt,
+  Banner, Button, Card, Chip, Divider, EmptyState, Field, H2, Label, ResultBlock, Rowed, Screen, Segmented, StatTile, Txt,
 } from '@/components/ui';
 
 /**
@@ -46,9 +48,9 @@ import {
  * A technician standing at a door in a stairwell has four questions and they
  * come in this order: what does the tag actually say, does this gap pass, did
  * it close and latch, and what do I write down. Each has a tab, and every
- * figure on this screen shows the clause it came from and how much that source
- * is worth — because the wrong answer here is not a wrong number, it is a
- * confident number with nothing behind it.
+ * figure on this screen shows the clause it came from — because the wrong
+ * answer here is not a wrong number, it is a confident number with nothing
+ * behind it.
  *
  * The screen leans hard on the module's refusals rather than hiding them. Three
  * clearances have no sourced figure at all, and where you land on one this
@@ -87,33 +89,28 @@ export default function FireDoorScreen() {
 // Shared pieces
 // ---------------------------------------------------------------------------
 
-const CONFIDENCE_TONE: Record<Confidence, 'pass' | 'warn' | 'fail'> = {
-  high: 'pass',
-  medium: 'warn',
-  low: 'fail',
-};
-
-/** Every figure on this screen is shown with where it came from and what that is worth. */
+/** Each source on one line, and the line opens it. */
 function SourceList({ ids, title = 'Sources' }: { ids: SourceId[]; title?: string }) {
   const t = useTheme();
   const sources = citeSources(ids);
   if (sources.length === 0) return null;
   return (
-    <Card>
+    <Card style={{ gap: t.space(0.5) }}>
       <Label>{title}</Label>
-      <View style={{ gap: t.space(3), marginTop: t.space(2) }}>
-        {sources.map((s) => (
-          <View key={s.id} style={{ gap: 4 }}>
-            <Rowed gap={2} wrap>
-              <Chip label={s.confidence} tone={CONFIDENCE_TONE[s.confidence]} />
-              <Txt size="sm" weight="700" style={{ flex: 1 }}>{s.ref}</Txt>
-            </Rowed>
-            <Txt size="xs" tone="muted" style={{ lineHeight: 17 }}>{s.what}.</Txt>
-            <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>{s.basis}</Txt>
-            <Txt size="xs" tone="accent" mono>{s.url}</Txt>
-          </View>
-        ))}
-      </View>
+      {sources.map((s) => (
+        <Pressable
+          key={s.id}
+          accessibilityRole="link"
+          onPress={() => void Linking.openURL(s.url).catch(() => undefined)}
+          hitSlop={6}
+          style={{ minHeight: 44, justifyContent: 'center' }}
+        >
+          <Rowed gap={2}>
+            <Txt size="sm" tone="accent" style={{ flex: 1, lineHeight: 19 }}>{s.ref}</Txt>
+            <MaterialCommunityIcons name="open-in-new" size={16} color={t.color.accentText} />
+          </Rowed>
+        </Pressable>
+      ))}
     </Card>
   );
 }
@@ -150,15 +147,6 @@ function YesNo({
 const asBool = (v: 'yes' | 'no' | 'unknown'): boolean | undefined =>
   v === 'unknown' ? undefined : v === 'yes';
 
-/** "2, 2.5, 3" typed on a phone with one thumb, into millimetres. */
-function readMeasurements(text: string): number[] {
-  return text
-    .split(/[,;\s]+/)
-    .map((p) => p.trim())
-    .filter((p) => p.length > 0)
-    .map((p) => Number(p));
-}
-
 // ---------------------------------------------------------------------------
 // FRL
 // ---------------------------------------------------------------------------
@@ -173,10 +161,7 @@ function FrlView() {
 
   return (
     <>
-      <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-        Read it off the tag on the hinge stile of the leaf, not off the register. Three grading periods in a fixed
-        order, and the order is the part people get wrong.
-      </Txt>
+      <Txt size="sm" tone="muted">Read the tag on the hinge stile.</Txt>
 
       <Field
         label="FRL on the tag"
@@ -184,23 +169,13 @@ function FrlView() {
         onChangeText={setText}
         placeholder="-/60/30"
         autoCapitalize="characters"
-        hint="A leading FRL, spare spaces and a backslash are all read; anything else is refused rather than repaired."
       />
 
       {!entered ? (
-        <EmptyState
-          icon="keyboard-outline"
-          title="Type what the tag says"
-          body="Exactly what is stamped on it. Nothing here is inferred from a blank, and a two-element shorthand is not accepted as an FRL."
-        />
+        <EmptyState icon="keyboard-outline" title="Type what the tag says" body="Type the FRL exactly as stamped." />
       ) : result.ok ? (
         <>
-          <ResultBlock
-            label="Fire resistance level"
-            value={result.normalised}
-            tone="accent"
-            detail={`Read with ${result.confidence} confidence.`}
-          />
+          <ResultBlock label="Fire resistance level" value={result.normalised} tone="accent" />
 
           <Card>
             <Label>What each position means</Label>
@@ -227,7 +202,7 @@ function FrlView() {
           </Card>
 
           {result.notes.map((n) => (
-            <Banner key={n} tone="warn" title="Worth a second look" body={n} />
+            <Banner key={n} tone="warn" title="Check this" body={n} />
           ))}
         </>
       ) : (
@@ -239,10 +214,8 @@ function FrlView() {
           </Card>
           {result.candidates.length > 0 ? (
             <Card>
-              <Label>Plausible, unproven</Label>
-              <Txt size="xs" tone="faint" style={{ marginTop: 6, lineHeight: 17 }}>
-                Shown so you know what to check for. This is not the answer and must not go on a schedule as one.
-              </Txt>
+              <Label>Possible readings</Label>
+              <Txt size="xs" tone="faint" style={{ marginTop: 6 }}>Confirm on the tag.</Txt>
               <View style={{ gap: t.space(2), marginTop: t.space(2) }}>
                 {result.candidates.map((c) => (
                   <View key={c.normalised} style={{ gap: 3 }}>
@@ -263,7 +236,7 @@ function FrlView() {
         onChangeText={setSchedule}
         placeholder="-/60/30"
         autoCapitalize="characters"
-        hint="Optional. A tag that disagrees with the register is either a wrong record or a changed door."
+        hint="Optional. A mismatch is a wrong record or a changed door."
       />
       {entered && schedule.trim() ? <ScheduleComparison tag={text} schedule={schedule} /> : null}
 
@@ -319,6 +292,22 @@ const RELEASE_LABEL: Record<ReleasePosition, string> = {
   'small-opening': 'Just off the stop',
 };
 
+/**
+ * The tag particulars other than the FRL, ticked as seen.
+ *
+ * The verdict asks whether each one is on the tag, not what it says, so a tick
+ * is the whole of what is needed. Without these a fire door could never be
+ * identified from this screen, whatever was on its tag.
+ */
+const TAG_ITEMS: { key: Exclude<TagParticularKey, 'frl'>; label: string }[] = [
+  { key: 'componentStandard', label: 'Standard' },
+  { key: 'manufacturer', label: 'Manufacturer' },
+  { key: 'applicant', label: 'Applicant' },
+  { key: 'certifier', label: 'Certifier' },
+  { key: 'tagNumber', label: 'Tag number' },
+  { key: 'yearOfManufacture', label: 'Year made' },
+];
+
 function InspectView() {
   const t = useTheme();
   const [doorType, setDoorType] = useState<DoorType>('fire');
@@ -332,6 +321,7 @@ function InspectView() {
   const [tagState, setTagState] = useState<TagState>('present');
   const [frameTagState, setFrameTagState] = useState<TagState>('present');
   const [tagFrl, setTagFrl] = useState('');
+  const [onTag, setOnTag] = useState<Exclude<TagParticularKey, 'frl'>[]>([]);
   const [scheduleFrl, setScheduleFrl] = useState('');
   const [approvedOn, setApprovedOn] = useState('');
 
@@ -340,43 +330,51 @@ function InspectView() {
 
   const toggleRelease = (p: ReleasePosition) =>
     setReleased((prev) => (prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]));
+  const toggleOnTag = (k: Exclude<TagParticularKey, 'frl'>) =>
+    setOnTag((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]));
 
-  const verdict = useMemo(
-    () =>
-      assessDoor({
-        assetId: 'this door',
+  // No verdict until something has actually been recorded against this door.
+  const recorded =
+    released.length > 0 || closedFully !== 'unknown' || latched !== 'unknown' || heldOpen !== 'none'
+    || seals !== 'not-checked' || tagState !== 'present' || frameTagState !== 'present'
+    || onTag.length > 0 || !!tagFrl.trim() || !!scheduleFrl.trim() || !!approvedOn.trim();
+
+  const verdict = useMemo(() => {
+    const particulars: TagParticulars = { frl: tagFrl.trim() || undefined };
+    for (const k of onTag) particulars[k] = 'seen';
+    return assessDoor({
+      assetId: 'this door',
+      doorType,
+      leafAction,
+      frame: 'rebated',
+      scheduleFrl: scheduleFrl.trim() || undefined,
+      closing: {
         doorType,
         leafAction,
-        frame: 'rebated',
-        scheduleFrl: scheduleFrl.trim() || undefined,
-        closing: {
-          doorType,
-          leafAction,
-          releasedFrom: released,
-          closedFully: asBool(closedFully),
-          latched: latching.applies ? asBool(latched) : undefined,
-          heldOpenBy: heldOpen === 'none' ? 'none' : heldOpen,
-          holdOpenReleasedOnAlarm: heldOpen === 'approved-device' ? asBool(holdOpenReleased) : undefined,
-        },
-        smokeSeals: profile.needsSmokeSeals ? seals : undefined,
-        tag: profile.hasTag
-          ? {
-            leaf: {
-              state: tagState,
-              particulars: tagState === 'present' ? { frl: tagFrl.trim() || undefined } : undefined,
-            },
-            frame: { state: frameTagState },
-            scheduleFrl: scheduleFrl.trim() || undefined,
-            buildingApprovedOn: approvedOn.trim() || undefined,
-          }
-          : undefined,
-      }),
-    [
-      doorType, leafAction, released, closedFully, latched, heldOpen, holdOpenReleased,
-      seals, tagState, frameTagState, tagFrl, scheduleFrl, approvedOn, latching.applies,
-      profile.hasTag, profile.needsSmokeSeals,
-    ],
-  );
+        releasedFrom: released,
+        closedFully: asBool(closedFully),
+        latched: latching.applies ? asBool(latched) : undefined,
+        heldOpenBy: heldOpen === 'none' ? 'none' : heldOpen,
+        holdOpenReleasedOnAlarm: heldOpen === 'approved-device' ? asBool(holdOpenReleased) : undefined,
+      },
+      smokeSeals: profile.needsSmokeSeals ? seals : undefined,
+      tag: profile.hasTag
+        ? {
+          leaf: {
+            state: tagState,
+            particulars: tagState === 'present' ? particulars : undefined,
+          },
+          frame: { state: frameTagState },
+          scheduleFrl: scheduleFrl.trim() || undefined,
+          buildingApprovedOn: approvedOn.trim() || undefined,
+        }
+        : undefined,
+    });
+  }, [
+    doorType, leafAction, released, closedFully, latched, heldOpen, holdOpenReleased,
+    seals, tagState, frameTagState, tagFrl, onTag, scheduleFrl, approvedOn, latching.applies,
+    profile.hasTag, profile.needsSmokeSeals,
+  ]);
 
   return (
     <>
@@ -404,8 +402,8 @@ function InspectView() {
       <Banner
         tone={latching.isFailure ? 'warn' : 'info'}
         title={latching.applies
-          ? latching.isFailure ? 'Latching is a failure here, not an observation' : 'Latching is not a defect here'
-          : 'This leaf has no latch to test'}
+          ? latching.isFailure ? 'Not latching is a failure here' : 'Not latching is an observation here'
+          : 'No latch to test'}
         body={latching.reason}
       />
 
@@ -422,12 +420,9 @@ function InspectView() {
           />
         ))}
       </Rowed>
-      <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-        A closer with a weak final snap shuts a door from wide open on momentum and leaves it short from part open,
-        which is where a door is actually let go of. One position is not the check.
-      </Txt>
+      <Txt size="xs" tone="faint">Test from fully open and part open.</Txt>
 
-      <YesNo label="Came fully to the closed position" value={closedFully} onChange={setClosedFully} />
+      <YesNo label="Closed fully" value={closedFully} onChange={setClosedFully} />
       {latching.applies ? (
         <YesNo
           label="Latch engaged"
@@ -464,10 +459,7 @@ function InspectView() {
               { value: 'not-checked', label: 'Not checked' },
             ]}
           />
-          <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-            Continuous, in contact along their length, not painted, not worn flat. A seal that is not touching is not
-            a seal, and this is the check a walk-past always passes.
-          </Txt>
+          <Txt size="xs" tone="faint">Continuous, touching, not painted or flattened.</Txt>
         </>
       ) : null}
 
@@ -495,13 +487,27 @@ function InspectView() {
             ]}
           />
           {tagState === 'present' ? (
-            <Field
-              label="FRL on the tag"
-              value={tagFrl}
-              onChangeText={setTagFrl}
-              placeholder="-/60/30"
-              autoCapitalize="characters"
-            />
+            <>
+              <Field
+                label="FRL on the tag"
+                value={tagFrl}
+                onChangeText={setTagFrl}
+                placeholder="-/60/30"
+                autoCapitalize="characters"
+              />
+              <Label>Also on the tag</Label>
+              <Rowed gap={2} wrap>
+                {TAG_ITEMS.map((item) => (
+                  <Chip
+                    key={item.key}
+                    label={item.label}
+                    selected={onTag.includes(item.key)}
+                    onPress={() => toggleOnTag(item.key)}
+                  />
+                ))}
+              </Rowed>
+              <Txt size="xs" tone="faint">Tick each one you can read.</Txt>
+            </>
           ) : null}
           <Field
             label="FRL on the register"
@@ -516,69 +522,75 @@ function InspectView() {
             onChangeText={setApprovedOn}
             placeholder="d/m/yyyy"
             autoCapitalize="none"
-            hint="Decides whether a tag was required at all. Left blank, this app will not assume a modern building."
+            hint="Decides whether a tag was required."
           />
         </>
       ) : null}
 
       <H2>Verdict</H2>
-      <ResultBlock
-        label="This door"
-        value={OUTCOME_LABEL[verdict.outcome]}
-        tone={OUTCOME_TONE[verdict.outcome]}
-        detail={verdict.statement}
-      />
-      {verdict.reason ? (
-        <Banner
-          tone="warn"
-          title={verdict.outcome === 'unverifiable' ? 'Not a pass' : 'No result'}
-          body={verdict.reason}
-        />
-      ) : null}
+      {!recorded ? (
+        <Txt size="sm" tone="muted">Record what you checked to see the verdict.</Txt>
+      ) : (
+        <>
+          <ResultBlock
+            label="This door"
+            value={OUTCOME_LABEL[verdict.outcome]}
+            tone={OUTCOME_TONE[verdict.outcome]}
+            detail={verdict.statement}
+          />
+          {verdict.reason ? (
+            <Banner
+              tone="warn"
+              title={verdict.outcome === 'unverifiable' ? 'Not a pass' : 'No result'}
+              body={verdict.reason}
+            />
+          ) : null}
 
-      <Rowed gap={2}>
-        <StatTile label="Failed" value={verdict.failedChecks.length} tone={verdict.failedChecks.length ? 'fail' : 'default'} />
-        <StatTile
-          label="No result"
-          value={verdict.checksWithoutVerdict.length}
-          tone={verdict.checksWithoutVerdict.length ? 'warn' : 'default'}
-        />
-        <StatTile
-          label="Identified"
-          value={verdict.identified === undefined ? 'n/a' : verdict.identified ? 'Yes' : 'No'}
-          tone={verdict.identified === false ? 'warn' : 'default'}
-        />
-      </Rowed>
+          <Rowed gap={2}>
+            <StatTile label="Failed" value={verdict.failedChecks.length} tone={verdict.failedChecks.length ? 'fail' : 'default'} />
+            <StatTile
+              label="No result"
+              value={verdict.checksWithoutVerdict.length}
+              tone={verdict.checksWithoutVerdict.length ? 'warn' : 'default'}
+            />
+            <StatTile
+              label="Identified"
+              value={verdict.identified === undefined ? 'n/a' : verdict.identified ? 'Yes' : 'No'}
+              tone={verdict.identified === false ? 'warn' : 'default'}
+            />
+          </Rowed>
 
-      <Card>
-        <Label>Checks</Label>
-        <View style={{ gap: t.space(3), marginTop: t.space(2) }}>
-          {verdict.checks.map((c) => (
-            <View key={c.id} style={{ gap: 4 }}>
-              <Rowed gap={2} wrap>
-                <Chip label={c.result.replace('-', ' ')} tone={CHECK_TONE[c.result]} />
-                <Txt size="sm" weight="700" style={{ flex: 1 }}>{c.label}</Txt>
-                {c.defectCode ? <Chip label={c.defectCode} tone="fail" /> : null}
-              </Rowed>
-              <Txt size="xs" tone="muted" style={{ lineHeight: 17 }}>{c.statement}</Txt>
-              {c.meaning ? <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>{c.meaning}</Txt> : null}
+          <Card>
+            <Label>Checks</Label>
+            <View style={{ gap: t.space(3), marginTop: t.space(2) }}>
+              {verdict.checks.map((c) => (
+                <View key={c.id} style={{ gap: 4 }}>
+                  <Rowed gap={2} wrap>
+                    <Chip label={c.result.replace('-', ' ')} tone={CHECK_TONE[c.result]} />
+                    <Txt size="sm" weight="700" style={{ flex: 1 }}>{c.label}</Txt>
+                    {c.defectCode ? <Chip label={c.defectCode} tone="fail" /> : null}
+                  </Rowed>
+                  <Txt size="xs" tone="muted" style={{ lineHeight: 17 }}>{c.statement}</Txt>
+                  {c.meaning ? <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>{c.meaning}</Txt> : null}
+                </View>
+              ))}
             </View>
-          ))}
-        </View>
-      </Card>
+          </Card>
 
-      {verdict.notes.length > 0 ? (
-        <Card>
-          <Label>Notes</Label>
-          <View style={{ gap: t.space(2), marginTop: t.space(2) }}>
-            {verdict.notes.map((n) => (
-              <Txt key={n} size="xs" tone="faint" style={{ lineHeight: 17 }}>{n}</Txt>
-            ))}
-          </View>
-        </Card>
-      ) : null}
+          {verdict.notes.length > 0 ? (
+            <Card>
+              <Label>Notes</Label>
+              <View style={{ gap: t.space(2), marginTop: t.space(2) }}>
+                {verdict.notes.map((n) => (
+                  <Txt key={n} size="xs" tone="faint" style={{ lineHeight: 17 }}>{n}</Txt>
+                ))}
+              </View>
+            </Card>
+          ) : null}
 
-      <SourceList ids={verdict.sourceIds} />
+          <SourceList ids={verdict.sourceIds} />
+        </>
+      )}
     </>
   );
 }
@@ -601,11 +613,14 @@ function GapView() {
   const [position, setPosition] = useState<GapPosition>('stile');
   const [doorType, setDoorType] = useState<DoorType>('fire');
   const [leafAction, setLeafAction] = useState<LeafAction>('side-hung');
-  const [frame, setFrame] = useState<FrameType>('rebated');
+  // Not assumed: the 3 mm limit is for a rebated frame, so the frame is picked.
+  const [frame, setFrame] = useState<FrameType>('unknown');
   const [covering, setCovering] = useState<FloorCovering>('unknown');
-  const [text, setText] = useState('');
+  // One field per reading. An iPhone's decimal keypad has no comma, so a list
+  // typed into one box could only ever hold a single reading.
+  const [fields, setFields] = useState<string[]>(['']);
 
-  const readings = useMemo(() => readMeasurements(text), [text]);
+  const { readingsMm: readings, unreadable } = useMemo(() => readingsFromFields(fields), [fields]);
   const result = useMemo(
     () => checkGap({
       position,
@@ -619,12 +634,12 @@ function GapView() {
     [position, readings, doorType, leafAction, frame, covering],
   );
 
+  const setField = (i: number, v: string) => setFields((prev) => prev.map((p, j) => (j === i ? v : p)));
+  const removeField = (i: number) => setFields((prev) => prev.filter((_, j) => j !== i));
+
   return (
     <>
-      <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-        “Three around and ten under” is right for exactly one configuration. This makes you say which one you are in,
-        and refuses where no figure can be sourced for it.
-      </Txt>
+      <Txt size="sm" tone="muted">Pick the edge and door type.</Txt>
 
       <Label>Where</Label>
       <Rowed gap={2} wrap>
@@ -689,21 +704,51 @@ function GapView() {
         </>
       ) : null}
 
-      <Field
-        label="Readings"
-        value={text}
-        onChangeText={setText}
-        keyboardType="decimal-pad"
-        suffix="mm"
-        placeholder="2, 2.5, 3"
-        hint="Every reading along that edge, separated by commas. A mean cannot be taken from one."
+      <Label>Readings</Label>
+      {fields.map((value, i) => (
+        <Rowed key={i} gap={2}>
+          <View style={{ flex: 1 }}>
+            <Field
+              value={value}
+              onChangeText={(v) => setField(i, v)}
+              keyboardType="decimal-pad"
+              suffix="mm"
+              placeholder={`Reading ${i + 1}`}
+            />
+          </View>
+          {fields.length > 1 ? (
+            <Pressable
+              onPress={() => removeField(i)}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove reading ${i + 1}`}
+              hitSlop={6}
+              style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}
+            >
+              <MaterialCommunityIcons name="close" size={20} color={t.color.textMuted} />
+            </Pressable>
+          ) : null}
+        </Rowed>
+      ))}
+      <Button
+        title="Add reading"
+        variant="secondary"
+        compact
+        icon={<MaterialCommunityIcons name="plus" size={18} color={t.color.accentText} />}
+        onPress={() => setFields((prev) => [...prev, ''])}
       />
+      <Txt size="xs" tone="faint">Enter every reading along the edge.</Txt>
 
-      {readings.length === 0 ? (
+      {unreadable.length > 0 ? (
+        <Banner
+          tone="warn"
+          title="Check the readings"
+          body={`Reading ${unreadable.join(', ')} is not a number.`}
+        />
+      ) : readings.length === 0 ? (
         <EmptyState
           icon="ruler"
           title="Enter the measurements"
-          body="All of them. The limits that apply here are written against a mean, not against the worst point you found."
+          body="At least three per stile and two across the head."
         />
       ) : result.known ? (
         <>
@@ -723,7 +768,6 @@ function GapView() {
           <Card>
             <Rowed gap={2} wrap>
               <Chip label={result.within ? 'Within' : 'Outside'} tone={result.within ? 'pass' : 'fail'} />
-              <Chip label={result.confidence} tone={CONFIDENCE_TONE[result.confidence]} />
               {result.defectCode ? <Chip label={result.defectCode} tone="fail" /> : null}
             </Rowed>
             <Txt size="sm" weight="700" style={{ marginTop: t.space(2) }}>{result.limit.label}</Txt>
@@ -744,15 +788,12 @@ function GapView() {
         </>
       ) : (
         <>
-          <Banner tone="warn" title="No limit this app can source" body={result.reason} />
+          <Banner tone="warn" title="No published limit" body={result.reason} />
           <Card>
             <Label>What to do</Label>
             <Txt size="sm" style={{ marginTop: 6, lineHeight: 19 }}>{result.whatToDo}</Txt>
             <Divider />
-            <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-              Record the measurement anyway. It is evidence even without a limit to hold it to, and it is what the
-              certifier will ask for.
-            </Txt>
+            <Txt size="xs" tone="faint">Record the measurement anyway.</Txt>
           </Card>
           <SourceList ids={result.sourceIds} />
         </>
@@ -776,11 +817,7 @@ function ReferenceView() {
 
   return (
     <>
-      <H2>What the tag has to establish</H2>
-      <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-        A doorset without a readable tag may be working perfectly and still cannot be proved to be the door the
-        schedule describes. Each particular closes off a different way that can go wrong.
-      </Txt>
+      <H2>What the tag must show</H2>
       <Card>
         <View style={{ gap: t.space(3) }}>
           {TAG_PARTICULARS.map((p) => (
@@ -795,7 +832,7 @@ function ReferenceView() {
         </View>
       </Card>
 
-      <H2>Was a tag required at all</H2>
+      <H2>Was a tag required</H2>
       <Field
         label="Building approved"
         value={approvedOn}
@@ -803,17 +840,17 @@ function ReferenceView() {
         placeholder="d/m/yyyy"
         autoCapitalize="none"
       />
-      <Banner
-        tone={requirement.required === true ? 'info' : requirement.required === false ? 'pass' : 'warn'}
-        title={requirement.required === true ? 'Tags required'
-          : requirement.required === false ? 'Tags not required at approval' : 'Cannot be answered'}
-        body={requirement.whatToDo ? `${requirement.reason} ${requirement.whatToDo}` : requirement.reason}
-      />
+      {approvedOn.trim() ? (
+        <Banner
+          tone={requirement.required === true ? 'info' : requirement.required === false ? 'pass' : 'warn'}
+          title={requirement.required === true ? 'Tags required'
+            : requirement.required === false ? 'Tags not required at approval' : 'Check with the certifier'}
+          body={requirement.whatToDo ? `${requirement.reason} ${requirement.whatToDo}` : requirement.reason}
+        />
+      ) : null}
       <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-        Queensland publishes this date two ways. The current Queensland Fire Department information sheet gives{' '}
-        {formatAuDate(TAG_REQUIRED_FROM)}; the superseded 2012 QFRS fire door FAQ gives{' '}
-        {formatAuDate(TAG_REQUIRED_FROM_SUPERSEDED)}. For an approval between them this app refuses rather than
-        choosing between two Crown publications.
+        QFD gives {formatAuDate(TAG_REQUIRED_FROM)}; the superseded 2012 QFRS FAQ gives{' '}
+        {formatAuDate(TAG_REQUIRED_FROM_SUPERSEDED)}. Between these dates, check with the certifier.
       </Txt>
 
       <H2>Door types</H2>
@@ -839,15 +876,12 @@ function ReferenceView() {
         </Card>
       ))}
 
-      <H2>Sourced clearances</H2>
+      <H2>Clearances</H2>
       <Card>
         <View style={{ gap: t.space(3) }}>
           {GAP_LIMITS.map((limit) => (
             <View key={limit.position} style={{ gap: 3 }}>
-              <Rowed gap={2} wrap>
-                <Chip label={limit.confidence} tone={CONFIDENCE_TONE[limit.confidence]} />
-                <Txt size="sm" weight="700" style={{ flex: 1 }}>{limit.label}</Txt>
-              </Rowed>
+              <Txt size="sm" weight="700">{limit.label}</Txt>
               <Txt size="sm" mono tone="accent">
                 {limit.minMm !== undefined && limit.maxMm !== undefined
                   ? `${limit.minMm}–${limit.maxMm} mm`
@@ -862,18 +896,14 @@ function ReferenceView() {
           ))}
           <Divider />
           <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-            A sliding face clearance also has a {SLIDING_FACE_ANY_POINT_MAX_MM} mm ceiling at any single point, and a
-            required sign is in capital letters at least {SIGN_MIN_LETTER_HEIGHT_MM} mm high contrasting with its
-            background{'known' in sign ? '' : ` — currently “${sign.wording.replace(/\n/g, ' / ')}” under ${sign.clause}`}.
+            Sliding face: {SLIDING_FACE_ANY_POINT_MAX_MM} mm max at any single point. Door sign: capitals at least{' '}
+            {SIGN_MIN_LETTER_HEIGHT_MM} mm high, contrasting with the background
+            {'known' in sign ? '.' : `, now “${sign.wording.replace(/\n/g, ' / ')}” (${sign.clause}).`}
           </Txt>
         </View>
       </Card>
 
-      <H2>Where this app has no figure</H2>
-      <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-        Every one of these has a number that circulates on site. None of them has a number that can be sourced, and a
-        clearance in a report is a figure a client spends money against.
-      </Txt>
+      <H2>No published figure</H2>
       {Object.entries(UNSOURCED_GAPS).map(([key, gap]) => (
         <Card key={key}>
           <Rowed gap={2}>
@@ -885,8 +915,7 @@ function ReferenceView() {
         </Card>
       ))}
 
-      <H2>Everything this screen relies on</H2>
-      <SourceList ids={Object.keys(SOURCES) as SourceId[]} title="Sources, with what each is worth" />
+      <SourceList ids={Object.keys(SOURCES) as SourceId[]} />
     </>
   );
 }

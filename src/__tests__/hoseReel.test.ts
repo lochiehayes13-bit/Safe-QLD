@@ -69,7 +69,7 @@ describe('the sources behind every figure', () => {
     // a statutory document. The honest answer is that this app does not know.
     expect(SOURCES.as1851.confidence).not.toBe('high');
     expect(SOURCES.as1851.basis).toMatch(/section number is NOT established/i);
-    expect(AS1851_SECTION_NOT_ESTABLISHED).toMatch(/does not print an AS 1851-2012 section or item number/i);
+    expect(AS1851_SECTION_NOT_ESTABLISHED).toMatch(/AS 1851 section .* office copy/i);
   });
 
   it('marks the two trade pages low confidence and the government code high, and never the other way round', () => {
@@ -133,14 +133,14 @@ describe('what one reel reaches', () => {
     const c = coverage(36, 6);
     if (isRefused(c)) throw new Error(c.reason);
     expect(c.confidence).toBe('low');
-    expect(c.notes.join(' ')).toMatch(/Nothing here supports that figure/);
+    expect(c.notes.join(' ')).toMatch(/Record where it came from/);
   });
 
   it('refuses a hose length it was not given rather than assuming the common one', () => {
     for (const bad of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
       const c = coverage(bad);
       expect(isRefused(c)).toBe(true);
-      if (isRefused(c)) expect(c.whatToDo).toMatch(/Read the length/);
+      if (isRefused(c)) expect(c.whatToDo).toMatch(/Measure the hose on the reel/);
     }
   });
 
@@ -214,8 +214,8 @@ describe('how many reels a floor plausibly needs', () => {
     const e = estimateReels(10_000, 36);
     if (isRefused(e)) throw new Error(e.reason);
     const notes = e.notes.join(' ');
-    expect(notes).toMatch(/bare-floor minimum is a true lower bound/);
-    expect(notes).toMatch(/grid figure is not a lower bound/);
+    expect(notes).toMatch(/Bare-floor minimum: fewer reels cannot cover this area/);
+    expect(notes).toMatch(/Grid estimate: a square layout/);
     const hexagonal = Math.ceil(10_000 / ((3 * Math.sqrt(3)) / 2) / (40 * 40));
     expect(hexagonal).toBeLessThan(e.gridEstimate);
     expect(hexagonal).toBeGreaterThanOrEqual(e.idealMinimum);
@@ -264,7 +264,7 @@ describe('the duty a reel has to deliver', () => {
     expect(isRefused(d)).toBe(true);
     if (isRefused(d)) {
       expect(d.reason).toMatch(/Table 6\.1/);
-      expect(d.whatToDo).toMatch(/purchased copy/);
+      expect(d.whatToDo).toMatch(/office copy/);
     }
   });
 
@@ -282,7 +282,7 @@ describe('checking a measured flow against a supplied duty', () => {
   it('refuses to test against a duty nobody supplied, because a tick with nothing behind it is worse than no tick', () => {
     const r = checkFlow({ measuredFlowLitresPerMinute: 24 });
     expect(isRefused(r)).toBe(true);
-    if (isRefused(r)) expect(r.whatToDo).toMatch(/will not assume one/);
+    if (isRefused(r)) expect(r.reason).toMatch(/No duty entered/);
   });
 
   it('refuses when nothing was measured, and says the test is taken with the hose run out', () => {
@@ -348,7 +348,8 @@ describe('checking a measured flow against a supplied duty', () => {
     if (isRefused(r)) throw new Error(r.reason);
     expect(r.verdict).toBe('fail');
     expect(r.flow.margin).toBe(-19.4);
-    expect(r.notes.join(' ')).toMatch(/factor of sixty/);
+    // Shown beside the verdict in L/s, the unit the duty is written in.
+    expect(r.measuredFlowLitresPerSecond).toBe(0.01);
   });
 
   it('fails a reel that flowed nothing, instead of filing zero as "not measured"', () => {
@@ -397,7 +398,7 @@ describe('checking a measured flow against a supplied duty', () => {
     if (isRefused(r)) throw new Error(r.reason);
     expect(r.verdict).toBe('undetermined');
     expect(r.pressure.verdict).toBe('not-measured');
-    expect(r.statement).toMatch(/not the same thing/);
+    expect(r.statement).toMatch(/^Pressure at the reel inlet not measured\. Not proved/);
   });
 
   it('still fails a measured shortfall even when the other half of the test was skipped', () => {
@@ -442,7 +443,7 @@ describe('checking a measured flow against a supplied duty', () => {
   it('says a pressure reading has to be taken with water flowing, not with the nozzle shut', () => {
     const r = checkFlow({ measuredRunningPressureKpa: 300, dutyPressureKpa: 220 });
     if (isRefused(r)) throw new Error(r.reason);
-    expect(r.notes.join(' ')).toMatch(/Static pressure with the nozzle/);
+    expect(r.notes.join(' ')).toMatch(/Not static, not at the nozzle/);
   });
 });
 
@@ -611,7 +612,7 @@ describe('when the next one falls due', () => {
     expect(d.state).toBe('overdue');
     expect(d.due.earliest).toBe('2024-07-01');
     expect(d.missedOccurrences).toBe(5);
-    expect(d.notes.join(' ')).toMatch(/oldest one still outstanding/);
+    expect(d.notes.join(' ')).toMatch(/oldest one owed/);
   });
 
   it('keeps "never recorded" separate from "overdue" so the worse fact survives', () => {
@@ -640,7 +641,7 @@ describe('when the next one falls due', () => {
     expect(d.due.earliest).toBe('2025-12-01');
     expect(d.due.latest).toBe('2025-12-30');
     expect(d.due.label).toBe('December 2025');
-    expect(d.notes.join(' ')).toMatch(/No day has been invented/);
+    expect(d.notes.join(' ')).toMatch(/within December 2025, not on a set day/);
   });
 
   it('carries a bare year through as a year-wide span rather than snapping it to January', () => {
@@ -655,7 +656,7 @@ describe('when the next one falls due', () => {
   it('applies no tolerance window, and says so rather than leaving it to be discovered', () => {
     const d = nextDue({ activity: 'six-monthly', commissioned: '01/01/2020', today: TODAY });
     if (isRefused(d)) throw new Error(d.reason);
-    expect(d.notes.join(' ')).toMatch(/No tolerance window has been applied/);
+    expect(d.notes.join(' ')).toMatch(/No tolerance window applied/);
   });
 
   it('falls back to the last service when there is no anchor, and marks the answer as the weaker one it is', () => {
@@ -664,7 +665,7 @@ describe('when the next one falls due', () => {
     expect(d.anchoredTo).toBe('last-service');
     expect(d.confidence).toBe('low');
     expect(d.due.earliest).toBe('2027-02-20');
-    expect(d.notes.join(' ')).toMatch(/drift the anchor rule exists to prevent/);
+    expect(d.notes.join(' ')).toMatch(/lateness carries forward/);
   });
 
   it('uses the first recorded service as the anchor where commissioning is unknown', () => {
@@ -865,7 +866,7 @@ describe('the site rollup', () => {
     expect(r.unknown).toBe(3); // FHR-04, all three activities
     const six = r.byActivity.find((b) => b.activity === 'six-monthly')!;
     expect(six.unknownReasons[0]!.count).toBe(1);
-    expect(six.unknownReasons[0]!.reason).toMatch(/Nothing readable to count from/);
+    expect(six.unknownReasons[0]!.reason).toMatch(/No date to count from/);
   });
 
   it('lists the reel whose hose has to come off, by asset and by location', () => {

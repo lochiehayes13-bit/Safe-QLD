@@ -70,8 +70,7 @@ export type SourceId =
   | 'qbcc-portable'
   | 'alexon-types'
   | 'essentialfire-types'
-  | 'wormald-adverse'
-  | 'nfpa10-co2-charge';
+  | 'wormald-adverse';
 
 export interface Source {
   id: SourceId;
@@ -93,7 +92,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'as1851-s10': {
     id: 'as1851-s10',
     what: 'That portable and wheeled fire extinguishers are serviced under Section 10, at six-monthly, yearly and five-yearly frequencies',
-    ref: 'AS 1851-2012, Section 10 (routine service of portable and wheeled fire extinguishers)',
+    ref: 'AS 1851-2012, Section 10',
     url: 'https://www.standards.org.au/standards-catalogue/standard-details?designation=as-1851-2012',
     confidence: 'high',
     basis:
@@ -104,7 +103,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'amsa-707': {
     id: 'amsa-707',
     what: 'The six-monthly inspection item list, that the extinguisher is weighed to establish it is fully charged, and that AS 1851 also carries a yearly and a five-yearly service',
-    ref: 'Australian Maritime Safety Authority, Guidance Notice AMSA 707 (2/17), February 2017, Attachment 1',
+    ref: 'AMSA Guidance Notice 707 (2/17), Attachment 1',
     url: 'https://www.amsa.gov.au/sites/default/files/2023-11/amsa707_inspection_of_portable_fire_extinguishers.pdf',
     confidence: 'high',
     basis:
@@ -115,7 +114,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'fpa-servicing': {
     id: 'fpa-servicing',
     what: 'Six-monthly inspection of all extinguishers; weighing where there is no pressure gauge; emptying, pressure testing and refilling every five years; refill after any discharge; and that Queensland is the only state licensing extinguisher technicians',
-    ref: 'Fire Protection Association Australia, Fact Sheet V1 SFE1, "Servicing Fire Extinguishers — A Guide for Consumers"',
+    ref: 'FPA Australia Fact Sheet SFE1',
     url: 'https://www.eh.org.au/documents/item/721',
     confidence: 'medium',
     basis:
@@ -126,7 +125,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'firewize-5yr': {
     id: 'firewize-5yr',
     what: 'That the five-yearly falls on the anniversary of the date of manufacture stamped on the cylinder, and that the pressure test is at the greater of 1.5 times working pressure or 2 MPa',
-    ref: 'Firewize, "What is the date stamp on portable fire extinguishers", citing AS 1851-2012 Table 10.4.3 and AS/NZS 1841.1:2007 marking requirements',
+    ref: 'Firewize, extinguisher date stamps (AS 1851 Table 10.4.3)',
     url: 'https://firewize.com.au/learn/what-date-stamp-portable-fire-extinguishers',
     confidence: 'low',
     basis:
@@ -137,7 +136,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'co2-ten-year-claim': {
     id: 'co2-ten-year-claim',
     what: 'The competing claim that carbon dioxide extinguishers are pressure tested at ten years while every other portable is tested at five',
-    ref: 'Firechief Australia, fire extinguisher pressure testing guide — "CO2 extinguishers require testing every 10 years" against five years for most portables',
+    ref: 'Firechief, extinguisher pressure testing guide',
     url: 'https://firechief.net.au/fire-extinguisher-pressure-testing-adelaide-guide/',
     confidence: 'low',
     basis:
@@ -150,7 +149,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'as1841-series': {
     id: 'as1841-series',
     what: 'Which part of the AS/NZS 1841 series specifies each extinguisher type, and that the date of manufacture is a required marking',
-    ref: 'AS/NZS 1841 series: 1841.1 general requirements, then parts 2 to 8 by type',
+    ref: 'AS/NZS 1841 series',
     url: 'https://www.standards.org.au/standards-catalogue/standard-details?designation=as-nzs-1841-1-2007',
     confidence: 'medium',
     basis:
@@ -161,7 +160,7 @@ export const SOURCES: Record<SourceId, Source> = {
   as2444: {
     id: 'as2444',
     what: 'That extinguisher location signage and selection/placement is governed by its own standard, which the six-monthly inspection checks against',
-    ref: 'AS 2444 (portable fire extinguishers and fire blankets — selection and location)',
+    ref: 'AS 2444 Selection and location',
     url: 'https://www.standards.org.au/standards-catalogue/standard-details?designation=as-2444-2001',
     confidence: 'medium',
     basis:
@@ -171,7 +170,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'dcceew-halon': {
     id: 'dcceew-halon',
     what: 'That halon extinguishers may not be owned or used in Australia without an approved essential use, that surrendered halon goes to the National Halon Bank, and that disposal has been free of charge since 1 January 2023',
-    ref: 'Department of Climate Change, Energy, the Environment and Water — Halon disposal; Australian Halon Management Strategy',
+    ref: 'DCCEEW, halon disposal',
     url: 'https://www.dcceew.gov.au/environment/protection/ozone/halon/halon-disposal',
     confidence: 'high',
     basis:
@@ -181,7 +180,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'qbcc-portable': {
     id: 'qbcc-portable',
     what: 'That Queensland licenses portable fire equipment work by class, and that a certify licence does not authorise inspect-and-test work',
-    ref: 'Queensland Building and Construction Commission — fire protection (portable) certify licence class, scope of work',
+    ref: 'QBCC, fire protection (portable) licence',
     url: 'https://qbcc.qld.gov.au/licences/apply-licence/available-licences/fire-protection/fire-protection-portable-certify',
     confidence: 'high',
     basis:
@@ -195,7 +194,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'alexon-types': {
     id: 'alexon-types',
     what: 'Colour bands and the fire classes each Australian extinguisher type is sold against',
-    ref: 'Alexon (Australian supplier), fire extinguisher types, classes and colour bands',
+    ref: 'Alexon, extinguisher types and colour bands',
     url: 'https://www.alexon.com.au/news/fire-extinguisher-types-a-complete-guide-to-classes-and-colour-bands',
     confidence: 'low',
     basis:
@@ -205,7 +204,7 @@ export const SOURCES: Record<SourceId, Source> = {
   'essentialfire-types': {
     id: 'essentialfire-types',
     what: 'Colour bands and fire classes, including BE powder and the class-by-class prohibitions',
-    ref: 'Essential Fire Services (Australian contractor), Australian fire extinguisher types',
+    ref: 'Essential Fire Services, extinguisher types',
     url: 'https://www.essentialfire.net.au/extinguisher-types',
     confidence: 'low',
     basis:
@@ -216,23 +215,13 @@ export const SOURCES: Record<SourceId, Source> = {
   'wormald-adverse': {
     id: 'wormald-adverse',
     what: 'That AS 1851-2012 sets a separate regime for equipment in adverse or aggressive environments, at clause 1.13',
-    ref: 'Wormald Australia, understanding adverse environments, citing AS 1851-2012 Clause 1.13',
+    ref: 'Wormald, adverse environments (AS 1851 Clause 1.13)',
     url: 'https://wormald.com.au/blog/understanding-adverse-environments/',
     confidence: 'low',
     basis:
       "A manufacturer's blog. Relied on only for the existence of the clause and the fact that servicing frequency "
       + 'increases in an adverse environment. By how much it increases is not established here, and this module will '
       + 'not shorten an interval on the strength of it.',
-  },
-  'nfpa10-co2-charge': {
-    id: 'nfpa10-co2-charge',
-    what: 'The ten-per-cent-of-charge weight loss threshold at which a carbon dioxide extinguisher is recharged',
-    ref: 'North American carbon dioxide extinguisher service manual, written to NFPA 10',
-    url: 'https://www.strike-first.com/site/assets/files/1031/co2_service_manual_v2.pdf',
-    confidence: 'low',
-    basis:
-      'Not Australian and not AS 1851. Carried only so the figure a technician has probably heard can be shown with '
-      + 'its actual origin attached. This module will not issue a pass or fail on it — see chargeTolerance().',
   },
 };
 
@@ -311,21 +300,21 @@ export function isRefused(v: unknown): v is Refused {
 export type FireClass = 'A' | 'B' | 'C' | 'D' | 'E' | 'F';
 
 export const FIRE_CLASS_LABEL: Record<FireClass, string> = {
-  A: 'Class A — ordinary combustibles',
-  B: 'Class B — flammable and combustible liquids',
-  C: 'Class C — flammable gases',
-  D: 'Class D — combustible metals',
-  E: 'Class E — electrically energised equipment',
-  F: 'Class F — cooking oils and fats',
+  A: 'Class A: ordinary combustibles',
+  B: 'Class B: flammable and combustible liquids',
+  C: 'Class C: flammable gases',
+  D: 'Class D: combustible metals',
+  E: 'Class E: electrically energised equipment',
+  F: 'Class F: cooking oils and fats',
 };
 
 export const FIRE_CLASS_EXAMPLES: Record<FireClass, string> = {
   A: 'Timber, paper, cardboard, textiles, most plastics.',
   B: 'Petrol, diesel, solvents, paints, oils that are not cooking oils.',
-  C: 'LPG, natural gas, acetylene — a leak alight at the point of escape.',
+  C: 'LPG, natural gas, acetylene: a leak alight where it escapes.',
   D: 'Magnesium, sodium, lithium, titanium, and swarf of the same.',
   E: 'Switchboards, motors, appliances and cabling while still energised. De-energise and it becomes whatever it is made of.',
-  F: 'Deep fryers, woks, griddles — cooking oils and fats at cooking temperature.',
+  F: 'Deep fryers, woks, griddles: cooking oils and fats at cooking temperature.',
 };
 
 // ===========================================================================
@@ -357,7 +346,7 @@ export type Suitability = 'rated' | 'conditional' | 'unrated' | 'prohibited';
 export const SUITABILITY_LABEL: Record<Suitability, string> = {
   rated: 'Rated',
   conditional: 'Only in stated circumstances',
-  unrated: 'Not rated — will not put it out',
+  unrated: 'Not rated: will not put it out',
   prohibited: 'MUST NOT be used',
 };
 
@@ -419,14 +408,10 @@ const CLASS_C_CONDITIONAL: Omit<ClassSuitability, 'sourceIds'> = {
   fireClass: 'C',
   suitability: 'conditional',
   consequence:
-    'Do not extinguish a burning gas escape unless the supply can be isolated first. Putting the flame out while gas '
-    + 'is still flowing fills the space with an explosive mixture and leaves the ignition source in it. Isolate, then '
-    + 'deal with what the gas has set alight. This is a statement about the gas valve and not a rating: whether this '
-    + "agent does anything to a gas fire is on the extinguisher's own label.",
+    'Isolate the gas first. Put out with gas still flowing, it fills the space with an explosive mix; isolate, then '
+    + 'deal with what is alight. This is about the valve, not a rating: check the label.',
   confidence: 'medium',
-  dispute:
-    'The two trade sources reached disagree on whether ABE powder carries a Class C rating at all. It makes no '
-    + 'difference to what a technician should do, which is isolate the gas.',
+  dispute: 'Trade sources differ on whether ABE carries a Class C rating. Either way, isolate the gas.',
 };
 
 /**
@@ -438,8 +423,8 @@ const CLASS_D_PROHIBITED = (sourceIds: SourceId[]): ClassSuitability => ({
   fireClass: 'D',
   suitability: 'prohibited',
   consequence:
-    'Burning metal reacts with water and with carbon dioxide, and reduces both to fuel. Class D needs a purpose-made '
-    + 'metal-fire agent, which Safe QLD does not carry and this app does not model. Nothing in this list will do it.',
+    'Burning metal reacts with water and CO₂ and feeds on both. Class D needs a purpose-made metal-fire agent; nothing '
+    + 'in this list will do it.',
   confidence: 'medium',
   sourceIds,
 });
@@ -470,8 +455,8 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
         fireClass: 'E',
         suitability: 'prohibited',
         consequence:
-          'The jet is a conductor. The operator is holding the other end of it. This is the prohibition that kills '
-          + 'people, and a plain red cylinder in front of a switchboard is the commonest way it happens.',
+          'The jet is a conductor and the operator is holding the other end. A plain red cylinder by a switchboard is '
+          + 'how people get killed.',
         confidence: 'high',
         sourceIds: ['alexon-types', 'essentialfire-types'],
       },
@@ -486,8 +471,7 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
       },
     ],
     handlingCautions: [
-      'Plain red with no band. Do not read an unbanded cylinder as "band missing" — that is what a water extinguisher '
-      + 'looks like, and it is the one that must never go near electrical equipment.',
+      'Plain red with no band is a water extinguisher, not a missing band. Keep it away from electrical equipment.',
     ],
     sourceIds: ['as1841-series', 'alexon-types', 'essentialfire-types'],
   },
@@ -518,22 +502,21 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
         fireClass: 'F',
         suitability: 'prohibited',
         consequence:
-          'Same failure as water: the carrier flashes to steam below the oil surface and throws it out. Cooking oil '
-          + 'is a Class F fire and takes wet chemical, not foam, whatever the foam is rated for on Class B.',
+          'Same as water: it flashes to steam under the oil and throws it out. Cooking oil takes wet chemical, not foam.',
         confidence: 'high',
         sourceIds: ['alexon-types', 'essentialfire-types'],
       },
     ],
     handlingCautions: [
-      'Foam concentrates are being reformulated across Australia as fluorinated foams are phased out. Check what the '
-      + 'unit is actually charged with before refilling it, and check the site is not under a PFAS management plan.',
+      'Foam concentrates are changing as fluorinated foams are phased out. Check what it holds before refilling, and '
+      + 'whether the site has a PFAS management plan.',
     ],
     sourceIds: ['as1841-series', 'alexon-types', 'essentialfire-types'],
   },
 
   'dry-chemical-abe': {
     type: 'dry-chemical-abe',
-    label: 'Dry chemical powder — ABE',
+    label: 'Dry chemical powder (ABE)',
     shortLabel: 'ABE',
     agent: 'Monoammonium phosphate based dry chemical powder',
     standardPart: 'AS/NZS 1841.5',
@@ -549,27 +532,24 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
         fireClass: 'F',
         suitability: 'prohibited',
         consequence:
-          'The discharge splashes burning oil out of the vat, and powder does not cool. What is left is oil still above '
-          + 'its auto-ignition temperature, so it relights — often after the operator has walked away believing it is '
-          + 'out. This is the single most common wrong-extinguisher finding in a commercial kitchen.',
+          'Splashes burning oil out of the vat and does not cool it, so it relights, often after the operator walks '
+          + 'away. The commonest wrong-extinguisher finding in a kitchen.',
         confidence: 'high',
         sourceIds: ['alexon-types', 'essentialfire-types'],
       },
     ],
     handlingCautions: [
-      'Discharged indoors it takes visibility to nothing in seconds. In a small plant room the operator can lose the '
-      + 'way out.',
-      'The powder is mildly corrosive and gets everywhere. Discharged over a switchboard or a server rack it will '
-      + 'often cost more than the fire did — which is the argument for CO₂ in those rooms, not a safety prohibition.',
-      'Invert and shake at the six-monthly to confirm the powder is still free-flowing. Powder that has packed will '
-      + 'not discharge whatever the gauge says.',
+      'Discharged indoors it kills visibility in seconds. In a small plant room the way out can be lost.',
+      'Mildly corrosive and gets everywhere. Over a switchboard or server rack it can cost more than the fire; use '
+      + 'CO₂ there.',
+      'Invert and shake at the six-monthly. Packed powder will not discharge whatever the gauge says.',
     ],
     sourceIds: ['as1841-series', 'alexon-types', 'essentialfire-types'],
   },
 
   'dry-chemical-be': {
     type: 'dry-chemical-be',
-    label: 'Dry chemical powder — BE',
+    label: 'Dry chemical powder (BE)',
     shortLabel: 'BE',
     agent: 'Sodium bicarbonate based dry chemical powder',
     standardPart: 'AS/NZS 1841.5',
@@ -580,9 +560,8 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
         fireClass: 'A',
         suitability: 'unrated',
         consequence:
-          'BE powder does not carry a Class A rating. It knocks flame down without forming the crust that holds a '
-          + 'deep-seated fire in ordinary combustibles, so the fire comes back. This is the difference from ABE and it '
-          + 'is invisible on the cylinder — both carry a white band.',
+          'No Class A rating. It knocks flame down but does not crust over, so a deep-seated fire comes back. It looks '
+          + 'the same as ABE: both carry a white band.',
         confidence: 'medium',
         sourceIds: ['essentialfire-types'],
       },
@@ -593,20 +572,14 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
       {
         fireClass: 'F',
         suitability: 'prohibited',
-        consequence:
-          'Some overseas guidance credits bicarbonate powder with saponifying cooking oil. The Australian trade source '
-          + 'reached does not, and a Class F risk is served by wet chemical. Treat BE as prohibited on Class F: the '
-          + 'splash risk is the same as ABE and the cooling is no better.',
+        consequence: 'Treat as prohibited on Class F: it splashes like ABE and does not cool. Use wet chemical.',
         confidence: 'low',
         sourceIds: ['essentialfire-types'],
-        dispute:
-          'Overseas material sometimes rates bicarbonate powder for cooking oil. No Australian source reached does. '
-          + 'The conservative reading is used and this is why.',
+        dispute: 'Some overseas guidance rates bicarbonate powder for cooking oil. No Australian source does.',
       },
     ],
     handlingCautions: [
-      'ABE and BE wear the same white band. If the register or the tag does not say which, read the label — the '
-      + 'difference is a whole fire class.',
+      'ABE and BE share a white band. If the register or tag does not say which, read the label.',
       'Same visibility and residue problems as ABE.',
     ],
     sourceIds: ['as1841-series', 'essentialfire-types'],
@@ -625,8 +598,8 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
         fireClass: 'A',
         suitability: 'unrated',
         consequence:
-          'CO₂ smothers but does not wet or cool. A deep-seated fire in paper or timber reignites behind it once the '
-          + 'gas disperses, which outdoors or in a draught is almost immediately.',
+          'Smothers but does not cool. Paper or timber reignites once the gas disperses, almost at once outdoors or in '
+          + 'a draught.',
         confidence: 'high',
         sourceIds: ['alexon-types', 'essentialfire-types'],
       },
@@ -636,30 +609,23 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
       {
         fireClass: 'E',
         suitability: 'rated',
-        consequence:
-          'Non-conductive and leaves no residue, which is why it is the extinguisher for switchrooms, comms rooms and '
-          + 'laboratories where powder would write off the equipment.',
+        consequence: 'Non-conductive and leaves no residue: the one for switchrooms, comms rooms and labs.',
         confidence: 'high',
         sourceIds: ['alexon-types', 'essentialfire-types'],
       },
       {
         fireClass: 'F',
         suitability: 'prohibited',
-        consequence:
-          'The discharge velocity blows burning oil straight out of the vat, and CO₂ does nothing to cool oil that is '
-          + 'above its auto-ignition temperature. A CO₂ unit mounted in a kitchen is a defect to be raised, not a '
-          + 'preference to be noted.',
+        consequence: 'Blows burning oil out of the vat and does not cool it. A CO₂ unit in a kitchen is a defect to raise.',
         confidence: 'high',
         sourceIds: ['alexon-types', 'essentialfire-types'],
       },
     ],
     handlingCautions: [
-      'No pressure gauge. A CO₂ extinguisher is only proved full by weighing it — the six-monthly gauge check that '
-      + 'covers every other type does not exist on this one.',
-      'The horn reaches cryogenic temperatures in use. Hold the handle, not the horn.',
-      'Discharged in a small closed room it displaces the air. Get out with it.',
-      'High-pressure cylinder. Any body damage, thread damage or corrosion on a CO₂ extinguisher is a more serious '
-      + 'finding than the same damage on a stored-pressure unit.',
+      'No pressure gauge. Only weighing proves it full.',
+      'The horn gets cryogenically cold in use. Hold the handle, not the horn.',
+      'In a small closed room it displaces the air. Get out with it.',
+      'High-pressure cylinder. Body, thread or corrosion damage is more serious than on a stored-pressure unit.',
     ],
     sourceIds: ['as1841-series', 'alexon-types', 'essentialfire-types'],
   },
@@ -678,16 +644,12 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
         suitability: 'rated',
         confidence: 'medium',
         sourceIds: ['alexon-types'],
-        dispute:
-          'One trade source rates wet chemical for Class A as well as F; the other lists it for Class F only. Rely on '
-          + "the rating printed on the extinguisher's own label, which is what the fire load was assessed against.",
+        dispute: 'Trade sources differ on a Class A rating. Go by the label.',
       },
       {
         fireClass: 'B',
         suitability: 'unrated',
-        consequence:
-          'Rated for cooking oils and fats, which is not the same thing as flammable liquids generally. Do not treat a '
-          + 'kitchen unit as covering the solvent store.',
+        consequence: 'Rated for cooking oils, not flammable liquids generally. A kitchen unit does not cover the solvent store.',
         confidence: 'medium',
         sourceIds: ['essentialfire-types'],
       },
@@ -697,25 +659,21 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
         fireClass: 'E',
         suitability: 'prohibited',
         consequence:
-          'The agent is a salt solution and conducts. In a commercial kitchen the fryer, the griddle and the power to '
-          + 'both are within arm’s reach of each other, so this prohibition is a live one: isolate before use.',
+          'A salt solution: it conducts. Fryer, griddle and their power are within arm’s reach, so isolate before use.',
         confidence: 'high',
         sourceIds: ['alexon-types', 'essentialfire-types'],
       },
       {
         fireClass: 'F',
         suitability: 'rated',
-        consequence:
-          'The only agent in this list rated for cooking oils. It saponifies the surface into a soap layer and cools '
-          + 'below auto-ignition — which is why the discharge is a gentle spray and must not be rushed.',
+        consequence: 'The only agent here rated for cooking oils. It forms a soap layer and cools the oil; apply it slowly.',
         confidence: 'high',
         sourceIds: ['alexon-types', 'essentialfire-types'],
       },
     ],
     handlingCautions: [
-      'Applied as a slow spray, not a jet. Discharged like a powder unit it splashes the oil it is supposed to be '
-      + 'blanketing.',
-      'A kitchen with a Class F risk and no wet chemical unit is a selection defect, whatever else is on the wall.',
+      'A slow spray, not a jet. Rushed, it splashes the oil it should be blanketing.',
+      'A Class F risk with no wet chemical unit is a selection defect.',
     ],
     sourceIds: ['as1841-series', 'alexon-types', 'essentialfire-types'],
   },
@@ -734,10 +692,7 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
         suitability: 'rated',
         confidence: 'low',
         sourceIds: ['as1841-series'],
-        dispute:
-          'Neither trade source reached covers vaporising liquid extinguishers. The ratings here follow the general '
-          + "clean-agent case and must be replaced with the rating printed on the unit's own label before they are "
-          + 'used on a document.',
+        dispute: 'General clean-agent ratings. Use the rating on the label.',
       },
       { fireClass: 'B', suitability: 'rated', confidence: 'low', sourceIds: ['as1841-series'] },
       { ...CLASS_C_CONDITIONAL, sourceIds: ['as1841-series'] },
@@ -746,16 +701,13 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
       {
         fireClass: 'F',
         suitability: 'prohibited',
-        consequence:
-          'A gaseous agent does not cool oil that is above its auto-ignition temperature. Same failure as CO₂: it goes '
-          + 'out and then it comes back.',
+        consequence: 'A gas does not cool oil above its auto-ignition temperature. Like CO₂, it goes out and comes back.',
         confidence: 'medium',
         sourceIds: ['as1841-series'],
       },
     ],
     handlingCautions: [
-      'Clean agents differ from each other. Read the label rather than assuming a rating from the yellow band, and '
-      + 'record the agent name on the asset — a refill has to match it.',
+      'Clean agents differ. Read the label, not the band, and record the agent name: a refill has to match.',
       'Not halon. If the label says BCF, halon 1211 or halon 1301, classify it as halon and stop.',
     ],
     sourceIds: ['as1841-series'],
@@ -763,9 +715,9 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
 
   halon: {
     type: 'halon',
-    label: 'Halon (BCF) — withdrawn',
+    label: 'Halon (BCF), withdrawn',
     shortLabel: 'Halon',
-    agent: 'Halon 1211 (BCF) or halon 1301 — an ozone depleting substance',
+    agent: 'Halon 1211 (BCF) or halon 1301, an ozone depleting substance',
     colourBand: 'Yellow band on older units. Do not rely on the band: read the label.',
     hasPressureGauge: null,
     classes: [
@@ -789,10 +741,8 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
     ],
     withdrawn: {
       statement:
-        'Halon has not been lawful to own or use in Australia since 1995 except under an approved essential use, such '
-        + 'as on board aircraft. A halon extinguisher found on a commercial building is surrendered to the National '
-        + 'Halon Bank, not serviced and not condemned as scrap. Surrender has been free of charge since 1 January '
-        + '2023. Treat this as a legal obligation on the owner, and say so in writing.',
+        'Not lawful to own or use in Australia since 1995 outside an approved essential use. Surrender it to the '
+        + 'National Halon Bank (free since 1 January 2023); do not service or scrap it. Tell the owner in writing.',
       sourceIds: ['dcceew-halon'],
     },
     sourceIds: ['dcceew-halon'],
@@ -862,7 +812,7 @@ export function checkUse(type: ExtinguisherType, fireClass: FireClass): UseVerdi
     return {
       known: false,
       code: 'no-position-held',
-      reason: `This app holds no position on ${profile.label} against ${FIRE_CLASS_LABEL[fireClass]}.`,
+      reason: `No rating held for ${profile.label} on ${FIRE_CLASS_LABEL[fireClass]}.`,
       whatToDo: "Read the rating printed on the extinguisher's own label and record it against the asset.",
       sourceIds: profile.sourceIds,
     };
@@ -974,9 +924,7 @@ export function classifyTypeText(text: string | undefined): TypeMatch | Refused 
       known: false,
       code: 'type-cell-two-agents',
       reason: `"${raw}" names more than one agent: ${distinct.map((t) => PROFILES[t].shortLabel).join(' and ')}.`,
-      whatToDo:
-        'One row per extinguisher. Split the row, or read the label and record the one agent this asset actually '
-        + 'holds.',
+      whatToDo: 'One row per extinguisher. Read the label and record the one agent it holds.',
       sourceIds: ['as1841-series'],
     };
   }
@@ -987,10 +935,8 @@ export function classifyTypeText(text: string | undefined): TypeMatch | Refused 
     return {
       known: false,
       code: 'type-cell-ambiguous-powder',
-      reason:
-        `"${raw}" says powder without saying whether it is ABE or BE. The two carry the same white band and differ on `
-        + 'Class A, so this cannot be settled from the cell.',
-      whatToDo: 'Read the label at the next attendance. Until then treat the asset as unclassified, not as ABE.',
+      reason: `"${raw}" says powder but not ABE or BE. They share a white band and differ on Class A.`,
+      whatToDo: 'Read the label. Until then treat it as unclassified, not as ABE.',
       sourceIds: ['essentialfire-types'],
     };
   }
@@ -998,7 +944,7 @@ export function classifyTypeText(text: string | undefined): TypeMatch | Refused 
   return {
     known: false,
     code: 'type-cell-unrecognised',
-    reason: `"${raw}" does not name an extinguisher type this app recognises.`,
+    reason: `"${raw}" is not a known extinguisher type.`,
     whatToDo: 'Read the label and record the agent. Do not assume from the size or the location.',
     sourceIds: ['as1841-series'],
   };
@@ -1047,7 +993,7 @@ const SIX_MONTHLY_ITEMS = [
   'Anti-tamper device intact, maintenance record tag attached and legible.',
   'Body, hose and horn undamaged, uncorroded and unobstructed; operating instructions readable.',
   'Pressure indicator reading in the operable band, where one is fitted.',
-  'Weighed to establish it is fully charged — the only check there is on a unit with no gauge.',
+  'Weighed to confirm full charge; the only check on a unit with no gauge.',
   'Location sign visible.',
   'Powder units inverted to confirm the powder is still free-flowing.',
 ];
@@ -1075,9 +1021,8 @@ export function intervalsFor(type: ExtinguisherType): IntervalSpec[] {
       intervalMonths: 12,
       label: ACTIVITY_LABEL.yearly,
       what: [
-        'The six-monthly inspection, plus the additional yearly items for this type.',
-        'Which extra items fall at the yearly rather than the six-monthly is not established in this app. Work the '
-        + 'yearly from the purchased copy of Section 10 and not from this list.',
+        'The six-monthly inspection, plus the yearly items for this type.',
+        'Work the yearly items from the office copy of Section 10.',
       ],
       confidence: 'medium',
       sourceIds: ['as1851-s10', 'amsa-707', 'fpa-servicing'],
@@ -1126,12 +1071,8 @@ export function pressureTestInterval(type: ExtinguisherType): PressureTestInterv
       confidence: 'low',
       sourceIds: ['as1851-s10', 'firewize-5yr', 'co2-ten-year-claim'],
       dispute:
-        'Sources disagree. Guidance describing AS 1851 Section 10 puts every portable extinguisher on a five-yearly '
-        + 'test; an Australian contractor reached puts CO₂ on a ten-yearly test while leaving every other portable on '
-        + 'five. Neither source names the clause or the cylinder standard the ten years would come from, so no '
-        + 'standard designation is asserted for it here. Five years is used because it is the shorter, not because '
-        + 'the ten-year reading has been disproved. Settle it against the purchased copy before quoting a client '
-        + 'either way.',
+        'AS 1851 Section 10 guidance puts every portable on five years; one contractor puts CO₂ on a ten-yearly test. '
+        + 'Five years is used as the shorter. Check the office copy before quoting either.',
       note:
         'A CO₂ body is a high-pressure cylinder and is tested at a gas cylinder test station, not on the van.',
     };
@@ -1142,9 +1083,7 @@ export function pressureTestInterval(type: ExtinguisherType): PressureTestInterv
       anchor: 'date-of-manufacture',
       confidence: 'low',
       sourceIds: ['dcceew-halon'],
-      note:
-        'Academic. A halon extinguisher is not pressure tested and returned to service — it is surrendered to the '
-        + 'National Halon Bank.',
+      note: 'Not tested: halon is surrendered to the National Halon Bank.',
     };
   }
   return {
@@ -1152,10 +1091,7 @@ export function pressureTestInterval(type: ExtinguisherType): PressureTestInterv
     anchor: 'date-of-manufacture',
     confidence: 'medium',
     sourceIds: ['as1851-s10', 'fpa-servicing', 'firewize-5yr'],
-    note:
-      'Discharged, stripped, tested and recharged on the anniversary of manufacture. The industry body notes there '
-      + '"may be other servicing requirements at 3, 5 or 6 years"; this app does not know what those are and does not '
-      + 'invent them.',
+    note: 'Discharged, stripped, tested and recharged on the anniversary of manufacture.',
   };
 }
 
@@ -1175,9 +1111,8 @@ export function pressureTestInterval(type: ExtinguisherType): PressureTestInterv
 export function adverseEnvironmentCaution(): { statement: string; sourceIds: SourceId[]; confidence: Confidence } {
   return {
     statement:
-      'This asset is in an adverse environment. AS 1851-2012 sets a separate regime for equipment in aggressive '
-      + 'environments at clause 1.13, and servicing frequency increases. By how much is not established in this app, '
-      + 'so the intervals shown have NOT been shortened. Set the frequency from the purchased copy and record why.',
+      'Coastal, dusty or corrosive sites: AS 1851-2012 Clause 1.13 increases the frequency. The intervals shown have '
+      + 'NOT been shortened; set them from the office copy.',
     sourceIds: ['wormald-adverse', 'as1851-s10'],
     confidence: 'low',
   };
@@ -1402,9 +1337,7 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
         `The ${ACTIVITY_LABEL[input.activity].toLowerCase()} is held at ${spec.intervalMonths} months but its date `
         + `arithmetic runs on a ${frequencyMonths ?? 'missing'}-month schedule. The two disagree, so no due date is `
         + 'given.',
-      whatToDo:
-        'This is a fault in the app, not in the register. Report it — the interval and the schedule frequency for '
-        + 'this activity have to be the same length.',
+      whatToDo: 'Report it to the office. The register is not at fault.',
       sourceIds,
     };
   }
@@ -1416,12 +1349,8 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
     return {
       known: false,
       code: 'no-anchor-date',
-      reason:
-        `Neither a date of manufacture nor a record of the last ${ACTIVITY_LABEL[input.activity].toLowerCase()} is `
-        + 'readable, so there is nothing to count from.',
-      whatToDo:
-        'Read the date stamped on the cylinder at the next attendance. Every extinguisher carries one, and it is the '
-        + 'anchor this schedule is supposed to run from.',
+      reason: 'No date of manufacture and no last service: nothing to count from.',
+      whatToDo: 'Read the date stamped on the cylinder.',
       sourceIds: ['as1841-series', 'firewize-5yr'],
     };
   }
@@ -1430,10 +1359,8 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
     return {
       known: false,
       code: 'manufacture-in-future',
-      reason: `The date of manufacture reads ${manufactured.label}, which is in the future.`,
-      whatToDo:
-        'Re-read the stamp. A two-digit year read as the wrong century is the usual cause, and the register needs '
-        + 'correcting at the source system rather than here.',
+      reason: `Date of manufacture ${manufactured.label} is in the future.`,
+      whatToDo: 'Re-read the stamp and check the year.',
       sourceIds: ['as1841-series'],
     };
   }
@@ -1447,12 +1374,8 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
     return {
       known: false,
       code: 'service-in-future',
-      reason:
-        `The last ${ACTIVITY_LABEL[input.activity].toLowerCase()} reads ${lastDone.label}, which has not happened `
-        + 'yet.',
-      whatToDo:
-        'Correct the date in the source system. Until it is corrected this asset has no schedule — a service dated '
-        + 'in the future counts an occurrence nobody carried out.',
+      reason: `Last service ${lastDone.label} has not happened yet.`,
+      whatToDo: 'Correct the date in the register before scheduling from it.',
       sourceIds: ['as1841-series'],
     };
   }
@@ -1461,12 +1384,8 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
     return {
       known: false,
       code: 'service-before-manufacture',
-      reason:
-        `The last ${ACTIVITY_LABEL[input.activity].toLowerCase()} reads ${lastDone.label}, which is before the date of `
-        + `manufacture of ${manufactured.label}.`,
-      whatToDo:
-        'One of the two dates is wrong. Do not schedule from either until the register is corrected — an asset '
-        + 'scheduled off a bad anchor reads as compliant for years.',
+      reason: `Last service ${lastDone.label} is before the date of manufacture, ${manufactured.label}.`,
+      whatToDo: 'One date is wrong. Do not schedule from either until the register is fixed.',
       sourceIds: ['as1841-series'],
     };
   }
@@ -1475,11 +1394,7 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
   const anchoredTo = manufactured ? 'date-of-manufacture' : 'last-service';
 
   if (anchoredTo === 'last-service') {
-    notes.push(
-      'No date of manufacture was readable, so this is counted forward from the last service. Any lateness already in '
-      + 'the record is carried forward with it, which is exactly the drift the anchor rule exists to prevent. Read the '
-      + 'stamp off the cylinder and re-assess.',
-    );
+    notes.push('Counted from the last service, so any lateness carries forward. Enter the manufacture date on the cylinder.');
   }
 
   // Which occurrence has already been done.
@@ -1546,37 +1461,24 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
   const missedOccurrences = Math.max(0, dueByNow - nextOccurrence + 1);
 
   if (missedOccurrences > 1) {
-    notes.push(
-      `${missedOccurrences} occurrences of this activity have fallen due since the last recorded one. The date shown `
-      + 'is the oldest one still outstanding, not the most recent.',
-    );
+    notes.push(`${missedOccurrences} missed. The date shown is the oldest one still outstanding.`);
   }
   if (notCredited && lastDone) {
     notes.push(
-      `The last one recorded, ${lastDone.label}, sits between scheduled dates — ${notCredited.months} months before `
-      + `occurrence ${notCredited.occurrence}, which is more than a quarter of the interval. It has not been counted `
-      + 'as that occurrence, so that occurrence is still outstanding. Under the anchor rule a service done well '
-      + 'before a scheduled date does not satisfy it.',
+      `Last one recorded, ${lastDone.label}, was ${notCredited.months} months before occurrence `
+      + `${notCredited.occurrence}: too early to count, so that one is still outstanding.`,
     );
   }
   if (earlyCredit && lastDone) {
     notes.push(
-      `The last one recorded, ${lastDone.label}, was ${earlyCredit.months} month`
-      + `${earlyCredit.months === 1 ? '' : 's'} before occurrence ${earlyCredit.occurrence} fell due and has been `
-      + 'counted as it. No tolerance window is being asserted by that — it is close enough to the date that reading '
-      + 'it as the next one instead would report a service that never happened.',
+      `Last one recorded, ${lastDone.label}, was ${earlyCredit.months} month`
+      + `${earlyCredit.months === 1 ? '' : 's'} before occurrence ${earlyCredit.occurrence} and is counted as it.`,
     );
   }
   if (due.precision !== 'day') {
-    notes.push(
-      `The anchor was recorded as "${anchor.raw}" — ${anchor.precision === 'month' ? 'a month' : 'a year'} with no `
-      + `day — so the next one is due within ${due.label} rather than on a particular date. No day has been invented.`,
-    );
+    notes.push(`Recorded as "${anchor.raw}", so it is due within ${due.label}, not on a set day.`);
   }
-  notes.push(
-    'No tolerance window has been applied. The AS 1851 Section 6 tolerances this app holds are for detection and '
-    + 'alarm systems; what Section 10 allows on an extinguisher is not established here, so none is assumed.',
-  );
+  notes.push('No tolerance window applied.');
   if (spec.dispute) notes.push(spec.dispute);
 
   return {
@@ -1585,8 +1487,8 @@ export function nextDue(input: DueInput): DueAssessment | Refused {
     anchoredTo,
     anchorNote:
       anchoredTo === 'date-of-manufacture'
-        ? `Counted from the date of manufacture, ${anchor.label}. Occurrence ${nextOccurrence} since manufacture.`
-        : `Counted from the last service, ${anchor.label}, because no date of manufacture was readable.`,
+        ? `Counted from the date of manufacture, ${anchor.label}.`
+        : `Counted from the last service, ${anchor.label}.`,
     occurrence: nextOccurrence,
     due,
     state,
@@ -1649,8 +1551,8 @@ export const CONDITION_RULES: Record<ConditionFinding, ConditionRule> = {
       'Halon has not been lawful to own or use in Australia since 1995 outside an approved essential use. This is a '
       + 'legal position, not a condition assessment, and it outranks every other finding on the asset.',
     action:
-      'Do not discharge and do not refill. Remove from service and surrender the unit to the National Halon Bank — '
-      + 'free of charge since 1 January 2023 — and put the obligation to the owner in writing.',
+      'Do not discharge or refill. Remove from service, surrender it to the National Halon Bank (free since 1 January '
+      + '2023), and tell the owner in writing.',
     confidence: 'high',
     sourceIds: ['dcceew-halon'],
   },
@@ -1690,12 +1592,9 @@ export const CONDITION_RULES: Record<ConditionFinding, ConditionRule> = {
     label: 'Corrosion or pitting on the body',
     outcome: 'judgement',
     reason:
-      'Surface rust on a coastal site is cosmetic; pitting that has taken metal out of the wall is a condemnation. '
-      + 'Which one this is depends on depth, extent and where on the body it sits, and none of that reaches this app '
-      + 'from a checkbox.',
-    action:
-      'The technician on site decides, and records the decision with a photograph. If it is close, it goes to the '
-      + 'five-yearly strip where the inside can be seen, not back on the wall.',
+      'Surface rust on a coastal site is cosmetic; pitting that has taken metal out of the wall condemns it. Depth, '
+      + 'extent and position decide.',
+    action: 'Decide on site and photograph it. If it is close, send it to the five-yearly strip, not back on the wall.',
     confidence: 'medium',
     sourceIds: ['amsa-707', 'wormald-adverse'],
   },
@@ -1706,7 +1605,7 @@ export const CONDITION_RULES: Record<ConditionFinding, ConditionRule> = {
     reason:
       'A shallow dent in the skirt is not the same as a gouge across a weld seam. On a CO₂ cylinder, working at far '
       + 'higher pressure, the same damage is a more serious finding than it would be on a stored-pressure unit.',
-    action: 'Decided on site, with a photograph. Where it is a CO₂ body and there is any doubt, condemn.',
+    action: 'Decide on site and photograph it. On a CO₂ body, if in doubt, condemn.',
     confidence: 'medium',
     sourceIds: ['amsa-707'],
   },
@@ -1728,12 +1627,11 @@ export const CONDITION_RULES: Record<ConditionFinding, ConditionRule> = {
     label: 'Type, rating or instructions unreadable',
     outcome: 'judgement',
     reason:
-      'An extinguisher nobody can identify cannot be selected, cannot be refilled with the right agent and cannot be '
-      + 'used under stress by someone reading it for the first time. Sometimes the label is replaceable; sometimes the '
-      + 'markings are stamped and gone.',
+      'Nobody can select it, refill it with the right agent, or use it under stress. A label can be replaced; stamped '
+      + 'markings cannot.',
     action:
-      'Replace the label if the markings can be established from the stamping. If the agent cannot be established at '
-      + 'all, condemn — an unknown agent must not be discharged at an unknown fire.',
+      'Replace the label if the stamping shows what it is. If the agent cannot be established, condemn it: an unknown '
+      + 'agent must not go on an unknown fire.',
     confidence: 'medium',
     sourceIds: ['amsa-707', 'as1841-series'],
   },
@@ -1741,12 +1639,8 @@ export const CONDITION_RULES: Record<ConditionFinding, ConditionRule> = {
     id: 'no-date-of-manufacture',
     label: 'No readable date of manufacture',
     outcome: 'judgement',
-    reason:
-      'The date stamp is the anchor the five-yearly runs from. Without it there is no way to say whether the pressure '
-      + 'test is due, and a schedule counted from the last service instead will drift.',
-    action:
-      'Search the base and the neck before concluding it is absent. If it genuinely is not there, the asset cannot be '
-      + 'scheduled properly and should be replaced at the next five-yearly rather than tested indefinitely.',
+    reason: 'The five-yearly counts from the date stamp. Without it the pressure test date is unknown.',
+    action: 'Check the base and the neck first. If there is no stamp, replace it at the next five-yearly.',
     confidence: 'medium',
     sourceIds: ['as1841-series', 'firewize-5yr'],
   },
@@ -1776,9 +1670,7 @@ export const CONDITION_RULES: Record<ConditionFinding, ConditionRule> = {
     reason:
       'A broken seal means it may have been operated, and an extinguisher that has been operated at all no longer '
       + 'holds a full charge however little came out.',
-    action:
-      'Refill and reseal. The industry position is explicit that a partially discharged extinguisher is refilled '
-      + 'between the five-yearly services, not topped up or left.',
+    action: 'Refill and reseal. A partly discharged unit is refilled, not topped up or left.',
     confidence: 'medium',
     sourceIds: ['fpa-servicing'],
   },
@@ -1789,7 +1681,7 @@ export const CONDITION_RULES: Record<ConditionFinding, ConditionRule> = {
     reason:
       'Packed powder will not discharge no matter what the gauge reads, which makes the gauge check on a powder unit '
       + 'a partial check at best.',
-    action: 'Strip, replace the powder charge and recharge. Look at the mounting — vibration is the usual cause.',
+    action: 'Strip, replace the powder charge and recharge. Check the mounting: vibration is the usual cause.',
     confidence: 'medium',
     sourceIds: ['amsa-707'],
   },
@@ -1895,9 +1787,7 @@ export function assessCondition(input: ConditionInput): ConditionAssessment {
       needsJudgement,
       repairable,
       unrecognised,
-      statement:
-        'No condition assessment was carried out on this asset, so nothing can be said about it. An absence of '
-        + 'findings from an extinguisher nobody looked at is not a pass.',
+      statement: 'Not inspected, so no verdict. No findings from an unchecked extinguisher is not a pass.',
       sourceIds: ['as1851-s10', 'amsa-707'],
     };
   }
@@ -1909,9 +1799,7 @@ export function assessCondition(input: ConditionInput): ConditionAssessment {
       needsJudgement,
       repairable,
       unrecognised,
-      statement:
-        `This app has no rule for ${unrecognised.map((u) => `"${u}"`).join(', ')}, so it cannot say whether the asset `
-        + 'is serviceable. A person has to rule on it and the finding should be added to the rules.',
+      statement: `No rule for ${unrecognised.map((u) => `"${u}"`).join(', ')}. Decide on site and record it.`,
       sourceIds: sourceIds.length ? sourceIds : ['as1851-s10'],
     };
   }
@@ -1924,9 +1812,8 @@ export function assessCondition(input: ConditionInput): ConditionAssessment {
       repairable,
       unrecognised,
       statement:
-        `A person has to decide: ${needsJudgement.map((r) => r.label.toLowerCase()).join('; ')}. `
-        + 'Until that decision is recorded the asset is neither condemned nor serviceable, and it must not be tagged '
-        + 'as either.',
+        `Decide on site: ${needsJudgement.map((r) => r.label.toLowerCase()).join('; ')}. Until then it is neither `
+        + 'condemned nor serviceable.',
       sourceIds,
     };
   }
@@ -1951,9 +1838,7 @@ export function assessCondition(input: ConditionInput): ConditionAssessment {
     needsJudgement,
     repairable,
     unrecognised,
-    statement:
-      'Inspected, and nothing found that takes it out of service. This covers what a routine inspection can see; it '
-      + 'is not a statement about the inside of the body, which is only seen at the five-yearly strip.',
+    statement: 'Inspected: nothing takes it out of service. The inside of the body is only seen at the five-yearly.',
     sourceIds: ['as1851-s10', 'amsa-707'],
   };
 }
@@ -1973,7 +1858,7 @@ export interface ChargeTolerance {
    * is what an empty-array fallback did here, puts AS 1851 Section 10 beside a
    * number that AS 1851 never stated, in a document a client reads.
    */
-  origin: 'manufacturer-plate' | 'app-held';
+  origin: 'manufacturer-plate';
   confidence: Confidence;
   sourceIds: SourceId[];
   /** Why this figure should be treated carefully. Always present. */
@@ -1981,33 +1866,15 @@ export interface ChargeTolerance {
 }
 
 /**
- * The permitted variation in charge mass, by type.
+ * The permitted variation in charge mass: the figure on this extinguisher's
+ * own plate, and nothing else.
  *
- * This is deliberately almost empty, and the emptiness is the point. Weighing
- * an extinguisher is the check; the pass or fail is entirely a function of the
- * tolerance applied, and this app could not find that tolerance stated in any
- * Australian publication it can reach. The one figure that exists here — ten
- * per cent of the charge for carbon dioxide — comes from a North American
- * service manual written to NFPA 10, and it is carried with that fact attached
- * rather than dressed up as AS 1851.
- *
- * Everything else returns nothing, and checkCharge refuses instead of guessing.
- * The right answer on site is the tolerance printed on the extinguisher's own
- * label or plate, which the caller can pass in.
+ * Weighing is the check, and the pass or fail is entirely a function of the
+ * tolerance applied. No Australian publication states one, so none is held
+ * here for any type — not even carbon dioxide, where the only figure in
+ * circulation is North American. Every type gets a verdict once the plate
+ * figure is entered, and none gets one before.
  */
-export const CHARGE_TOLERANCE: Partial<Record<ExtinguisherType, ChargeTolerance>> = {
-  'carbon-dioxide': {
-    percentOfCharge: 10,
-    origin: 'app-held',
-    confidence: 'low',
-    sourceIds: ['nfpa10-co2-charge'],
-    caveat:
-      'Not an Australian figure. It comes from a North American service manual written to NFPA 10, and is offered '
-      + 'only because a CO₂ extinguisher has no gauge and weighing is the only check there is. The tolerance on the '
-      + "unit's own plate governs; where the plate states one, pass it in.",
-  },
-};
-
 export function chargeTolerance(
   type: ExtinguisherType,
   manufacturerPercent?: number,
@@ -2017,8 +1884,8 @@ export function chargeTolerance(
       return {
         known: false,
         code: 'tolerance-not-a-percentage',
-        reason: `A tolerance of ${manufacturerPercent}% is not a usable figure.`,
-        whatToDo: 'Re-read the plate. The tolerance is a small percentage of the charge, not of the gross mass.',
+        reason: `${manufacturerPercent}% is not a usable tolerance.`,
+        whatToDo: 'Re-read the plate. It is a percentage of the charge, not of the gross mass.',
         sourceIds: ['as1851-s10'],
       };
     }
@@ -2027,24 +1894,15 @@ export function chargeTolerance(
       origin: 'manufacturer-plate',
       confidence: 'high',
       sourceIds: [],
-      caveat:
-        "Taken from the manufacturer's own marking on this extinguisher, which is the figure that governs. It is a "
-        + 'reading off the asset and not a published figure, so no document is cited for it — record the plate in the '
-        + 'photographs instead.',
+      caveat: 'From the plate on this extinguisher. Photograph the plate.',
     };
   }
-  const known = CHARGE_TOLERANCE[type];
-  if (known) return known;
   return {
     known: false,
     code: 'no-charge-tolerance',
-    reason:
-      `This app holds no charge tolerance for ${PROFILES[type].label}, and will not borrow one from another type. A `
-      + 'few hundred grams either way decides whether an extinguisher goes back on a wall.',
-    whatToDo:
-      "Read the permitted variation off the extinguisher's own label or plate and pass it in. Failing that, check the "
-      + 'gauge and refer the weight to the five-yearly strip.',
-    sourceIds: ['as1851-s10', 'fpa-servicing'],
+    reason: `No plate tolerance entered for this ${PROFILES[type].shortLabel} unit.`,
+    whatToDo: 'Enter the tolerance from the plate.',
+    sourceIds: [],
   };
 }
 
@@ -2058,7 +1916,7 @@ export interface ChargeCheck {
   /** Difference as a percentage of the expected charge, to one decimal. */
   differencePercent: number;
   tolerancePercent: number;
-  /** Whether the tolerance is the app's own held figure or this asset's plate. */
+  /** Where the tolerance came from: always this asset's plate. */
   toleranceOrigin: ChargeTolerance['origin'];
   toleranceCaveat: string;
   state: ChargeState;
@@ -2104,8 +1962,8 @@ const isWholeGrams = (n: unknown): n is number =>
  *
  * It refuses in five separate places, and each of them is a real record seen on
  * a register: a gross mass at or below the tare, a tare nobody recorded, no
- * expected charge to compare against, a type this app has no tolerance for, and
- * a tolerance figure that is not a percentage.
+ * expected charge to compare against, no tolerance read off the plate, and a
+ * tolerance figure that is not a percentage.
  */
 export function checkCharge(input: ChargeInput): ChargeCheck | Refused {
   const { type, tareGrams, grossGrams } = input;
@@ -2115,10 +1973,8 @@ export function checkCharge(input: ChargeInput): ChargeCheck | Refused {
     return {
       known: false,
       code: 'mass-not-read',
-      reason: 'The tare or gross mass is missing or is not a mass.',
-      whatToDo:
-        'Read the tare off the cylinder stamping and weigh the extinguisher. Both in grams — a kilogram figure '
-        + 'entered here reads as a very light extinguisher.',
+      reason: 'Tare or gross is missing.',
+      whatToDo: 'Tare off the cylinder stamping, gross off the scales, both in grams.',
       sourceIds: ['amsa-707'],
     };
   }
@@ -2127,12 +1983,8 @@ export function checkCharge(input: ChargeInput): ChargeCheck | Refused {
     return {
       known: false,
       code: 'mass-not-whole-grams',
-      reason:
-        `A mass of ${!isWholeGrams(tareGrams) ? tareGrams : grossGrams} g is not a whole number of grams, and this `
-        + 'check works in whole grams so that a subtraction never turns into a float.',
-      whatToDo:
-        'Enter both masses as whole grams. A decimal here is almost always kilograms in a grams field — 3.5 is three '
-        + 'and a half grams, not a 3.5 kg extinguisher.',
+      reason: `${!isWholeGrams(tareGrams) ? tareGrams : grossGrams} g is not a whole number of grams.`,
+      whatToDo: 'Enter whole grams. A decimal is usually kilograms in a grams field.',
       sourceIds: ['amsa-707'],
     };
   }
@@ -2141,13 +1993,9 @@ export function checkCharge(input: ChargeInput): ChargeCheck | Refused {
     return {
       known: false,
       code: 'gross-at-or-below-tare',
-      reason:
-        `The extinguisher weighs ${grossGrams} g and its stamped empty mass is ${tareGrams} g, so it appears to hold `
-        + 'no agent at all.',
+      reason: `Weighs ${grossGrams} g against a stamped tare of ${tareGrams} g: no agent at all.`,
       whatToDo:
-        'One of the two figures is wrong — usually a tare read off the wrong stamping, or a scale still in kilograms. '
-        + 'Check both before writing anything down. If the reading is real the extinguisher is empty, which is a '
-        + 'defect and not a weight check.',
+        'Check the tare stamping, and for a scale still in kilograms. If both are right it is empty: raise a defect.',
       sourceIds: ['amsa-707'],
     };
   }
@@ -2163,10 +2011,8 @@ export function checkCharge(input: ChargeInput): ChargeCheck | Refused {
     return {
       known: false,
       code: 'mass-not-whole-grams',
-      reason:
-        `The charge to compare against works out at ${expected} g, which is not a whole number of grams. The label `
-        + 'figure it came from is in the wrong unit or has been mistyped.',
-      whatToDo: "Re-read the nominal charge or the full gross mass off the label and enter it as whole grams.",
+      reason: `The charge works out at ${expected} g, not a whole number of grams.`,
+      whatToDo: 'Re-read the nominal charge off the label, in whole grams.',
       sourceIds: ['amsa-707'],
     };
   }
@@ -2175,10 +2021,8 @@ export function checkCharge(input: ChargeInput): ChargeCheck | Refused {
     return {
       known: false,
       code: 'no-expected-charge',
-      reason: 'There is nothing to compare the weight against — no nominal charge and no labelled full gross mass.',
-      whatToDo:
-        "Read the charge or the full gross mass off the extinguisher's label. Without one of them a weight is a "
-        + 'number, not a check.',
+      reason: 'No nominal charge, so nothing to compare the weight against.',
+      whatToDo: 'Enter the charge from the label.',
       sourceIds: ['amsa-707', 'fpa-servicing'],
     };
   }
@@ -2204,14 +2048,13 @@ export function checkCharge(input: ChargeInput): ChargeCheck | Refused {
 
   const statement =
     state === 'within-tolerance'
-      ? `Holding ${actual} g against ${expected} g nominal, ${differencePercent > 0 ? '+' : ''}${differencePercent}% — `
-        + `within the ±${tolerance.percentOfCharge}% applied.`
+      ? `Holding ${actual} g against ${expected} g nominal (${differencePercent > 0 ? '+' : ''}${differencePercent}%), `
+        + `within ±${tolerance.percentOfCharge}%.`
       : state === 'undercharged'
-        ? `Short by ${Math.abs(difference)} g, ${Math.abs(differencePercent)}% of the nominal charge, against a `
-          + `±${tolerance.percentOfCharge}% allowance. The extinguisher has lost agent and must be recharged.`
-        : `Heavier than nominal by ${difference} g, ${differencePercent}% of the charge, against a `
-          + `±${tolerance.percentOfCharge}% allowance. Overcharging is not a harmless error — check the tare stamping `
-          + 'and what the unit was last filled with.';
+        ? `Short by ${Math.abs(difference)} g (${Math.abs(differencePercent)}%) against ±${tolerance.percentOfCharge}%. `
+          + 'Recharge it.'
+        : `Over by ${difference} g (${differencePercent}%) against ±${tolerance.percentOfCharge}%. Check the tare `
+          + 'stamping and what it was filled with.';
 
   return {
     actualChargeGrams: actual,
@@ -2517,8 +2360,7 @@ export function rollupSite(entries: RegisterEntry[], todayIso: string, horizonMo
  * paperwork nicety.
  */
 export const QLD_LICENSING_NOTE =
-  'Queensland licenses portable fire equipment work by class through the QBCC, and is the only state that licenses '
-  + 'extinguisher technicians at all. The class held has to cover the work actually done — a certify class does not '
-  + 'authorise inspect and test — and the licence number goes on the record of maintenance.';
+  'The QBCC licenses portable fire work by class. The class must cover the work done (a certify class does not cover '
+  + 'inspect and test), and the licence number goes on the record.';
 
 export const QLD_LICENSING_SOURCE: SourceId[] = ['qbcc-portable', 'fpa-servicing'];

@@ -26,6 +26,7 @@ import {
   latchingApplies,
   parseAuDate,
   parseFrl,
+  readingsFromFields,
   requiredSignWording,
   summariseDoors,
   tagRequirement,
@@ -396,6 +397,24 @@ describe('the tag — what it has to establish', () => {
     expect(a.statement).toContain('information sheet lists');
   });
 
+  it('identifies a door from particulars ticked as seen, which is how the Inspect tab records them', () => {
+    // The screen types the FRL and ticks the other six as present. Presence is
+    // what identification turns on, so a full set of ticks identifies the door
+    // and one missing tick does not.
+    const seen: TagParticulars = {
+      componentStandard: 'seen', frl: '-/60/30', manufacturer: 'seen', applicant: 'seen',
+      certifier: 'seen', tagNumber: 'seen', yearOfManufacture: 'seen',
+    };
+    const all = assessTag({ leaf: { state: 'present', particulars: seen }, frame: { state: 'present' } });
+    expect(all.identified).toBe(true);
+    const short = assessTag({
+      leaf: { state: 'present', particulars: { ...seen, certifier: undefined } },
+      frame: { state: 'present' },
+    });
+    expect(short.identified).toBe(false);
+    expect(short.missingParticulars.map((p) => p.key)).toEqual(['certifier']);
+  });
+
   it('explains the manufacturer field by the recall it exists to make possible', () => {
     const manufacturer = TAG_PARTICULARS.find((p) => p.key === 'manufacturer')!;
     expect(manufacturer.establishes).toContain('recall');
@@ -475,7 +494,7 @@ describe('tagRequirement — the date Queensland publishes two ways', () => {
   it('refuses a date it cannot read instead of falling back to today', () => {
     const r = tagRequirement({ buildingApprovedOn: 'about 1980' });
     expect(r.required).toBeUndefined();
-    expect(r.reason).toContain('not a date this app will read');
+    expect(r.reason).toContain('is not a date. Use d/m/yyyy');
   });
 });
 
@@ -702,6 +721,33 @@ describe('clearance gaps — every sourced limit carries its clause', () => {
   });
 });
 
+describe('readings typed one field at a time', () => {
+  // The Gaps tab gives each reading its own field, because the iPhone decimal
+  // keypad has no comma to separate a list with. These are the fields as typed.
+  it('turns several fields into several readings, so a mean can be taken on an iPhone', () => {
+    const { readingsMm, unreadable } = readingsFromFields(['2', '2.5', '3']);
+    expect(readingsMm).toEqual([2, 2.5, 3]);
+    expect(unreadable).toEqual([]);
+    const c = checkGap({ position: 'stile', readingsMm, doorType: 'fire', leafAction: 'side-hung', frame: 'rebated' });
+    expect(c.known).toBe(true);
+    if (c.known) expect(c.valueMm).toBe(2.5);
+  });
+
+  it('skips the empty field Add reading leaves behind instead of reading it as zero', () => {
+    expect(readingsFromFields(['3.1', '', '  ']).readingsMm).toEqual([3.1]);
+  });
+
+  it('reads a decimal comma as a point', () => {
+    expect(readingsFromFields(['2,5']).readingsMm).toEqual([2.5]);
+  });
+
+  it('names a field that is not a number rather than dropping it from the mean', () => {
+    const r = readingsFromFields(['3', 'x', '4']);
+    expect(r.readingsMm).toEqual([3, 4]);
+    expect(r.unreadable).toEqual([2]);
+  });
+});
+
 describe('clearance gaps — the floor, where the answer depends on what is down there', () => {
   it('refuses to pick a floor limit when nobody recorded what is under the leaf', () => {
     // Three different limits apply depending on the covering. Guessing picks
@@ -761,7 +807,7 @@ describe('clearance gaps — the floor, where the answer depends on what is down
     expect(c.within).toBe(true);
     expect(c.confidence).toBe('medium');
     expect(c.notes.join(' ')).toContain('if the carpet is down');
-    expect(c.statement).toContain('not a clearance a finished door may keep');
+    expect(c.statement).toContain('Not a clearance a finished door may keep');
   });
 });
 
@@ -1224,7 +1270,7 @@ describe('assessDoor — one door, one honest answer', () => {
     expect(v.outcome).toBe('fail');
     expect(v.defectCodes).toEqual([]);
     expect(v.notes.join(' ')).toContain('no code for a tag that disagrees with the register');
-    expect(v.notes.join(' ')).toContain('raise it as its own item');
+    expect(v.notes.join(' ')).toContain('Raise it as its own item');
   });
 
   it('does not treat an untested door as a working one', () => {
