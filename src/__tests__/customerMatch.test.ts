@@ -14,7 +14,7 @@ import {
 
 // Invented sites and customers in invented places.
 const SITES: MatchSite[] = [
-  { id: 's1', name: 'Storage Choice - Sumner Park', address: '12 Example St', suburb: 'Sumner Park', postcode: '4074', clientName: 'Storage Choice Pty Ltd', latitude: -27.560, longitude: 152.930 },
+  { id: 's1', name: 'Fictional Storage - Northside', address: '12 Example St', suburb: 'Northside', postcode: '4074', clientName: 'Fictional Storage Pty Ltd', latitude: -27.560, longitude: 152.930 },
   { id: 's2', name: 'Riverbend Plaza', address: '5/40 Fictional Pde', suburb: 'Springfield', postcode: '4300', clientName: 'Acme Property', latitude: -27.660, longitude: 152.920 },
   { id: 's3', name: 'Harbour Tower', address: '1 Nowhere Rd', suburb: 'Portside', postcode: '4000' },
 ];
@@ -26,7 +26,7 @@ const CUSTOMERS: MatchCustomer[] = [
 
 describe('normalising a name', () => {
   it('drops case, punctuation and the corporate suffixes', () => {
-    expect(normaliseName('Storage Choice - Sumner Park')).toBe('storage choice sumner park');
+    expect(normaliseName('Fictional Storage - Northside')).toBe('fictional storage northside');
     expect(normaliseName('ACME Property Pty Ltd')).toBe('acme property');
     expect(normaliseName('Acme Property P/L')).toBe('acme property');
     expect(normaliseName('The Acme Property Limited')).toBe('acme property');
@@ -36,7 +36,7 @@ describe('normalising a name', () => {
   });
 
   it('does not strip words that identify a business', () => {
-    expect(normaliseName('Storage King')).not.toBe(normaliseName('Storage Choice'));
+    expect(normaliseName('Storage King')).not.toBe(normaliseName('Fictional Storage'));
     expect(normaliseName('Company Kitchen')).toBe('company kitchen');
   });
 });
@@ -52,16 +52,16 @@ describe('reading a street address', () => {
   });
 
   it('reads a geocoder’s comma chain, with or without a name in front', () => {
-    expect(parseStreet('12, Example Street, Sumner Park, Brisbane City, Queensland, 4074, Australia'))
+    expect(parseStreet('12, Example Street, Northside, Brisbane City, Queensland, 4074, Australia'))
       .toEqual({ number: '12', street: 'example street', postcode: '4074' });
-    expect(parseStreet('Bunnings, 12, Example Street, Sumner Park, Queensland, 4074, Australia'))
+    expect(parseStreet('Bunnings, 12, Example Street, Northside, Queensland, 4074, Australia'))
       .toEqual({ number: '12', street: 'example street', postcode: '4074' });
-    expect(parseStreet('12 Example St, Sumner Park QLD 4074, Australia'))
+    expect(parseStreet('12 Example St, Northside QLD 4074, Australia'))
       .toEqual({ number: '12', street: 'example street', postcode: '4074' });
   });
 
   it('gives nothing for an address with no number', () => {
-    expect(parseStreet('Sumner Park, Queensland, Australia')).toEqual({});
+    expect(parseStreet('Northside, Queensland, Australia')).toEqual({});
     expect(parseStreet('')).toEqual({});
     expect(parseStreet(undefined)).toEqual({});
   });
@@ -71,12 +71,12 @@ describe('matching an address', () => {
   const site = SITES[0]!;
 
   it('matches the geocoder’s long form to the office’s short one', () => {
-    expect(addressMatches({ address: '12 Example Street, Sumner Park QLD 4074, Australia' }, site)).toEqual({ ok: true });
-    expect(addressMatches({ address: '12, Example Street, Sumner Park, Brisbane City, Queensland, 4074, Australia' }, site)).toEqual({ ok: true });
+    expect(addressMatches({ address: '12 Example Street, Northside QLD 4074, Australia' }, site)).toEqual({ ok: true });
+    expect(addressMatches({ address: '12, Example Street, Northside, Brisbane City, Queensland, 4074, Australia' }, site)).toEqual({ ok: true });
   });
 
   it('accepts the postcode where the suburb is spelt differently', () => {
-    expect(addressMatches({ address: '12 Example St, Sumner Pk 4074' }, site)).toEqual({ ok: true });
+    expect(addressMatches({ address: '12 Example St, Nthside 4074' }, site)).toEqual({ ok: true });
   });
 
   it('refuses the same number on the same street in another suburb', () => {
@@ -84,9 +84,9 @@ describe('matching an address', () => {
   });
 
   it('refuses a different number or a different street', () => {
-    expect(addressMatches({ address: '14 Example St, Sumner Park QLD 4074' }, site).ok).toBe(false);
-    expect(addressMatches({ address: '12 Example Rd, Sumner Park QLD 4074' }, site).ok).toBe(false);
-    expect(addressMatches({ address: '12 Exemplar St, Sumner Park QLD 4074' }, site).ok).toBe(false);
+    expect(addressMatches({ address: '14 Example St, Northside QLD 4074' }, site).ok).toBe(false);
+    expect(addressMatches({ address: '12 Example Rd, Northside QLD 4074' }, site).ok).toBe(false);
+    expect(addressMatches({ address: '12 Exemplar St, Northside QLD 4074' }, site).ok).toBe(false);
   });
 
   it('treats a different unit in the same building as a different premises', () => {
@@ -100,7 +100,7 @@ describe('matching an address', () => {
   it('matches on the street alone only when the office holds no suburb or postcode', () => {
     const bare = { address: '12 Example St' };
     expect(addressMatches({ address: '12 Example St, Anywhere QLD 4999' }, bare)).toEqual({ ok: true });
-    expect(addressMatches({ address: 'Sumner Park' }, site).ok).toBe(false);
+    expect(addressMatches({ address: 'Northside' }, site).ok).toBe(false);
   });
 
   it('does not take the council in a geocoder’s chain for the suburb', () => {
@@ -123,12 +123,12 @@ describe('matching an address', () => {
   });
 
   it('lets two postcodes that disagree settle it before the suburb is looked at', () => {
-    expect(addressMatches({ address: '12 Example St, Sumner Park QLD 4300' }, site)).toEqual({ ok: false, reason: 'different suburb' });
+    expect(addressMatches({ address: '12 Example St, Northside QLD 4300' }, site)).toEqual({ ok: false, reason: 'different suburb' });
     // No postcode on the place: the suburb decides, as before.
-    expect(addressMatches({ address: '12 Example St, Sumner Park' }, site)).toEqual({ ok: true });
+    expect(addressMatches({ address: '12 Example St, Northside' }, site)).toEqual({ ok: true });
     // No postcode on the site: the suburb decides, and a one-line address
     // with no segments after the street is searched for the word.
-    expect(addressMatches({ address: '12 Example St Sumner Park QLD 4074' }, { address: '12 Example St', suburb: 'Sumner Park' })).toEqual({ ok: true });
+    expect(addressMatches({ address: '12 Example St Northside QLD 4074' }, { address: '12 Example St', suburb: 'Northside' })).toEqual({ ok: true });
   });
 });
 
@@ -150,25 +150,25 @@ describe('distance', () => {
 
 describe('the verdict', () => {
   it('is our site on an exact name, however it is punctuated', () => {
-    const m = matchPlace({ name: 'STORAGE CHOICE SUMNER PARK' }, SITES, CUSTOMERS);
+    const m = matchPlace({ name: 'FICTIONAL STORAGE NORTHSIDE' }, SITES, CUSTOMERS);
     expect(m.verdict).toBe('our site');
     expect(m.site?.id).toBe('s1');
     expect(m.evidence).toEqual([{ signal: 'name', detail: 'same name' }]);
   });
 
   it('is not fooled by a shared first word', () => {
-    // Storage King is the shop next door to Storage Choice, and a customer
+    // Storage King is the shop next door to Fictional Storage, and a customer
     // in its own right — but not this site.
-    const m = matchPlace({ name: 'Storage King Sumner Park', address: '14 Example St, Sumner Park QLD 4074' }, SITES, CUSTOMERS);
+    const m = matchPlace({ name: 'Storage King Northside', address: '14 Example St, Northside QLD 4074' }, SITES, CUSTOMERS);
     expect(m.verdict).toBe('not a customer');
     expect(m.site).toBeUndefined();
   });
 
   it('is our site on the address, and says which one', () => {
-    const m = matchPlace({ name: 'Some Tenant', address: '12 Example Street, Sumner Park QLD 4074, Australia' }, SITES, CUSTOMERS);
+    const m = matchPlace({ name: 'Some Tenant', address: '12 Example Street, Northside QLD 4074, Australia' }, SITES, CUSTOMERS);
     expect(m.verdict).toBe('our site');
     expect(m.site?.id).toBe('s1');
-    expect(m.evidence).toEqual([{ signal: 'address', detail: '12 Example St, Sumner Park 4074' }]);
+    expect(m.evidence).toEqual([{ signal: 'address', detail: '12 Example St, Northside 4074' }]);
   });
 
   it('is our site inside sixty metres of a located site, with the distance on it', () => {
@@ -187,12 +187,12 @@ describe('the verdict', () => {
 
   it('prefers the site with more evidence, then the nearer one', () => {
     const twins: MatchSite[] = [
-      { id: 'a', name: 'Luggage Direct', latitude: -27.5, longitude: 153.0 },
-      { id: 'b', name: 'Luggage Direct', address: '3 Example St', suburb: 'Portside', latitude: -27.9, longitude: 153.4 },
-      { id: 'c', name: 'Luggage Direct', latitude: -27.4, longitude: 153.0 },
+      { id: 'a', name: 'Bag Depot', latitude: -27.5, longitude: 153.0 },
+      { id: 'b', name: 'Bag Depot', address: '3 Example St', suburb: 'Portside', latitude: -27.9, longitude: 153.4 },
+      { id: 'c', name: 'Bag Depot', latitude: -27.4, longitude: 153.0 },
     ];
-    expect(matchPlace({ name: 'Luggage Direct', address: '3 Example St, Portside QLD' }, twins).site?.id).toBe('b');
-    expect(matchPlace({ name: 'Luggage Direct', latitude: -27.41, longitude: 153.0 }, twins).site?.id).toBe('c');
+    expect(matchPlace({ name: 'Bag Depot', address: '3 Example St, Portside QLD' }, twins).site?.id).toBe('b');
+    expect(matchPlace({ name: 'Bag Depot', latitude: -27.41, longitude: 153.0 }, twins).site?.id).toBe('c');
   });
 
   it('does not take a same-named site thirty kilometres away for this one', () => {
@@ -216,7 +216,7 @@ describe('the verdict', () => {
     const chain: MatchSite[] = [
       { id: 'other', name: 'Storage King', address: '9 Other St', suburb: 'Farside', postcode: '4999', clientName: 'Storage King Pty Ltd' },
     ];
-    const m = matchPlace({ name: 'Storage King', address: '14 Example St, Sumner Park QLD 4074' }, chain, CUSTOMERS);
+    const m = matchPlace({ name: 'Storage King', address: '14 Example St, Northside QLD 4074' }, chain, CUSTOMERS);
     expect(m.verdict).toBe('our customer, different site');
     expect(m.site).toBeUndefined();
     expect(m.customer?.externalId).toBe('813');
@@ -225,7 +225,7 @@ describe('the verdict', () => {
 
   it('still takes the name at its word when nothing contradicts it', () => {
     // No address and no position on the place: nothing to check against.
-    const located = matchPlace({ name: 'Storage Choice Sumner Park' }, SITES, CUSTOMERS);
+    const located = matchPlace({ name: 'Fictional Storage Northside' }, SITES, CUSTOMERS);
     expect(located.verdict).toBe('our site');
     expect(located.site?.id).toBe('s1');
     // A place with a position but a site the geocoder has not placed, and
@@ -257,10 +257,10 @@ describe('the verdict', () => {
   });
 
   it('is our customer on a site’s client name, even with no mirrored customer', () => {
-    const m = matchPlace({ name: 'Storage Choice Pty Ltd' }, SITES, []);
+    const m = matchPlace({ name: 'Fictional Storage Pty Ltd' }, SITES, []);
     expect(m.verdict).toBe('our customer, different site');
     expect(m.customer).toBeUndefined();
-    expect(m.evidence).toEqual([{ signal: 'client name', detail: 'the client on Storage Choice - Sumner Park' }]);
+    expect(m.evidence).toEqual([{ signal: 'client name', detail: 'the client on Fictional Storage - Northside' }]);
   });
 
   it('ranks the site above the customer when both match', () => {

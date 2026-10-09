@@ -280,8 +280,8 @@ export interface Destination {
    * action rather than a menu row.
    *
    * Hiding a destination takes its row out of the hubs; it does not and must
-   * not disarm a button in the middle of a piece of work. Van stock ends a
-   * restock on Purchase requests, and it does that for a technician too. Where
+   * not disarm a button in the middle of a piece of work. Things I need ends a
+   * request on Purchase requests, and it does that for a technician too. Where
    * that is true it is written down, because the alternative is this module
    * telling somebody to go and search for a screen they were standing on
    * thirty seconds ago. Must be one of `openedFrom`, and must itself be shown
@@ -466,7 +466,7 @@ export const DESTINATIONS: readonly Destination[] = [
   // -- Ask the office --------------------------------------------------------
   {
     route: '/work/rfi', file: 'app/work/rfi.tsx', tab: 'today', section: 'Ask the office',
-    label: 'Ask the office', modes: BOTH, openedFrom: ['/shortcuts'],
+    label: 'Ask the office', modes: BOTH, openedFrom: ['/shortcuts', '/work/job/[id]'],
     blurb:
       'A question to your supervisor by email, with the job and site in the subject, and noted '
       + 'on the job in Simpro when there is one.',
@@ -483,9 +483,7 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/suggest', file: 'app/suggest.tsx', tab: 'today', section: 'Ask the office',
     label: 'Suggest a change', modes: BOTH, openedFrom: ['/shortcuts'],
-    blurb:
-      'An idea, a fault or missing information about this app, emailed under a fixed subject '
-      + 'tag to whoever builds it.',
+    blurb: 'An idea or a fault with the app, emailed to the suggestions address.',
     terms: ['suggest', 'suggestion', 'feedback', 'idea', 'bug', 'improve', 'wrong'],
   },
 
@@ -614,16 +612,6 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['asset', 'device', 'history', 'timeline'],
   },
   {
-    route: '/assets/trend', file: 'app/assets/trend.tsx', tab: 'sites', section: 'In front of you',
-    label: 'Measurement trend', needsContext: true, modes: BOTH, openedFrom: ['/assets/[id]'],
-    blurb: 'What one asset\u2019s readings have been doing across every service, not just at this one.',
-    terms: ['trend', 'measurements', 'readings', 'over time', 'declining', 'history'],
-    keptBecause:
-      'The hydrant that passes every year at a pressure fifteen per cent lower than it started at '
-      + 'is the conversation to have before it fails, and it is a technician standing at the asset '
-      + 'who is in a position to have it.',
-  },
-  {
     route: '/assets/new', file: 'app/assets/new.tsx', tab: 'sites', section: 'In front of you',
     // Needs the site even though the screen will let you pick one: an asset
     // filed against no site is a record nobody finds again.
@@ -679,56 +667,16 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['zone chart', 'zones', 'panel door', 'print'],
   },
   {
-    route: '/site/due', file: 'app/site/due.tsx', tab: 'sites', section: 'This site',
-    label: 'What is due', needsContext: true, modes: BOTH,
-    streams: ['service'],
-    streamBecause:
-      'The same, for one site: what its routines owe. Nothing on an install is due in that sense.', openedFrom: ['/site/[id]'],
-    blurb: 'Every routine this site owes, including the ones with nothing recorded against them yet.',
-    terms: ['due', 'next service', 'schedule', 'frequency'],
-  },
-  {
     route: '/site/defects', file: 'app/site/defects.tsx', tab: 'sites', section: 'This site',
     label: 'Site defects', needsContext: true, modes: BOTH, openedFrom: ['/site/[id]'],
     blurb: 'Open and closed defects for this site.',
     terms: ['defects', 'faults', 'outstanding'],
   },
   {
-    route: '/site/coverage', file: 'app/site/coverage.tsx', tab: 'sites', section: 'This site',
-    label: 'Not tested', needsContext: true, modes: BOTH,
-    streams: ['service'],
-    streamBecause:
-      'What the routine has not reached this cycle. There is no cycle on a job that is being '
-      + 'installed.',
-    openedFrom: ['/site/[id]'],
-    blurb: 'The devices nobody could reach — a hole in the year, and deliberately not a defect list.',
-    terms: ['not tested', 'inaccessible', 'coverage', 'missed', 'no access'],
-  },
-  {
-    route: '/site/history', file: 'app/site/history.tsx', tab: 'sites', section: 'This site',
-    label: 'Service history', needsContext: true, modes: BOTH,
-    streams: ['service'],
-    streamBecause:
-      'The service history behind a system. A new install has none, and the handover documents are '
-      + 'what stand in its place.',
-    openedFrom: ['/site/[id]'],
-    blurb: 'Whether each service landed inside tolerance, measured against the date the schedule called for.',
-    terms: ['history', 'past services', 'on time', 'tolerance'],
-  },
-  {
     route: '/site/cause-effect', file: 'app/site/cause-effect.tsx', tab: 'sites', section: 'This site',
     label: 'Cause and effect', needsContext: true, modes: BOTH, openedFrom: ['/site/[id]'],
-    blurb: 'Edited by cause, exported as the matrix, and tested by confirming what actually happened.',
+    blurb: 'Built by cause and exported as the matrix.',
     terms: ['cause and effect', 'matrix', 'c&e', 'interface', 'commissioning'],
-  },
-  {
-    route: '/site/parts', file: 'app/site/parts.tsx', tab: 'sites', section: 'This site',
-    label: 'Parts needed', needsContext: true, modes: BOTH, openedFrom: ['/site/[id]'],
-    blurb: "What clearing this site's open defects takes, gathered from the defect codes rather than from memory.",
-    terms: ['parts', 'order', 'materials', 'what to bring'],
-    keptBecause:
-      'It feeds a purchase order, which is office work — but it is also the list a technician '
-      + 'loads the van from the night before, and no office list can be that.',
   },
   {
     route: '/site/quote', file: 'app/site/quote.tsx', tab: 'sites', section: 'This site',
@@ -818,12 +766,6 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['battery', 'standby', 'ah', 'quiescent', 'alarm current', 'fip'],
   },
   {
-    route: '/tools/vesda', file: 'app/tools/vesda.tsx', tab: 'tools', section: 'Calculators',
-    label: 'VESDA battery', modes: BOTH, openedFrom: ['/tools'],
-    blurb: 'The same calculation with the aspirator setting made a required choice, because it is the biggest lever in it.',
-    terms: ['vesda', 'aspirating', 'asd', 'battery', 'aspirator'],
-  },
-  {
     route: '/tools/voltdrop', file: 'app/tools/voltdrop.tsx', tab: 'tools', section: 'Calculators',
     label: 'Cable volt drop', modes: BOTH, openedFrom: ['/tools'],
     blurb: 'Whether the device at the far end of a long run still sees enough voltage to operate in alarm.',
@@ -836,39 +778,16 @@ export const DESTINATIONS: readonly Destination[] = [
     streamBecause:
       'Sizing a run is design work. A service technician replacing a like-for-like run has the '
       + 'existing size; picking a new one is an install decision.',
-    openedFrom: ['/tools', '/tools/cable-tables'],
+    openedFrom: ['/tools'],
     blurb: 'The four checks that decide a cable, run against the office\'s own capacity tables rather than against figures nobody can account for.',
     terms: ['cable', 'sizing', 'current carrying capacity', 'ccc', 'as 3008', 'as 3000', 'derating', 'submain', 'wiring rules'],
-  },
-  {
-    route: '/tools/cable-tables', file: 'app/tools/cable-tables.tsx', tab: 'tools', section: 'Calculators',
-    label: 'Cable tables', modes: BOTH,
-    streams: ['construction'],
-    streamBecause:
-      'The wiring-rules current and impedance tables, which are the input to sizing a new run.', openedFrom: ['/tools', '/tools/cable'],
-    blurb: 'The capacity figures themselves: loaded once from the office\'s licensed copy, searched by size or by what they carry.',
-    terms: ['cable tables', 'as 3008', 'current rating', 'amps', 'mv/a/m', 'derating factor', 'import'],
-  },
-  {
-    route: '/tools/sizing', file: 'app/tools/sizing.tsx', tab: 'tools', section: 'Calculators',
-    label: 'Size it from a description', modes: BOTH,
-    streams: ['construction'],
-    streamBecause:
-      'Sizing a run from a description of the job, which is the same design decision one screen '
-      + 'over.',
-    openedFrom: ['/tools', '/tools/cable'],
-    blurb:
-      'Say what you are installing in a sentence and get the cable and the breaker back, worked off '
-      + 'the standard’s own tables with the words it read printed beside them.',
-    terms: ['cable', 'size', 'sizing', 'chat', 'describe', 'ask', 'breaker', 'as 3008', 'install',
-      'what size cable', 'submain', 'mains'],
   },
   {
     route: '/tools/wiring', file: 'app/tools/wiring.tsx', tab: 'tools', section: 'Calculators',
     label: 'Wiring rules tables', modes: BOTH,
     streams: ['construction'],
     streamBecause:
-      'The wiring rules tables themselves: derating, grouping, installation methods. Design inputs.', openedFrom: ['/tools', '/tools/cable', '/tools/cable-tables'],
+      'The wiring rules tables themselves: derating, grouping, installation methods. Design inputs.', openedFrom: ['/tools', '/tools/cable'],
     blurb:
       'Every numbered table in AS/NZS 3008.1.1 and the sizing tables of AS/NZS 3000, searched by what is '
       + 'in the column headings rather than by table number.',
@@ -978,7 +897,7 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/library/law', file: 'app/library/law.tsx', tab: 'tools', section: 'Reference',
-    label: 'The regulation', modes: BOTH, openedFrom: ['/library'],
+    label: 'Fire safety regulation', modes: BOTH, openedFrom: ['/library'],
     blurb: 'The Building Fire Safety Regulation indexed by who has to do what, with the words that decide reproduced.',
     terms: ['regulation', 'bfsr', 'law', 'legislation', 'section 49', 'critical defect',
       'occupier', 'penalty', 'statutory'],
@@ -1012,7 +931,7 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/tools/defects', file: 'app/tools/defects.tsx', tab: 'tools', section: 'Reference',
-    label: 'Defect library', modes: BOTH, openedFrom: ['/tools'],
+    label: 'Defect wording', modes: BOTH, openedFrom: ['/tools'],
     blurb: 'The coded wording that goes on a report, and the work that clears it.',
     terms: ['defect', 'wording', 'code', 'critical', 'rectification'],
   },
@@ -1021,12 +940,6 @@ export const DESTINATIONS: readonly Destination[] = [
     label: 'Parts', modes: BOTH, openedFrom: ['/shortcuts', '/tools'],
     blurb: 'Part numbers, brands and descriptions, searched all at once because you only know one of them.',
     terms: ['part', 'catalogue', 'part number', 'brand', 'spares'],
-  },
-  {
-    route: '/ask', file: 'app/ask.tsx', tab: 'tools', section: 'Reference',
-    label: 'Ask Safe QLD', modes: BOTH, openedFrom: ['/tools'],
-    blurb: 'A search across everything the app holds, which says on the screen that it is not a language model.',
-    terms: ['ask', 'question', 'search', 'how do i'],
   },
 
   // -- Work ------------------------------------------------------------------
@@ -1064,9 +977,9 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/work/outbound', file: 'app/work/outbound.tsx', tab: 'work', section: 'Records',
-    label: 'Send to the office', modes: BOTH, openedFrom: ['/work'],
-    blurb: 'A finished service and the defects it raised, pushed to the Simpro job as notes.',
-    terms: ['send', 'office', 'simpro', 'push', 'upload', 'sync', 'job note'],
+    label: 'Waiting to send', modes: BOTH, openedFrom: ['/work'],
+    blurb: 'Work queued for Simpro, and finished services to send.',
+    terms: ['send', 'office', 'simpro', 'push', 'upload', 'sync', 'job note', 'waiting', 'queue', 'outbound'],
     keptBecause:
       'A technician is the only person who knows the service is finished, and the office finding '
       + 'out when the paperwork arrives is how an invoice goes out for a service that was nine '
@@ -1213,22 +1126,6 @@ export const DESTINATIONS: readonly Destination[] = [
       + 'means anything.',
   },
   {
-    route: '/work/stock', file: 'app/work/stock.tsx', tab: 'work', section: 'Parts and stock',
-    label: 'Van stock', modes: BOTH, openedFrom: ['/work', '/shortcuts'],
-    blurb: 'What you carry, and what tomorrow will leave you short of.',
-    terms: ['stock', 'van', 'restock', 'inventory', 'spares'],
-  },
-  {
-    route: '/work/stock-list', file: 'app/work/stock-list.tsx', tab: 'work', section: 'Parts and stock',
-    label: 'Stock to load', modes: BOTH, openedFrom: ['/work', '/shortcuts'],
-    blurb: 'What the next few days of booked work calls for, less what the van already carries.',
-    terms: ['stock list', 'load', 'pick list', 'parts', 'week ahead', 'days', 'defects', 'van'],
-    keptBecause:
-      'Loading the van is the technician\'s job and nobody else can do it: the answer depends on '
-      + 'what is already in the back. The office cannot see that, and a list built without it is a '
-      + 'list of things half of which are already on board.',
-  },
-  {
     route: '/work/needs', file: 'app/work/needs.tsx', tab: 'work', section: 'Parts and stock',
     label: 'Things I need', modes: BOTH, openedFrom: ['/work', '/shortcuts', '/work/purchases'],
     blurb: 'The running list of parts to get, split into what is wanted now and what is for work still coming.',
@@ -1240,16 +1137,15 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/work/purchases', file: 'app/work/purchases.tsx', tab: 'work', section: 'Parts and stock',
-    label: 'Purchase requests', modes: OFFICE, openedFrom: ['/work', '/work/stock', '/work/stock-list', '/work/needs'],
-    // Raising a restock lands on this screen, and it does that in Technician
+    label: 'Purchase requests', modes: OFFICE, openedFrom: ['/work', '/work/needs'],
+    // Raising a request from Things I need lands on this screen, in Technician
     // mode too — hiding the row must not break the middle of that action.
-    stillOpenedFrom: '/work/stock',
+    stillOpenedFrom: '/work/needs',
     blurb: 'Parts to order, queued until the phone has signal.',
     terms: ['purchase', 'order', 'request', 'parts', 'buy'],
     hiddenBecause:
-      'Ordering is the office\'s job. You still raise a request in one action from Van stock '
-      + 'when you run out — this is the list of everybody\'s requests, and nothing on it is work '
-      + 'you can do.',
+      'Ordering is the office\'s job. You still raise a request from Things I need; this is '
+      + 'the list of everybody\'s requests.',
   },
   {
     route: '/orders', file: 'app/orders/index.tsx', tab: 'work', section: 'Parts and stock',
@@ -1281,12 +1177,6 @@ export const DESTINATIONS: readonly Destination[] = [
     keptBecause:
       'The sell price on a part is the office\'s own figure, already on every quote a customer has seen; reading '
       + 'it out commits nobody to anything. What the company pays for the part is not on the phone at all.',
-  },
-  {
-    route: '/work/knowledge', file: 'app/work/knowledge.tsx', tab: 'work', section: 'Parts and stock',
-    label: 'Company knowledge', modes: BOTH, openedFrom: ['/shortcuts', '/work'],
-    blurb: 'Tricks of the trade, marked verified or not wherever they are used.',
-    terms: ['knowledge', 'tips', 'notes', 'how we do it'],
   },
   {
     route: '/work/portfolio', file: 'app/work/portfolio.tsx', tab: 'work', section: 'Planning',

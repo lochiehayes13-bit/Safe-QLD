@@ -35,6 +35,7 @@ import {
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
 import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
+import { showsPanelRows, siteCanBeDeleted } from '@/domain/sitePage';
 import { showAlert } from '@/components/alert';
 
 /** Site detail — the hub every other screen hangs off. */
@@ -164,7 +165,7 @@ export default function SiteScreen() {
       });
       router.push({ pathname: '/report/[id]', params: { id: report.id } });
     } catch (e) {
-      showAlert('Could not start the sheet', describeActionFailure(e, 'start a test sheet for this site'));
+      showAlert('Could not start the test sheet', describeActionFailure(e, 'start the test sheet'));
     } finally {
       setCreating(false);
     }
@@ -174,7 +175,7 @@ export default function SiteScreen() {
     if (!site) return;
     showAlert(
       'Delete site?',
-      `This removes ${site.name} and everything under it — panels, points, reports and defects. It cannot be undone.`,
+      `Removes ${site.name} with its panels, points, reports and defects. This can't be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -191,6 +192,7 @@ export default function SiteScreen() {
 
   if (!site) return <RecordGate missing={missing} what="site" failed={failed} onRetry={() => { void load(); }} />;
 
+  const hasPanels = showsPanelRows(panels.length);
   const openDefects = defects.filter((d) => d.status === 'open');
   const criticalDefects = openDefects.filter((d) => d.severity === 'critical');
   const customer = office?.customers[0];
@@ -251,12 +253,7 @@ export default function SiteScreen() {
       });
 
       if (!input) {
-        showAlert(
-          'Nothing to report yet',
-          'No assets at this site have been passed, failed or recorded as not tested in the last '
-          + 'month. Run a routine first — the report is built from what was actually recorded, not '
-          + 'from the asset list.',
-        );
+        showAlert('Nothing to report yet', 'No results recorded here in the last 30 days.');
         return;
       }
 
@@ -290,7 +287,7 @@ export default function SiteScreen() {
       const config = await siteToConfig(site);
       const totals = configTotals(config);
       if (!totals.panels) {
-        showAlert('Nothing to share', 'This site has no panel data yet. Import a device list first.');
+        showAlert('Nothing to share', 'No panel data here. Import the panel config first.');
         return;
       }
       const bytes = encodePack({
@@ -308,7 +305,7 @@ export default function SiteScreen() {
         showAlert(notice.title, notice.body);
       }
     } catch (e) {
-      showAlert('Could not build the pack', e instanceof Error ? e.message : String(e));
+      showAlert('Could not share the site', e instanceof Error ? e.message : String(e));
     } finally {
       setSharing(false);
     }
@@ -324,7 +321,7 @@ export default function SiteScreen() {
           rows: rows.map((r) => ({
             id: r.id,
             title: r.premisesName || site.name,
-            detail: `Last touched ${formatAuDate(qldIsoDay(r.updatedAt) ?? r.updatedAt)}`,
+            detail: `Updated ${formatAuDate(qldIsoDay(r.updatedAt) ?? r.updatedAt)}`,
           })),
         });
       } else if (kind === 'occupier') {
@@ -351,7 +348,7 @@ export default function SiteScreen() {
         });
       }
     } catch (e) {
-      showAlert('Could not read them', describeActionFailure(e, 'reading the records'));
+      showAlert('Could not open records', describeActionFailure(e, 'open the records'));
     }
   };
 
@@ -379,7 +376,7 @@ export default function SiteScreen() {
         router.push({ pathname: '/assessment/[id]', params: { id: rec.id } });
       }
     } catch (e) {
-      showAlert('Not started', describeActionFailure(e, 'starting the record'));
+      showAlert('Not started', describeActionFailure(e, 'start the record'));
     }
   };
 
@@ -398,7 +395,7 @@ export default function SiteScreen() {
             <Label>{CHOOSER_LABEL[chooser.kind].what}</Label>
             {chooser.rows.length === 0 ? (
               <Txt size="sm" tone="muted" style={{ marginTop: t.space(1), lineHeight: 19 }}>
-                None on this site yet.
+                None yet.
               </Txt>
             ) : null}
             {chooser.rows.map((r) => (
@@ -433,8 +430,8 @@ export default function SiteScreen() {
         {site.clientName ? <Txt tone="faint" size="sm">{site.clientName}</Txt> : null}
 
         <Rowed gap={2}>
-          <StatTile label="Panels" value={panels.length} />
-          <StatTile label="Points" value={pointCount.toLocaleString()} />
+          {hasPanels ? <StatTile label="Panels" value={panels.length} /> : null}
+          {hasPanels ? <StatTile label="Points" value={pointCount.toLocaleString()} /> : null}
           <StatTile label="Open defects" value={openDefects.length} tone={criticalDefects.length ? 'fail' : 'default'} />
         </Rowed>
 
@@ -456,27 +453,34 @@ export default function SiteScreen() {
             style={{ flex: 1 }}
           />
           <Button
-            title="Import a configuration"
-            variant="secondary"
-            onPress={() => router.push({ pathname: '/import', params: { siteId: site.id } })}
-            style={{ flex: 1 }}
-          />
-        </Rowed>
-        <Rowed gap={2}>
-          <Button
-            title="Share this site"
-            variant="secondary"
-            onPress={sharePack}
-            loading={sharing}
-            style={{ flex: 1 }}
-          />
-          <Button
             title="Bulk test"
             variant="secondary"
             onPress={() => router.push({ pathname: '/site/bulk-test', params: { siteId: site.id } })}
             style={{ flex: 1 }}
           />
         </Rowed>
+        {/*
+          * Importing and sharing only once a panel is here. Without one, the
+          * Panels section below carries the import, and a share has nothing
+          * in it to send.
+          */}
+        {hasPanels ? (
+          <Rowed gap={2}>
+            <Button
+              title="Import config"
+              variant="secondary"
+              onPress={() => router.push({ pathname: '/import', params: { siteId: site.id } })}
+              style={{ flex: 1 }}
+            />
+            <Button
+              title="Share this site"
+              variant="secondary"
+              onPress={sharePack}
+              loading={sharing}
+              style={{ flex: 1 }}
+            />
+          </Rowed>
+        ) : null}
 
         {/*
           * The office's side of the site. Who it belongs to, who to ring and
@@ -501,14 +505,12 @@ export default function SiteScreen() {
                 </Pressable>
               ) : (
                 <Txt size="sm" tone="faint" style={{ marginTop: 4 }}>
-                  {site.clientName
-                    ? `${site.clientName} — the customer record opens once a job or quote here has synced.`
-                    : 'The office has no job or quote here yet, so there is no customer to open.'}
+                  {site.clientName || 'No customer on record'}
                 </Txt>
               )}
               {otherCustomers ? (
                 <Txt size="xs" tone="faint">
-                  Work here has also been billed to {otherCustomers} other customer{otherCustomers === 1 ? '' : 's'}.
+                  Also billed to {otherCustomers} other customer{otherCustomers === 1 ? '' : 's'}.
                 </Txt>
               ) : null}
 
@@ -516,7 +518,7 @@ export default function SiteScreen() {
                 <Label>Site contact</Label>
                 {site.contactName || ways.length ? (
                   <>
-                    <Txt weight="700" style={{ marginTop: 4 }}>{site.contactName || 'Unnamed contact'}</Txt>
+                    <Txt weight="700" style={{ marginTop: 4 }}>{site.contactName || 'No name'}</Txt>
                     {ways.length ? (
                       <Rowed gap={2} wrap style={{ marginTop: t.space(2) }}>
                         {ways.map((w) => (
@@ -531,11 +533,11 @@ export default function SiteScreen() {
                         ))}
                       </Rowed>
                     ) : (
-                      <Txt size="sm" tone="faint">The office has no number or email for them.</Txt>
+                      <Txt size="sm" tone="faint">No phone or email on record.</Txt>
                     )}
                   </>
                 ) : (
-                  <Txt size="sm" tone="faint" style={{ marginTop: 4 }}>The office lists no contact for this site.</Txt>
+                  <Txt size="sm" tone="faint" style={{ marginTop: 4 }}>No site contact.</Txt>
                 )}
               </View>
 
@@ -546,13 +548,13 @@ export default function SiteScreen() {
                 */}
               {site.publicNotes ? (
                 <View style={{ marginTop: t.space(3) }}>
-                  <Label>Notes from the office</Label>
+                  <Label>Office notes</Label>
                   <Txt style={{ marginTop: 4 }}>{site.publicNotes}</Txt>
                 </View>
               ) : null}
               {officeError ? (
                 <Txt size="xs" tone="faint" style={{ marginTop: t.space(2) }}>
-                  Showing what the phone holds. Could not refresh: {officeError}
+                  Could not refresh from Simpro: {officeError}
                 </Txt>
               ) : null}
             </Card>
@@ -578,7 +580,7 @@ export default function SiteScreen() {
                 {people.length ? (
                   people.map((p) => <PersonRow key={p.id} person={p} />)
                 ) : (
-                  <Txt size="sm" tone="faint" style={{ marginTop: 4 }}>The office lists nobody at this site beyond the site contact above.</Txt>
+                  <Txt size="sm" tone="faint" style={{ marginTop: 4 }}>No other contacts.</Txt>
                 )}
               </Card>
             ) : null}
@@ -588,24 +590,24 @@ export default function SiteScreen() {
                   icon="clipboard-list-outline"
                   title="Jobs"
                   subtitle={office.stats.jobsTotal
-                    ? `${office.stats.jobsTotal} job${office.stats.jobsTotal === 1 ? '' : 's'} on the books · ${office.stats.jobsOpen} open`
-                    : 'None on the books for this site'}
+                    ? `${office.stats.jobsTotal} job${office.stats.jobsTotal === 1 ? '' : 's'} · ${office.stats.jobsOpen} open`
+                    : 'No jobs'}
                   onPress={() => router.push({ pathname: '/work/jobs', params: { siteId: site.id } })}
                 />
                 <NavRow
                   icon="file-sign"
-                  title="Simpro quotes"
+                  title="Quotes"
                   subtitle={office.quoteCount
-                    ? `${office.quoteCount} quote${office.quoteCount === 1 ? '' : 's'} · ${office.stats.quotesOpen} still open`
-                    : 'Nothing quoted for this site'}
+                    ? `${office.quoteCount} quote${office.quoteCount === 1 ? '' : 's'} · ${office.stats.quotesOpen} open`
+                    : 'No quotes'}
                   onPress={() => router.push({ pathname: '/quotes/simpro', params: { siteId: site.id } })}
                 />
                 <NavRow
                   icon="receipt-text-outline"
                   title="Invoices"
                   subtitle={office.stats.invoicesUnpaidCents
-                    ? `${formatCents(office.stats.invoicesUnpaidCents)} unpaid against this site's jobs`
-                    : 'Nothing owing in the two years the phone holds'}
+                    ? `${formatCents(office.stats.invoicesUnpaidCents)} unpaid`
+                    : 'Nothing owing'}
                   onPress={() => router.push({ pathname: '/invoices', params: { siteId: site.id } })}
                 />
                 <Txt size="xs" tone="faint">
@@ -619,84 +621,12 @@ export default function SiteScreen() {
           </>
         ) : null}
 
-        <H2>Browse</H2>
-        <NavRow
-          icon="format-list-bulleted"
-          title="Points"
-          subtitle={`${pointCount.toLocaleString()} devices — search by text, zone or address`}
-          onPress={() => router.push({ pathname: '/site/points', params: { siteId: site.id } })}
-        />
+        <H2>On site</H2>
         <NavRow
           icon="cube-outline"
           title="Asset register"
-          subtitle="Extinguishers, lights, hydrants, doors, pumps — each with its own history"
+          subtitle="Every asset on site"
           onPress={() => router.push({ pathname: '/site/assets', params: { siteId: site.id } })}
-        />
-        <NavRow
-          icon="shape-outline"
-          title="Zones"
-          subtitle="Zone list with device counts"
-          onPress={() => router.push({ pathname: '/site/zones', params: { siteId: site.id } })}
-        />
-        <NavRow
-          icon="clipboard-text-outline"
-          title="Baseline data"
-          subtitle="Commissioning record, filled from this site's own data"
-          onPress={() => { void openRecords('baseline'); }}
-        />
-        <NavRow
-          icon="table-large"
-          title="Cause & effect"
-          subtitle="Matrix of causes against the outputs they operate"
-          onPress={() => router.push({ pathname: '/site/cause-effect', params: { siteId: site.id } })}
-        />
-        <NavRow
-          icon="calendar-clock"
-          title="What is due"
-          subtitle="Routines due or overdue here, with their tolerance windows"
-          onPress={() => router.push({ pathname: '/site/due', params: { siteId: site.id } })}
-        />
-        <NavRow
-          icon="cart-outline"
-          title="Parts needed"
-          subtitle="What the open defects need ordered, from their coded quote lines"
-          onPress={() => router.push({ pathname: '/site/parts', params: { siteId: site.id } })}
-        />
-        <NavRow
-          icon="help-circle-outline"
-          title="Not tested"
-          subtitle="Assets that were attempted and could not be tested, with the reason"
-          onPress={() => router.push({ pathname: '/site/coverage', params: { siteId: site.id } })}
-        />
-        <NavRow
-          icon="currency-usd"
-          title="Rectification quote"
-          subtitle="Price the open defects from their coded lines and the rate card"
-          onPress={() => router.push({ pathname: '/site/quote', params: { siteId: site.id } })}
-        />
-        <NavRow
-          icon="clipboard-check-outline"
-          title="Form 72"
-          subtitle="The department's hydrant and sprinkler form, and the occupier's copy of it"
-          onPress={() => router.push({ pathname: '/site/form72', params: { siteId: site.id } })}
-        />
-        <NavRow
-          icon="file-certificate-outline"
-          title="Occupier statement"
-          subtitle="Annual declaration, filled from this site's own register and defects"
-          onPress={() => { void openRecords('occupier'); }}
-        />
-        <NavRow
-          icon="history"
-          title="Service history"
-          subtitle="What has been done here, and whether it was done within tolerance"
-          onPress={() => router.push({ pathname: '/site/history', params: { siteId: site.id } })}
-        />
-        <NavRow
-          icon="clipboard-search-outline"
-          title="Effectiveness assessment"
-          subtitle="Visual and advisory — recommendations for a project, not a service"
-          onPress={() => { void openRecords('assessment'); }}
         />
         <NavRow
           icon="alert-octagon-outline"
@@ -705,18 +635,72 @@ export default function SiteScreen() {
           tone={criticalDefects.length ? 'fail' : undefined}
           onPress={() => router.push({ pathname: '/site/defects', params: { siteId: site.id } })}
         />
+        {hasPanels ? (
+          <>
+            <NavRow
+              icon="format-list-bulleted"
+              title="Points"
+              subtitle={`${pointCount.toLocaleString()} device${pointCount === 1 ? '' : 's'}`}
+              onPress={() => router.push({ pathname: '/site/points', params: { siteId: site.id } })}
+            />
+            <NavRow
+              icon="shape-outline"
+              title="Zones"
+              subtitle="Zones and device counts"
+              onPress={() => router.push({ pathname: '/site/zones', params: { siteId: site.id } })}
+            />
+            <NavRow
+              icon="table-large"
+              title="Cause & effect"
+              subtitle="Build and export the matrix"
+              onPress={() => router.push({ pathname: '/site/cause-effect', params: { siteId: site.id } })}
+            />
+          </>
+        ) : null}
+
+        <H2>Paperwork</H2>
+        <NavRow
+          icon="currency-usd"
+          title="Rectification quote"
+          subtitle="Quote the open defects"
+          onPress={() => router.push({ pathname: '/site/quote', params: { siteId: site.id } })}
+        />
+        <NavRow
+          icon="clipboard-check-outline"
+          title="Form 72"
+          subtitle="Hydrant and sprinkler test form"
+          onPress={() => router.push({ pathname: '/site/form72', params: { siteId: site.id } })}
+        />
+        <NavRow
+          icon="file-certificate-outline"
+          title="Occupier statement"
+          subtitle="Annual occupier declaration"
+          onPress={() => { void openRecords('occupier'); }}
+        />
+        <NavRow
+          icon="clipboard-text-outline"
+          title="Baseline data"
+          subtitle="Commissioning record"
+          onPress={() => { void openRecords('baseline'); }}
+        />
+        <NavRow
+          icon="clipboard-search-outline"
+          title="Effectiveness assessment"
+          subtitle="Advisory site assessment"
+          onPress={() => { void openRecords('assessment'); }}
+        />
 
         <H2>Panels</H2>
         {panels.length ? (
           panels.map((p) => <PanelCard key={p.id} panel={p} />)
         ) : (
           <EmptyState
-          icon="alarm-light-outline"
-            title="No panels yet"
-            body="Import a device list exported from the panel's programming tool, or add points by hand."
+            icon="alarm-light-outline"
+            title="No panels"
+            body="Import the panel config or device list."
             action={
               <Button
-                title="Import a device list"
+                title="Import config"
                 onPress={() => router.push({ pathname: '/import', params: { siteId: site.id } })}
               />
             }
@@ -731,7 +715,10 @@ export default function SiteScreen() {
                 <View style={{ flex: 1 }}>
                   <Txt weight="700">{r.title}</Txt>
                   <Txt size="sm" tone="muted">
-                    {r.frequency} · {r.serviceDate}
+                    {[
+                      r.frequency.charAt(0).toUpperCase() + r.frequency.slice(1),
+                      r.serviceDate ? formatAuDate(r.serviceDate) : undefined,
+                    ].filter(Boolean).join(' · ')}
                   </Txt>
                 </View>
                 <Chip label={r.status === 'complete' ? 'Complete' : 'Draft'} tone={r.status === 'complete' ? 'pass' : 'warn'} />
@@ -742,8 +729,13 @@ export default function SiteScreen() {
           <Txt tone="faint" size="sm">No reports yet.</Txt>
         )}
 
-        <View style={{ height: t.space(4) }} />
-        <Button title="Delete site" variant="danger" onPress={confirmDelete} />
+        {/*
+          * Only for a site typed in here. A site from Simpro comes back on the
+          * next sync without the records deleted with it.
+          */}
+        {siteCanBeDeleted(site) ? (
+          <Button title="Delete site" variant="danger" onPress={confirmDelete} style={{ marginTop: t.space(4) }} />
+        ) : null}
       </Screen>
     </>
   );
@@ -763,8 +755,8 @@ function PersonRow({ person: p }: { person: ContactRecord }) {
     >
       <Rowed gap={2}>
         <View style={{ flex: 1 }}>
-          <Txt weight="700" numberOfLines={1}>{p.name || 'Unnamed contact'}</Txt>
-          <Txt size="xs" tone="muted" numberOfLines={1}>{[p.position, p.department, number].filter(Boolean).join(' · ') || 'No number on record'}</Txt>
+          <Txt weight="700" numberOfLines={1}>{p.name || 'No name'}</Txt>
+          <Txt size="xs" tone="muted" numberOfLines={1}>{[p.position, p.department, number].filter(Boolean).join(' · ') || 'No number'}</Txt>
         </View>
         {call ? (
           <Button

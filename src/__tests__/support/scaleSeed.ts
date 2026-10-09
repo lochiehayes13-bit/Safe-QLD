@@ -69,7 +69,7 @@ const SUBURBS = [
   'Nundah', 'Carindale', 'Redbank', 'Loganholme', 'Caboolture', 'Strathpine', 'Wynnum',
 ];
 const STREETS = ['Wharf', 'Baldwin', 'Emsworth', 'Kingsford', 'Marlowe', 'Petrie', 'Sandgate', 'Turbot', 'Vulture', 'Hale'];
-const PREFIX = ['Harbourline', 'Baldwin Living', 'Storage Choice', 'Luggage Direct', 'Kingsford Plaza', 'Northgate Works',
+const PREFIX = ['Harbourline', 'Baldwin Living', 'Fictional Storage', 'Bag Depot', 'Kingsford Plaza', 'Northgate Works',
   'Riverbend Estate', 'Cathedral Chambers', 'Milton Reach', 'Pinelands', 'Everton Village', 'Sunnybank Central'];
 const SUFFIX = ['Apartments', 'Body Corporate', 'Industrial', 'Retail', 'Depot', 'Chambers', 'Terraces', 'Warehouse', 'Precinct'];
 const JOB_TITLES = ['Six-monthly routine', 'Annual routine', 'Monthly routine', 'Callout — panel in fault',

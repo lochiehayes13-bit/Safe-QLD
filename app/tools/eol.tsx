@@ -24,8 +24,8 @@ export default function EolScreen() {
       <Screen>
         <Banner
           tone="warn"
-          title="There is no universal EOL value"
-          body="It varies by panel, by card and often by configured mode, and several Australian panels sense current or voltage bands rather than resistance. Always confirm against the panel manual and the as-installed configuration."
+          title="Check the panel manual"
+          body="EOL varies by panel, card and mode. Some panels sense current or voltage, not resistance."
         />
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2) }}>
@@ -40,10 +40,7 @@ export default function EolScreen() {
           <Card key={`${e.panel}-${e.circuit}-${i}`}>
             <Rowed style={{ justifyContent: 'space-between' }}>
               <Label>{e.brand}</Label>
-              <Chip
-                label={e.confidence}
-                tone={e.confidence === 'high' ? 'pass' : e.confidence === 'low' ? 'warn' : 'default'}
-              />
+              {e.confidence !== 'high' ? <Chip label="Check manual" tone="warn" /> : null}
             </Rowed>
             <Txt weight="700" style={{ marginTop: 4 }}>{e.panel}</Txt>
             <Txt size="sm" tone="muted">{e.circuit}</Txt>
@@ -54,10 +51,14 @@ export default function EolScreen() {
           </Card>
         ))}
 
-        <H2>Published state boundaries</H2>
-        <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-          Only a minority of panels publish these. Do not extrapolate one panel's bands to another.
-        </Txt>
+        {tables.length ? (
+          <>
+            <H2>State boundaries</H2>
+            <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+              Only some panels publish these. Don&rsquo;t apply them to other panels.
+            </Txt>
+          </>
+        ) : null}
         {tables.map((s, i) => (
           <Card key={`${s.panel}-${i}`}>
             <Txt weight="700">{s.panel}</Txt>
@@ -81,7 +82,7 @@ export default function EolScreen() {
               </View>
             ) : (
               <Txt size="sm" tone="warn" style={{ marginTop: t.space(2), lineHeight: 19 }}>
-                This panel does not sense by resistance, so no band table applies.
+                No resistance bands published.
               </Txt>
             )}
             {s.notes ? <Txt size="sm" tone="muted" style={{ marginTop: t.space(2), lineHeight: 19 }}>{s.notes}</Txt> : null}

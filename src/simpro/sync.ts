@@ -237,8 +237,8 @@ export interface PullOptions {
  * Matches an incoming site to one already held, by external id then by name.
  *
  * The name fallback refuses a name that identifies more than one building —
- * see matchSiteByRefOrName. Three of this company's sites are called "Luggage
- * Direct", and folding a Simpro site onto whichever of them came first merges
+ * see matchSiteByRefOrName. Three of this company's sites share one
+ * name, and folding a Simpro site onto whichever of them came first merges
  * three buildings' jobs and assets into one.
  */
 function matchSite(existing: SiteIndex<Site>, externalId: string, name: string) {

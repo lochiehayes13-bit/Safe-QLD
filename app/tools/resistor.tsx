@@ -1,9 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { Stack } from 'expo-router';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
-  COLOURS,
   DIGIT_COLOURS,
   MULTIPLIER_COLOURS,
   TCR_COLOURS,
@@ -11,6 +9,7 @@ import {
   colourSpec,
   decodeBands,
   encodeBands,
+  fewestBandsFor,
   formatOhms,
   isPreferredValue,
   nearestPreferred,
@@ -20,7 +19,7 @@ import {
   type BandCount,
 } from '@/calc/resistor';
 import { useTheme } from '@/theme';
-import { Banner, Card, Field, H2, Label, ResultBlock, Rowed, Screen, Segmented, Txt } from '@/components/ui';
+import { Banner, Field, Label, ResultBlock, Screen, Segmented, Txt } from '@/components/ui';
 
 /**
  * Resistor decoder.
@@ -32,18 +31,48 @@ import { Banner, Card, Field, H2, Label, ResultBlock, Rowed, Screen, Segmented, 
 
 type Mode = 'decode' | 'encode';
 
-const DEFAULT_BANDS: BandColour[] = ['yellow', 'violet', 'red', 'gold', 'brown', 'brown'];
+/**
+ * Each band is held by what it means rather than where it sits, so changing
+ * the band count keeps the digits, multiplier and tolerance already picked.
+ */
+type Slot = 'd1' | 'd2' | 'd3' | 'mult' | 'tol' | 'tcr';
+type Picks = Record<Slot, BandColour | null>;
+
+const NO_PICKS: Picks = { d1: null, d2: null, d3: null, mult: null, tol: null, tcr: null };
+
+const SLOT_LABEL: Record<Slot, string> = {
+  d1: 'Digit 1', d2: 'Digit 2', d3: 'Digit 3', mult: 'Multiplier', tol: 'Tolerance', tcr: 'Temp. coefficient',
+};
+
+const SLOT_OPTIONS: Record<Slot, BandColour[]> = {
+  d1: DIGIT_COLOURS, d2: DIGIT_COLOURS, d3: DIGIT_COLOURS,
+  mult: MULTIPLIER_COLOURS, tol: TOLERANCE_COLOURS, tcr: TCR_COLOURS,
+};
+
+/** The slots on a resistor of this many bands, in the order they sit on the body. */
+function slotsFor(count: BandCount): Slot[] {
+  const slots: Slot[] = count >= 5 ? ['d1', 'd2', 'd3', 'mult'] : ['d1', 'd2', 'mult'];
+  if (count >= 4) slots.push('tol');
+  if (count === 6) slots.push('tcr');
+  return slots;
+}
+
+/** A 3-band resistor has no tolerance band and is ±20%. */
+const THREE_BAND_TOLERANCE = 20;
+
+/** The temperature coefficient shown on a 6-band encode. */
+const SIX_BAND_TCR = 100;
 
 export default function ResistorScreen() {
   const [mode, setMode] = useState<Mode>('decode');
   const [count, setCount] = useState<BandCount>(4);
-  const [bands, setBands] = useState<BandColour[]>(DEFAULT_BANDS);
-  const [valueText, setValueText] = useState('4k7');
+  const [picks, setPicks] = useState<Picks>(NO_PICKS);
+  const [valueText, setValueText] = useState('');
   const [tolerance, setTolerance] = useState(5);
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Resistor decoder' }} />
+      <Stack.Screen options={{ title: 'Resistor values' }} />
       <Screen>
         <Segmented
           value={mode}
@@ -66,7 +95,7 @@ export default function ResistorScreen() {
         />
 
         {mode === 'decode' ? (
-          <DecodeView count={count} bands={bands} setBands={setBands} />
+          <DecodeView count={count} picks={picks} setPicks={setPicks} />
         ) : (
           <EncodeView
             count={count}
@@ -85,36 +114,26 @@ export default function ResistorScreen() {
 
 function DecodeView({
   count,
-  bands,
-  setBands,
+  picks,
+  setPicks,
 }: {
   count: BandCount;
-  bands: BandColour[];
-  setBands: (b: BandColour[]) => void;
+  picks: Picks;
+  setPicks: (p: Picks) => void;
 }) {
   const t = useTheme();
-  const result = useMemo(() => decodeBands(bands, count), [bands, count]);
-
-  const setBand = (i: number, c: BandColour) => {
-    const next = [...bands];
-    next[i] = c;
-    setBands(next);
-  };
-
-  const digitCount = count >= 5 ? 3 : 2;
-  const slots: { label: string; options: BandColour[]; index: number }[] = [];
-  for (let i = 0; i < digitCount; i++) {
-    slots.push({ label: `Digit ${i + 1}`, options: DIGIT_COLOURS, index: i });
-  }
-  slots.push({ label: 'Multiplier', options: MULTIPLIER_COLOURS, index: digitCount });
-  if (count >= 4) slots.push({ label: 'Tolerance', options: TOLERANCE_COLOURS, index: digitCount + 1 });
-  if (count === 6) slots.push({ label: 'Temp. coeff.', options: TCR_COLOURS, index: digitCount + 2 });
+  const slots = slotsFor(count);
+  const sequence = slots.map((s) => picks[s]);
+  const complete = sequence.every((b): b is BandColour => b !== null);
+  const result = complete ? decodeBands(sequence as BandColour[], count) : null;
 
   return (
     <>
-      <ResistorGraphic bands={bands.slice(0, count)} />
+      <ResistorGraphic bands={sequence} />
 
-      {result.ok ? (
+      {result === null ? (
+        <Txt size="sm" tone="muted">Pick each band.</Txt>
+      ) : result.ok ? (
         <ResultBlock
           label="Resistance"
           value={result.display ?? ''}
@@ -123,17 +142,17 @@ function DecodeView({
           }`}
         />
       ) : (
-        <Banner tone="fail" title="That band combination is not valid" body={result.error} />
+        <Banner tone="fail" title="Check the bands" body={result.error} />
       )}
 
-      {result.ok && result.ohms !== undefined ? <PreferredNote ohms={result.ohms} /> : null}
+      {result?.ok && result.ohms !== undefined ? <PreferredNote ohms={result.ohms} /> : null}
 
       {slots.map((s) => (
-        <View key={s.label} style={{ gap: t.space(1.5) }}>
-          <Label>{s.label}</Label>
+        <View key={s} style={{ gap: t.space(1.5) }}>
+          <Label>{SLOT_LABEL[s]}</Label>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2), paddingRight: t.space(4) }}>
-            {s.options.map((c) => (
-              <Swatch key={c} colour={c} selected={bands[s.index] === c} onPress={() => setBand(s.index, c)} />
+            {SLOT_OPTIONS[s].map((c) => (
+              <Swatch key={c} colour={c} selected={picks[s] === c} onPress={() => setPicks({ ...picks, [s]: c })} />
             ))}
           </ScrollView>
         </View>
@@ -156,10 +175,12 @@ function EncodeView({
   setTolerance: (v: number) => void;
 }) {
   const ohms = useMemo(() => parseOhms(valueText), [valueText]);
+  const shownTolerance = count === 3 ? THREE_BAND_TOLERANCE : tolerance;
   const bands = useMemo(
-    () => (ohms === null ? null : encodeBands(ohms, count, tolerance, count === 6 ? 100 : undefined)),
+    () => (ohms === null ? null : encodeBands(ohms, count, tolerance, count === 6 ? SIX_BAND_TCR : undefined)),
     [ohms, count, tolerance],
   );
+  const fewest = ohms === null ? null : fewestBandsFor(ohms);
 
   return (
     <>
@@ -167,37 +188,40 @@ function EncodeView({
         label="Resistance"
         value={valueText}
         onChangeText={setValueText}
-        placeholder="4k7, 470R, 10k, 1M"
         autoCapitalize="none"
-        hint="Accepts shorthand (4k7), decimals (4.7k) or plain ohms (4700)"
+        hint="e.g. 4k7, 4.7k or 4700"
       />
 
-      <Segmented
-        value={String(tolerance)}
-        onChange={(v) => setTolerance(parseFloat(v))}
-        options={[
-          { value: '1', label: '±1%' },
-          { value: '2', label: '±2%' },
-          { value: '5', label: '±5%' },
-          { value: '10', label: '±10%' },
-        ]}
-      />
-
-      {ohms === null ? (
-        <Banner tone="warn" title="Enter a resistance" body="Try 4k7, 470R, 10k or 4700." />
-      ) : bands === null ? (
-        <Banner
-          tone="warn"
-          title="Not representable with these bands"
-          body={`${formatOhms(ohms)} at ±${tolerance}% cannot be shown on a ${count}-band resistor. A three-significant-figure value needs 5 or 6 bands.`}
+      {count === 3 ? (
+        <Txt size="sm" tone="muted">3 band is ±20%.</Txt>
+      ) : (
+        <Segmented
+          value={String(tolerance)}
+          onChange={(v) => setTolerance(parseFloat(v))}
+          options={[
+            { value: '1', label: '±1%' },
+            { value: '2', label: '±2%' },
+            { value: '5', label: '±5%' },
+            { value: '10', label: '±10%' },
+          ]}
         />
+      )}
+
+      {!valueText.trim() ? null : ohms === null ? (
+        <Banner tone="warn" title="Check the value" body="e.g. 4k7, 470R or 4700." />
+      ) : bands === null ? (
+        fewest !== null && fewest > count ? (
+          <Banner tone="warn" title={`Can't show on ${count} bands`} body="Needs a 5 or 6 band resistor." />
+        ) : (
+          <Banner tone="warn" title="No colour code for this value" body="Too many significant figures, or out of range." />
+        )
       ) : (
         <>
           <ResistorGraphic bands={bands} />
           <ResultBlock
             label="Bands"
             value={bands.map((b) => colourSpec(b)?.label ?? b).join(' · ')}
-            detail={`${formatOhms(ohms)}  ·  ${shorthandOhms(ohms)}  ·  ±${tolerance}%`}
+            detail={`${formatOhms(ohms)}  ·  ${shorthandOhms(ohms)}  ·  ±${shownTolerance}%${count === 6 ? `  ·  ${SIX_BAND_TCR} ppm/K` : ''}`}
           />
           <PreferredNote ohms={ohms} />
         </>
@@ -209,21 +233,21 @@ function EncodeView({
 function PreferredNote({ ohms }: { ohms: number }) {
   const inE24 = isPreferredValue(ohms, 'E24');
   const inE96 = isPreferredValue(ohms, 'E96');
-  if (inE24) return <Banner tone="pass" title="E24 preferred value" body="A standard 5% series value — readily available." />;
-  if (inE96) return <Banner tone="pass" title="E96 preferred value" body="A standard 1% series value." />;
+  if (inE24) return <Banner tone="pass" title="E24 value" body="Standard 5% value." />;
+  if (inE96) return <Banner tone="pass" title="E96 value" body="Standard 1% value." />;
 
   const near24 = nearestPreferred(ohms, 'E24');
   return (
     <Banner
       tone="info"
-      title="Not a preferred value"
-      body={`This is not in the E24 or E96 series. The nearest E24 value is ${near24 !== null ? formatOhms(near24) : '—'}.`}
+      title="Not a standard value"
+      body={near24 !== null ? `Nearest E24 value: ${formatOhms(near24)}.` : undefined}
     />
   );
 }
 
 /** Draws the resistor body with its bands, so the picker matches the part in hand. */
-function ResistorGraphic({ bands }: { bands: BandColour[] }) {
+function ResistorGraphic({ bands }: { bands: (BandColour | null)[] }) {
   const t = useTheme();
   return (
     <View style={{ alignItems: 'center', paddingVertical: t.space(3) }}>
@@ -244,16 +268,17 @@ function ResistorGraphic({ bands }: { bands: BandColour[] }) {
           }}
         >
           {bands.map((b, i) => {
-            const spec = colourSpec(b);
+            const spec = b ? colourSpec(b) : undefined;
             return (
               <View
-                key={`${b}-${i}`}
+                key={`${b ?? 'unset'}-${i}`}
                 style={{
                   width: 15,
                   height: 74,
                   backgroundColor: spec?.hex ?? 'transparent',
-                  borderWidth: spec?.needsOutline ? 1 : 0,
-                  borderColor: 'rgba(0,0,0,0.45)',
+                  // An unpicked band is a faint outline, so the positions still show.
+                  borderWidth: !spec || spec.needsOutline ? 1 : 0,
+                  borderColor: spec ? 'rgba(0,0,0,0.45)' : 'rgba(0,0,0,0.18)',
                 }}
               />
             );

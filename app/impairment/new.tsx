@@ -7,9 +7,11 @@ import { SYSTEM_LABELS, activeSystems, type SystemKind } from '@/seed/assetTypes
 import { loadPrefs } from '@/app-prefs';
 import { useTheme } from '@/theme';
 import { describeActionFailure } from '@/domain/loadFailure';
+import { readRestoreTime } from '@/domain/restoreTime';
 import { Banner, Button, Chip, Field, H2, Screen } from '@/components/ui';
 import { showAlert } from '@/components/alert';
 import { SitePicker } from '@/components/SitePicker';
+import { RestoreTimeFields } from '@/components/RestoreTimeFields';
 
 /**
  * Declaring an impairment.
@@ -26,7 +28,7 @@ export default function NewImpairmentScreen() {
   const [system, setSystem] = useState<SystemKind>('detection');
   const [scope, setScope] = useState('');
   const [reason, setReason] = useState('');
-  const [expected, setExpected] = useState('');
+  const [expected, setExpected] = useState({ date: '', time: '' });
   const [technician, setTechnician] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -42,6 +44,8 @@ export default function NewImpairmentScreen() {
    * NOT NULL REFERENCES site(id), so there is no saving it without one.
    */
   const [sitesFailed, setSitesFailed] = useState(false);
+  /** Bumped by Try again, which re-runs the read below. */
+  const [siteAttempt, setSiteAttempt] = useState(0);
   useEffect(() => {
     void (async () => {
       const rows = await listSitePicks().catch(() => null);
@@ -49,7 +53,9 @@ export default function NewImpairmentScreen() {
       setSites(rows);
       if (rows.length === 1) setSiteId(rows[0]!.id);
     })();
-    void loadPrefs().then((p) => setTechnician(p.technicianName));
+  }, [siteAttempt]);
+  useEffect(() => {
+    void loadPrefs().then((p) => setTechnician(p.technicianName)).catch(() => undefined);
   }, []);
 
   const start = async () => {
@@ -58,7 +64,12 @@ export default function NewImpairmentScreen() {
       return;
     }
     if (!scope.trim()) {
-      showAlert('What is out of service?', 'Record what is affected — a whole panel, a loop, a zone, one device. The person taking over needs to know.');
+      showAlert("What's out?", 'Say what is out: panel, loop, zone or device.');
+      return;
+    }
+    const restore = readRestoreTime(expected.date, expected.time, Date.now());
+    if ('why' in restore) {
+      showAlert('Check the restore time', restore.why);
       return;
     }
     setSaving(true);
@@ -68,12 +79,12 @@ export default function NewImpairmentScreen() {
         system: SYSTEM_LABELS[system],
         scope: scope.trim(),
         reason: reason.trim(),
-        expectedRestoreAt: expected.trim() || undefined,
+        expectedRestoreAt: restore.at,
         technician: technician.trim() || undefined,
       });
       router.replace({ pathname: '/impairment/[id]', params: { id: rec.id } });
     } catch (e) {
-      showAlert('Could not declare it', describeActionFailure(e, 'record this impairment'));
+      showAlert("Couldn't save it", describeActionFailure(e, 'record this impairment'));
     } finally {
       setSaving(false);
     }
@@ -85,8 +96,8 @@ export default function NewImpairmentScreen() {
       <Screen>
         <Banner
           tone="fail"
-          title="This starts a clock"
-          body="From the moment you declare it, the app tracks how long the system has been down and shows it on your home screen until it is restored. Notifications and fire watch are tracked on the next screen."
+          title="Starts a timer"
+          body="Shows on your home screen until the system is restored."
         />
 
         {/*
@@ -100,17 +111,19 @@ export default function NewImpairmentScreen() {
           * ever being read.
           */}
         {sitesFailed ? (
-          <Banner
-            tone="fail"
-            title="The site list could not be read"
-            body={'Nothing is wrong with your sites — this phone could not read them just now. Go back and '
-              + 'open this screen again. An impairment is filed against a site and cannot be saved without one.'}
-          />
+          <>
+            <Banner tone="fail" title="Couldn't load sites" body="An impairment needs a site." />
+            <Button
+              title="Try again"
+              variant="secondary"
+              onPress={() => { setSitesFailed(false); setSiteAttempt((n) => n + 1); }}
+            />
+          </>
         ) : (
           <SitePicker sites={sites} value={siteId} onChange={setSiteId} />
         )}
 
-        <H2>System affected</H2>
+        <H2>System</H2>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.space(2) }}>
           {activeSystems().filter((s) => s !== 'structure').map((s) => (
             <Chip key={s} label={SYSTEM_LABELS[s]} selected={system === s} onPress={() => setSystem(s)} />
@@ -118,14 +131,14 @@ export default function NewImpairmentScreen() {
         </View>
 
         <Field
-          label="What exactly is out of service"
+          label="What's out of service"
           value={scope}
           onChangeText={setScope}
           multiline
-          placeholder="e.g. Loop 2 isolated — levels 4 to 7 detection offline"
+          placeholder="e.g. Loop 2 isolated, levels 4 to 7"
         />
         <Field label="Why" value={reason} onChangeText={setReason} multiline placeholder="e.g. Cable damaged by ceiling works" />
-        <Field label="Expected back in service" value={expected} onChangeText={setExpected} placeholder="YYYY-MM-DD HH:MM" />
+        <RestoreTimeFields date={expected.date} time={expected.time} onChange={setExpected} />
         <Field label="Technician" value={technician} onChangeText={setTechnician} autoCapitalize="words" />
 
         <Button title="Declare impairment" onPress={start} loading={saving} />

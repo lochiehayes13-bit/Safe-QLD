@@ -8,6 +8,7 @@ import {
   colourSpec,
   decodeBands,
   encodeBands,
+  fewestBandsFor,
   formatOhms,
   isPreferredValue,
   nearestPreferred,
@@ -357,5 +358,32 @@ describe('nearest preferred value is nearest by ratio', () => {
     expect(nearestPreferred(0, 'E24')).toBeNull();
     expect(nearestPreferred(-5, 'E24')).toBeNull();
     expect(nearestPreferred(Number.NaN, 'E24')).toBeNull();
+  });
+});
+
+describe('fewestBandsFor', () => {
+  it('needs 3 bands for two significant figures', () => {
+    expect(fewestBandsFor(4700)).toBe(3);
+    expect(fewestBandsFor(0.22)).toBe(3);
+  });
+
+  it('needs 5 bands for three significant figures', () => {
+    // 4.75k is an E96 value with no 4-band code.
+    expect(encodeBands(4750, 4)).toBeNull();
+    expect(fewestBandsFor(4750)).toBe(5);
+  });
+
+  it('has no band count for four significant figures or a value out of range', () => {
+    expect(fewestBandsFor(4701)).toBeNull();
+    expect(fewestBandsFor(0)).toBeNull();
+    expect(fewestBandsFor(0.001)).toBeNull();
+  });
+});
+
+describe('a 3-band encode', () => {
+  it('ignores the tolerance picked, because a 3-band resistor is always ±20%', () => {
+    expect(encodeBands(4700, 3, 1)).toEqual(encodeBands(4700, 3, 10));
+    expect(encodeBands(4700, 3, 1)).toHaveLength(3);
+    expect(decodeBands(encodeBands(4700, 3)!, 3).tolerancePct).toBe(20);
   });
 });

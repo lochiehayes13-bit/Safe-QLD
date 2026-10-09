@@ -57,7 +57,7 @@ describe('the gate itself', () => {
 
 describe('every screen that asks for a site', () => {
   it('finds them all, so this is not passing on an empty list', () => {
-    expect(gated.length).toBeGreaterThanOrEqual(12);
+    expect(gated.length).toBeGreaterThanOrEqual(8);
   });
 
   it.each(gated.map((g) => [g.file, g.source] as const))(

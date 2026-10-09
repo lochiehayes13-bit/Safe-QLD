@@ -111,8 +111,11 @@ describe('controls that used to do nothing', () => {
 
   it('cause and effect says a site with no panel has nothing to attach a rule to', () => {
     const ce = read('app', 'site', 'cause-effect.tsx');
-    expect(ce).toContain('{adding && !panelId ? (');
-    expect(ce).toContain('This site has no panel on the phone yet');
+    // Said up front with the way to fix it, and "Add a cause" is only offered
+    // where there is a panel to add one to.
+    expect(ce).toContain('{loaded && !panelId ? (');
+    expect(ce).toContain('title="No panel at this site"');
+    expect(ce).toContain('{panelId && !adding ? (');
   });
 
   it('baseline data offers the site list it already holds', () => {

@@ -1,12 +1,22 @@
-import React, { useMemo, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Pressable, ScrollView, View } from 'react-native';
 import { Stack } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
-import { Pressable } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { readNumber, toggleSign } from '@/calc/fieldNumber';
 import { QUANTITIES, convertAll, formatValue, type Quantity, type Unit } from '@/calc/units';
 import { useTheme } from '@/theme';
-import { Card, Chip, Field, Rowed, Screen, Txt } from '@/components/ui';
+import { Button, Card, Chip, Field, Rowed, Screen, Txt } from '@/components/ui';
+
+/**
+ * Quantities a reading can go below zero in: a temperature, or a compound
+ * gauge on the suction side of a pump. These get a ± key, because the iPhone's
+ * decimal keypad has no minus.
+ */
+const SIGNED = new Set(['temperature', 'pressure']);
+
+/** How long the "Copied" mark stays on a row. */
+const COPIED_MS = 1500;
 
 /**
  * Unit converter.
@@ -19,18 +29,40 @@ export default function ConverterScreen() {
   const t = useTheme();
   const [quantity, setQuantity] = useState<Quantity>(QUANTITIES[0]!);
   const [unit, setUnit] = useState<Unit>(QUANTITIES[0]!.units[0]!);
-  const [text, setText] = useState('700');
+  const [text, setText] = useState('');
+  const [copied, setCopied] = useState<string | null>(null);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const value = useMemo(() => {
-    const v = parseFloat(text);
-    return Number.isFinite(v) ? v : Number.NaN;
-  }, [text]);
+  useEffect(() => () => {
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+  }, []);
 
+  const value = useMemo(() => readNumber(text) ?? Number.NaN, [text]);
   const results = useMemo(() => convertAll(value, unit, quantity), [value, unit, quantity]);
+  const signed = SIGNED.has(quantity.id);
+
+  const pickQuantity = (q: Quantity) => {
+    setQuantity(q);
+    setUnit(q.units[0]!);
+    // A minus carried over from a temperature means nothing on a length.
+    if (!SIGNED.has(q.id)) setText((prev) => prev.replace(/^\s*-/, ''));
+  };
+
+  const copy = (unitId: string, v: number) => {
+    if (!Number.isFinite(v)) return;
+    Clipboard.setStringAsync(formatValue(v))
+      .then((ok) => {
+        if (ok === false) return;
+        setCopied(unitId);
+        if (copiedTimer.current) clearTimeout(copiedTimer.current);
+        copiedTimer.current = setTimeout(() => setCopied(null), COPIED_MS);
+      })
+      .catch(() => undefined);
+  };
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Converter' }} />
+      <Stack.Screen options={{ title: 'Unit converter' }} />
       <Screen>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2) }}>
           {QUANTITIES.map((q) => (
@@ -38,12 +70,19 @@ export default function ConverterScreen() {
               key={q.id}
               label={q.label}
               selected={quantity.id === q.id}
-              onPress={() => { setQuantity(q); setUnit(q.units[0]!); }}
+              onPress={() => pickQuantity(q)}
             />
           ))}
         </ScrollView>
 
-        <Field label="Value" value={text} onChangeText={setText} keyboardType="numeric" suffix={unit.symbol} />
+        <Rowed gap={2} align="flex-end">
+          <View style={{ flex: 1 }}>
+            <Field label="Value" value={text} onChangeText={setText} keyboardType="decimal-pad" suffix={unit.symbol} />
+          </View>
+          {signed ? (
+            <Button title="±" variant="secondary" onPress={() => setText(toggleSign(text))} />
+          ) : null}
+        </Rowed>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2) }}>
           {quantity.units.map((u) => (
@@ -54,10 +93,12 @@ export default function ConverterScreen() {
         <Card>
           {results.map((r, i) => {
             const isSource = r.unit.id === unit.id;
+            const justCopied = copied === r.unit.id;
             return (
               <Pressable
                 key={r.unit.id}
-                onPress={() => void Clipboard.setStringAsync(formatValue(r.value))}
+                onPress={() => copy(r.unit.id, r.value)}
+                disabled={!Number.isFinite(r.value)}
                 style={{
                   paddingVertical: t.space(2.5),
                   borderTopWidth: i === 0 ? 0 : 1,
@@ -66,9 +107,16 @@ export default function ConverterScreen() {
               >
                 <Rowed style={{ justifyContent: 'space-between' }}>
                   <View style={{ flex: 1 }}>
-                    <Txt size="sm" tone={isSource ? 'accent' : 'muted'} weight={isSource ? '700' : '400'}>
-                      {r.unit.label}
-                    </Txt>
+                    {justCopied ? (
+                      <Rowed gap={1}>
+                        <MaterialCommunityIcons name="check" size={14} color={t.color.pass} />
+                        <Txt size="sm" tone="pass" weight="700">Copied</Txt>
+                      </Rowed>
+                    ) : (
+                      <Txt size="sm" tone={isSource ? 'accent' : 'muted'} weight={isSource ? '700' : '400'}>
+                        {r.unit.label}
+                      </Txt>
+                    )}
                   </View>
                   <Rowed gap={2} align="baseline">
                     <Txt size="lg" weight="700" mono tone={isSource ? 'accent' : 'default'}>
@@ -84,7 +132,7 @@ export default function ConverterScreen() {
 
         <Rowed gap={2}>
           <MaterialCommunityIcons name="content-copy" size={14} color={t.color.textFaint} />
-          <Txt size="xs" tone="faint">Tap any row to copy it.</Txt>
+          <Txt size="xs" tone="faint">Tap a row to copy it.</Txt>
         </Rowed>
       </Screen>
     </>

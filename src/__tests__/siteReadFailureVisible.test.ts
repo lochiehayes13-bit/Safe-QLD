@@ -73,7 +73,12 @@ describe('declaring an impairment', () => {
   });
 
   it('says so on screen instead of leaving an empty list', () => {
-    expect(source).toContain("title=\"The site list could not be read\"");
+    expect(source).toContain('title="Couldn\'t load sites"');
+  });
+
+  it('offers another go without leaving the screen', () => {
+    expect(source).toContain('onPress={() => { setSitesFailed(false); setSiteAttempt((n) => n + 1); }}');
+    expect(source).toContain('}, [siteAttempt]);');
   });
 
   it('shows the picker whatever the list holds', () => {

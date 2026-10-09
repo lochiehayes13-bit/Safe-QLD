@@ -51,7 +51,7 @@ describe('a repository read with its table gone', () => {
     // The driver's own words, kept: "no such table: defect" is what tells
     // anybody looking at it that this is not a data problem.
     expect(said).toMatch(/no such table/i);
-    expect(said).toMatch(/not in the shape this build expects/);
+    expect(said).toMatch(/storage needs repair/);
   });
 
   it('answers normally while the table is there, so the check above means something', async () => {

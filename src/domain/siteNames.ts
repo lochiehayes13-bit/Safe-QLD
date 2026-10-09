@@ -4,8 +4,8 @@
  * The register keys sites on the id the office system gave them, which is
  * right — it is the only stable identity, and matching on name would merge
  * genuinely separate buildings. But three of Safe QLD's sites are called
- * "Storage Choice - Sumner Park", three are "Luggage Direct" and two are
- * "Brisbane Rheumatology", and the register carries no address for any of
+ * "Fictional Storage - Northside", three are "Bag Depot" and two are
+ * "Main St Clinic", and the register carries no address for any of
  * them. So the list shows identical rows, and a technician picking the wrong
  * one records a service against the wrong building.
  *
@@ -131,10 +131,10 @@ export interface SiteMatch<T> {
  * match on, and without it every import makes a second copy of the building.
  *
  * But it was matching on names that are not identities. In Safe QLD's own
- * register three names cover eight separate buildings — three "Luggage
- * Direct", three "Storage Choice - Sumner Park", two "Brisbane
- * Rheumatology" — and a name lookup returns whichever of them comes first.
- * So all three Luggage Directs collapse onto one local site, and the assets,
+ * register three names cover eight separate buildings — three "Bag
+ * Depot", three "Fictional Storage - Northside", two "Main St
+ * Clinic" — and a name lookup returns whichever of them comes first.
+ * So all three Bag Depots collapse onto one local site, and the assets,
  * jobs and service history of three different buildings merge into it.
  * Silently, because a match is the quiet path.
  *
@@ -245,7 +245,7 @@ export function matchSiteInIndex<T extends NamedSite>(
   /*
    * A namesake that already carries a different reference from the same
    * source is a different building, and the name must not join them. Three
-   * Luggage Directs arriving from the sync one after another: the first has
+   * Bag Depots arriving from the sync one after another: the first has
    * no namesake and is created; the second finds exactly one site by name, but
    * that site is SIMPRO:3370 and this one is SIMPRO:3371, and the office does
    * not give one building two numbers. A site with no reference, or one from

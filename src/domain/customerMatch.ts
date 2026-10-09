@@ -7,7 +7,7 @@
  * from three signals, each of which is checked rather than trusted:
  *
  *  - the name, compared after the noise is taken off it, so "ACME Pty Ltd"
- *    and "Acme" are the same customer but "Storage Choice" and "Storage King"
+ *    and "Acme" are the same customer but "Fictional Storage" and "Storage King"
  *    are not — one is a customer and the other is the shop next door;
  *  - the address, compared on the street number, the street and the suburb,
  *    so "12 Smith Street, Springfield QLD 4300, Australia" from a geocoder
@@ -104,8 +104,8 @@ const NAME_NOISE = new Set(['pty', 'ltd', 'limited', 'p/l', 'inc', 'incorporated
 
 /**
  * A name reduced to what identifies it: lower case, "&" as "and", punctuation
- * as spaces, the corporate suffixes gone. "Storage Choice - Sumner Park" and
- * "STORAGE CHOICE SUMNER PARK" come out the same; "Storage King" does not.
+ * as spaces, the corporate suffixes gone. "Fictional Storage - Northside" and
+ * "FICTIONAL STORAGE NORTHSIDE" come out the same; "Storage King" does not.
  */
 export function normaliseName(name: string | null | undefined): string {
   if (!name) return '';
@@ -260,8 +260,8 @@ function words(text: string): string {
  * Whether one of the segments after the street is the suburb.
  *
  * Each segment is taken whole, with the state and postcode a one-line
- * address hangs on the end of it taken off: "Sumner Park QLD 4074" is the
- * suburb Sumner Park, and so is Nominatim's own "Sumner Park" segment. The
+ * address hangs on the end of it taken off: "Northside QLD 4074" is the
+ * suburb Northside, and so is Nominatim's own "Northside" segment. The
  * council segment beside it — "Ipswich City", "Brisbane City" — is a whole
  * segment too, so a site whose suburb is Ipswich does not match every street
  * in the council of the same name, which is what searching the flattened

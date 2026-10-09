@@ -43,8 +43,8 @@ const ICON: Record<FindingSeverity, React.ComponentProps<typeof MaterialCommunit
 };
 
 const HEADING: Record<FindingSeverity, string> = {
-  fail: 'Fix these',
-  warn: 'Worth looking at',
+  fail: 'To fix',
+  warn: 'To look at',
   note: 'Worth knowing',
 };
 
@@ -82,21 +82,17 @@ export default function ConfigVerifyScreen() {
       {!result ? (
         <Banner
           tone="warn"
-          title="There is nothing here to check"
-          body={
-            opened.unreadable
-            ?? 'This build could not read any devices out of the file, so none of the checks have anything to run against.'
-          }
+          title="Nothing to check"
+          body={opened.unreadable ?? 'No devices read from this file.'}
         />
       ) : (
         <>
           <Card variant="raised">
             <Txt weight="700">{describeVerdict(result)}</Txt>
             <Txt size="sm" tone="muted" style={{ marginTop: t.space(1), lineHeight: 19 }}>
-              {`${result.passed.length + result.findings.length} checks ran against this file. `}
               {result.skipped.length
-                ? `${result.skipped.length} could not, because of what this format does not carry.`
-                : 'Every check this app has could run against it.'}
+                ? `${result.passed.length + result.findings.length} checks run, ${result.skipped.length} skipped.`
+                : `All ${result.passed.length + result.findings.length} checks run.`}
             </Txt>
           </Card>
 
@@ -112,13 +108,12 @@ export default function ConfigVerifyScreen() {
               title="Nothing found"
               body={
                 result.passed.length
-                  ? `The ${result.passed.length} checks this file supports all came back clean. That is not the `
-                    + 'same as the system being right — it means nothing in the configuration contradicts itself.'
-                  : 'Nothing in this file could be checked at all. The list below says why.'
+                  ? `All ${result.passed.length} checks came back clean.`
+                  : 'No checks could run. See below.'
               }
               action={
                 <Button
-                  title="Look through the devices"
+                  title="Browse devices"
                   variant="secondary"
                   compact
                   onPress={() => router.push({ pathname: '/config/points', params: { id } })}
@@ -147,8 +142,7 @@ export default function ConfigVerifyScreen() {
                 icon={showSkipped ? 'chevron-up' : 'chevron-down'}
               />
               <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-                These are not passes. Each one needs something this file does not carry, and running it anyway
-                would produce findings that are confidently wrong.
+                The file doesn&apos;t carry the data for these.
               </Txt>
               {showSkipped ? (
                 <Card>
@@ -165,10 +159,7 @@ export default function ConfigVerifyScreen() {
           ) : null}
 
           <Txt size="xs" tone="faint" style={{ lineHeight: 17, marginTop: t.space(2) }}>
-            Nothing here is a compliance check. These read the configuration against itself — one device per
-            address, every zone a device names actually in the zone table, every device a rule drives actually on
-            the loop. Whether the system meets the Standard is a question about the building, which no file can
-            answer.
+            Checks the file against itself, not the Standard.
           </Txt>
         </>
       )}

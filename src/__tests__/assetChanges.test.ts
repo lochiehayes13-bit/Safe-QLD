@@ -110,7 +110,7 @@ describe('what changed', () => {
 describe('the words', () => {
   it('says what each kind does, with the asset and its fields', () => {
     expect(describeAssetChange('asset-create', { label: 'Extinguisher E-12', assetTypeName: 'Fire Extinguishers' })).toBe('New asset in Simpro: Extinguisher E-12 (Fire Extinguishers)');
-    expect(describeAssetChange('asset-update', { label: 'Extinguisher E-12', fields: [{ name: 'Location', value: 'L2' }], startDate: '2026-09-01' })).toBe('Asset corrected in Simpro: Extinguisher E-12 — Location, Start date');
+    expect(describeAssetChange('asset-update', { label: 'Extinguisher E-12', fields: [{ name: 'Location', value: 'L2' }], startDate: '2026-09-01' })).toBe('Asset corrected in Simpro: Extinguisher E-12: Location, Start date');
     expect(describeAssetChange('asset-archive', { label: 'Hose reel 3' })).toBe('Asset archived in Simpro: Hose reel 3');
     expect(describeAssetChange('asset-delete', { label: 'Hose reel 3' })).toBe('Asset deleted from Simpro: Hose reel 3');
   });
@@ -121,13 +121,13 @@ describe('the words', () => {
   });
 
   it('has a sentence for each state a change can be in', () => {
-    expect(describeChangeState('undoable')).toMatch(/take it back/);
-    expect(describeChangeState('queued')).toMatch(/next sync/);
+    expect(describeChangeState('undoable')).toMatch(/Undo/);
+    expect(describeChangeState('queued')).toBe('Waiting to send');
     expect(describeChangeState('sent')).toBe('Sent to the office');
     expect(describeChangeState('failed', 'HTTP 422')).toBe('Refused by Simpro: HTTP 422');
     expect(describeChangeState('unknown')).toMatch(/Waiting to send/);
     expect(describeChangeState('taken-back')).toMatch(/before it went/);
-    expect(describeChangeState('forgotten')).toMatch(/the office does not have it/);
+    expect(describeChangeState('forgotten')).toMatch(/not in Simpro/);
     expect(describeChangeState('forgotten', 'HTTP 502')).toMatch(/HTTP 502/);
   });
 });

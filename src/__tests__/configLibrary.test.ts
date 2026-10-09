@@ -172,7 +172,7 @@ describe('the line under a file name', () => {
   });
 
   it('says so plainly when there is nothing in it at all', () => {
-    expect(describeSummary(emptySummary())).toBe('Nothing this build can read');
+    expect(describeSummary(emptySummary())).toBe('No devices read');
   });
 
   it('counts one of something in the singular', () => {

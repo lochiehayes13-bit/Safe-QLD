@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   createCauseEffectRule, deleteCauseEffectRule, getSite, listCauseEffect, listPanels, listZones,
@@ -13,8 +13,9 @@ import { shareFile, writePdf, writeXlsx } from '@/export/files';
 import { notSharedNotice } from '@/export/shareOutcome';
 import { useTheme } from '@/theme';
 import { describeActionFailure } from '@/domain/loadFailure';
+import { searchZones } from '@/domain/zonePick';
 import {
-  Banner, Button, Card, Chip, Divider, EmptyState, Field, H2, Label, Rowed, Screen, Segmented, Txt,
+  Button, Card, Chip, Divider, EmptyState, Field, Label, Rowed, Screen, Txt,
 } from '@/components/ui';
 import { ContextGate } from '@/components/ContextGate';
 import { contextId } from '@/domain/screenContext';
@@ -24,12 +25,10 @@ import { showAlert } from '@/components/alert';
  * Cause and effect.
  *
  * The matrix is the deliverable, but the grid is unreadable on a phone, so the
- * screen edits by cause and exports the grid. Testing works the other way
- * round: pick a cause, the app tells you what should happen, and you tick off
- * what actually did as you go.
+ * screen edits by cause and exports the grid.
  *
- * The ticks are a checklist for the visit, not a record. Nothing stores them,
- * so the screen must not describe them as evidence — the outcome of the test
+ * There was a Test mode here, a checklist of what each cause should operate.
+ * Its ticks were never stored, so it was removed: the outcome of a test
  * belongs on the service report, where it is kept.
  */
 const CAUSE_KINDS: { value: CauseKind; label: string }[] = [
@@ -54,8 +53,6 @@ const EFFECT_KINDS: EffectKind[] = [
   'smoke-control', 'pressurisation', 'plant-shutdown', 'relay-output', 'other',
 ];
 
-type Mode = 'edit' | 'test';
-
 export default function CauseEffectScreen() {
   const t = useTheme();
   // `contextId` rather than the raw parameter: several screens push
@@ -66,7 +63,8 @@ export default function CauseEffectScreen() {
   const [panelId, setPanelId] = useState<string>();
   const [zones, setZones] = useState<Zone[]>([]);
   const [rules, setRules] = useState<CauseEffectRule[]>([]);
-  const [mode, setMode] = useState<Mode>('edit');
+  // Whether the panels have been read, so "no panel" is not shown while they load.
+  const [loaded, setLoaded] = useState(false);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -76,6 +74,7 @@ export default function CauseEffectScreen() {
       setSite(s);
       setPanels(p);
       setPanelId((cur) => cur ?? p[0]?.id);
+      setLoaded(true);
     });
   }, [siteId]);
 
@@ -132,17 +131,22 @@ export default function CauseEffectScreen() {
           </ScrollView>
         ) : null}
 
-        <Segmented
-          value={mode}
-          onChange={setMode}
-          options={[{ value: 'edit', label: 'Build' }, { value: 'test', label: 'Test' }]}
-        />
-
-        {mode === 'test' ? (
-          <Banner
-            tone="info"
-            title="Expected versus actual — a checklist for this visit"
-            body="Pick a cause and the app lists what should happen, so you can tick each effect off as you see it. The ticks are not saved and do not go on the matrix: record the outcome on the service report."
+        {/*
+          * A site with no panel has nothing to write a rule against. Said
+          * with the way to fix it, rather than offering "Add a cause" and
+          * swallowing the press.
+          */}
+        {loaded && !panelId ? (
+          <EmptyState
+            icon="alarm-light-outline"
+            title="No panel at this site"
+            body="Import the panel config first."
+            action={(
+              <Button
+                title="Import config"
+                onPress={() => router.push({ pathname: '/import', params: { siteId } })}
+              />
+            )}
           />
         ) : null}
 
@@ -153,47 +157,35 @@ export default function CauseEffectScreen() {
           </Rowed>
         ) : null}
 
-        {/*
-          * A site with no panel has nothing to write a rule against, and the
-          * button said nothing about it: tapping "Add a cause" set `adding`
-          * and then this rendered nothing, so the press was swallowed. A
-          * control that does nothing and says nothing is read as the app
-          * being broken, which is a worse conclusion than the true one.
-          */}
-        {adding && !panelId ? (
-          <Banner
-            tone="info"
-            title="This site has no panel on the phone yet"
-            body="A cause and effect rule is written against a panel's zones, so there is nothing to
-              attach one to. Import the panel's configuration, or sync the site, and this opens up."
-          />
-        ) : null}
-
-        {adding && panelId ? (
+        {panelId && adding ? (
           <AddRule
             zones={zones}
             onCancel={() => setAdding(false)}
             onSave={async (rule) => {
-              await createCauseEffectRule(panelId, rule);
-              setAdding(false);
-              void load();
+              try {
+                await createCauseEffectRule(panelId, rule);
+                setAdding(false);
+                void load();
+              } catch (e) {
+                showAlert('Not saved', describeActionFailure(e, 'save the cause'));
+              }
             }}
           />
-        ) : (
+        ) : null}
+        {panelId && !adding ? (
           <Button
             title="Add a cause"
             variant="secondary"
             onPress={() => setAdding(true)}
             icon={<MaterialCommunityIcons name="plus" size={16} color={t.color.text} />}
           />
-        )}
+        ) : null}
 
         {rules.length ? (
           rules.map((r) => (
             <RuleCard
               key={r.id}
               rule={r}
-              mode={mode}
               onDelete={() => {
                 showAlert('Remove this cause?', r.causeLabel, [
                   { text: 'Cancel', style: 'cancel' },
@@ -206,21 +198,20 @@ export default function CauseEffectScreen() {
               }}
             />
           ))
-        ) : (
+        ) : panelId ? (
           <EmptyState
-          icon="sitemap-outline"
-            title="No cause and effect recorded"
-            body="Add each cause and the outputs it operates. The matrix exports as a landscape PDF or a spreadsheet."
+            icon="sitemap-outline"
+            title="No causes yet"
+            body="Add each cause and the outputs it operates."
           />
-        )}
+        ) : null}
       </Screen>
     </>
   );
 }
 
-function RuleCard({ rule, mode, onDelete }: { rule: CauseEffectRule; mode: Mode; onDelete: () => void }) {
+function RuleCard({ rule, onDelete }: { rule: CauseEffectRule; onDelete: () => void }) {
   const t = useTheme();
-  const [confirmed, setConfirmed] = useState<Record<string, boolean>>({});
 
   return (
     <Card>
@@ -232,50 +223,29 @@ function RuleCard({ rule, mode, onDelete }: { rule: CauseEffectRule; mode: Mode;
             {rule.causeZoneNumber !== undefined && rule.causeZoneNumber !== null ? ` · Zone ${rule.causeZoneNumber}` : ''}
           </Txt>
         </View>
-        {mode === 'edit' ? (
-          <Pressable onPress={onDelete} hitSlop={10}>
-            <MaterialCommunityIcons name="trash-can-outline" size={18} color={t.color.textFaint} />
-          </Pressable>
-        ) : null}
+        <Pressable onPress={onDelete} hitSlop={10}>
+          <MaterialCommunityIcons name="trash-can-outline" size={18} color={t.color.textFaint} />
+        </Pressable>
       </Rowed>
 
       <Divider />
-      <Label>{mode === 'test' ? 'Should happen' : 'Effects'}</Label>
-      {mode === 'test' ? (
-        <Txt size="xs" tone="faint" style={{ marginTop: 2 }}>Ticks are for this visit only and are not saved.</Txt>
-      ) : null}
+      <Label>Effects</Label>
 
       <View style={{ marginTop: t.space(2), gap: t.space(1.5) }}>
-        {rule.effects.map((e) => {
-          const ok = confirmed[e.id];
-          return (
-            <Pressable
-              key={e.id}
-              onPress={() => (mode === 'test' ? setConfirmed((p) => ({ ...p, [e.id]: !p[e.id] })) : undefined)}
-            >
-              <Rowed gap={2}>
-                {mode === 'test' ? (
-                  <MaterialCommunityIcons
-                    name={ok ? 'checkbox-marked-circle' : 'checkbox-blank-circle-outline'}
-                    size={20}
-                    color={ok ? t.color.pass : t.color.textFaint}
-                  />
-                ) : (
-                  <MaterialCommunityIcons
-                    name={e.state === 'conditional' ? 'help-circle-outline' : 'arrow-right-thin'}
-                    size={18}
-                    color={e.state === 'conditional' ? t.color.warn : t.color.accentText}
-                  />
-                )}
-                <Txt size="sm" style={{ flex: 1 }} weight={ok ? '700' : '400'}>
-                  {e.effectLabel || EFFECT_LABEL[e.effectKind]}
-                </Txt>
-                {e.delaySeconds ? <Chip label={`${e.delaySeconds}s`} /> : null}
-                {e.state === 'conditional' ? <Chip label="Conditional" tone="warn" /> : null}
-              </Rowed>
-            </Pressable>
-          );
-        })}
+        {rule.effects.map((e) => (
+          <Rowed key={e.id} gap={2}>
+            <MaterialCommunityIcons
+              name={e.state === 'conditional' ? 'help-circle-outline' : 'arrow-right-thin'}
+              size={18}
+              color={e.state === 'conditional' ? t.color.warn : t.color.accentText}
+            />
+            <Txt size="sm" style={{ flex: 1 }}>
+              {e.effectLabel || EFFECT_LABEL[e.effectKind]}
+            </Txt>
+            {e.delaySeconds ? <Chip label={`${e.delaySeconds}s`} /> : null}
+            {e.state === 'conditional' ? <Chip label="Conditional" tone="warn" /> : null}
+          </Rowed>
+        ))}
       </View>
 
       {rule.sourceLogic ? (
@@ -290,6 +260,9 @@ function RuleCard({ rule, mode, onDelete }: { rule: CauseEffectRule; mode: Mode;
   );
 }
 
+/** How many zones the picker draws at once. Where it cuts, it says so. */
+const ZONE_ROWS = 8;
+
 function AddRule({
   zones, onCancel, onSave,
 }: {
@@ -301,11 +274,13 @@ function AddRule({
   const [label, setLabel] = useState('');
   const [kind, setKind] = useState<CauseKind>('zone-alarm');
   const [zoneNumber, setZoneNumber] = useState<number>();
+  const [zoneQuery, setZoneQuery] = useState('');
   const [effects, setEffects] = useState<EffectKind[]>(['occupant-warning', 'brigade-signal']);
   const [delays, setDelays] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState('');
 
   const zone = useMemo(() => zones.find((z) => z.number === zoneNumber), [zones, zoneNumber]);
+  const found = useMemo(() => searchZones(zones, zoneQuery, ZONE_ROWS), [zones, zoneQuery]);
 
   const save = () => {
     const finalLabel = label.trim() || (zone ? `Zone ${zone.number} — ${zone.text}` : 'Cause');
@@ -338,13 +313,48 @@ function AddRule({
       {kind === 'zone-alarm' && zones.length ? (
         <>
           <View style={{ height: t.space(2.5) }} />
-          <Label>Zone</Label>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2), paddingTop: t.space(1.5) }}>
-            {zones.slice(0, 60).map((z) => (
-              <Chip key={z.id} label={`${z.number}`} selected={zoneNumber === z.number} onPress={() => setZoneNumber(z.number)} />
-            ))}
-          </ScrollView>
-          {zone ? <Txt size="sm" tone="muted" style={{ marginTop: 6 }}>{zone.text}</Txt> : null}
+          <Field
+            label="Zone"
+            value={zoneQuery}
+            onChangeText={setZoneQuery}
+            placeholder="Number or name"
+            autoCapitalize="none"
+          />
+          <View style={{ marginTop: t.space(1) }}>
+            {found.rows.map((z) => {
+              const picked = zoneNumber === z.number;
+              return (
+                <Pressable
+                  key={z.id}
+                  onPress={() => setZoneNumber(picked ? undefined : z.number)}
+                  style={{ minHeight: 40, justifyContent: 'center' }}
+                >
+                  <Rowed gap={2}>
+                    <Txt mono size="sm" tone="accent" weight="700" style={{ minWidth: 40 }}>{z.number}</Txt>
+                    <Txt size="sm" style={{ flex: 1 }} numberOfLines={1} weight={picked ? '700' : '400'}>
+                      {z.text || 'No text'}
+                    </Txt>
+                    <MaterialCommunityIcons
+                      name={picked ? 'check-circle' : 'circle-outline'}
+                      size={18}
+                      color={picked ? t.color.accent : t.color.textFaint}
+                    />
+                  </Rowed>
+                </Pressable>
+              );
+            })}
+            {found.matching === 0 ? <Txt size="sm" tone="faint">No zone matches.</Txt> : null}
+            {found.matching > found.rows.length ? (
+              <Txt size="xs" tone="faint">
+                First {found.rows.length} of {found.matching}. Search to narrow.
+              </Txt>
+            ) : null}
+          </View>
+          {zone ? (
+            <Txt size="sm" tone="muted" style={{ marginTop: 6 }}>
+              Picked: zone {zone.number}{zone.text ? `, ${zone.text}` : ''}
+            </Txt>
+          ) : null}
         </>
       ) : null}
 
@@ -353,7 +363,7 @@ function AddRule({
         label="Label"
         value={label}
         onChangeText={setLabel}
-        placeholder={zone ? `Zone ${zone.number} — ${zone.text}` : 'How this cause reads on the matrix'}
+        placeholder={zone ? `Zone ${zone.number} — ${zone.text}` : 'As it reads on the matrix'}
       />
 
       <View style={{ height: t.space(2.5) }} />
@@ -371,7 +381,7 @@ function AddRule({
 
       {effects.length ? (
         <View style={{ marginTop: t.space(2.5), gap: t.space(2) }}>
-          <Label>Delays (seconds, leave blank for none)</Label>
+          <Label>Delays (seconds)</Label>
           {effects.map((k) => (
             <Rowed key={k} gap={2} align="center">
               <Txt size="sm" style={{ flex: 1 }}>{EFFECT_LABEL[k]}</Txt>

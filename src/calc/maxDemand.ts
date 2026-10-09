@@ -32,6 +32,9 @@
  * direction that trips a main on the first hot afternoon.
  */
 
+import { designCurrent } from './cable';
+import { readNumber } from './fieldNumber';
+
 export type DemandBasis = 'fraction' | 'fixed';
 
 /** Which phase a load sits on. */
@@ -41,7 +44,7 @@ export const PHASE_LABELS: Record<DemandPhase, string> = {
   a: 'Phase A',
   b: 'Phase B',
   c: 'Phase C',
-  all: 'Across all three',
+  all: 'Three phase',
 };
 
 export interface DemandRow {
@@ -108,18 +111,18 @@ export function assessDemand(rows: readonly DemandRow[]): DemandResult {
 
   for (const row of rows) {
     if (!Number.isFinite(row.connectedA) || row.connectedA < 0) {
-      assessed.push({ row, demandA: 0, ignored: 'the connected load is not a number' });
-      warnings.push(`${row.label || 'A row'}: the connected load is not a number.`);
+      assessed.push({ row, demandA: 0, ignored: 'connected load is not a number' });
+      warnings.push(`${row.label || 'A row'}: connected load is not a number.`);
       continue;
     }
     if (!Number.isFinite(row.value) || row.value < 0) {
-      assessed.push({ row, demandA: 0, ignored: 'the assessment is not a number' });
-      warnings.push(`${row.label || 'A row'}: the assessment is not a number.`);
+      assessed.push({ row, demandA: 0, ignored: 'allowance is not a number' });
+      warnings.push(`${row.label || 'A row'}: allowance is not a number.`);
       continue;
     }
     if (row.basis === 'fraction' && row.value > 1) {
-      assessed.push({ row, demandA: 0, ignored: 'a fraction above 1 would assess more than is connected' });
-      warnings.push(`${row.label || 'A row'}: a fraction above 1 would assess more than is connected.`);
+      assessed.push({ row, demandA: 0, ignored: 'fraction is over 1' });
+      warnings.push(`${row.label || 'A row'}: fraction is over 1.`);
       continue;
     }
 
@@ -185,4 +188,69 @@ function round(n: number, dp: number): number {
   if (!Number.isFinite(n)) return n;
   const f = 10 ** dp;
   return Math.round((n + Number.EPSILON) * f) / f;
+}
+
+/** A load as typed into the add form, before it is a row. */
+export interface DemandDraft {
+  label: string;
+  /** Connected amps as typed. */
+  connectedText: string;
+  /** Load in watts as typed. Used in place of the amps when it is filled. */
+  wattsText: string;
+  /** Volts the watts are at: phase to neutral, or line volts for a three-phase load. */
+  voltsText: string;
+  basis: DemandBasis;
+  valueText: string;
+  phase: DemandPhase;
+  source: string;
+}
+
+export interface DraftCheck {
+  /** Connected amps, worked from the watts where watts were entered. */
+  connectedA: number | null;
+  /** What is wrong with the allowance, for the line under that field. */
+  valueProblem?: string;
+  /** The row to add, present only when everything needed is filled and valid. */
+  row?: Omit<DemandRow, 'id'>;
+}
+
+/**
+ * Checks the add form.
+ *
+ * Refusing a bad allowance here, at the field, is kinder than accepting the
+ * row and then marking it not counted.
+ */
+export function checkDemandDraft(d: DemandDraft): DraftCheck {
+  let connectedA: number | null = null;
+  if (d.wattsText.trim()) {
+    const w = readNumber(d.wattsText);
+    const v = readNumber(d.voltsText);
+    if (w !== undefined && v !== undefined) {
+      connectedA = designCurrent(w, v, d.phase === 'all' ? 'three' : 'single');
+    }
+  } else {
+    connectedA = readNumber(d.connectedText) ?? null;
+  }
+
+  const value = readNumber(d.valueText);
+  let valueProblem: string | undefined;
+  if (d.valueText.trim() && value === undefined) valueProblem = 'Not a number.';
+  else if (value !== undefined && value < 0) valueProblem = "Can't be negative.";
+  else if (value !== undefined && d.basis === 'fraction' && value > 1) valueProblem = 'Enter 0 to 1.';
+
+  const label = d.label.trim();
+  if (!label || connectedA === null || connectedA <= 0 || value === undefined || valueProblem) {
+    return { connectedA, valueProblem };
+  }
+  return {
+    connectedA,
+    row: {
+      label,
+      connectedA,
+      basis: d.basis,
+      value,
+      phase: d.phase,
+      source: d.source.trim() || undefined,
+    },
+  };
 }

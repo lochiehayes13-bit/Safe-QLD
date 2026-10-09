@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { createSite } from '@/db/repo';
 import { rememberPosition } from '@/geo/geocode';
-import { Button, Field, H2, Screen, Txt } from '@/components/ui';
+import { Button, Field, Screen, Txt } from '@/components/ui';
 import { showAlert } from '@/components/alert';
 
 /**
@@ -25,7 +25,7 @@ export default function NewSiteScreen() {
 
   const save = async () => {
     if (!name.trim()) {
-      showAlert('Name required', 'Give the site a name so you can find it later.');
+      showAlert('Name required', 'Give the site a name.');
       return;
     }
     setSaving(true);
@@ -59,17 +59,16 @@ export default function NewSiteScreen() {
       <Stack.Screen options={{ title: 'New site' }} />
       <Screen>
         <Txt tone="muted" size="sm" style={{ lineHeight: 20 }}>
-          Only the name is required. Everything else can be filled in later, and appears on exported reports.
+          Only the name is required.
         </Txt>
 
-        <Field label="Site name" value={name} onChangeText={setName} placeholder="e.g. Brisbane Square Tower" autoCapitalize="words" />
-        <Field label="Street address" value={address} onChangeText={setAddress} placeholder="266 George St" autoCapitalize="words" />
+        <Field label="Site name" value={name} onChangeText={setName} autoCapitalize="words" />
+        <Field label="Street address" value={address} onChangeText={setAddress} autoCapitalize="words" />
         <Field label="Suburb" value={suburb} onChangeText={setSuburb} autoCapitalize="words" />
         <Field label="Postcode" value={postcode} onChangeText={setPostcode} keyboardType="numeric" />
 
-        <H2>Job details</H2>
-        <Field label="Client" value={client} onChangeText={setClient} placeholder="Building owner or managing agent" autoCapitalize="words" />
-        <Field label="Site reference" value={siteRef} onChangeText={setSiteRef} placeholder="Your job or asset number" autoCapitalize="characters" />
+        <Field label="Client" value={client} onChangeText={setClient} placeholder="Owner or managing agent" autoCapitalize="words" />
+        <Field label="Site reference" value={siteRef} onChangeText={setSiteRef} autoCapitalize="characters" />
 
         <Button title="Create site" onPress={save} loading={saving} />
       </Screen>

@@ -104,8 +104,8 @@ export default function ConfigCompareScreen() {
       const notes: string[] = [];
       if (panels.length > 1 || parsed.panels.length > 1) {
         notes.push(
-          'This site or this file has more than one panel, and zone numbers start again on each of them. '
-          + 'The devices compare correctly; a zone difference may be two panels\' zone 3 rather than a change.',
+          'More than one panel, and zone numbers restart on each. '
+          + 'A zone difference may just be two panels\' zone 3.',
         );
       }
 
@@ -142,7 +142,7 @@ export default function ConfigCompareScreen() {
       .finally(() => setBusy(false));
   };
 
-  if (!id) return <ContextGate kind="configuration" what="what has changed since the register was written" title="Compare" />;
+  if (!id) return <ContextGate kind="configuration" what="the differences from the register" title="Compare" />;
   if (!opened) {
     return (
       <RecordGate
@@ -162,8 +162,8 @@ export default function ConfigCompareScreen() {
       {!parsed ? (
         <Banner
           tone="warn"
-          title="There is nothing to compare"
-          body={opened.unreadable ?? 'This build could not read any devices out of the file.'}
+          title="Nothing to compare"
+          body={opened.unreadable ?? 'No devices read from this file.'}
         />
       ) : null}
 
@@ -172,7 +172,7 @@ export default function ConfigCompareScreen() {
           <Banner
             tone="info"
             title="Which site is this?"
-            body="Pick the building this configuration belongs to and the comparison reads its register. Nothing is written either way."
+            body="Pick the site to compare against. Nothing is written."
           />
           <Card>
             {sitesFailed ? (
@@ -185,12 +185,12 @@ export default function ConfigCompareScreen() {
 
       {readFailed ? (
         <>
-          <Banner tone="fail" title="The register could not be read" body={readFailed} />
+          <Banner tone="fail" title="Couldn't read the register" body={readFailed} />
           <Button title="Try again" variant="secondary" onPress={() => void compare()} />
         </>
       ) : null}
 
-      {siteId && busy && !comparison ? <Txt size="sm" tone="muted">Reading the register…</Txt> : null}
+      {siteId && busy && !comparison ? <Txt size="sm" tone="muted">Loading the register…</Txt> : null}
 
       {mismatches.map((m) => (
         <Banner key={m.kind} tone="warn" title={m.title} body={m.body} />
@@ -209,18 +209,18 @@ export default function ConfigCompareScreen() {
           </Card>
 
           <Rowed gap={2}>
-            <StatTile label="In the file only" value={comparison.added.length} tone={comparison.added.length ? 'accent' : 'default'} />
-            <StatTile label="Here only" value={comparison.removed.length} tone={comparison.removed.length ? 'warn' : 'default'} />
+            <StatTile label="File only" value={comparison.added.length} tone={comparison.added.length ? 'accent' : 'default'} />
+            <StatTile label="Register only" value={comparison.removed.length} tone={comparison.removed.length ? 'warn' : 'default'} />
           </Rowed>
           <Rowed gap={2}>
-            <StatTile label="Different" value={comparison.changed.length} tone={comparison.changed.length ? 'warn' : 'default'} />
-            <StatTile label="The same" value={comparison.unchanged.toLocaleString()} tone="pass" />
+            <StatTile label="Changed" value={comparison.changed.length} tone={comparison.changed.length ? 'warn' : 'default'} />
+            <StatTile label="Same" value={comparison.unchanged.toLocaleString()} tone="pass" />
           </Rowed>
 
           {[...comparison.caveats, ...siteCaveats].length ? (
             <Banner
               tone="info"
-              title="What this comparison could not do"
+              title="Note"
               body={[...comparison.caveats, ...siteCaveats].join('\n\n')}
             />
           ) : null}
@@ -231,9 +231,8 @@ export default function ConfigCompareScreen() {
               title="Nothing has changed"
               body={
                 comparison.unchanged
-                  ? `Every one of the ${comparison.unchanged.toLocaleString()} devices in the file is on the register, `
-                    + 'in the same place, with the same text.'
-                  : 'There was nothing on either side to compare.'
+                  ? `All ${comparison.unchanged.toLocaleString()} devices match the register.`
+                  : 'Nothing on either side.'
               }
               action={
                 <Button
@@ -248,7 +247,7 @@ export default function ConfigCompareScreen() {
 
           {comparison.changed.length ? (
             <>
-              <SectionHeader title={`${comparison.changed.length} different`} />
+              <SectionHeader title={`${comparison.changed.length} changed`} />
               <Card>
                 {comparison.changed.map((d, i) => (
                   <View key={`${d.inFile.where}-${i}`}>
@@ -262,9 +261,9 @@ export default function ConfigCompareScreen() {
 
           {comparison.added.length ? (
             <>
-              <SectionHeader title={`${comparison.added.length} in the file and not on the register`} />
+              <SectionHeader title={`${comparison.added.length} in the file only`} />
               <Txt size="sm" tone="muted" style={{ marginBottom: t.space(2), lineHeight: 19 }}>
-                Devices somebody has added since the register was written, or devices the register never had.
+                Added since, or never on the register.
               </Txt>
               <Card>
                 {comparison.added.map((p, i) => (
@@ -279,10 +278,9 @@ export default function ConfigCompareScreen() {
 
           {comparison.removed.length ? (
             <>
-              <SectionHeader title={`${comparison.removed.length} on the register and not in the file`} />
+              <SectionHeader title={`${comparison.removed.length} on the register only`} />
               <Txt size="sm" tone="muted" style={{ marginBottom: t.space(2), lineHeight: 19 }}>
-                Devices that have come out, or that this file does not cover — a config for one panel of a
-                networked site will read this way about the rest of them.
+                Removed, or on a panel this file doesn&apos;t cover.
               </Txt>
               <Card>
                 {comparison.removed.map((p, i) => (
@@ -308,13 +306,13 @@ export default function ConfigCompareScreen() {
                 {comparison.zonesAdded.map((z) => (
                   <Txt key={`a${z.number}`} size="sm" style={{ lineHeight: 19 }}>
                     <Txt size="sm" weight="700">{`Zone ${z.number}: `}</Txt>
-                    {`"${z.inFile}" — in the file, not on the register`}
+                    {`"${z.inFile}" (file only)`}
                   </Txt>
                 ))}
                 {comparison.zonesRemoved.map((z) => (
                   <Txt key={`d${z.number}`} size="sm" style={{ lineHeight: 19 }}>
                     <Txt size="sm" weight="700">{`Zone ${z.number}: `}</Txt>
-                    {`"${z.held}" — on the register, not in the file`}
+                    {`"${z.held}" (register only)`}
                   </Txt>
                 ))}
               </Card>

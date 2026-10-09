@@ -1,10 +1,14 @@
 import {
   calculateVesda,
   detectorCurrents,
+  VESDA_ACCESSORIES,
   VESDA_MODELS,
   VESDA_PSUS,
+  vesdaDevices,
+  vesdaSupplyNote,
   wattsToMa,
 } from '@/calc/vesda';
+import { calculateBattery, FC_DEFAULT, L_DESIGN } from '@/calc/battery';
 
 describe('wattsToMa', () => {
   it('converts published watts to current at the nominal 24 V supply', () => {
@@ -178,5 +182,46 @@ describe('catalogue integrity', () => {
   it('uses unique ids', () => {
     expect(new Set(VESDA_MODELS.map((m) => m.id)).size).toBe(VESDA_MODELS.length);
     expect(new Set(VESDA_PSUS.map((m) => m.id)).size).toBe(VESDA_PSUS.length);
+  });
+});
+
+describe('VESDA as devices in the FIP battery calculator', () => {
+  const devices = vesdaDevices();
+
+  it('carries every published setting of every detector, and every accessory', () => {
+    const settings = VESDA_MODELS.reduce((n, m) => n + m.variants.length, 0);
+    expect(devices.filter((d) => d.kind === 'detector')).toHaveLength(settings);
+    expect(devices.filter((d) => d.kind === 'accessory')).toHaveLength(VESDA_ACCESSORIES.length);
+    expect(new Set(devices.map((d) => d.id)).size).toBe(devices.length);
+  });
+
+  it('gives the same currents the VESDA engine does', () => {
+    const veu10 = devices.find((d) => d.id === 'veu-a00@10')!;
+    const engine = detectorCurrents({ modelId: 'veu-a00', setting: 10, quantity: 1 });
+    expect(veu10.standbyMa).toBeCloseTo(engine.maQuiescent, 1);
+    expect(veu10.alarmMa).toBeCloseTo(engine.maAlarm, 1);
+    expect(veu10.label).toBe('VESDA-E VEU-A00, aspirator 10');
+  });
+
+  it('never lists an alarm current below standby, and says so where it was raised', () => {
+    for (const d of devices) expect(d.alarmMa).toBeGreaterThanOrEqual(d.standbyMa);
+    expect(devices.find((d) => d.id === 'ves-a00-p@10')!.note).toContain('Alarm taken at standby');
+  });
+
+  it('sizes the same battery through the FIP engine as through the VESDA one', () => {
+    // A VEP at setting 1 over 24 hours: the manufacturer pairing, 9.16 Ah, 12 Ah.
+    const vep = devices.find((d) => d.id === 'vep-a00-p@1')!;
+    const fip = calculateBattery({
+      mode: 'design', monitored: true, alarmHours: 0.5, capacityDerating: FC_DEFAULT, deteriorationFactor: L_DESIGN,
+      loads: [{ id: 'v', label: vep.label, quantity: 1, standbyMa: vep.standbyMa, alarmMa: vep.alarmMa }],
+    });
+    const own = calculateVesda({ detectors: [{ modelId: 'vep-a00-p', setting: 1, quantity: 1 }], monitored: true, alarmHours: 0.5 });
+    expect(fip.requiredAh).toBeCloseTo(own.requiredAh, 2);
+    expect(fip.recommendedAh).toBe(12);
+  });
+
+  it('describes a supply in one line, flagging distributor figures', () => {
+    expect(vesdaSupplyNote(VESDA_PSUS.find((p) => p.id === 'vps-250-stx5')!)).toBe('VPS-250-STX5: 3 A, 24 Ah max.');
+    expect(vesdaSupplyNote(VESDA_PSUS.find((p) => p.id === 'vps-215-e5')!)).toContain('confirm on the datasheet');
   });
 });

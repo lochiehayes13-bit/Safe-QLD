@@ -289,14 +289,14 @@ export interface LocalRevert {
 export function revertFor(payload: AssetChangePayload): LocalRevert {
   switch (payload.kind) {
     case 'asset-create':
-      return { patch: {}, note: 'Nothing was sent to the office. The asset stays on the phone.' };
+      return { patch: {}, note: 'Not sent. Kept on the phone.' };
     case 'asset-update':
       return payload.before
-        ? { patch: revertPatch(payload.before), note: 'Nothing was sent to the office, and the asset is back as it was on the phone.' }
-        : { patch: {}, note: 'Nothing was sent to the office. The edit is still on the phone; change it back by hand if it should not stand.' };
+        ? { patch: revertPatch(payload.before), note: 'Not sent. The asset is back as it was.' }
+        : { patch: {}, note: 'Not sent. The edit is still on the phone; change it back by hand if needed.' };
     case 'asset-archive':
     case 'asset-delete':
-      return { patch: { status: payload.previousStatus }, note: 'Nothing was sent to the office. The asset is still on the register.' };
+      return { patch: { status: payload.previousStatus }, note: 'Not sent. The asset is still on the register.' };
   }
 }
 
@@ -357,7 +357,7 @@ export function describeAssetChange(kind: string, payload: unknown): string {
       const fields = (p as Partial<AssetUpdatePayload>).fields ?? [];
       const names = fields.map((f) => f.name);
       if ((p as Partial<AssetUpdatePayload>).startDate !== undefined) names.push('Start date');
-      return `Asset corrected in Simpro: ${label}${names.length ? ` — ${names.join(', ')}` : ''}`;
+      return `Asset corrected in Simpro: ${label}${names.length ? `: ${names.join(', ')}` : ''}`;
     }
     case 'asset-archive':
       return `Asset archived in Simpro: ${label}`;
@@ -373,12 +373,12 @@ export type AssetChangeState = 'undoable' | 'queued' | 'sent' | 'failed' | 'unkn
 
 export function describeChangeState(state: AssetChangeState, error?: string): string {
   switch (state) {
-    case 'undoable': return 'Not sent yet — you can still take it back';
-    case 'queued': return 'Waiting to send — goes with the next sync';
+    case 'undoable': return 'Not sent yet. Undo available';
+    case 'queued': return 'Waiting to send';
     case 'sent': return 'Sent to the office';
     case 'failed': return `Refused by Simpro${error ? `: ${error}` : ''}`;
-    case 'unknown': return 'Sent, and no reply came — see Waiting to send';
-    case 'forgotten': return `Dropped from Waiting to send${error ? `: ${error}` : ''} — the office does not have it`;
+    case 'unknown': return 'Sent, no reply. See Waiting to send';
+    case 'forgotten': return `Dropped, not in Simpro${error ? `: ${error}` : ''}`;
     case 'taken-back': return 'Taken back before it went';
   }
 }

@@ -31,42 +31,43 @@ export default function WorkScreen() {
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
-  const groups: { title: string; rows: { label: string; sub: string; icon: React.ComponentProps<typeof MaterialCommunityIcons>['name']; href: string; badge?: number; tone?: 'fail' | 'warn' }[] }[] = [
+  type Row = {
+    label: string; sub: string; icon: React.ComponentProps<typeof MaterialCommunityIcons>['name']; href: string;
+    badge?: number; tone?: 'fail' | 'warn';
+  };
+  const groups: { title: string; rows: Row[] }[] = [
     {
       title: 'On the tools',
       rows: [
-        { label: 'Clock on', sub: 'On when you start a job, off when you finish; the hours go to Simpro', icon: 'timer-play-outline', href: '/work/clock' },
-        { label: 'Jobs', sub: 'Scheduled and outstanding work', icon: 'clipboard-list-outline', href: '/work/jobs', badge: counts.jobsOpen },
-        { label: 'Schedule', sub: "The team's day and yours; book yourself onto a job, move or take off your own blocks", icon: 'calendar-multiselect-outline', href: '/work/schedule' },
-        { label: 'Plan work', sub: 'Build a day from what each site last had done, then put it on your Simpro schedule', icon: 'calendar-month-outline', href: '/work/plan' },
-        { label: 'Portfolio health', sub: 'How the whole book is going, coverage stated before any score', icon: 'chart-donut', href: '/work/portfolio' },
-        { label: "Today's run", sub: 'Jobs ordered by how close they are, urgent first', icon: 'map-marker-path', href: '/work/route' },
-        { label: 'Overdue and due', sub: 'Routines past their tolerance window, across every site', icon: 'calendar-alert', href: '/work/due' },
-        { label: 'Impairments', sub: 'Systems currently out of service', icon: 'alert-octagon-outline', href: '/work/impairments', badge: counts.impairmentsOpen, tone: counts.impairmentsOpen ? 'fail' : undefined },
-        { label: 'Defects', sub: 'Raised, quoted and outstanding', icon: 'alert-circle-outline', href: '/work/defects', badge: counts.defectsOpen, tone: counts.defectsOpen ? 'warn' : undefined },
+        { label: 'Clock on', sub: 'Clock on and off jobs. Hours go to Simpro.', icon: 'timer-play-outline', href: '/work/clock' },
+        { label: 'Jobs', sub: 'Scheduled and open jobs', icon: 'clipboard-list-outline', href: '/work/jobs', badge: counts.jobsOpen },
+        { label: 'Schedule', sub: "Your day and the team's. Book yourself on.", icon: 'calendar-multiselect-outline', href: '/work/schedule' },
+        { label: 'Plan work', sub: 'Build a day and book it in Simpro', icon: 'calendar-month-outline', href: '/work/plan' },
+        { label: "Today's run", sub: 'Jobs in order of distance', icon: 'map-marker-path', href: '/work/route' },
+        { label: 'Portfolio health', sub: 'Service coverage across every site', icon: 'chart-donut', href: '/work/portfolio' },
+        { label: 'Overdue and due', sub: 'Routines past due across every site', icon: 'calendar-alert', href: '/work/due' },
+        { label: 'Impairments', sub: 'Systems out of service', icon: 'alert-octagon-outline', href: '/work/impairments', badge: counts.impairmentsOpen, tone: counts.impairmentsOpen ? 'fail' : undefined },
+        { label: 'Defects', sub: 'Raised, quoted and open', icon: 'alert-circle-outline', href: '/work/defects', badge: counts.defectsOpen, tone: counts.defectsOpen ? 'warn' : undefined },
         { label: 'Promises', sub: "Things you said you'd come back for", icon: 'hand-back-right-outline', href: '/work/promises', badge: counts.promisesOpen },
       ],
     },
     {
       title: 'Records',
       rows: [
-        { label: 'Send to the office', sub: 'Push a finished service and its defects to the Simpro job', icon: 'cloud-upload-outline', href: '/work/outbound' },
-        { label: 'Occupier statements', sub: 'Every statement across every site, closest to late first', icon: 'file-certificate-outline', href: '/occupier' },
-        { label: 'Quotes', sub: 'What is out with clients and what is about to lapse', icon: 'file-sign', href: '/quotes' },
-        { label: 'Test sheets', sub: 'Service reports and device testing', icon: 'file-document-outline', href: '/work/reports', badge: counts.reportsDraft },
+        { label: 'Waiting to send', sub: 'Queued work and finished services', icon: 'cloud-upload-outline', href: '/work/outbound' },
+        { label: 'Timesheets', sub: 'Your weekly hours', icon: 'calendar-clock-outline', href: '/work/timesheets', badge: counts.timesheetsDraft },
+        { label: 'Test sheets', sub: 'Service reports', icon: 'file-document-outline', href: '/work/reports', badge: counts.reportsDraft },
+        { label: 'Quotes', sub: 'Out with clients, and about to lapse', icon: 'file-sign', href: '/quotes' },
+        { label: 'Occupier statements', sub: 'Every site, closest deadline first', icon: 'file-certificate-outline', href: '/occupier' },
         { label: 'Baseline data', sub: 'Commissioning records', icon: 'clipboard-text-outline', href: '/work/baselines', badge: counts.baselines },
-        { label: 'Timesheets', sub: 'Weekly hours and sign off', icon: 'calendar-clock-outline', href: '/work/timesheets', badge: counts.timesheetsDraft },
       ],
     },
     {
-      title: 'Parts and knowledge',
+      title: 'Parts',
       rows: [
-        { label: 'Asset labels', sub: 'Issue numbers to untagged assets and print the sheet', icon: 'tag-multiple-outline', href: '/work/labels' },
-        { label: 'Van stock', sub: 'What you carry and what needs restocking', icon: 'van-utility', href: '/work/stock', badge: counts.restock, tone: counts.restock ? 'warn' : undefined },
-        { label: 'Stock to load', sub: 'What the days ahead need, less what is in the van', icon: 'clipboard-list-outline', href: '/work/stock-list' },
-        { label: 'Things I need', sub: 'Parts to grab, for now and for work still coming', icon: 'format-list-checks', href: '/work/needs' },
+        { label: 'Things I need', sub: 'Parts to get, now and for coming work', icon: 'format-list-checks', href: '/work/needs' },
         { label: 'Purchase requests', sub: 'Parts to order', icon: 'cart-outline', href: '/work/purchases', badge: counts.purchasesDraft },
-        { label: 'Company knowledge', sub: 'Tricks of the trade, approved and unverified', icon: 'lightbulb-on-outline', href: '/work/knowledge' },
+        { label: 'Asset labels', sub: 'Number untagged assets and print', icon: 'tag-multiple-outline', href: '/work/labels' },
       ],
     },
   ];

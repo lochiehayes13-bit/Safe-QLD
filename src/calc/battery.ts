@@ -158,6 +158,20 @@ export interface ChargerResult {
 /** Charge-acceptance allowance for VRLA. Engineering practice, not a standard figure. */
 const CHARGE_INEFFICIENCY = 1.2;
 
+/**
+ * The share of a supply's rating the standby load may take before it is
+ * worth a warning. Standby draw is continuous, and an aspirating detector in
+ * particular runs its fan all day, so a supply at 90% is one more device from
+ * overloaded.
+ */
+export const SUPPLY_HEAVY_LOAD = 0.8;
+
+/** Standby current as a fraction of the supply rating, or undefined without a rating. */
+export function standbySupplyLoad(quiescentA: number, psuOutputA: number | undefined): number | undefined {
+  if (psuOutputA === undefined || !Number.isFinite(psuOutputA) || psuOutputA <= 0) return undefined;
+  return quiescentA / psuOutputA;
+}
+
 function round(n: number, dp = 2): number {
   const f = 10 ** dp;
   return Math.round((n + Number.EPSILON) * f) / f;
@@ -228,9 +242,8 @@ export function calculateBattery(input: BatteryInput): BatteryResult {
   if (input.mode === 'service' && !factorUsable) {
     issues.push({
       level: 'error',
-      title: 'Deterioration factor is not usable',
-      detail:
-        `The deterioration factor must be a number of at least 1; "${String(input.deteriorationFactor)}" is not. The design factor of ${L_DESIGN} has been applied instead.`,
+      title: 'Deterioration factor not usable',
+      detail: `L must be 1 or more, not "${String(input.deteriorationFactor)}". Using ${L_DESIGN}.`,
     });
   }
 
@@ -238,8 +251,7 @@ export function calculateBattery(input: BatteryInput): BatteryResult {
     issues.push({
       level: 'info',
       title: 'Reduced deterioration factor in use',
-      detail:
-        'L = 1.1 applies only when assessing a battery already in service for more than 12 months. A new battery, or any design or commissioning calculation, uses 1.25.',
+      detail: `L = ${L_IN_SERVICE} only for a battery in service over 12 months. New or design: ${L_DESIGN}.`,
     });
   }
 
@@ -247,17 +259,15 @@ export function calculateBattery(input: BatteryInput): BatteryResult {
     issues.push({
       level: 'info',
       title: '72 hour standby applied',
-      detail:
-        'The power-supply-failure signal is not continuously monitored, so the full 72 hour standby period applies. This is roughly three times the battery of a monitored system.',
+      detail: 'Supply failure is not monitored. About three times the battery of a monitored system.',
     });
   }
 
   if (!input.loads.some((l) => l.isAse)) {
     issues.push({
       level: 'warning',
-      title: 'No alarm signalling equipment load entered',
-      detail:
-        'Brigade monitoring equipment draws current in both standby and alarm and is routinely left out. Add it, or add a line recording that the site has none.',
+      title: 'No alarm signalling equipment load',
+      detail: 'Add the ASE line. Set its Qty to 0 if the site has none.',
     });
   }
 
@@ -265,7 +275,7 @@ export function calculateBattery(input: BatteryInput): BatteryResult {
     issues.push({
       level: 'error',
       title: 'No standby current entered',
-      detail: 'Add the panel and its connected loads before relying on this result.',
+      detail: 'Add the panel and its loads.',
     });
   }
 
@@ -273,8 +283,7 @@ export function calculateBattery(input: BatteryInput): BatteryResult {
     issues.push({
       level: 'warning',
       title: 'Alarm current is below standby current',
-      detail:
-        'That is possible on a system with many door holders, which drop out in alarm — but it is more often a data entry error. Check the alarm figures.',
+      detail: 'Normal with many door holders. Otherwise check the alarm figures.',
     });
   }
 
@@ -283,16 +292,15 @@ export function calculateBattery(input: BatteryInput): BatteryResult {
     issues.push({
       level: 'warning',
       title: `Battery temperature outside ${TEMP_MIN_C}–${TEMP_MAX_C} °C`,
-      detail:
-        'The capacity formula is stated for this temperature window and no numeric correction is given outside it. Apply the battery manufacturer’s own derating curve for this environment.',
+      detail: 'Apply the battery maker’s derating curve.',
     });
   }
 
   if (recommendedAh === null) {
     issues.push({
       level: 'warning',
-      title: 'Capacity exceeds common battery sizes',
-      detail: `${round(requiredAh, 1)} Ah is beyond the largest standard size in the list. Expect a purpose-built battery set and a separate battery cabinet.`,
+      title: 'Above standard battery sizes',
+      detail: `${round(requiredAh, 1)} Ah needs a custom battery set and separate cabinet.`,
     });
   }
 
@@ -302,7 +310,7 @@ export function calculateBattery(input: BatteryInput): BatteryResult {
     issues.push({
       level: 'error',
       title: 'Battery will not fit this panel',
-      detail: `The calculation calls for ${round(chosen, 1)} Ah but the selected panel accepts at most ${input.panelMaxBatteryAh} Ah. An external power supply and battery cabinet is required.`,
+      detail: `Needs ${round(chosen, 1)} Ah; the panel takes ${input.panelMaxBatteryAh} Ah at most. Fit an external supply and battery cabinet.`,
     });
   }
 
@@ -331,6 +339,21 @@ export function calculateBattery(input: BatteryInput): BatteryResult {
     alarmCRate = alarmA / chosen;
     const fraction = availableFractionAtRate(alarmCRate);
     effectiveDerating = fraction > 0 ? 1 / fraction : undefined;
+  }
+
+  const supplyLoad = standbySupplyLoad(quiescentA, input.psuOutputA);
+  if (supplyLoad !== undefined && supplyLoad > 1) {
+    issues.push({
+      level: 'error',
+      title: 'Supply overloaded in standby',
+      detail: `${round(quiescentA * 1000, 0)} mA standby is over the ${input.psuOutputA} A rating.`,
+    });
+  } else if (supplyLoad !== undefined && supplyLoad > SUPPLY_HEAVY_LOAD) {
+    issues.push({
+      level: 'warning',
+      title: 'Supply heavily loaded in standby',
+      detail: `${round(supplyLoad * 100, 0)}% of the ${input.psuOutputA} A rating, all the time.`,
+    });
   }
 
   const charger = calculateCharger(chosen, quiescentA, input.psuOutputA, input.psuChargeCurrentA, issues);
@@ -377,15 +400,15 @@ export function calculateCharger(
     issues.push({
       level: 'error',
       title: 'Charger cannot recharge in time',
-      detail: `Restoring 80% of ${round(capacityAh, 1)} Ah within 24 hours needs about ${round(minimumChargeA, 2)} A, but the supply charges at ${psuChargeA} A.`,
+      detail: `80% of ${round(capacityAh, 1)} Ah in 24 h needs about ${round(minimumChargeA, 2)} A. The supply charges at ${psuChargeA} A.`,
     });
   }
 
   if (simultaneousOk === false) {
     issues.push({
       level: 'error',
-      title: 'Power supply cannot charge and carry the load together',
-      detail: `Quiescent load ${round(quiescentA, 2)} A plus charge current ${psuChargeA} A exceeds the supply's ${psuOutputA} A continuous rating.`,
+      title: 'Supply cannot charge and carry the load together',
+      detail: `${round(quiescentA, 2)} A standby plus ${psuChargeA} A charge is over the supply's ${psuOutputA} A rating.`,
     });
   }
 
@@ -403,7 +426,7 @@ export function calculateCharger(
  * Emitting these verbatim is what lets a tech transcribe straight onto the
  * commissioning form instead of re-deriving everything.
  */
-export function appendixFFields(r: BatteryResult, mains = '240 V a.c.'): { item: string; field: string; value: string }[] {
+export function appendixFFields(r: BatteryResult, mains = '230 V a.c.'): { item: string; field: string; value: string }[] {
   return [
     { item: '14a', field: 'Power supply source (mains), nominal voltage', value: mains },
     {

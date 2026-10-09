@@ -1106,7 +1106,7 @@ export function describeVerdict(result: VerifyResult): string {
   if (!result.findings.length) {
     const anything = result.subject.points + result.subject.zones + result.subject.rules;
     if (!anything || !result.passed.length) return 'Nothing in this file could be checked.';
-    return `Nothing found by the ${result.passed.length} checks this file supports.`;
+    return `All ${result.passed.length} checks clean.`;
   }
   const parts: string[] = [];
   if (fails) parts.push(`${fails} to fix`);

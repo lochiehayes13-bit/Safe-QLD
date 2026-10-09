@@ -1,11 +1,11 @@
 import React, { useCallback, useState } from 'react';
 import { View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
-import { File } from 'expo-file-system';
 import * as DocumentPicker from 'expo-document-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { listConfigFiles, configLibrarySize } from '@/db/configRepo';
 import { openConfig, NotAConfigError } from '@/services/configOpen';
+import { pickedFileBytes } from '@/services/pickedFileBytes';
 import { byBuilding, describeSummary, type ConfigFileRecord, type ConfigVersions } from '@/domain/configLibrary';
 import { PANEL_CATALOGUE } from '@/parsers';
 import { formatAuDate } from '@/export/sheets';
@@ -75,7 +75,7 @@ export default function ConfigExplorerScreen() {
     try {
       result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
     } catch (e) {
-      showAlert('Could not open the file picker', describeActionFailure(e, 'choose a file'));
+      showAlert("Couldn't open the file picker", describeActionFailure(e, 'choose a file'));
       return;
     }
     if (result.canceled || !result.assets[0]) return;
@@ -83,14 +83,15 @@ export default function ConfigExplorerScreen() {
 
     setOpening(true);
     try {
-      const bytes = new Uint8Array(await new File(asset.uri).bytes());
+      // The browser build has no file system; its half reads the picker's File.
+      const bytes = await pickedFileBytes(asset);
       const opened = await openConfig(asset.name, bytes);
       // Straight into it. A file that is opened and then left on a list is a
       // file somebody has to find again on a screen they have never used.
       router.push({ pathname: '/config/[id]', params: { id: opened.record.id } });
     } catch (e) {
       showAlert(
-        e instanceof NotAConfigError ? 'Not a panel configuration' : 'Could not open the file',
+        e instanceof NotAConfigError ? 'Not a panel config' : "Couldn't open the file",
         e instanceof Error ? e.message : String(e),
       );
     } finally {
@@ -103,7 +104,7 @@ export default function ConfigExplorerScreen() {
       <Stack.Screen options={{ title: 'Config Explorer' }} />
 
       <Button
-        title="Open a configuration"
+        title="Open a config"
         onPress={pick}
         loading={opening}
         icon={<MaterialCommunityIcons name="folder-open-outline" size={18} color={t.color.onAccent} />}
@@ -111,25 +112,21 @@ export default function ConfigExplorerScreen() {
 
       {failed ? (
         <>
-          <Banner tone="fail" title="The library could not be read" body={failed} />
+          <Banner tone="fail" title="Couldn't load configs" body={failed} />
           <Button title="Try again" variant="secondary" onPress={() => void load()} />
         </>
       ) : null}
 
       {loading && !groups.length ? (
-        <Txt size="sm" tone="muted">Reading the library…</Txt>
+        <Txt size="sm" tone="muted">Loading configs…</Txt>
       ) : null}
 
       {!loading && !failed && !groups.length ? (
         <EmptyState
           icon="file-cog-outline"
-          title="Nothing open yet"
-          body={
-            `Open a site file from ${nativeBrands}, a Safe QLD share pack, or a device list exported as CSV `
-            + 'from any panel programming tool. Nothing is written into a site: the file is read, kept, and '
-            + 'yours to look through.'
-          }
-          action={<Button title="Open a configuration" onPress={pick} loading={opening} />}
+          title="No configs yet"
+          body={`${nativeBrands} site files, share packs or device CSVs.`}
+          action={<Button title="Open a config" onPress={pick} loading={opening} />}
         />
       ) : null}
 
@@ -149,9 +146,7 @@ export default function ConfigExplorerScreen() {
 
       {size.files ? (
         <Txt size="xs" tone="faint" style={{ lineHeight: 17, marginTop: t.space(2) }}>
-          {`${size.files} ${size.files === 1 ? 'file' : 'files'} kept on this phone, `}
-          {`${readableSize(size.bytes)} in all. A configuration is the largest single thing this app stores; `}
-          <Txt size="xs" tone="faint">open one and remove it from there when you are done with it.</Txt>
+          {`${size.files} ${size.files === 1 ? 'file' : 'files'}, ${readableSize(size.bytes)} on this phone.`}
         </Txt>
       ) : null}
     </Screen>
@@ -179,9 +174,9 @@ function ConfigRow({ record, versions, index }: { record: ConfigFileRecord; vers
       </Txt>
       <Txt size="xs" tone="faint" style={{ marginTop: t.space(1), lineHeight: 17 }}>
         {`Opened ${formatAuDate(record.lastOpenedAt)}`}
-        {record.siteName ? ` · tied to ${record.siteName}` : ''}
+        {record.siteName ? ` · ${record.siteName}` : ''}
         {record.importedAt ? ' · imported' : ''}
-        {warnings ? ` · ${warnings} thing${warnings === 1 ? '' : 's'} the reader could not do` : ''}
+        {warnings ? ` · ${warnings} warning${warnings === 1 ? '' : 's'}` : ''}
       </Txt>
     </Card>
   );

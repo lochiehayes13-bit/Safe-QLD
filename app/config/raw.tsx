@@ -111,17 +111,17 @@ export default function ConfigRawScreen() {
     <Screen>
       <Stack.Screen options={{ title: 'Inside the file' }} />
 
-      {readFailed ? <Banner tone="fail" title="The file could not be opened" body={readFailed} /> : null}
+      {readFailed ? <Banner tone="fail" title="Couldn't open the file" body={readFailed} /> : null}
 
       {!bytes ? (
         <Banner
           tone="warn"
-          title="The file itself is gone"
-          body="The library has a record of this configuration but not its bytes. Open it again from wherever you got it."
+          title="File missing"
+          body="Open it again from the original."
         />
       ) : null}
 
-      {reading && !structure ? <Txt size="sm" tone="muted">Opening the file…</Txt> : null}
+      {reading && !structure ? <Txt size="sm" tone="muted">Opening…</Txt> : null}
 
       {structure ? (
         <>
@@ -135,7 +135,7 @@ export default function ConfigRawScreen() {
           </Card>
 
           {structure.warnings.length ? (
-            <Banner tone="warn" title="Not everything could be opened" body={structure.warnings.join('\n\n')} />
+            <Banner tone="warn" title="Some parts wouldn't open" body={structure.warnings.join('\n\n')} />
           ) : null}
 
           {structure.entries.length ? (
@@ -149,7 +149,7 @@ export default function ConfigRawScreen() {
                       <Txt size="sm" weight={entry.isConfig ? '700' : '400'} style={{ flex: 1 }} numberOfLines={1}>
                         {entry.name}
                       </Txt>
-                      {entry.isConfig ? <Chip label="The configuration" tone="pass" /> : null}
+                      {entry.isConfig ? <Chip label="Config" tone="pass" /> : null}
                       <Txt size="xs" tone="faint">{`${Math.max(1, Math.round(entry.byteLength / 1024))} KB`}</Txt>
                     </Rowed>
                   </View>
@@ -166,7 +166,7 @@ export default function ConfigRawScreen() {
             />
           ) : (
             <>
-              <SectionHeader title="What the vendor tool wrote" />
+              <SectionHeader title="Tables" />
               {structure.groups.map((group) => {
                 const open = openGroup === group.name;
                 return (
@@ -206,7 +206,7 @@ export default function ConfigRawScreen() {
 
                     {open && !page ? (
                       <Txt size="sm" tone="muted" style={{ marginTop: t.space(2) }}>
-                        This table could not be read.
+                        Couldn&apos;t read this table.
                       </Txt>
                     ) : null}
                   </Card>
@@ -216,8 +216,7 @@ export default function ConfigRawScreen() {
           )}
 
           <Txt size="xs" tone="faint" style={{ lineHeight: 17, marginTop: t.space(2) }}>
-            This is the file, not what the app made of it. A column here that appears nowhere else in the
-            Explorer is a column this build does not read — which is worth knowing, and worth sending in.
+            Raw tables as stored in the file.
           </Txt>
         </>
       ) : null}

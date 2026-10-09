@@ -352,11 +352,11 @@ describe('the job list as a query', () => {
       techniciansJson: JSON.stringify([{ id: '18', name: 'Corey Nankervis' }]),
     });
     await upsertJob({
-      id: 'j-byhand', siteName: 'Storage Choice', title: 'Add-on works', status: 'scheduled',
+      id: 'j-byhand', siteName: 'Fictional Storage', title: 'Add-on works', status: 'scheduled',
       scheduledFor: '2026-09-03', technician: 'Dale Whitmore',
     });
     await upsertJob({
-      id: 'j-done', externalId: '43749', siteName: 'Luggage Direct', title: 'Annual routine',
+      id: 'j-done', externalId: '43749', siteName: 'Bag Depot', title: 'Annual routine',
       stage: 'Invoiced', status: 'complete', scheduledFor: '2026-06-01', completedDate: '2026-06-01',
     });
     await upsertJob({
@@ -399,7 +399,7 @@ describe('the job list as a query', () => {
 
   it('searches the same fields, in the same words, as the in-memory match', async () => {
     await book();
-    for (const query of ['harbour', '#43747', '43747', 'routine', 'annual luggage', 'nothing at all']) {
+    for (const query of ['harbour', '#43747', '43747', 'routine', 'annual depot', 'nothing at all']) {
       const page = await listJobPage({ filter: 'all', today: TODAY, who: ME, query, limit: 100 });
       const expected = await inMemory('all', query, ME);
       expect({ query, ids: page.rows.map((j) => j.id) }).toEqual({ query, ids: expected.map((j) => j.id) });

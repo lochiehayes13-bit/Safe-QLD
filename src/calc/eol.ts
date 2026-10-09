@@ -49,7 +49,7 @@ export const EOL_VALUES: EolEntry[] = [
     panel: 'FireFinder Series 2 Brigade / PSU Monitor Board',
     circuit: 'Bell / sounder output, monitored ancillary output',
     value: '10K',
-    notes: 'Reverse-polarity current monitoring — every alarm device needs a series diode, 1N4004 recommended. Two 2 A circuits.',
+    notes: 'Reverse-polarity current monitoring. Every alarm device needs a series diode (1N4004). Two 2 A circuits.',
     confidence: 'high',
     source: 'Ampac MAN2986-2',
   },
@@ -94,7 +94,7 @@ export const EOL_VALUES: EolEntry[] = [
     panel: 'F4000 ATR',
     circuit: 'Fire circuit',
     value: '3K3',
-    notes: 'One of the few panels that publishes resistance bands — see the state table.',
+    notes: 'Publishes resistance bands. See state boundaries below.',
     confidence: 'high',
     source: 'Tyco FP4KSYSM F4000 system manual',
   },
@@ -215,7 +215,7 @@ export const ZONE_STATE_TABLES: ZoneStateTable[] = [
     method: 'Current band, not resistance',
     bands: null,
     notes:
-      'The F3200 decides alarm from the current a latched detector draws, so no resistance window describes it. Mode 3: up to 34.3 mA into a short, 14.2–15.3 mA into 800 Ω for a B2 alarm, 8.0–8.4 mA into 2 kΩ for B3. Fault thresholds 0.85–1.59 mA, EOL current 2 mA.',
+      'Alarm is set by the current a latched detector draws. Mode 3: up to 34.3 mA into a short, 14.2–15.3 mA into 800 Ω for a B2 alarm, 8.0–8.4 mA into 2 kΩ for B3. Fault thresholds 0.85–1.59 mA, EOL current 2 mA.',
     source: 'Tyco LT0255',
   },
   {
@@ -224,7 +224,7 @@ export const ZONE_STATE_TABLES: ZoneStateTable[] = [
     method: 'States reported, thresholds not published',
     bands: null,
     notes:
-      'The board reports normal, open circuit, short circuit and alarm, but publishes no resistance boundaries. Thresholds move with the selected EOL, so obtain them from Ampac for the configured value.',
+      'Reports normal, open circuit, short circuit and alarm. Thresholds move with the selected EOL; get them from Ampac for the configured value.',
     source: 'Ampac PDS4310-0082',
   },
 ];

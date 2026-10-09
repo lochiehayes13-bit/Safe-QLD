@@ -9,9 +9,9 @@ import {
  *
  * Keying sites on the office system's id is right — it is the only stable
  * identity, and matching on name would merge genuinely separate buildings. The
- * consequence is that three of Safe QLD's sites are called "Storage Choice -
- * Sumner Park", three are "Luggage Direct" and two are "Brisbane
- * Rheumatology", the register carries no address for any of them, and the list
+ * consequence is that three of Safe QLD's sites are called "Fictional Storage -
+ * Northside", three are "Bag Depot" and two are "Main St
+ * Clinic", the register carries no address for any of them, and the list
  * shows identical rows.
  *
  * A technician picking the wrong one of three identical rows records a service
@@ -28,19 +28,19 @@ const site = (over: Partial<NamedSite> = {}): NamedSite => ({
 describe('ambiguousNames', () => {
   it('finds a name more than one site answers to', () => {
     const names = ambiguousNames([
-      site({ id: '1', name: 'Luggage Direct' }),
-      site({ id: '2', name: 'Luggage Direct' }),
+      site({ id: '1', name: 'Bag Depot' }),
+      site({ id: '2', name: 'Bag Depot' }),
       site({ id: '3', name: 'Somewhere Else' }),
     ]);
-    expect([...names]).toEqual(['luggage direct']);
+    expect([...names]).toEqual(['bag depot']);
   });
 
   it('compares on case and spacing, because the register is typed by people', () => {
     const names = ambiguousNames([
-      site({ id: '1', name: 'Luggage Direct' }),
-      site({ id: '2', name: '  luggage direct  ' }),
+      site({ id: '1', name: 'Bag Depot' }),
+      site({ id: '2', name: '  bag depot  ' }),
     ]);
-    expect([...names]).toEqual(['luggage direct']);
+    expect([...names]).toEqual(['bag depot']);
   });
 
   it('ignores a blank name rather than making every blank ambiguous with the rest', () => {
@@ -71,8 +71,8 @@ describe('readableRef', () => {
 
 describe('disambiguator', () => {
   const sites = [
-    site({ id: '1', name: 'Luggage Direct', siteRef: 'register:3370' }),
-    site({ id: '2', name: 'Luggage Direct', siteRef: 'register:3371' }),
+    site({ id: '1', name: 'Bag Depot', siteRef: 'register:3370' }),
+    site({ id: '2', name: 'Bag Depot', siteRef: 'register:3371' }),
     site({ id: '3', name: 'Somewhere Else', siteRef: 'register:9000' }),
   ];
   const ambiguous = ambiguousNames(sites);
@@ -92,8 +92,8 @@ describe('disambiguator', () => {
 
   it('prefers where the building is, because that is how a technician knows it', () => {
     const withAddress = [
-      site({ id: '1', name: 'Luggage Direct', address: '12 Example Street', suburb: 'Hamilton', siteRef: 'register:3370' }),
-      site({ id: '2', name: 'Luggage Direct', siteRef: 'register:3371' }),
+      site({ id: '1', name: 'Bag Depot', address: '12 Example Street', suburb: 'Hamilton', siteRef: 'register:3370' }),
+      site({ id: '2', name: 'Bag Depot', siteRef: 'register:3371' }),
     ];
     const amb = ambiguousNames(withAddress);
     expect(disambiguator(withAddress[0]!, amb)).toBe('12 Example Street, Hamilton');
@@ -117,16 +117,16 @@ describe('indistinguishable', () => {
     const bare = [
       site({ id: '1', name: 'Twins' }),
       site({ id: '2', name: 'Twins' }),
-      site({ id: '3', name: 'Luggage Direct', siteRef: 'register:3370' }),
-      site({ id: '4', name: 'Luggage Direct', siteRef: 'register:3371' }),
+      site({ id: '3', name: 'Bag Depot', siteRef: 'register:3370' }),
+      site({ id: '4', name: 'Bag Depot', siteRef: 'register:3371' }),
     ];
     expect(indistinguishable(bare).map((s) => s.id)).toEqual(['1', '2']);
   });
 
   it('is empty where every duplicate has something to tell it by', () => {
     const fine = [
-      site({ id: '1', name: 'Luggage Direct', siteRef: 'register:3370' }),
-      site({ id: '2', name: 'Luggage Direct', siteRef: 'register:3371' }),
+      site({ id: '1', name: 'Bag Depot', siteRef: 'register:3370' }),
+      site({ id: '2', name: 'Bag Depot', siteRef: 'register:3371' }),
     ];
     expect(indistinguishable(fine)).toEqual([]);
   });
@@ -144,20 +144,20 @@ describe('matching an incoming site to one already held', () => {
    * it every import makes a second copy of the building.
    *
    * But three names in Safe QLD's own register cover eight separate buildings,
-   * and a name lookup returns whichever comes first. All three Luggage Directs
+   * and a name lookup returns whichever comes first. All three Bag Depots
    * collapsed onto one local site and took three buildings' assets, jobs and
    * service history with them — silently, because a match is the quiet path.
    */
   const held: NamedSite[] = [
-    { id: 'a', name: 'Luggage Direct', siteRef: 'asset-register:3370' },
-    { id: 'b', name: 'Luggage Direct', siteRef: 'asset-register:3371' },
-    { id: 'c', name: 'Luggage Direct', siteRef: 'asset-register:3372' },
+    { id: 'a', name: 'Bag Depot', siteRef: 'asset-register:3370' },
+    { id: 'b', name: 'Bag Depot', siteRef: 'asset-register:3371' },
+    { id: 'c', name: 'Bag Depot', siteRef: 'asset-register:3372' },
     { id: 'd', name: 'Sandgate Hall', siteRef: 'asset-register:9000' },
     { id: 'e', name: 'Carina Bus Depot' },
   ];
 
   it('matches on the reference, which is the only real identity', () => {
-    expect(matchSiteByRefOrName(held, 'asset-register:3371', 'Luggage Direct').match?.id).toBe('b');
+    expect(matchSiteByRefOrName(held, 'asset-register:3371', 'Bag Depot').match?.id).toBe('b');
   });
 
   it('prefers the reference over a name that would have matched something else', () => {
@@ -179,7 +179,7 @@ describe('matching an incoming site to one already held', () => {
      * together cannot be taken apart afterwards — nothing records which
      * service belonged to which.
      */
-    const out = matchSiteByRefOrName(held, 'SIMPRO:3370', 'Luggage Direct');
+    const out = matchSiteByRefOrName(held, 'SIMPRO:3370', 'Bag Depot');
     expect(out.match).toBeUndefined();
     expect(out.ambiguous?.map((s) => s.id)).toEqual(['a', 'b', 'c']);
   });
@@ -193,13 +193,13 @@ describe('matching an incoming site to one already held', () => {
      * site.
      */
     for (const id of ['3370', '3371', '3372']) {
-      expect(matchSiteByRefOrName(held, `SIMPRO:${id}`, 'Luggage Direct').match).toBeUndefined();
+      expect(matchSiteByRefOrName(held, `SIMPRO:${id}`, 'Bag Depot').match).toBeUndefined();
     }
   });
 
   it('will not fold a site onto a namesake already carrying a different reference from the same source', () => {
     /*
-     * Three Luggage Directs arriving from the sync one after another, into an
+     * Three Bag Depots arriving from the sync one after another, into an
      * app that has never seen them. The first creates a site. The second finds
      * no reference match and exactly one site by name — but that site is
      * SIMPRO:3370 and this one is SIMPRO:3371, and the office does not give
@@ -208,8 +208,8 @@ describe('matching an incoming site to one already held', () => {
     const sites: NamedSite[] = [];
     for (const id of ['3370', '3371', '3372']) {
       const ref = `SIMPRO:${id}`;
-      const out = matchSiteByRefOrName(sites, ref, 'Luggage Direct');
-      if (!out.match) sites.push({ id, name: 'Luggage Direct', siteRef: ref });
+      const out = matchSiteByRefOrName(sites, ref, 'Bag Depot');
+      if (!out.match) sites.push({ id, name: 'Bag Depot', siteRef: ref });
     }
     expect(sites.map((s) => s.siteRef)).toEqual(['SIMPRO:3370', 'SIMPRO:3371', 'SIMPRO:3372']);
   });
@@ -247,30 +247,30 @@ describe('matching an incoming site to one already held', () => {
  *
  * Speed is not what these check. They check that nothing was traded for it,
  * because the rule being optimised is the one that decides whether three
- * separate buildings called "Luggage Direct" stay three buildings. Every case
+ * separate buildings called "Bag Depot" stay three buildings. Every case
  * the list-walking version was given is asked of the index too, and the two
  * answers are compared directly rather than restated — a restatement can drift
  * and agree with itself.
  */
 describe('matching against an index', () => {
   const held: NamedSite[] = [
-    { id: 'a', name: 'Luggage Direct', siteRef: 'asset-register:3370' },
-    { id: 'b', name: 'Luggage Direct', siteRef: 'asset-register:3371' },
-    { id: 'c', name: 'Luggage Direct', siteRef: 'SIMPRO:3372' },
+    { id: 'a', name: 'Bag Depot', siteRef: 'asset-register:3370' },
+    { id: 'b', name: 'Bag Depot', siteRef: 'asset-register:3371' },
+    { id: 'c', name: 'Bag Depot', siteRef: 'SIMPRO:3372' },
     { id: 'd', name: 'Sandgate Hall', siteRef: 'asset-register:9000' },
     { id: 'e', name: 'Carina Bus Depot' },
     { id: 'f', name: '   ', siteRef: 'SIMPRO:5000' },
   ];
 
   const queries: [string | undefined, string][] = [
-    ['asset-register:3371', 'Luggage Direct'],
-    ['SIMPRO:3372', 'Luggage Direct'],
-    ['SIMPRO:9999', 'Luggage Direct'],
-    ['asset-register:9999', 'Luggage Direct'],
+    ['asset-register:3371', 'Bag Depot'],
+    ['SIMPRO:3372', 'Bag Depot'],
+    ['SIMPRO:9999', 'Bag Depot'],
+    ['asset-register:9999', 'Bag Depot'],
     ['SIMPRO:412', 'Carina Bus Depot'],
     ['SIMPRO:9000', 'Sandgate Hall'],
     [undefined, '  sandgate hall '],
-    [undefined, 'Luggage Direct'],
+    [undefined, 'Bag Depot'],
     ['SIMPRO:1', 'Somewhere New'],
     [undefined, ''],
     [undefined, '   '],
@@ -292,9 +292,9 @@ describe('matching against an index', () => {
 
   it('hands back a copy of the ambiguous list, not the index itself', () => {
     const index = indexSites(held);
-    const out = matchSiteInIndex(index, undefined, 'Luggage Direct');
-    out.ambiguous?.push({ id: 'intruder', name: 'Luggage Direct' });
-    expect(matchSiteInIndex(index, undefined, 'Luggage Direct').ambiguous).toHaveLength(3);
+    const out = matchSiteInIndex(index, undefined, 'Bag Depot');
+    out.ambiguous?.push({ id: 'intruder', name: 'Bag Depot' });
+    expect(matchSiteInIndex(index, undefined, 'Bag Depot').ambiguous).toHaveLength(3);
   });
 
   /*

@@ -139,7 +139,7 @@ describe('derating', () => {
   it('throws out a factor nobody can point at', () => {
     const r = combineDerating([{ kind: 'grouping', condition: 'six circuits', factor: 0.57, source: '  ' }]);
     expect(r.applied).toHaveLength(0);
-    expect(r.rejected[0]!.reason).toContain('not a derating');
+    expect(r.rejected[0]!.reason).toContain('no source');
   });
 
   it('applies the whole chain to a table figure', () => {
@@ -196,7 +196,7 @@ describe('protection coordination', () => {
 
   it('says what is missing rather than producing a confident zero', () => {
     expect(coordinate({ designCurrentA: 0, capacityA: 32 }).reason).toContain('Enter the current');
-    expect(coordinate({ designCurrentA: 18, capacityA: 0 }).reason).toContain('load a table figure');
+    expect(coordinate({ designCurrentA: 18, capacityA: 0 }).reason).toContain('No capacity figure');
   });
 
   it('offers the ratings devices are actually made in', () => {
@@ -374,15 +374,15 @@ describe('the whole chain', () => {
     expect(withFault.refusal).toContain('fault current needs');
   });
 
-  it('tells a phone with no tables to load some, rather than reporting no cable', () => {
+  it('asks for another arrangement when one carries no sizes, rather than reporting no cable', () => {
     const empty = sizeCable({ ...base, rows: [] });
     expect(empty.chosen).toBeUndefined();
-    expect(empty.refusal).toContain('Cable tables');
+    expect(empty.refusal).toBe('No sizes for this arrangement. Pick another.');
   });
 
   it('names the check that stopped the largest size, since that is what to change', () => {
     const hopeless = sizeCable({ ...base, designCurrentA: 200 });
-    expect(hopeless.refusal).toContain('installation method or the derating');
+    expect(hopeless.refusal).toContain('installation method or derating');
   });
 
   it('has the material constants it works from', () => {

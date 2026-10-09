@@ -89,7 +89,7 @@ describe('the site list read', () => {
           }
           return {
             items: opts.archivedRow
-              ? [{ ID: 4471, Name: 'Storage Choice - Maroochydore', Archived: true } as T]
+              ? [{ ID: 4471, Name: 'Fictional Storage - Maroochydore', Archived: true } as T]
               : [],
             truncated: false,
           };

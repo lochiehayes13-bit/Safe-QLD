@@ -120,17 +120,13 @@ export default function ConfigLogicScreen() {
       {panels.length > 1 && withLogic === 1 ? (
         <Banner
           tone="info"
-          title="The logic is held on one panel"
-          body={
-            'Several vendor tools write a whole network\'s cause and effect against the first panel rather '
-            + 'than splitting it up. An empty panel here means the file puts nothing there, not that the '
-            + 'reader missed it.'
-          }
+          title="Logic is on one panel"
+          body="The file stores the whole network's rules there."
         />
       ) : null}
 
       {(panel?.causeEffect.length ?? 0) > 6 ? (
-        <SearchBox value={search} onChange={setSearch} placeholder="A zone, an output, or a word from the equation" />
+        <SearchBox value={search} onChange={setSearch} placeholder="Zone, output or equation text" />
       ) : null}
 
       {/*
@@ -145,12 +141,8 @@ export default function ConfigLogicScreen() {
       {rules.length ? (
         <Banner
           tone="info"
-          title="Delays are not read out of any of these formats"
-          body={
-            'A rule with no delay shown against it is one whose delay was not read, not one that operates '
-            + 'straight away. Where a delay matters, read the equation — panels often carry it in the rule\u2019s '
-            + 'own name — and confirm it at the panel.'
-          }
+          title="Delays aren't read from these files"
+          body="No delay shown doesn't mean none. Check the rule name and confirm at the panel."
         />
       ) : null}
 
@@ -160,16 +152,15 @@ export default function ConfigLogicScreen() {
           title={debounced ? 'Nothing matches' : 'No cause and effect in this file'}
           body={
             debounced
-              ? 'Try fewer words, or the zone number on its own.'
-              : 'The reader found no logic. Inside the file shows what is actually in there, including '
-                + 'anything this build does not read.'
+              ? 'Try fewer words or just the zone number.'
+              : 'Check Inside the file for the raw tables.'
           }
         />
       ) : (
         <>
           <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
             {`${rules.length.toLocaleString()} of ${(panel?.causeEffect.length ?? 0).toLocaleString()} rules. `}
-            Read the equation, not the summary above it — that is the line the panel was programmed with.
+            The equation is what the panel runs.
           </Txt>
           {rules.map((rule, i) => (
             <Card key={`${rule.causeLabel}-${i}`}>
@@ -204,7 +195,7 @@ export default function ConfigLogicScreen() {
                 </>
               ) : (
                 <Txt size="sm" tone="faint" style={{ marginTop: t.space(1) }}>
-                  No outputs. The file records this cause and nothing it drives.
+                  No outputs.
                 </Txt>
               )}
 

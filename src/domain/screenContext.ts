@@ -48,7 +48,7 @@ export interface MissingContext {
 const PICKER: Record<ContextKind, { route: string; label: string }> = {
   site: { route: '/sites', label: 'Choose a site' },
   asset: { route: '/assets/find', label: 'Find an asset' },
-  configuration: { route: '/config', label: 'Open a configuration' },
+  configuration: { route: '/config', label: 'Open a config' },
 };
 
 /**
@@ -77,10 +77,7 @@ export function missingContext(kind: ContextKind, what: string): MissingContext 
   const picker = PICKER[kind];
   return {
     title: TITLE[kind],
-    body:
-      `This screen shows ${what} for one ${kind}, and it was opened without one — which happens `
-      + `when it is reached from search or from a link rather than from the ${kind} itself. `
-      + `Nothing is missing and nothing has failed: it simply has no ${kind} to report on yet.`,
+    body: `Pick a ${kind} to see ${what}.`,
     actionLabel: picker.label,
     actionRoute: picker.route,
   };

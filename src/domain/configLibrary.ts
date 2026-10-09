@@ -202,7 +202,7 @@ export function describeSummary(summary: ConfigSummary): string {
   if (summary.loops) parts.push(`${summary.loops.toLocaleString()} loop${summary.loops === 1 ? '' : 's'}`);
   if (summary.panels > 1) parts.push(`${summary.panels} panels`);
   if (summary.rules) parts.push(`${summary.rules.toLocaleString()} rule${summary.rules === 1 ? '' : 's'}`);
-  return parts.join(' · ') || 'Nothing this build can read';
+  return parts.join(' · ') || 'No devices read';
 }
 
 // ---------------------------------------------------------------------------

@@ -6,7 +6,8 @@ import { listSiteSummaries, type SiteSummary, type SiteSummaryPage } from '@/db/
 import { useTheme } from '@/theme';
 import { Button, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
 import { Reveal, Skeleton } from '@/components/motion';
-import { disambiguator, siteIsArchived } from '@/domain/siteNames';
+import { disambiguator } from '@/domain/siteNames';
+import { siteListChips } from '@/domain/sitePage';
 import { officeEmptyState, type EmptyStateWords } from '@/domain/deviceData';
 import { siteSearchMiss, type SiteMissWords } from '@/domain/siteMiss';
 import { loadPrefs } from '@/app-prefs';
@@ -46,7 +47,7 @@ export default function SitesScreen() {
   // not the same as one with nothing in it, and saying "add your first site"
   // to the first sends a person to type in a building the office already has.
   const [empty, setEmpty] = useState<EmptyStateWords>(
-    { title: 'No sites yet', body: 'Add a site by hand, or import a device list exported from any panel programming tool. Both work offline.' },
+    { title: 'No sites yet', body: 'Add a site or import a panel config.' },
   );
   /*
    * What a miss means, which this screen used to refuse to say.
@@ -104,7 +105,7 @@ export default function SitesScreen() {
       });
       await load();
       showAlert(
-        'Site list re-read',
+        'Sites refreshed',
         [
           `${result.sitesAdded} added, ${result.sitesUpdated} updated.`,
           ...(result.notes.length ? ['', ...result.notes] : []),
@@ -112,7 +113,7 @@ export default function SitesScreen() {
         ].join('\n'),
       );
     } catch (e) {
-      showAlert('Could not read the site list', describeActionFailure(e, 'read the office’s site list'));
+      showAlert('Could not refresh sites', describeActionFailure(e, 'refresh the site list'));
     } finally {
       setPulling(false);
     }
@@ -125,7 +126,7 @@ export default function SitesScreen() {
    * would make the warning appear and disappear as somebody types, which is
    * why the count is made in the same statement that reads them.
    */
-  const filtered = page?.rows ?? [];
+  const filtered = useMemo(() => page?.rows ?? [], [page]);
   const ambiguous = useMemo(
     () => new Set(filtered.filter((s) => s.sharesName).map((s) => s.name.trim().toLowerCase())),
     [filtered],
@@ -153,7 +154,7 @@ export default function SitesScreen() {
               <TextInput
                 value={search}
                 onChangeText={setSearch}
-                placeholder="Name, suburb, address, postcode, client or number"
+                placeholder="Name, suburb, address or client"
                 placeholderTextColor={t.color.textFaint}
                 autoCapitalize="none"
                 style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md }}
@@ -218,7 +219,7 @@ export default function SitesScreen() {
               action={(
                 <Rowed gap={2} wrap>
                   {empty.action ? <Button title={empty.action.label} onPress={() => router.push(empty.action!.route)} /> : null}
-                  <Button title="Add a site by hand" variant="ghost" onPress={() => router.push('/site/new')} />
+                  <Button title="Add a site" variant="ghost" onPress={() => router.push('/site/new')} />
                 </Rowed>
               )}
             />
@@ -233,15 +234,15 @@ export default function SitesScreen() {
  * One site in the list.
  *
  * `apart` is what tells this site from its namesakes, and it is absent on all
- * but a handful of rows. Three of the sites on the book are called "Storage
- * Choice - Sumner Park", three are "Luggage Direct" and two are "Brisbane
- * Rheumatology", the register carries no address for any of them, and without
- * this the rows are identical — so a technician picks one of three and records
- * a service against whichever building it turns out to be.
+ * but a handful of rows. Several sites on the book share a name with two or
+ * three others and carry no address, and without this the rows are identical,
+ * so a technician picks one of three and records a service against whichever
+ * building it turns out to be.
  */
 function SiteCard({ site, apart }: { site: SiteSummary; apart?: string }) {
   const t = useTheme();
   const location = [site.suburb, site.state].filter(Boolean).join(' ');
+  const chips = siteListChips(site);
   return (
     <Card onPress={() => router.push({ pathname: '/site/[id]', params: { id: site.id } })}>
       <Rowed align="flex-start" gap={3}>
@@ -255,22 +256,21 @@ function SiteCard({ site, apart }: { site: SiteSummary; apart?: string }) {
             <Rowed gap={1.5} align="center">
               <MaterialCommunityIcons name="alert-circle-outline" size={13} color={t.color.warn} />
               <Txt size="xs" tone="warn" numberOfLines={1}>
-                Another site shares this name — {apart}
+                Same name as another site · {apart}
               </Txt>
             </Rowed>
           ) : null}
-          <Rowed gap={1.5} wrap style={{ marginTop: t.space(1.5) }}>
-            {/*
-              * Marked, not hidden. An archived building's logbook is still the
-              * record of work that happened and its assets are still in the
-              * wall; a technician sent there has to be able to find it. What
-              * they must not do is raise new work against it without knowing.
-              */}
-            {siteIsArchived(site) ? <Chip label="Archived in the office" tone="warn" /> : null}
-            <Chip label={`${site.panelCount} panel${site.panelCount === 1 ? '' : 's'}`} />
-            <Chip label={`${site.pointCount.toLocaleString()} points`} />
-            {site.openDefects > 0 ? <Chip label={`${site.openDefects} open`} tone="fail" /> : null}
-          </Rowed>
+          {chips.length ? (
+            <Rowed gap={1.5} wrap style={{ marginTop: t.space(1.5) }}>
+              {/*
+                * Marked, not hidden. An archived building's logbook is still the
+                * record of work that happened and its assets are still in the
+                * wall; a technician sent there has to be able to find it. What
+                * they must not do is raise new work against it without knowing.
+                */}
+              {chips.map((c) => <Chip key={c.label} label={c.label} tone={c.tone} />)}
+            </Rowed>
+          ) : null}
         </View>
         <MaterialCommunityIcons name="chevron-right" size={22} color={t.color.textFaint} />
       </Rowed>
@@ -302,16 +302,16 @@ function SiteMiss({
       <Rowed gap={2} wrap style={{ justifyContent: 'center' }}>
         {words.offerPull ? (
           <Button
-            title={pulling ? 'Reading the office…' : 'Pull every site from the office'}
+            title={pulling ? 'Refreshing…' : 'Refresh sites'}
             onPress={onPull}
             disabled={pulling}
           />
         ) : null}
         {words.offerConnect ? (
-          <Button title="Connect to the office" onPress={() => router.push('/settings')} />
+          <Button title="Connect to Simpro" onPress={() => router.push('/settings')} />
         ) : null}
         {words.offerAdd ? (
-          <Button title="Add it by hand" variant="ghost" onPress={() => router.push('/site/new')} />
+          <Button title="Add a site" variant="ghost" onPress={() => router.push('/site/new')} />
         ) : null}
       </Rowed>
     </View>

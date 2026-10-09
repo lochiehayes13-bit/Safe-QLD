@@ -83,7 +83,7 @@ export interface DecodeResult {
  *   6 — digit, digit, digit, multiplier, tolerance, temperature coefficient
  */
 export function decodeBands(bands: BandColour[], count: BandCount): DecodeResult {
-  if (bands.length < count) return { ok: false, error: `Select all ${count} bands.` };
+  if (bands.length < count) return { ok: false, error: `Pick all ${count} bands.` };
 
   const digitCount = count >= 5 ? 3 : 2;
   let digits = 0;
@@ -91,21 +91,21 @@ export function decodeBands(bands: BandColour[], count: BandCount): DecodeResult
   for (let i = 0; i < digitCount; i++) {
     const spec = BY_COLOUR.get(bands[i]!);
     if (!spec || spec.digit === undefined) {
-      return { ok: false, error: `Band ${i + 1} cannot be ${spec?.label ?? bands[i]} — it must carry a digit.` };
+      return { ok: false, error: `Band ${i + 1} can't be ${spec?.label ?? bands[i]}. It must be a digit colour.` };
     }
     digits = digits * 10 + spec.digit;
   }
 
   const multSpec = BY_COLOUR.get(bands[digitCount]!);
   if (!multSpec || multSpec.multiplier === undefined) {
-    return { ok: false, error: `The multiplier band cannot be ${multSpec?.label ?? bands[digitCount]}.` };
+    return { ok: false, error: `The multiplier band can't be ${multSpec?.label ?? bands[digitCount]}.` };
   }
 
   let tolerancePct = 20;
   if (count >= 4) {
     const tolSpec = BY_COLOUR.get(bands[digitCount + 1]!);
     if (!tolSpec || tolSpec.tolerance === undefined) {
-      return { ok: false, error: `The tolerance band cannot be ${tolSpec?.label ?? bands[digitCount + 1]}.` };
+      return { ok: false, error: `The tolerance band can't be ${tolSpec?.label ?? bands[digitCount + 1]}.` };
     }
     tolerancePct = tolSpec.tolerance;
   }
@@ -114,7 +114,7 @@ export function decodeBands(bands: BandColour[], count: BandCount): DecodeResult
   if (count === 6) {
     const tcrSpec = BY_COLOUR.get(bands[digitCount + 2]!);
     if (!tcrSpec || tcrSpec.tcr === undefined) {
-      return { ok: false, error: `The temperature coefficient band cannot be ${tcrSpec?.label ?? bands[digitCount + 2]}.` };
+      return { ok: false, error: `The temperature coefficient band can't be ${tcrSpec?.label ?? bands[digitCount + 2]}.` };
     }
     tcrPpm = tcrSpec.tcr;
   }
@@ -333,4 +333,15 @@ export function encodeBands(ohms: number, count: BandCount, tolerancePct = 5, tc
   }
 
   return bands;
+}
+
+/**
+ * The fewest bands that can show a value: 3 for two significant figures, 5 for
+ * three. Null where no band count can, which is four or more significant
+ * figures or a value outside the multiplier colours.
+ */
+export function fewestBandsFor(ohms: number): BandCount | null {
+  if (encodeBands(ohms, 3) !== null) return 3;
+  if (encodeBands(ohms, 5, 1) !== null) return 5;
+  return null;
 }

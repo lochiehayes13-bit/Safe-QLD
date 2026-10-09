@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { FlatList, Modal, Pressable, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
@@ -8,16 +8,19 @@ import {
   FC_DEFAULT,
   L_DESIGN,
   L_IN_SERVICE,
-  STANDARD_SLA_AH,
   type CalcMode,
   type Issue,
-  type LoadItem,
 } from '@/calc/battery';
+import {
+  draftFromFigures, figureText, hasLoadFigures, loadFromDraft, loadsFromDrafts, parseFigure,
+  type LoadDraft,
+} from '@/calc/batteryLoads';
+import { VESDA_PSUS, vesdaDevices, vesdaSupplyNote, type VesdaDevice, type VesdaPsu } from '@/calc/vesda';
 import { DevicePicker } from '@/components/DevicePicker';
 import type { CatalogueItem } from '@/db/catalogueRepo';
 import { useTheme } from '@/theme';
 import {
-  Banner, Button, Card, Divider, Field, H2, Label, ResultBlock, Rowed, Screen, Segmented, Txt,
+  Banner, Button, Card, Chip, Divider, Field, H2, Label, ResultBlock, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
 
 /**
@@ -27,20 +30,15 @@ import {
  * total-current boxes: entering loads individually is what makes the standby
  * and alarm figures defensible, and it is the only way door holders and
  * brigade monitoring get counted correctly.
+ *
+ * It opens empty and shows no battery until the technician's own loads are
+ * in. A schedule that arrives pre-filled with typical figures produces a
+ * battery size before anyone has looked at the site, and that is the number
+ * that gets written down.
  */
 
 let seq = 0;
 const nextId = (): string => `load-${++seq}`;
-
-/** Starting schedule — the lines that appear on nearly every job. */
-function initialLoads(): LoadItem[] {
-  return [
-    { id: nextId(), label: 'Fire indicator panel', quantity: 1, standbyMa: 150, alarmMa: 250 },
-    { id: nextId(), label: 'Detectors (loop)', quantity: 100, standbyMa: 0.33, alarmMa: 0.33 },
-    { id: nextId(), label: 'Sounders / strobes', quantity: 0, standbyMa: 0, alarmMa: 15 },
-    { id: nextId(), label: 'Alarm signalling equipment (ASE)', quantity: 1, standbyMa: 60, alarmMa: 100, isAse: true },
-  ];
-}
 
 /**
  * The loads a baseline record can hand over.
@@ -52,25 +50,27 @@ function initialLoads(): LoadItem[] {
  * of nameplate figures added up.
  *
  * So they arrive as a single measured line, labelled as measured, and the
- * screen's own list is replaced rather than added to. Mixing a measured total
- * with the default itemised list would double the panel.
+ * screen's own list is replaced rather than added to.
  */
-function measuredLoads(quiescentA: number, alarmA: number): LoadItem[] {
-  return [{
-    id: nextId(),
-    label: 'Measured at the panel (from the baseline record)',
+function measuredLoads(quiescentA: number, alarmA: number): LoadDraft[] {
+  return [draftFromFigures(nextId(), {
+    label: 'Measured at panel',
     quantity: 1,
     standbyMa: quiescentA * 1000,
     alarmMa: alarmA * 1000,
-    note: 'Taken from the baseline data form rather than added up from nameplates.',
-  }];
+  })];
 }
 
 /** A number off a form field, where a blank and a nonsense entry both mean "not given". */
 function handedOver(v: string | undefined): number | undefined {
-  if (!v) return undefined;
-  const n = parseFloat(v);
-  return Number.isFinite(n) && n > 0 ? n : undefined;
+  const n = parseFigure(v);
+  return n !== undefined && n > 0 ? n : undefined;
+}
+
+/** A positive figure off a box, or undefined. */
+function positive(text: string): number | undefined {
+  const n = parseFigure(text);
+  return n !== undefined && n > 0 ? n : undefined;
 }
 
 export default function BatteryCalculatorScreen() {
@@ -94,13 +94,13 @@ export default function BatteryCalculatorScreen() {
   const fromBaseline = handed.quiescent !== undefined && handed.alarm !== undefined;
 
   const [mode, setMode] = useState<CalcMode>(fromBaseline && handed.installed !== undefined ? 'service' : 'design');
-  const [loads, setLoads] = useState<LoadItem[]>(
-    fromBaseline ? () => measuredLoads(handed.quiescent!, handed.alarm!) : initialLoads,
+  const [drafts, setDrafts] = useState<LoadDraft[]>(
+    fromBaseline ? () => measuredLoads(handed.quiescent!, handed.alarm!) : [],
   );
   const [monitored, setMonitored] = useState(true);
   const [alarmMinutes, setAlarmMinutes] = useState('30');
   const [ageing, setAgeing] = useState(L_DESIGN);
-  const [installedAh, setInstalledAh] = useState(handed.installed !== undefined ? String(handed.installed) : '');
+  const [installedAh, setInstalledAh] = useState(handed.installed !== undefined ? figureText(handed.installed) : '');
   const [panelMaxAh, setPanelMaxAh] = useState('');
   const [psuOutput, setPsuOutput] = useState('');
   const [psuCharge, setPsuCharge] = useState('');
@@ -108,6 +108,11 @@ export default function BatteryCalculatorScreen() {
   const [showWhy, setShowWhy] = useState(false);
   // Which load row the catalogue picker is filling, if any.
   const [pickingFor, setPickingFor] = useState<string | null>(null);
+  const [vesdaOpen, setVesdaOpen] = useState(false);
+  const [vesdaPsu, setVesdaPsu] = useState<VesdaPsu | null>(null);
+
+  const loads = useMemo(() => loadsFromDrafts(drafts), [drafts]);
+  const ready = hasLoadFigures(loads);
 
   const result = useMemo(
     () =>
@@ -115,20 +120,21 @@ export default function BatteryCalculatorScreen() {
         mode,
         loads,
         monitored,
-        alarmHours: (parseFloat(alarmMinutes) || 30) / 60,
+        alarmHours: (positive(alarmMinutes) ?? 30) / 60,
         deteriorationFactor: mode === 'design' ? L_DESIGN : ageing,
         capacityDerating: FC_DEFAULT,
-        averageTempC: tempC ? parseFloat(tempC) : undefined,
-        installedBatteryAh: installedAh ? parseFloat(installedAh) : undefined,
-        panelMaxBatteryAh: panelMaxAh ? parseFloat(panelMaxAh) : undefined,
-        psuOutputA: psuOutput ? parseFloat(psuOutput) : undefined,
-        psuChargeCurrentA: psuCharge ? parseFloat(psuCharge) : undefined,
+        averageTempC: parseFigure(tempC),
+        installedBatteryAh: positive(installedAh),
+        panelMaxBatteryAh: positive(panelMaxAh),
+        psuOutputA: positive(psuOutput),
+        psuChargeCurrentA: positive(psuCharge),
       }),
     [mode, loads, monitored, alarmMinutes, ageing, tempC, installedAh, panelMaxAh, psuOutput, psuCharge],
   );
 
-  const update = (id: string, patch: Partial<LoadItem>) =>
-    setLoads((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+  const update = (id: string, patch: Partial<LoadDraft>) =>
+    setDrafts((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+  const add = (row: LoadDraft) => setDrafts((prev) => [...prev, row]);
 
   /**
    * Fills a load row from the catalogue.
@@ -138,20 +144,37 @@ export default function BatteryCalculatorScreen() {
    */
   const applyDevice = (item: CatalogueItem) => {
     if (!pickingFor) return;
+    const noAlarm = item.alarmMa === null || item.alarmMa === undefined;
     update(pickingFor, {
       label: `${item.brand} ${item.partNumber}`,
-      standbyMa: item.quiescentMa ?? 0,
-      alarmMa: item.alarmMa ?? item.quiescentMa ?? 0,
-      note: item.alarmMa === null || item.alarmMa === undefined
-        ? 'Alarm current not published — standby figure used. Confirm against the datasheet.'
-        : `From ${item.brand} datasheet · ${item.confidence} confidence`,
+      standbyMa: figureText(item.quiescentMa ?? 0),
+      alarmMa: figureText(item.alarmMa ?? item.quiescentMa ?? 0),
+      note: noAlarm ? 'Alarm not published; standby used. Check the datasheet.' : `From ${item.brand} datasheet.`,
     });
     setPickingFor(null);
   };
 
-  const errors = result.issues.filter((i) => i.level === 'error');
-  const warnings = result.issues.filter((i) => i.level === 'warning');
-  const infos = result.issues.filter((i) => i.level === 'info');
+  const addVesda = (d: VesdaDevice) => {
+    add(draftFromFigures(nextId(), { label: d.label, quantity: 1, standbyMa: d.standbyMa, alarmMa: d.alarmMa, note: d.note }));
+    setVesdaOpen(false);
+  };
+
+  const pickVesdaSupply = (p: VesdaPsu) => {
+    setPsuOutput(figureText(p.ratedA));
+    setPanelMaxAh(figureText(p.maxBatteryAh));
+    setVesdaPsu(p);
+    setVesdaOpen(false);
+  };
+  // The supply line stays only while its two figures are still in the boxes.
+  const supplyNote = vesdaPsu && psuOutput === figureText(vesdaPsu.ratedA) && panelMaxAh === figureText(vesdaPsu.maxBatteryAh)
+    ? vesdaSupplyNote(vesdaPsu)
+    : undefined;
+
+  const shown = ready ? result.issues : [];
+  const errors = shown.filter((i) => i.level === 'error');
+  const warnings = shown.filter((i) => i.level === 'warning');
+  const infos = shown.filter((i) => i.level === 'info');
+  const factor = mode === 'design' ? L_DESIGN : ageing;
 
   return (
     <>
@@ -161,11 +184,7 @@ export default function BatteryCalculatorScreen() {
           <Banner
             tone="info"
             title="Filled from the baseline record"
-            body={
-              `The quiescent and full alarm currents came off the baseline form for ${params.from || 'this site'}, `
-              + 'as one measured line rather than a list of nameplate figures. Edit them here if you measured '
-              + 'again — nothing you change is written back to the record.'
-            }
+            body={`Currents from the baseline${params.from ? ` for ${params.from}` : ''}. Edits aren't saved back.`}
           />
         ) : null}
         <Segmented
@@ -176,27 +195,27 @@ export default function BatteryCalculatorScreen() {
             { value: 'service', label: 'In service' },
           ]}
         />
-        <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-          {mode === 'design'
-            ? 'Sizing a new battery. The deterioration factor is fixed at 1.25 — the reduced figure is a service-only allowance.'
-            : 'Assessing a battery already installed. 1.1 may be used once it has been in service more than 12 months.'}
+        <Txt size="sm" tone="muted">
+          {mode === 'design' ? `New battery: L = ${L_DESIGN}.` : `Installed battery: L = ${L_IN_SERVICE} after 12 months.`}
         </Txt>
 
         <ResultBlock
           label={mode === 'design' ? 'Specify battery' : 'Capacity required'}
-          value={result.recommendedAh !== null ? String(result.recommendedAh) : result.requiredAh.toFixed(1)}
-          unit="Ah"
-          tone={errors.length ? 'fail' : 'accent'}
+          value={!ready ? '—' : result.recommendedAh !== null ? String(result.recommendedAh) : result.requiredAh.toFixed(1)}
+          unit={ready ? 'Ah' : undefined}
+          tone={!ready ? 'muted' : errors.length ? 'fail' : 'accent'}
           detail={
-            result.recommendedAh !== null
-              ? `Calculated ${result.requiredAh.toFixed(2)} Ah, rounded up to the next standard size. 2 × 12 V ${result.recommendedAh} Ah in series.`
-              : 'Beyond common battery sizes — expect a purpose-built set and separate cabinet.'
+            !ready
+              ? 'Add loads to size the battery.'
+              : result.recommendedAh !== null
+                ? `Calculated ${result.requiredAh.toFixed(2)} Ah. 2 × 12 V ${result.recommendedAh} Ah in series.`
+                : 'Above standard sizes. Custom set needed.'
           }
         />
 
         <Rowed gap={2}>
-          <MiniStat label="Standby" value={`${(result.quiescentA * 1000).toFixed(0)} mA`} />
-          <MiniStat label="Alarm" value={`${(result.alarmA * 1000).toFixed(0)} mA`} />
+          <MiniStat label="Standby" value={ready ? `${(result.quiescentA * 1000).toFixed(0)} mA` : '—'} />
+          <MiniStat label="Alarm" value={ready ? `${(result.alarmA * 1000).toFixed(0)} mA` : '—'} />
           <MiniStat label="Standby time" value={`${result.standbyHours} h`} />
         </Rowed>
 
@@ -209,10 +228,8 @@ export default function BatteryCalculatorScreen() {
             <Rowed gap={3}>
               <Radio on={monitored} />
               <View style={{ flex: 1 }}>
-                <Txt weight="600">Fault signal continuously monitored — 24 h</Txt>
-                <Txt size="sm" tone="muted" style={{ lineHeight: 18 }}>
-                  The power supply failure signal is monitored on site or remotely. Typical of any brigade-monitored building.
-                </Txt>
+                <Txt weight="600">Supply failure monitored: 24 h</Txt>
+                <Txt size="sm" tone="muted">PSU fault monitored, e.g. brigade-connected.</Txt>
               </View>
             </Rowed>
           </Pressable>
@@ -221,27 +238,26 @@ export default function BatteryCalculatorScreen() {
             <Rowed gap={3}>
               <Radio on={!monitored} />
               <View style={{ flex: 1 }}>
-                <Txt weight="600">Not continuously monitored — 72 h</Txt>
-                <Txt size="sm" tone="muted" style={{ lineHeight: 18 }}>
-                  The base requirement. Roughly three times the battery — this is the assumption most often got wrong.
-                </Txt>
+                <Txt weight="600">Not monitored: 72 h</Txt>
+                <Txt size="sm" tone="muted">About three times the battery.</Txt>
               </View>
             </Rowed>
           </Pressable>
         </Card>
 
         <H2>Load schedule</H2>
-        <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-          Enter standby and alarm current separately for each line. Door holders draw in standby and drop out in alarm;
-          detectors are in microamps at rest and milliamps in alarm.
-        </Txt>
+        <Txt size="sm" tone="muted">Standby and alarm current per line, in mA.</Txt>
 
-        {loads.map((l) => (
+        {drafts.length === 0 ? (
+          <Txt size="sm" tone="faint">No loads yet. Start with the panel.</Txt>
+        ) : null}
+
+        {drafts.map((l) => (
           <LoadRow
             key={l.id}
             load={l}
             onChange={(patch) => update(l.id, patch)}
-            onRemove={() => setLoads((prev) => prev.filter((x) => x.id !== l.id))}
+            onRemove={() => setDrafts((prev) => prev.filter((x) => x.id !== l.id))}
             onPickDevice={() => setPickingFor(l.id)}
           />
         ))}
@@ -251,35 +267,38 @@ export default function BatteryCalculatorScreen() {
             title="Add load"
             variant="secondary"
             style={{ flex: 1 }}
-            onPress={() =>
-              setLoads((prev) => [...prev, { id: nextId(), label: '', quantity: 1, standbyMa: 0, alarmMa: 0 }])
-            }
+            onPress={() => add(draftFromFigures(nextId(), { label: '' }))}
             icon={<MaterialCommunityIcons name="plus" size={16} color={t.color.text} />}
           />
           <Button
             title="Door holders"
             variant="secondary"
             style={{ flex: 1 }}
-            onPress={() =>
-              setLoads((prev) => [
-                ...prev,
-                { id: nextId(), label: 'Door holders', quantity: 1, standbyMa: 55, alarmMa: 0, note: 'Energised in standby, released in alarm' },
-              ])
-            }
+            onPress={() => add(draftFromFigures(nextId(), { label: 'Door holders', alarmMa: 0, note: 'Draw in standby, release in alarm.' }))}
           />
+        </Rowed>
+        <Rowed gap={2}>
+          <Button
+            title="ASE"
+            variant="secondary"
+            style={{ flex: 1 }}
+            onPress={() => add(draftFromFigures(nextId(), { label: 'ASE', isAse: true, note: 'Qty 0 if the site has none.' }))}
+          />
+          <Button title="VESDA" variant="secondary" style={{ flex: 1 }} onPress={() => setVesdaOpen(true)} />
         </Rowed>
 
         <H2>Conditions</H2>
         <Rowed gap={2} align="flex-start">
           <View style={{ flex: 1 }}>
-            <Field label="Alarm time" value={alarmMinutes} onChangeText={setAlarmMinutes} keyboardType="numeric" suffix="min" />
+            <Field label="Alarm time" value={alarmMinutes} onChangeText={setAlarmMinutes} keyboardType="decimal-pad" suffix="min" />
           </View>
           <View style={{ flex: 1 }}>
+            {/* The default keyboard, because a battery room can sit below zero and decimal-pad has no minus. */}
             <Field
               label="Battery temp"
               value={tempC}
               onChangeText={setTempC}
-              keyboardType="numeric"
+              keyboardType="default"
               suffix="°C"
               hint="Formula valid 15–30 °C"
             />
@@ -292,23 +311,23 @@ export default function BatteryCalculatorScreen() {
               value={String(ageing)}
               onChange={(v) => setAgeing(parseFloat(v))}
               options={[
-                { value: String(L_DESIGN), label: 'New / under 12 mo (1.25)' },
-                { value: String(L_IN_SERVICE), label: 'Over 12 months (1.1)' },
+                { value: String(L_DESIGN), label: `Under 12 months (${L_DESIGN})` },
+                { value: String(L_IN_SERVICE), label: `Over 12 months (${L_IN_SERVICE})` },
               ]}
             />
             <Field
               label="Installed battery"
               value={installedAh}
               onChangeText={setInstalledAh}
-              keyboardType="numeric"
+              keyboardType="decimal-pad"
               suffix="Ah"
-              hint="Nameplate capacity of the battery actually fitted"
+              hint="Nameplate Ah of the fitted battery"
             />
-            {result.installedPasses !== undefined ? (
+            {ready && result.installedPasses !== undefined ? (
               <Banner
                 tone={result.installedPasses ? 'pass' : 'fail'}
                 title={result.installedPasses ? 'Installed battery is adequate' : 'Installed battery is undersized'}
-                body={`${installedAh} Ah fitted against ${result.requiredAh.toFixed(2)} Ah required.`}
+                body={`${installedAh} Ah fitted, ${result.requiredAh.toFixed(2)} Ah required.`}
               />
             ) : null}
           </>
@@ -317,7 +336,7 @@ export default function BatteryCalculatorScreen() {
         <H2>Panel and power supply</H2>
         <Rowed gap={2} align="flex-start">
           <View style={{ flex: 1 }}>
-            <Field label="Panel max battery" value={panelMaxAh} onChangeText={setPanelMaxAh} keyboardType="numeric" suffix="Ah" />
+            <Field label="Panel max battery" value={panelMaxAh} onChangeText={setPanelMaxAh} keyboardType="decimal-pad" suffix="Ah" />
           </View>
           <View style={{ flex: 1 }}>
             <Field label="PSU output" value={psuOutput} onChangeText={setPsuOutput} keyboardType="decimal-pad" suffix="A" />
@@ -326,8 +345,9 @@ export default function BatteryCalculatorScreen() {
             <Field label="Charge current" value={psuCharge} onChangeText={setPsuCharge} keyboardType="decimal-pad" suffix="A" />
           </View>
         </Rowed>
+        {supplyNote ? <Txt size="xs" tone="faint">{supplyNote}</Txt> : null}
 
-        {result.charger ? (
+        {ready && result.charger ? (
           <Card>
             <Label>Charger check</Label>
             <View style={{ gap: t.space(1.5), marginTop: t.space(2) }}>
@@ -345,24 +365,28 @@ export default function BatteryCalculatorScreen() {
           </Card>
         ) : null}
 
-        <H2>Working</H2>
-        <Card>
-          <Txt mono size="sm" tone="muted" style={{ lineHeight: 21 }}>
-            C20 = L × [(Iq × Tq) + Fc × (Ia × Ta)]
-          </Txt>
-          <Divider />
-          <WorkingLine label="Standby term (Iq × Tq)" value={`${result.standbyAh.toFixed(3)} Ah`} />
-          <WorkingLine label={`Alarm term (Fc=${FC_DEFAULT} × Ia × Ta)`} value={`${result.alarmAh.toFixed(3)} Ah`} />
-          <WorkingLine label="Subtotal" value={`${result.subtotalAh.toFixed(3)} Ah`} />
-          <WorkingLine label={`× L = ${mode === 'design' ? L_DESIGN : ageing}`} value={`${result.requiredAh.toFixed(2)} Ah`} strong />
-        </Card>
+        {ready ? (
+          <>
+            <H2>Working</H2>
+            <Card>
+              <Txt mono size="sm" tone="muted" style={{ lineHeight: 21 }}>
+                C20 = L × [(Iq × Tq) + Fc × (Ia × Ta)]
+              </Txt>
+              <Divider />
+              <WorkingLine label="Standby term (Iq × Tq)" value={`${result.standbyAh.toFixed(3)} Ah`} />
+              <WorkingLine label={`Alarm term (Fc=${FC_DEFAULT} × Ia × Ta)`} value={`${result.alarmAh.toFixed(3)} Ah`} />
+              <WorkingLine label="Subtotal" value={`${result.subtotalAh.toFixed(3)} Ah`} />
+              <WorkingLine label={`× L = ${factor}`} value={`${result.requiredAh.toFixed(2)} Ah`} strong />
+            </Card>
+          </>
+        ) : null}
 
-        {result.effectiveDerating !== undefined ? (
+        {ready && result.effectiveDerating !== undefined ? (
           <>
             <Pressable onPress={() => setShowWhy((v) => !v)}>
               <Rowed gap={1}>
                 <Txt size="sm" tone="accent" weight="700">
-                  {showWhy ? 'Hide' : 'Why is the de-rating factor 2?'}
+                  {showWhy ? 'Hide' : `Why Fc = ${FC_DEFAULT}?`}
                 </Txt>
                 <MaterialCommunityIcons
                   name={showWhy ? 'chevron-up' : 'chevron-down'}
@@ -374,39 +398,42 @@ export default function BatteryCalculatorScreen() {
             {showWhy ? (
               <Card>
                 <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-                  A lead-acid battery delivers less than its rated capacity when discharged quickly, so the alarm term is
-                  de-rated. At {result.alarmCRate?.toFixed(3)}C this system would only need about{' '}
-                  {result.effectiveDerating.toFixed(2)}× — the mandated factor of {FC_DEFAULT} is conservative here, and gets
-                  closer to necessary on large occupant warning loads. Always size to {FC_DEFAULT}.
+                  Fast discharge cuts capacity. At {result.alarmCRate?.toFixed(3)}C this system needs about{' '}
+                  {result.effectiveDerating.toFixed(2)}×. Always use Fc = {FC_DEFAULT}.
                 </Txt>
               </Card>
             ) : null}
           </>
         ) : null}
 
-        <H2>Baseline data</H2>
-        <Card>
-          <Txt size="sm" tone="muted" style={{ marginBottom: t.space(2), lineHeight: 19 }}>
-            The power supply items a commissioning record asks for, ready to transcribe.
-          </Txt>
-          {appendixFFields(result).map((f) => (
-            <View key={f.item} style={{ paddingVertical: t.space(1.5) }}>
-              <Txt size="xs" tone="faint" weight="700">{f.item}  {f.field}</Txt>
-              <Txt size="sm" weight="600">{f.value}</Txt>
-            </View>
-          ))}
-        </Card>
+        {ready ? (
+          <>
+            <H2>Baseline data</H2>
+            <Card>
+              <Txt size="sm" tone="muted" style={{ marginBottom: t.space(2) }}>Power supply items for the record.</Txt>
+              {appendixFFields(result).map((f) => (
+                <View key={f.item} style={{ paddingVertical: t.space(1.5) }}>
+                  <Txt size="xs" tone="faint" weight="700">{f.item}  {f.field}</Txt>
+                  <Txt size="sm" weight="600">{f.value}</Txt>
+                </View>
+              ))}
+            </Card>
+          </>
+        ) : null}
 
         {infos.map((i, n) => <IssueBanner key={`i${n}`} issue={i} />)}
 
-        <Txt size="xs" tone="faint" style={{ lineHeight: 17, marginTop: 4 }}>
-          Standard battery sizes offered: {STANDARD_SLA_AH.join(', ')} Ah. Always confirm the result against the current
-          standard and the panel manufacturer's own data before relying on it.
-        </Txt>
+        <Txt size="xs" tone="faint" style={{ marginTop: 4 }}>Confirm against AS 1670.1 and the panel manual.</Txt>
         <DevicePicker
           visible={pickingFor !== null}
           onClose={() => setPickingFor(null)}
           onPick={applyDevice}
+        />
+        <VesdaPicker
+          visible={vesdaOpen}
+          onClose={() => setVesdaOpen(false)}
+          onPickDevice={addVesda}
+          onPickSupply={pickVesdaSupply}
         />
       </Screen>
     </>
@@ -419,12 +446,13 @@ function LoadRow({
   onRemove,
   onPickDevice,
 }: {
-  load: LoadItem;
-  onChange: (patch: Partial<LoadItem>) => void;
+  load: LoadDraft;
+  onChange: (patch: Partial<LoadDraft>) => void;
   onRemove: () => void;
   onPickDevice: () => void;
 }) {
   const t = useTheme();
+  const figures = loadFromDraft(load);
   return (
     <Card>
       <Rowed gap={2} align="flex-start">
@@ -437,18 +465,13 @@ function LoadRow({
       </Rowed>
       <Rowed gap={2} align="flex-start" style={{ marginTop: t.space(2) }}>
         <View style={{ flex: 0.8 }}>
-          <Field
-            label="Qty"
-            value={String(load.quantity)}
-            onChangeText={(v) => onChange({ quantity: parseFloat(v) || 0 })}
-            keyboardType="numeric"
-          />
+          <Field label="Qty" value={load.quantity} onChangeText={(v) => onChange({ quantity: v })} keyboardType="decimal-pad" />
         </View>
         <View style={{ flex: 1.1 }}>
           <Field
             label="Standby"
-            value={String(load.standbyMa)}
-            onChangeText={(v) => onChange({ standbyMa: parseFloat(v) || 0 })}
+            value={load.standbyMa}
+            onChangeText={(v) => onChange({ standbyMa: v })}
             keyboardType="decimal-pad"
             suffix="mA"
           />
@@ -456,8 +479,8 @@ function LoadRow({
         <View style={{ flex: 1.1 }}>
           <Field
             label="Alarm"
-            value={String(load.alarmMa)}
-            onChangeText={(v) => onChange({ alarmMa: parseFloat(v) || 0 })}
+            value={load.alarmMa}
+            onChangeText={(v) => onChange({ alarmMa: v })}
             keyboardType="decimal-pad"
             suffix="mA"
           />
@@ -466,11 +489,90 @@ function LoadRow({
       {load.note ? <Txt size="xs" tone="faint" style={{ marginTop: 6 }}>{load.note}</Txt> : null}
       <Rowed style={{ justifyContent: 'space-between', marginTop: 6 }}>
         <Txt size="xs" tone="faint" style={{ flex: 1 }}>
-          Subtotal {(load.quantity * load.standbyMa).toFixed(1)} mA standby · {(load.quantity * load.alarmMa).toFixed(1)} mA alarm
+          Subtotal {(figures.quantity * figures.standbyMa).toFixed(1)} mA standby · {(figures.quantity * figures.alarmMa).toFixed(1)} mA alarm
         </Txt>
         <Button title="From catalogue" variant="ghost" compact onPress={onPickDevice} />
       </Rowed>
     </Card>
+  );
+}
+
+/**
+ * VESDA detectors, accessories and supplies, picked into the schedule.
+ *
+ * These were a screen of their own running this same calculation. As devices
+ * here, a VESDA on a panel's supply and a VESDA on its own are sized the same
+ * way, with the rest of the schedule beside them.
+ */
+function VesdaPicker({
+  visible,
+  onClose,
+  onPickDevice,
+  onPickSupply,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onPickDevice: (d: VesdaDevice) => void;
+  onPickSupply: (p: VesdaPsu) => void;
+}) {
+  const t = useTheme();
+  const [tab, setTab] = useState<'detector' | 'accessory' | 'supply'>('detector');
+  const devices = useMemo(() => vesdaDevices(), []);
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet">
+      <Screen scroll={false} padded={false} edges={['top']}>
+        <View style={{ padding: t.space(4), gap: t.space(2.5) }}>
+          <Rowed style={{ justifyContent: 'space-between' }}>
+            <Txt size="lg" weight="700">VESDA</Txt>
+            <Button title="Close" variant="ghost" compact onPress={onClose} />
+          </Rowed>
+          <Segmented
+            value={tab}
+            onChange={setTab}
+            options={[
+              { value: 'detector', label: 'Detectors' },
+              { value: 'accessory', label: 'Accessories' },
+              { value: 'supply', label: 'Supplies' },
+            ]}
+          />
+          <Txt size="xs" tone="faint">
+            {tab === 'supply' ? 'Fills panel max battery and PSU output.' : 'Watts converted at 24 V. Adds a load line.'}
+          </Txt>
+        </View>
+        {tab === 'supply' ? (
+          <FlatList
+            data={VESDA_PSUS}
+            keyExtractor={(p) => p.id}
+            contentContainerStyle={{ paddingHorizontal: t.space(4), paddingBottom: t.space(10), gap: t.space(2) }}
+            renderItem={({ item }) => (
+              <Card onPress={() => onPickSupply(item)}>
+                <Txt mono size="sm" weight="700" tone="accent">{item.model}</Txt>
+                <Txt size="xs" tone="muted" style={{ marginTop: 2 }}>
+                  {item.ratedA} A · {item.maxBatteryAh} Ah max{item.note ? ` · ${item.note}` : ''}
+                </Txt>
+                {!item.verified ? <Chip label="Distributor figures" tone="warn" /> : null}
+              </Card>
+            )}
+          />
+        ) : (
+          <FlatList
+            data={devices.filter((d) => d.kind === tab)}
+            keyExtractor={(d) => d.id}
+            contentContainerStyle={{ paddingHorizontal: t.space(4), paddingBottom: t.space(10), gap: t.space(2) }}
+            renderItem={({ item }) => (
+              <Card onPress={() => onPickDevice(item)}>
+                <Txt weight="600">{item.label}</Txt>
+                <Txt size="xs" tone="muted" style={{ marginTop: 2 }}>{item.detail}</Txt>
+                <Txt size="xs" tone="faint" style={{ marginTop: 2 }}>
+                  {figureText(item.standbyMa)} mA standby · {figureText(item.alarmMa)} mA alarm
+                </Txt>
+              </Card>
+            )}
+          />
+        )}
+      </Screen>
+    </Modal>
   );
 }
 

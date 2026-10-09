@@ -5,11 +5,13 @@ import { Stack, router } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { getAssetByCode, findBySerial, type AssetRecord } from '@/db/assetRepo';
-import { queryCatalogue, type CatalogueItem } from '@/db/catalogueRepo';
+import {
+  findAssetsByIdentifier, findBySerialContaining, type AssetIdentifierHit,
+} from '@/db/assetRepo';
+import { findByPartNumber, type CatalogueItem } from '@/db/catalogueRepo';
+import { officeNumber, resolveScan, type ScanResult } from '@/domain/assetLookup';
 import { assetTypeById } from '@/seed/assetTypes';
 import { useTheme } from '@/theme';
-import { describeActionFailure } from '@/domain/loadFailure';
 import { Banner, Button, Card, Chip, Field, Rowed, Screen, Txt } from '@/components/ui';
 import { showAlert } from '@/components/alert';
 
@@ -27,10 +29,9 @@ import { showAlert } from '@/components/alert';
  * ordinary reasons — a faded label, a tag behind a pipe, no camera permission —
  * and a scanner with no fallback is a dead end at exactly the wrong moment.
  */
-type Found =
-  | { kind: 'asset'; asset: AssetRecord }
-  | { kind: 'part'; part: CatalogueItem }
-  | { kind: 'none'; code: string };
+type Found = ScanResult<AssetIdentifierHit, CatalogueItem>;
+
+const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 export default function ScanScreen() {
   const t = useTheme();
@@ -43,38 +44,25 @@ export default function ScanScreen() {
   const lastCode = useRef<string | null>(null);
 
   const lookup = useCallback(async (raw: string) => {
-    const code = raw.trim();
-    if (!code) return;
+    if (!raw.trim()) return;
     setBusy(true);
     try {
-      const asset = await getAssetByCode(code);
-      if (asset) {
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setFound({ kind: 'asset', asset });
-        return;
-      }
-
-      const bySerial = await findBySerial(code);
-      if (bySerial.length === 1) {
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setFound({ kind: 'asset', asset: bySerial[0]! });
-        return;
-      }
-
-      const parts = await queryCatalogue({ search: code, limit: 2 });
-      // Only when it is unambiguous. Two candidates means we have not
-      // identified anything, and saying so is more use than picking one.
-      const exact = parts.filter((p) => p.partNumber.toUpperCase() === code.toUpperCase());
-      if (exact.length === 1) {
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setFound({ kind: 'part', part: exact[0]! });
-        return;
-      }
-
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      setFound({ kind: 'none', code });
+      // The printed label carries the tag without hyphens, and a Simpro
+      // asset is known by the office's own number: both are read here.
+      const result = await resolveScan(raw, {
+        byIdentifier: (keys) => findAssetsByIdentifier(keys),
+        bySerialContaining: (read) => findBySerialContaining(read),
+        parts: (read) => findByPartNumber(read),
+      });
+      if (!result) return;
+      void Haptics.notificationAsync(
+        result.kind === 'none'
+          ? Haptics.NotificationFeedbackType.Warning
+          : Haptics.NotificationFeedbackType.Success,
+      );
+      setFound(result);
     } catch (e) {
-      showAlert('Could not look that up', describeActionFailure(e, 'look up that code'));
+      showAlert('Lookup failed', errorText(e));
     } finally {
       setBusy(false);
     }
@@ -115,11 +103,11 @@ export default function ScanScreen() {
           </View>
         ) : (
           <Card>
-            <Txt weight="700">Camera not available</Txt>
+            <Txt weight="700">Camera off</Txt>
             <Txt size="sm" tone="muted" style={{ lineHeight: 19, marginTop: 4 }}>
               {permission?.canAskAgain === false
-                ? 'Camera access was turned off for this app. Turn it back on in the phone’s settings, or type the code below.'
-                : 'Scanning needs access to the camera. You can also type the code below.'}
+                ? 'Allow the camera in Settings, or type the code below.'
+                : 'Allow the camera to scan, or type the code below.'}
             </Txt>
             {permission?.canAskAgain !== false ? (
               <Button
@@ -136,15 +124,11 @@ export default function ScanScreen() {
                       showAlert(
                         'Still no camera',
                         next.canAskAgain
-                          ? 'Camera access was not given, so scanning is off. Type the code below instead.'
-                          : 'Camera access is turned off for this app and cannot be asked for again from '
-                            + 'here. Turn it on in the phone\u2019s settings, or type the code below.',
+                          ? 'Type the code below instead.'
+                          : 'Allow the camera in Settings, or type the code below.',
                       );
                     })
-                    .catch((e: unknown) => showAlert(
-                      'Could not ask for the camera',
-                      describeActionFailure(e, 'ask for camera access'),
-                    ));
+                    .catch((e: unknown) => showAlert('Camera unavailable', `${errorText(e)} Type the code below.`));
                 }}
                 style={{ marginTop: t.space(2.5) }}
               />
@@ -154,7 +138,7 @@ export default function ScanScreen() {
 
         {found ? <Result found={found} onAgain={reset} /> : (
           <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-            Point the camera at an asset tag, a device label or a part barcode.
+            Point at the tag, label or barcode.
           </Txt>
         )}
 
@@ -164,7 +148,7 @@ export default function ScanScreen() {
             value={manual}
             onChangeText={setManual}
             autoCapitalize="characters"
-            placeholder="Asset code, serial or part number"
+            placeholder="Tag, asset #, serial or part"
           />
           <Button
             title="Look it up"
@@ -187,29 +171,61 @@ export default function ScanScreen() {
   );
 }
 
+function AssetCard({ asset }: { asset: AssetIdentifierHit }) {
+  const t = useTheme();
+  const type = assetTypeById(asset.assetTypeId);
+  const officeNo = officeNumber(asset.attributes);
+  return (
+    <Card onPress={() => router.push({ pathname: '/assets/[id]', params: { id: asset.id } })}>
+      <Rowed align="flex-start" gap={2}>
+        <MaterialCommunityIcons name="cube-outline" size={22} color={t.color.pass} />
+        <View style={{ flex: 1 }}>
+          <Txt weight="700">{asset.name || type?.label || 'Asset'}</Txt>
+          <Txt size="sm" numberOfLines={1}>{asset.siteName ?? 'No site'}</Txt>
+          <Txt size="sm" tone="muted">
+            {[
+              type?.label,
+              asset.code,
+              officeNo && officeNo !== asset.code ? `Asset # ${officeNo}` : undefined,
+              [asset.level, asset.room].filter(Boolean).join(' '),
+            ].filter(Boolean).join(' · ')}
+          </Txt>
+          <Rowed gap={2} wrap style={{ marginTop: t.space(1.5) }}>
+            {asset.lastResult === 'pass' || asset.lastResult === 'fail' ? (
+              <Chip
+                label={asset.lastResult === 'fail' ? 'Last failed' : 'Last passed'}
+                tone={asset.lastResult === 'fail' ? 'fail' : 'pass'}
+              />
+            ) : null}
+            {asset.lastServicedAt ? <Chip label={`Serviced ${formatAuDate(asset.lastServicedAt)}`} /> : null}
+          </Rowed>
+        </View>
+        <MaterialCommunityIcons name="chevron-right" size={22} color={t.color.textFaint} />
+      </Rowed>
+    </Card>
+  );
+}
+
 function Result({ found, onAgain }: { found: Found; onAgain: () => void }) {
   const t = useTheme();
+  const again = <Button title="Scan another" variant="secondary" onPress={onAgain} />;
 
   if (found.kind === 'asset') {
-    const a = found.asset;
-    const type = assetTypeById(a.assetTypeId);
     return (
-      <Card onPress={() => router.push({ pathname: '/assets/[id]', params: { id: a.id } })}>
-        <Rowed align="flex-start" gap={2}>
-          <MaterialCommunityIcons name="cube-outline" size={22} color={t.color.pass} />
-          <View style={{ flex: 1 }}>
-            <Txt weight="700">{a.name || type?.label || 'Asset'}</Txt>
-            <Txt size="sm" tone="muted">
-              {[type?.label, a.code, [a.level, a.room].filter(Boolean).join(' ')].filter(Boolean).join(' · ')}
-            </Txt>
-            <Rowed gap={2} wrap style={{ marginTop: t.space(1.5) }}>
-              {a.lastResult ? <Chip label={a.lastResult === 'fail' ? 'Last failed' : 'Last passed'} tone={a.lastResult === 'fail' ? 'fail' : 'pass'} /> : null}
-              {a.lastServicedAt ? <Chip label={`Serviced ${formatAuDate(a.lastServicedAt)}`} /> : null}
-            </Rowed>
-          </View>
-          <MaterialCommunityIcons name="chevron-right" size={22} color={t.color.textFaint} />
-        </Rowed>
-      </Card>
+      <>
+        <AssetCard asset={found.asset} />
+        {again}
+      </>
+    );
+  }
+
+  if (found.kind === 'assets') {
+    return (
+      <>
+        <Txt size="sm" tone="muted">{found.assets.length} assets match “{found.read}”. Pick the right site.</Txt>
+        {found.assets.map((a) => <AssetCard key={a.id} asset={a} />)}
+        {again}
+      </>
     );
   }
 
@@ -227,7 +243,7 @@ function Result({ found, onAgain }: { found: Found; onAgain: () => void }) {
               {p.supplier ? <Chip label={p.supplier} /> : null}
             </Rowed>
             <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5), lineHeight: 17 }}>
-              This is a catalogue part, not an asset on a site. Nothing here is a record of this particular device.
+              Catalogue part, not a site asset.
             </Txt>
           </View>
         </Rowed>
@@ -238,19 +254,21 @@ function Result({ found, onAgain }: { found: Found; onAgain: () => void }) {
     );
   }
 
+  const banner = found.problem === 'misread'
+    ? { title: 'Tag misread', body: `Read “${found.read}”. Scan it again or type it.` }
+    : found.problem === 'newer-label'
+      ? { title: 'Newer label', body: 'Update the app to read this label.' }
+      : { title: 'No match', body: `No asset or part matches “${found.read}”.` };
+
   return (
     <>
-      <Banner
-        tone="warn"
-        title="Nothing matched that code"
-        body={`Read as "${found.code}". It is not an asset code, a serial we hold, or a part number in the catalogue. If this device should be on the register, add it and give it a tag.`}
-      />
+      <Banner tone="warn" title={banner.title} body={banner.body} />
       <Rowed gap={2}>
         <Button title="Scan another" variant="secondary" onPress={onAgain} style={{ flex: 1 }} />
         <Button
           title="Search parts"
           variant="secondary"
-          onPress={() => router.push({ pathname: '/catalogue', params: { q: found.code } })}
+          onPress={() => router.push({ pathname: '/catalogue', params: { q: found.read } })}
           style={{ flex: 1 }}
         />
       </Rowed>

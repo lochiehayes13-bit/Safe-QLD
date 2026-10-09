@@ -3,6 +3,7 @@ import {
   WIRING_TABLES, columnSeries, rowGroup, rowSizeMm2, wiringTable,
   type WiringColumn, type WiringTable,
 } from '@/seed/wiring';
+import { columnDoubts, metaValue, printedColumn, tidyHeading } from '@/domain/wiringView';
 
 /**
  * The wiring rules tables, as the cable calculator eats them.
@@ -107,10 +108,13 @@ const DERATING_TABLES: { ref: string; kind: DeratingKind; note: string }[] = [
 
 export interface CapacityColumn {
   id: string;
-  /** "Table 4 col 6". */
+  /** "Table 4 col 6", in the book's own column numbering. */
   ref: string;
   tableRef: string;
+  /** The column's number in the seed, which indexes its values. */
   columnN: number;
+  /** The number the book prints over the column. Usually the same as columnN. */
+  printedN: number;
   material: ConductorMaterial;
   /** As the table designates it: Thermoplastic, X-90, 110 °C. */
   insulation: string;
@@ -133,8 +137,8 @@ export interface CapacityColumn {
   referenceAmbient?: string;
   /** Never blank: a figure nobody can point at is not a figure. */
   source: string;
-  /** Anything the transcription could not reconcile on this table. */
-  problems: string[];
+  /** Figure doubts that touch this column, one short line each. Usually none. */
+  doubts: string[];
   /** How many sizes the column actually carries a figure for. */
   sizes: number;
 }
@@ -158,13 +162,18 @@ export function conductorFormOf(label: string): string | undefined {
 
 /** The installation arrangement a column describes, without the conductor. */
 export function arrangementOf(label: string): string {
-  return segments(label).filter((p) => !CONDUCTOR_WORDS.has(p.toLowerCase())).join(' › ');
+  return segments(label)
+    .filter((p) => !CONDUCTOR_WORDS.has(p.toLowerCase()))
+    // Some tables print "Current-carrying capacity, A" over every column; it
+    // says nothing about where the cable is.
+    .filter((p) => !/^current-carrying capacit(y|ies)\b/i.test(p))
+    .join(' › ');
 }
 
 function materialOf(label: string, table: WiringTable): ConductorMaterial {
   if (/\bal\b|alumin/i.test(label)) return 'aluminium';
   if (/\bcu\b|copper/i.test(label)) return 'copper';
-  const meta = `${table.meta.conductor ?? ''} ${table.meta.cable_type ?? ''} ${table.title}`;
+  const meta = `${metaValue(table, 'conductor')} ${metaValue(table, 'cable_type')} ${table.title}`;
   return /alumin/i.test(meta) ? 'aluminium' : 'copper';
 }
 
@@ -172,21 +181,22 @@ function temperatureOf(table: WiringTable): number {
   // MIMS tables state a sheath temperature rather than a conductor one; it is
   // the figure their ratings are computed against, so it is the right one to
   // match a voltage drop column on.
-  const raw = table.meta.max_conductor_temperature
-    ?? table.meta.maximum_conductor_temperature
-    ?? table.meta.sheath_temperature
-    ?? '';
-  const m = /(\d+(?:\.\d+)?)/.exec(String(raw));
+  const raw = metaValue(table, 'max_conductor_temperature', 'maximum_conductor_temperature', 'sheath_temperature');
+  const m = /(\d+(?:\.\d+)?)/.exec(raw);
   const n = m ? Number(m[1]) : NaN;
   return Number.isFinite(n) ? n : 75;
 }
 
+/**
+ * A title-block value, read whichever way the transcription spelt its key.
+ *
+ * The keys come as "cable_type", "cable type" and "cable_types" across the
+ * tables, and reading one spelling left Tables 6 and 7 with no cable type at
+ * all, which kept them out of the picker entirely. The value comes back as a
+ * sentence, so "THREE SINGLE-CORE" and "Three single-core" are one cable.
+ */
 function metaOf(table: WiringTable, ...keys: string[]): string {
-  for (const k of keys) {
-    const v = table.meta[k];
-    if (typeof v === 'string' && v.trim()) return v.trim();
-  }
-  return '';
+  return tidyHeading(metaValue(table, ...keys));
 }
 
 /**
@@ -235,12 +245,14 @@ export function capacityColumns(): CapacityColumn[] {
       if (isKeyColumn(table, column)) continue;
       const series = columnSeries(table, column.n);
       if (!series.length) continue;
+      const printed = printedColumn(table, column.n);
 
       out.push({
         id: `${table.ref}#${column.n}`.replace(/\s+/g, ''),
-        ref: `${table.ref} col ${column.n}`,
+        ref: `${table.ref} col ${printed}`,
         tableRef: table.ref,
         columnN: column.n,
+        printedN: printed,
         material: materialOf(column.label, table),
         insulation,
         cores,
@@ -248,8 +260,8 @@ export function capacityColumns(): CapacityColumn[] {
         conductorForm: conductorFormOf(column.label),
         operatingC,
         referenceAmbient: referenceAmbient || undefined,
-        source: `${table.source}, ${table.ref} col ${column.n}${table.page ? `, p.${table.page}` : ''}`,
-        problems: table.problems,
+        source: `${table.source}, ${table.ref} col ${printed}${table.page ? `, p.${table.page}` : ''}`,
+        doubts: columnDoubts(table, printed),
         sizes: series.length,
       });
     }
@@ -382,8 +394,8 @@ export function candidateRowsFor(column: CapacityColumn): WiringCandidates {
   }
 
   const dropNote = dropTable && dropColumn
-    ? `Volt drop from ${dropTable.ref}, ${dropColumn.label}.`
-    : 'No voltage drop table on this phone matches this cable, so the drop is computed from the conductor’s resistance instead.';
+    ? `Volt drop from ${dropTable.ref} at ${temperatureInLabel(dropColumn.label) ?? column.operatingC} °C.`
+    : 'Volt drop from conductor resistance.';
 
   return { rows: rows.sort((a, b) => a.areaMm2 - b.areaMm2), dropNote };
 }

@@ -88,7 +88,7 @@ export default function ConfigPointsScreen() {
         showAlert(notice.title, notice.body);
       }
     } catch (e) {
-      showAlert('Could not make the spreadsheet', describeActionFailure(e, 'export this device list'));
+      showAlert("Couldn't make the spreadsheet", describeActionFailure(e, 'export this device list'));
     } finally {
       setExporting(false);
     }
@@ -115,7 +115,7 @@ export default function ConfigPointsScreen() {
         <SearchBox
           value={search}
           onChange={setSearch}
-          placeholder="Text, zone, what it is, or 1/34"
+          placeholder="Text, zone, type or 1/34"
         />
 
         {panels.length > 1 ? (
@@ -142,7 +142,7 @@ export default function ConfigPointsScreen() {
 
         {types.length > 1 ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2) }}>
-            <Chip label="Everything" selected={type === undefined} onPress={() => setType(undefined)} />
+            <Chip label="All types" selected={type === undefined} onPress={() => setType(undefined)} />
             {types.map((d) => (
               <Chip
                 key={d}
@@ -178,7 +178,7 @@ export default function ConfigPointsScreen() {
 
       {opened.unreadable ? (
         <View style={{ marginTop: t.space(3) }}>
-          <Banner tone="warn" title="This build could not read the contents" body={opened.unreadable} />
+          <Banner tone="warn" title="Couldn't read the contents" body={opened.unreadable} />
         </View>
       ) : null}
 
@@ -188,8 +188,8 @@ export default function ConfigPointsScreen() {
           title={debounced || loop !== undefined || type ? 'Nothing matches' : 'No devices in this file'}
           body={
             debounced || loop !== undefined || type
-              ? 'Try fewer words, or clear the loop and type filters above.'
-              : 'The reader found no devices. Inside the file shows what is actually in it.'
+              ? 'Try fewer words or clear the filters.'
+              : 'Check Inside the file for the raw tables.'
           }
         />
       ) : (
@@ -231,7 +231,7 @@ function PointRow({ point }: { point: ConfigPoint }) {
           where,
           DEVICE_TYPE_LABEL[point.deviceType] ?? point.deviceType,
           point.zoneNumber !== undefined
-            ? `zone ${point.zoneNumber}${point.zoneText?.trim() ? ` — ${point.zoneText.trim()}` : ''}`
+            ? `zone ${point.zoneNumber}${point.zoneText?.trim() ? `: ${point.zoneText.trim()}` : ''}`
             : undefined,
           point.deviceTypeRaw?.trim() && point.deviceType === 'unknown' ? point.deviceTypeRaw.trim() : undefined,
         ].filter(Boolean).join(' · ')}

@@ -5,6 +5,7 @@ import {
   CURVE_MULTIPLIER, PROTECTIVE_RATINGS_A, STANDARD_SIZES_MM2, adiabaticK, disconnects,
   faultLoop, maxLengthForDisconnection, minimumFaultSize, type ConductorMaterial,
 } from '@/calc/cable';
+import { readNumber } from '@/calc/fieldNumber';
 import { INSULATION_PRESETS } from '@/domain/cableTables';
 import { useTheme } from '@/theme';
 import {
@@ -35,8 +36,8 @@ import {
 export default function FaultLoopScreen() {
   const t = useTheme();
 
-  const [supplyOhms, setSupplyOhms] = useState('0.35');
-  const [length, setLength] = useState('40');
+  const [supplyOhms, setSupplyOhms] = useState('');
+  const [length, setLength] = useState('');
   const [activeMm2, setActiveMm2] = useState(2.5);
   const [earthMm2, setEarthMm2] = useState(2.5);
   const [material, setMaterial] = useState<ConductorMaterial>('copper');
@@ -48,54 +49,61 @@ export default function FaultLoopScreen() {
   const [multiplier, setMultiplier] = useState(String(CURVE_MULTIPLIER.C));
 
   const [clearingTime, setClearingTime] = useState('0.4');
+  const [insulation, setInsulation] = useState<string | null>('v75');
   const [startC, setStartC] = useState('70');
   const [finalC, setFinalC] = useState('160');
 
-  const run = useMemo(() => ({
-    supplyOhms: parseFloat(supplyOhms) || 0,
-    lengthM: parseFloat(length) || 0,
-    activeMm2,
-    earthMm2,
-    material,
-    operatingC: parseFloat(operatingC) || 75,
-    phaseVolts: parseFloat(phaseVolts) || 0,
-  }), [supplyOhms, length, activeMm2, earthMm2, material, operatingC, phaseVolts]);
+  /** Everything about the run except its length, or null until each figure is entered. */
+  const base = useMemo(() => {
+    const supply = readNumber(supplyOhms);
+    const operating = readNumber(operatingC);
+    const volts = readNumber(phaseVolts);
+    if (supply === undefined || operating === undefined || volts === undefined) return null;
+    return { supplyOhms: supply, activeMm2, earthMm2, material, operatingC: operating, phaseVolts: volts };
+  }, [supplyOhms, operatingC, phaseVolts, activeMm2, earthMm2, material]);
 
-  const loop = useMemo(() => faultLoop(run), [run]);
+  const lengthM = readNumber(length);
+  const mult = readNumber(multiplier);
+
+  const loop = useMemo(
+    () => (base && lengthM !== undefined ? faultLoop({ ...base, lengthM }) : null),
+    [base, lengthM],
+  );
 
   const trip = useMemo(() => {
-    const m = parseFloat(multiplier);
-    if (!loop || !Number.isFinite(m)) return null;
+    if (!loop || !base || mult === undefined) return null;
     return disconnects({
       faultCurrentA: loop.faultCurrentA,
       deviceRatingA,
-      multiplier: m,
-      phaseVolts: run.phaseVolts,
+      multiplier: mult,
+      phaseVolts: base.phaseVolts,
     });
-  }, [loop, deviceRatingA, multiplier, run.phaseVolts]);
+  }, [loop, base, deviceRatingA, mult]);
 
   const maxLength = useMemo(() => {
-    const m = parseFloat(multiplier);
-    if (!Number.isFinite(m)) return null;
-    return maxLengthForDisconnection({ ...run, deviceRatingA, multiplier: m });
-  }, [run, deviceRatingA, multiplier]);
+    if (!base || mult === undefined) return null;
+    return maxLengthForDisconnection({ ...base, deviceRatingA, multiplier: mult });
+  }, [base, deviceRatingA, mult]);
 
-  const k = useMemo(() => adiabaticK(material, parseFloat(startC), parseFloat(finalC)), [material, startC, finalC]);
+  const k = useMemo(
+    () => adiabaticK(material, readNumber(startC) ?? Number.NaN, readNumber(finalC) ?? Number.NaN),
+    [material, startC, finalC],
+  );
 
   const earthNeeded = useMemo(() => {
-    if (!loop || k === null) return null;
-    return minimumFaultSize({
-      faultA: loop.faultCurrentA,
-      clearingTimeS: parseFloat(clearingTime) || 0,
-      k,
-    });
+    const clearing = readNumber(clearingTime);
+    if (!loop || k === null || clearing === undefined) return null;
+    return minimumFaultSize({ faultA: loop.faultCurrentA, clearingTimeS: clearing, k });
   }, [loop, k, clearingTime]);
 
   const earthTooSmall = earthNeeded !== null && earthMm2 < earthNeeded.minimumAreaMm2;
 
+  const maxRunLine =
+    maxLength === null ? '' : maxLength > 0 ? ` Max run for this device: ${maxLength} m.` : ' Ze alone is over that.';
+
   return (
     <>
-      <Stack.Screen options={{ title: 'Fault loop and earthing' }} />
+      <Stack.Screen options={{ title: 'Fault loop' }} />
       <Screen>
         <ResultBlock
           label="Earth fault loop impedance"
@@ -103,34 +111,24 @@ export default function FaultLoopScreen() {
           unit="Ω"
           tone={trip?.ok === false ? 'fail' : 'accent'}
           detail={
-            loop
-              ? `${loop.faultCurrentA} A of fault current · ${loop.circuitOhms.toFixed(3)} Ω of it is the run, ${run.supplyOhms.toFixed(3)} Ω the supply`
-              : 'Enter the supply impedance and the run'
+            loop && base
+              ? `${Math.round(loop.faultCurrentA)} A fault · run ${loop.circuitOhms.toFixed(3)} Ω · supply ${base.supplyOhms.toFixed(3)} Ω`
+              : 'Enter the supply and the run.'
           }
         />
 
-        {trip ? (
+        {trip && loop ? (
           <Banner
             tone={trip.ok ? 'pass' : 'fail'}
-            title={trip.ok ? `Disconnects, with ${trip.marginPercent.toFixed(0)}% to spare` : 'Will not disconnect at once'}
-            body={
-              trip.ok
-                ? `${trip.reason} The loop could be as high as ${trip.maxLoopOhms} Ω and still clear.`
-                : `${trip.reason} The loop has to be under ${trip.maxLoopOhms} Ω${maxLength !== null ? `, which is ${maxLength} m of this cable` : ''}.`
-            }
+            title={trip.ok ? `Trips at once, ${trip.marginPercent.toFixed(0)}% margin` : "Won't trip at once"}
+            body={`${Math.round(loop.faultCurrentA)} A fault, ${trip.tripCurrentA} A needed. Zs max ${trip.maxLoopOhms} Ω.${maxRunLine}`}
           />
         ) : null}
 
-        {trip?.ok && maxLength !== null ? (
-          <Txt size="sm" tone="muted">
-            The run could be {maxLength} m before this device stops seeing enough fault current.
-          </Txt>
-        ) : null}
-
-        <H2>The supply and the run</H2>
+        <H2>Supply and run</H2>
         <Rowed gap={2} align="flex-start">
           <View style={{ flex: 1 }}>
-            <Field label="Supply impedance" value={supplyOhms} onChangeText={setSupplyOhms} keyboardType="decimal-pad" suffix="Ω" hint="Ze, from the authority or measured at the origin" />
+            <Field label="Supply impedance" value={supplyOhms} onChangeText={setSupplyOhms} keyboardType="decimal-pad" suffix="Ω" hint="Ze, from the network or measured at the origin" />
           </View>
           <View style={{ flex: 1 }}>
             <Field label="Voltage to earth" value={phaseVolts} onChangeText={setPhaseVolts} keyboardType="decimal-pad" suffix="V" />
@@ -141,27 +139,24 @@ export default function FaultLoopScreen() {
             <Field label="Run, one way" value={length} onChangeText={setLength} keyboardType="decimal-pad" suffix="m" />
           </View>
           <View style={{ flex: 1 }}>
-            <Field label="Conductor runs at" value={operatingC} onChangeText={setOperatingC} keyboardType="decimal-pad" suffix="°C" hint="Not 20 — a warm conductor passes less fault current" />
+            <Field label="Conductor runs at" value={operatingC} onChangeText={setOperatingC} keyboardType="decimal-pad" suffix="°C" hint="Operating temperature, not 20 °C" />
           </View>
         </Rowed>
 
-        <Label>Active</Label>
+        <Label>Active (mm²)</Label>
         <Rowed gap={2} wrap>
           {STANDARD_SIZES_MM2.slice(0, 10).map((s) => (
             <Chip key={s} label={`${s}`} selected={activeMm2 === s} onPress={() => setActiveMm2(s)} />
           ))}
         </Rowed>
-        <Label>Earth</Label>
+        <Label>Earth (mm²)</Label>
         <Rowed gap={2} wrap>
           {STANDARD_SIZES_MM2.slice(0, 10).map((s) => (
             <Chip key={s} label={`${s}`} selected={earthMm2 === s} onPress={() => setEarthMm2(s)} />
           ))}
         </Rowed>
         {earthMm2 < activeMm2 ? (
-          <Txt size="sm" tone="muted">
-            A reduced earth is the larger half of the loop, and assuming it matched the active is how this check gets
-            passed when it should not be.
-          </Txt>
+          <Txt size="sm" tone="muted">A reduced earth raises the loop impedance.</Txt>
         ) : null}
 
         <Segmented
@@ -170,7 +165,7 @@ export default function FaultLoopScreen() {
           options={[{ value: 'copper', label: 'Copper' }, { value: 'aluminium', label: 'Aluminium' }]}
         />
 
-        <H2>The protective device</H2>
+        <H2>Protective device</H2>
         <Rowed gap={2} wrap>
           {PROTECTIVE_RATINGS_A.slice(0, 11).map((r) => (
             <Chip key={r} label={`${r} A`} selected={deviceRatingA === r} onPress={() => setDeviceRatingA(r)} />
@@ -193,13 +188,13 @@ export default function FaultLoopScreen() {
           onChangeText={setMultiplier}
           keyboardType="decimal-pad"
           suffix="× rating"
-          hint={`Type ${curve} off the breaker's own datasheet. A fuse or a motor-rated device is neither.`}
+          hint="From the breaker datasheet."
         />
 
-        <H2>The earth conductor</H2>
+        <H2>Earth conductor</H2>
         <Rowed gap={2} align="flex-start">
           <View style={{ flex: 1 }}>
-            <Field label="Clearing time" value={clearingTime} onChangeText={setClearingTime} keyboardType="decimal-pad" suffix="s" hint="What the device's curve gives at this fault current" />
+            <Field label="Clearing time" value={clearingTime} onChangeText={setClearingTime} keyboardType="decimal-pad" suffix="s" hint="From the device curve at this fault current" />
           </View>
         </Rowed>
         <Label>Insulation</Label>
@@ -208,14 +203,34 @@ export default function FaultLoopScreen() {
             <Chip
               key={p.id}
               label={p.label}
-              selected={finalC === String(p.shortCircuitC)}
-              onPress={() => { setStartC(String(p.operatingC - 5)); setFinalC(String(p.shortCircuitC)); }}
+              selected={insulation === p.id}
+              onPress={() => {
+                setInsulation(p.id);
+                setStartC(String(p.operatingC - 5));
+                setFinalC(String(p.shortCircuitC));
+              }}
             />
           ))}
         </Rowed>
         <Rowed gap={2} align="flex-start">
-          <View style={{ flex: 1 }}><Field label="At the start" value={startC} onChangeText={setStartC} keyboardType="decimal-pad" suffix="°C" /></View>
-          <View style={{ flex: 1 }}><Field label="Highest allowed" value={finalC} onChangeText={setFinalC} keyboardType="decimal-pad" suffix="°C" /></View>
+          <View style={{ flex: 1 }}>
+            <Field
+              label="Initial temp"
+              value={startC}
+              onChangeText={(v) => { setStartC(v); setInsulation(null); }}
+              keyboardType="decimal-pad"
+              suffix="°C"
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Field
+              label="Final temp"
+              value={finalC}
+              onChangeText={(v) => { setFinalC(v); setInsulation(null); }}
+              keyboardType="decimal-pad"
+              suffix="°C"
+            />
+          </View>
         </Rowed>
 
         {earthNeeded ? (
@@ -223,24 +238,21 @@ export default function FaultLoopScreen() {
             tone={earthTooSmall ? 'fail' : 'pass'}
             title={
               earthTooSmall
-                ? `The earth has to be at least ${earthNeeded.standardAreaMm2 ?? earthNeeded.minimumAreaMm2} mm²`
-                : `${earthMm2} mm² earth survives the fault`
+                ? `Earth must be at least ${earthNeeded.standardAreaMm2 ?? earthNeeded.minimumAreaMm2} mm²`
+                : `${earthMm2} mm² earth withstands the fault`
             }
-            body={`S = I√t ÷ k works out at ${earthNeeded.minimumAreaMm2} mm², with k of ${k?.toFixed(0)} derived from the conductor's own resistivity and heat capacity.`}
+            body={`S = I√t ÷ k = ${earthNeeded.minimumAreaMm2} mm² (k = ${k?.toFixed(0)}).`}
           />
         ) : null}
 
         <Card>
-          <Label>Where these numbers come from</Label>
+          <Label>Basis</Label>
           <Txt size="sm" tone="muted" style={{ marginTop: t.space(2), lineHeight: 20 }}>
-            Nothing here is looked up. A maximum loop impedance is the supply voltage divided by the current the device
-            needs to trip at once — which is exactly how the printed figures are worked out — so this answer holds for
-            whatever device and whatever supply are in front of you rather than only for the rows somebody tabulated.
+            Zs max = Uo ÷ (trip multiple × rating), worked at the operating temperature.
           </Txt>
           <Divider />
           <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-            The loop is worked at the conductor&rsquo;s operating temperature, not at 20 °C. A warm conductor has more
-            resistance and passes less fault current, so working it cold produces a circuit that disconnects on paper.
+            B 5, C 10 and D 20 are the IEC 60898 upper limits. AS/NZS 3000 Table 8.1 uses 4, 7.5 and 12.5.
           </Txt>
           <View style={{ height: t.space(3) }} />
           <Button title="Cable sizing" variant="secondary" onPress={() => router.push('/tools/cable')} />

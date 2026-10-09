@@ -77,7 +77,7 @@ export default function NeedsScreen() {
   /*
    * How many sites the typed words actually match, which is not how many are
    * offered. Four chips were drawn and nothing said there were eleven: three
-   * of this company's sites are called "Storage Choice - Sumner Park" and
+   * of this company's sites are called "Fictional Storage - Northside" and
    * typing "Storage" offered four of them with no way to know the rest
    * existed. A silent cut is the same fault as no search at all.
    */

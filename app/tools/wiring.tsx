@@ -3,9 +3,10 @@ import { ScrollView, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
-  WIRING_DOC_LABEL, searchWiringTables, tablesFor, wiringFigureCount,
+  WIRING_DOC_LABEL, tablesFor, wiringFigureCount,
   type WiringDoc, type WiringTable,
 } from '@/seed/wiring';
+import { printedColumn, searchTables, tableDoubts, tableFacts } from '@/domain/wiringView';
 import { useTheme } from '@/theme';
 import {
   Banner, Card, Chip, Divider, EmptyState, Label, Rowed, Screen, SearchBox, Txt,
@@ -18,15 +19,14 @@ import {
  * they are looking for two singles in conduit in a wall, or for what buried
  * direct does to a 25 mm², and the words they use are in the column headings
  * rather than the title. So the search covers the headings, the notes and the
- * table's own metadata as well as its number, and every result says which of
- * those matched: a hit on a note is a different kind of answer from a hit on a
- * heading, and pretending otherwise makes the list look arbitrary.
+ * table's title-block facts as well as its number, and every result says
+ * which of those matched.
  *
  * The table itself is printed as the standard prints it — same column order,
- * same units, same notes underneath, blanks left blank. A blank cell in the
- * book means the arrangement does not apply to that size, and filling it with
- * a dash or a zero is how somebody ends up reading a figure across from the
- * wrong row.
+ * same column numbers, same units, same notes underneath, blanks left blank.
+ * A blank cell in the book means the arrangement does not apply to that size,
+ * and filling it with a dash or a zero is how somebody ends up reading a
+ * figure across from the wrong row.
  *
  * The edition and the page are on every table, because the question asked in
  * front of somebody six months later is "which book is that from".
@@ -40,10 +40,10 @@ export default function WiringTablesScreen() {
   const counts = useMemo(() => wiringFigureCount(), []);
 
   const results = useMemo(() => {
-    const hits = query.trim()
-      ? searchWiringTables(query, 60)
-      : tablesFor(doc === 'all' ? undefined : doc).map((table) => ({ table, matched: 'title' as const, detail: undefined }));
-    return doc === 'all' ? hits : hits.filter((h) => h.table.doc === doc);
+    const pool = tablesFor(doc === 'all' ? undefined : doc);
+    return query.trim()
+      ? searchTables(query, pool, 60)
+      : pool.map((table) => ({ table, matched: 'title' as const, detail: undefined }));
   }, [query, doc]);
 
   return (
@@ -56,14 +56,13 @@ export default function WiringTablesScreen() {
             <View style={{ flex: 1, marginLeft: t.space(3) }}>
               <Txt weight="700">{counts.tables} tables, {counts.figures.toLocaleString()} figures</Txt>
               <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-                Every numbered table in AS/NZS 3008.1.1 and the sizing tables of AS/NZS 3000, from the company’s
-                licensed copies. Search by what is in them, not by their number.
+                AS/NZS 3008.1.1 and 3000 tables. Search by heading.
               </Txt>
             </View>
           </Rowed>
         </Card>
 
-        <SearchBox value={query} onChange={setQuery} placeholder="buried direct, trefoil, thermal insulation, table 4…" />
+        <SearchBox value={query} onChange={setQuery} placeholder="buried direct, trefoil, table 4…" />
         <Rowed gap={2} wrap>
           <Chip label="Both books" selected={doc === 'all'} onPress={() => setDoc('all')} />
           <Chip label={WIRING_DOC_LABEL.as3008} selected={doc === 'as3008'} onPress={() => setDoc('as3008')} />
@@ -72,32 +71,32 @@ export default function WiringTablesScreen() {
 
         {results.length === 0 ? (
           <EmptyState
-          icon="magnify-close"
+            icon="magnify-close"
             title="Nothing matched"
-            body="Try the words on the column heading: unenclosed, enclosed in conduit, buried direct, trefoil, ambient."
+            body="Try: conduit, buried, trefoil, ambient."
           />
         ) : null}
 
-        {results.map(({ table, matched, detail }) => (
-          <Card key={`${table.doc}-${table.ref}`} onPress={() => setOpen(open === table.ref ? null : table.ref)}>
-            <Rowed align="flex-start">
-              <View style={{ flex: 1 }}>
-                <Txt weight="700">{table.ref} · {WIRING_DOC_LABEL[table.doc]}</Txt>
-                <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{shortTitle(table)}</Txt>
-                {detail ? (
-                  <Txt size="xs" tone="accent" style={{ marginTop: t.space(1) }}>
-                    {matched === 'column' ? 'Column: ' : matched === 'note' ? 'Note: ' : ''}{detail}
-                  </Txt>
-                ) : null}
-              </View>
-              <View style={{ alignItems: 'flex-end' }}>
+        {results.map(({ table, matched, detail }) => {
+          const key = `${table.doc}-${table.ref}`;
+          return (
+            <Card key={key} onPress={() => setOpen(open === key ? null : key)}>
+              <Rowed align="flex-start">
+                <View style={{ flex: 1 }}>
+                  <Txt weight="700">{table.ref} · {WIRING_DOC_LABEL[table.doc]}</Txt>
+                  <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{shortTitle(table)}</Txt>
+                  {detail ? (
+                    <Txt size="xs" tone="accent" style={{ marginTop: t.space(1) }}>
+                      {matched === 'column' ? 'Column: ' : matched === 'note' ? 'Note: ' : ''}{detail}
+                    </Txt>
+                  ) : null}
+                </View>
                 {table.page ? <Chip label={`p.${table.page}`} /> : null}
-                {table.problems.length ? <Chip label="Check" tone="warn" /> : null}
-              </View>
-            </Rowed>
-            {open === table.ref ? <TableView table={table} /> : null}
-          </Card>
-        ))}
+              </Rowed>
+              {open === key ? <TableView table={table} /> : null}
+            </Card>
+          );
+        })}
       </Screen>
     </>
   );
@@ -111,26 +110,23 @@ function shortTitle(table: WiringTable): string {
 
 function TableView({ table }: { table: WiringTable }) {
   const t = useTheme();
-  const metaEntries = Object.entries(table.meta).filter(([k]) => !k.startsWith('column_') && k !== 'values_layout');
+  const facts = tableFacts(table);
+  const doubts = tableDoubts(table);
 
   return (
     <View style={{ marginTop: t.space(3) }}>
       <Divider />
 
-      {table.problems.length ? (
-        <Banner
-          tone="warn"
-          title="Read this one against the book"
-          body={table.problems.join('\n\n')}
-        />
+      {doubts.length ? (
+        <Banner tone="warn" title="Check against the printed table" body={doubts.join('\n')} />
       ) : null}
 
-      {metaEntries.length ? (
+      {facts.length ? (
         <View style={{ marginBottom: t.space(2) }}>
-          {metaEntries.map(([k, v]) => (
-            <Rowed key={k} align="flex-start" style={{ marginTop: t.space(1) }}>
-              <Txt size="xs" tone="faint" style={{ width: 120 }}>{k.replace(/_/g, ' ')}</Txt>
-              <Txt size="xs" style={{ flex: 1, lineHeight: 17 }}>{String(v)}</Txt>
+          {facts.map((f) => (
+            <Rowed key={f.label} align="flex-start" style={{ marginTop: t.space(1) }}>
+              <Txt size="xs" tone="faint" style={{ width: 110 }}>{f.label}</Txt>
+              <Txt size="xs" style={{ flex: 1, lineHeight: 17 }}>{f.value}</Txt>
             </Rowed>
           ))}
         </View>
@@ -147,7 +143,7 @@ function TableView({ table }: { table: WiringTable }) {
           <Rowed gap={0} style={{ borderBottomWidth: 1, borderBottomColor: t.color.border, paddingBottom: t.space(1) }}>
             {table.columns.map((c) => (
               <View key={c.n} style={{ width: c.n === 1 ? 120 : 96, paddingRight: t.space(2) }}>
-                <Txt size="xs" tone="faint">{c.n}</Txt>
+                <Txt size="xs" tone="faint">{printedColumn(table, c.n)}</Txt>
                 <Txt size="xs" weight="600" style={{ lineHeight: 15 }}>{c.label}</Txt>
                 {c.unit ? <Txt size="xs" tone="faint">{c.unit}</Txt> : null}
               </View>
@@ -176,7 +172,7 @@ function TableView({ table }: { table: WiringTable }) {
 
       {table.notes.length ? (
         <View style={{ marginTop: t.space(3) }}>
-          <Label>Notes, as printed</Label>
+          <Label>Notes</Label>
           {table.notes.map((n, i) => (
             <Txt key={i} size="xs" tone="muted" style={{ marginTop: t.space(1), lineHeight: 17 }}>{n}</Txt>
           ))}
@@ -185,8 +181,7 @@ function TableView({ table }: { table: WiringTable }) {
 
       <Divider />
       <Txt size="xs" tone="faint" style={{ lineHeight: 16 }}>
-        {table.source}{table.page ? `, p.${table.page}` : ''}. Transcribed twice and checked; a figure that matters
-        is worth reading against the book.
+        {table.source}{table.page ? `, p.${table.page}` : ''}. Confirm critical figures in the printed standard.
       </Txt>
     </View>
   );

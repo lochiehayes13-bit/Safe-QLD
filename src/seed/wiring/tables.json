@@ -161,14 +161,7 @@
    "7 The current-carrying capacities for MIMS cables are based on an operating temperature of 100\u00b0C for the external surface of either bare metal-sheathed cables or served cables. Higher continuous operating temperatures are permissible for bare metal-sheathed cables, particularly stainless steel sheathed cables, dependent upon factors such as the following: (a) The suitability of the cable terminations and mountings. (b) The location of the cable away from combustible materials. (c) The location of the cable away from areas where there is a reasonable chance of persons touching the exposed surface. (d) Other environmental and external influences."
   ],
   "confidence": "high",
-  "problems": [
-   "Column 1 is a two-level layout in print (group heading, then indented designations). Keys are kept exactly as printed, with each group heading as its own row carrying no values (all null); it governs the designation rows that follow until the next heading. Group membership: Thermoplastic (see Note 3) covers V-75 through V-90HT; Cross-linked elastomeric (see Note 4) covers R-EP-90 through R-S-150 (see Note 6); Cross-linked polyolefin (XLPE) (see Note 4) covers X-90, X-90UV, X-HF-90 and X-HF-110 (see Note 5); Other types covers PE, LLDPE and Type 150 fibrous or polymeric (see Note 6). The MIMS row is simultaneously a heading and a data row.",
-   "The linearized source text does not show whether the spanning header 'Operating temperatures of conductors, \u00b0C (see Note 1)' also covers column 4. It has been placed over columns 2 and 3 only, since 'Minimum ambient' is an ambient rather than a conductor temperature; column 4 values are in \u00b0C either way.",
-   "Column 4 for the MIMS row and for 'Type 150 fibrous or polymeric (see Note 6)' is printed as an en dash (no value) and is transcribed as null. Column 4 entries printed as '*' (R-HF-110/R-E-110; X-90, X-90UV, X-HF-90; X-HF-110; PE, LLDPE) are kept as the string '*' per the table footnote 'Refer to manufacturer's information'.",
-   "MIMS columns 2 and 3 are printed as '100 (sheath)' and '250 (sheath)' and are kept as strings, since they are sheath rather than conductor temperatures.",
-   "Note 4 reads 'elastometric' in the source; transcribed as printed.",
-   "The table starts on printed page 14; Notes 6 and 7 continue on printed page 15."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -234,10 +227,7 @@
    "NOTE: Examples of the application of reduction factors for harmonic currents are provided in Appendix C."
   ],
   "confidence": "high",
-  "problems": [
-   "The standard prints no column numbers for Table 2; the column numbers 1-3 here are assigned left to right for reference only.",
-   "Em dashes printed in columns 2 and 3 mean no value and are transcribed as null."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -425,13 +415,7 @@
   ],
   "confidence": "high",
   "problems": [
-   "Column 3 'Reference drawing' holds line illustrations (cable arrangements with D spacings) only. No text is recoverable from the source extraction, so every column 3 cell is null.",
-   "Column 4 is printed as two stacked lines. The source contains no separator character between them; they are joined here with a single space. Reader B's semicolon is an editorial insertion and is NOT in the source.",
-   "Merged column 5 / column 6 cells: the source prints each spanning value once. It is repeated here on every item row the cell covers (items 1-2, 4-5, 7-8, 9-10, 12-13). The row spans are read from the printed layout and from the derating values that break the runs (23 for items 1-2 then 22 for item 3, etc.); they are not restated per row in the flattened text stream.",
-   "Items 3, 6 and 11 are continuation rows of the column 5 list above them: the source prints no cable details, no reference drawing and no capacity table reference on those rows (recorded null), only the trailing '(c)'/'(d)' method and its own derating table.",
-   "Item 1, column 5 reads 'cleats or hanger; or' (singular 'hanger') in the source; transcribed verbatim.",
-   "Item 4, column 4 reads 'Table 6 Columns 2 and 3' in the source \u2014 the same Table 6 columns cited for item 1, although item 4 is the 'spaced from surface' arrangement. Verified verbatim against the source; flagged as a possible source anomaly, not corrected.",
-   "Item 8, column 4 ends with a full stop ('Table 9 Columns 6 and 7.') and item 12/13 column 5 ends without one ('...or similar enclosure'); both transcribed verbatim."
+   "Item 4 cites Table 6 Columns 2 and 3; spaced from surface is Columns 4 and 5."
   ]
  },
  {
@@ -605,12 +589,7 @@
    "3 See AS/NZS 3000 for the restricted installation conditions of certain types of cables, e.g. insulated or insulated and sheathed cables in metallic and non-metallic conduits."
   ],
   "confidence": "high",
-  "problems": [
-   "Column 3 'Reference drawing' holds line illustrations only; no text is recoverable, so every column 3 cell is null.",
-   "Column 4 is printed as two stacked lines with no separator character; joined here with a single space (no semicolon, contrary to Reader B).",
-   "Merged column 5 / column 6 cells span pairs of item rows (1-2, 3-4, 5-6, 7-8, 9-10, 11-12); the source prints each value once and it is repeated here on both rows.",
-   "For items 1-2 and 7-8 the column 5 cell contains two separate blocks of installation methods, each matching one of the two reference drawings in column 3. The flattened text gives no way to tell which block pairs with which drawing, so both blocks are kept together in one cell, verbatim and in printed order."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -702,11 +681,7 @@
    "3 See Tables 27 and 28 for rating factors applicable to different ambient soil temperatures and depths of laying."
   ],
   "confidence": "high",
-  "problems": [
-   "Column 3 'Reference drawing' holds line illustrations only; no text is recoverable, so every column 3 cell is null.",
-   "Column 4 is printed as two stacked lines with no separator character; joined here with a single space (no semicolon, contrary to Reader B).",
-   "The source prints the column 5 method text once for the whole table, and '25(1)' once and '25(2)' once. The 25(1) value falls after the single-core group (items 1-2) and 25(2) after the multicore group (items 3-4); the spans are read from that printed order and layout, not restated per row in the text stream."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -829,14 +804,7 @@
    "3 See Tables 27 and 28 for rating factors applicable to different ambient soil temperatures and depths of laying."
   ],
   "confidence": "high",
-  "problems": [
-   "Column 3 'Reference drawing' holds line illustrations only; no text is recoverable, so every column 3 cell is null.",
-   "Column 4 is printed as two stacked lines with no separator character; joined here with a single space (no semicolon, contrary to Reader B).",
-   "Column 6 is one numbered column carrying two sub-headings ('in same enclosure', 'in separate enclosures'). Both sub-columns are emitted with n = 6; no column number is invented for the second.",
-   "The source prints '22 26(2)' once (after item 1) and '26(1)' once (after item 5). Assigning 22 / 26(2) to items 1-4 and 26(1) to items 5-6 \u2014 with no 'in same enclosure' value for items 5-6, which are separate-enclosure arrangements \u2014 is read from the printed row spans; the flattened text does not restate the values per row.",
-   "Item 6 prints no entry in column 2 in the source. The column 2 cell 'Single-core cables' is read as spanning items 5-6 and is repeated on item 6; that span is inferred from the layout, not stated in the text.",
-   "Item 4, column 4 reads 'Table 15 Column 14 and 15' ('Column' singular, unlike items 1-3 which read 'Columns'); transcribed verbatim."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -924,7 +892,7 @@
    },
    {
     "n": 14,
-    "label": "Conductor size (repeated at the left of the second page of the table)",
+    "label": "Conductor size",
     "unit": "mm2"
    },
    {
@@ -974,27 +942,27 @@
    },
    {
     "n": 24,
-    "label": "Underground wiring enclosure \u203a Cu \u203a Solid/Stranded",
+    "label": "Underground wiring enclosure \u203a in same enclosure \u203a Cu \u203a Solid/Stranded",
     "unit": "A"
    },
    {
     "n": 25,
-    "label": "Underground wiring enclosure \u203a Cu \u203a Flexible",
+    "label": "Underground wiring enclosure \u203a in same enclosure \u203a Cu \u203a Flexible",
     "unit": "A"
    },
    {
     "n": 26,
-    "label": "Underground wiring enclosure \u203a Al",
+    "label": "Underground wiring enclosure \u203a in same enclosure \u203a Al",
     "unit": "A"
    },
    {
     "n": 27,
-    "label": "Underground wiring enclosure \u203a Cu (columns 27 and 28 are the second Cu/Al pair; Table 3(4) Item 5 identifies them as cables in two separate enclosures)",
+    "label": "Underground wiring enclosure \u203a in separate enclosures \u203a Cu",
     "unit": "A"
    },
    {
     "n": 28,
-    "label": "Underground wiring enclosure \u203a Al (columns 27 and 28 are the second Cu/Al pair; Table 3(4) Item 5 identifies them as cables in two separate enclosures)",
+    "label": "Underground wiring enclosure \u203a in separate enclosures \u203a Al",
     "unit": "A"
    }
   ],
@@ -1651,12 +1619,7 @@
    "8 Cables within the scope of AS/NZS 5000.2 (up to 16 mm2) may be rated to the values in the Tables covering 90\u00b0C insulated cables, subject to\u2014 (a) information provided in Note 2; and (b) any other relevant requirements of AS/NZS 3000."
   ],
   "confidence": "high",
-  "problems": [
-   "Second page header numbers columns 14-28 (15 numbers) but the extraction yields exactly 14 value columns per row. Cross-references fix the mapping: Table 3(2) cites columns 15-17 (wiring enclosure in air), 18-19 (partially surrounded) and 20-21 (completely surrounded); Table 3(3) cites 22-23 (buried direct); Table 3(4) cites 24-26 and 27-28 (underground wiring enclosures); Note 7 cites column 22 for buried direct and the column-22 values for 1-10 mm2 equal the column-24 values as that note describes. Column 14 is therefore the repeated Conductor size column printed at the left of the second page (the same pattern holds for Tables 6, 10 and 12 in the Table 3 cross-references). It is recorded with the conductor size as its value so that the value index stays aligned with the standard's column numbers.",
-   "The printed header does not itself distinguish the two 'Underground wiring enclosure' Cu/Al groups (24-26 and 27-28); the distinction is carried by the reference drawings. Table 3(4) Items 1 and 5 identify 24-26 as cables in a single enclosure and 27-28 as single-core cables in two separate enclosures. Labels for 27-28 carry that identification in parentheses.",
-   "Reference drawings under the column headings are not present in the text extraction and could not be transcribed.",
-   "Note 4(c) in the extraction reads 'Table 23' for cable tray; Table 3(1) Note 5 refers to Tables 23 and 24. Transcribed as printed."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -1676,8 +1639,7 @@
    "column_14": "Column 14 is the conductor size (mm2) reprinted as the key column at the left of the table's continuation page. The standard numbers it, so it is kept: its value in every row equals column 1 / the row key. Rating columns are 2-13 and 15-28.",
    "column_groups": "Printed header groups: columns 2-13 Unenclosed (2-4 spaced, 5-7 spaced from surface, 8-10 touching, 11-13 exposed to sun); 15-17 Enclosed / wiring enclosure in air; 18-21 Thermal insulation (18-19 partially surrounded, 20-21 completely surrounded); 22-23 Buried direct; 24-28 Underground wiring enclosure.",
    "columns_24_to_28": "The printed heading is the same for both Cu/Al groups under 'Underground wiring enclosure'; the difference is carried only by the reference drawings. Table 3(4) Item 1 cites 'Tables 4 and 5 Columns 24 to 26' for cables in a single enclosure, and Item 5 cites 'Tables 4 and 5 Columns 27 and 28' for two enclosures.",
-   "values_layout": "values[i] is column i+2, so all 27 entries cover columns 2 to 28 inclusive in the standard's own numbering.",
-   "source_files": "as3008-2009-p010-040.txt (p.37, last page of that file); as3008-2009-p041-075.txt (pp.38-39, first two pages of that file)"
+   "values_layout": "values[i] is column i+2, so all 27 entries cover columns 2 to 28 inclusive in the standard's own numbering."
   },
   "columns": [
    {
@@ -1797,27 +1759,27 @@
    },
    {
     "n": 24,
-    "label": "Underground wiring enclosure \u203a Cu \u203a Solid/Stranded",
+    "label": "Underground wiring enclosure \u203a in same enclosure \u203a Cu \u203a Solid/Stranded",
     "unit": "A"
    },
    {
     "n": 25,
-    "label": "Underground wiring enclosure \u203a Cu \u203a Flexible",
+    "label": "Underground wiring enclosure \u203a in same enclosure \u203a Cu \u203a Flexible",
     "unit": "A"
    },
    {
     "n": 26,
-    "label": "Underground wiring enclosure \u203a Al",
+    "label": "Underground wiring enclosure \u203a in same enclosure \u203a Al",
     "unit": "A"
    },
    {
     "n": 27,
-    "label": "Underground wiring enclosure \u203a Cu",
+    "label": "Underground wiring enclosure \u203a in separate enclosures \u203a Cu",
     "unit": "A"
    },
    {
     "n": 28,
-    "label": "Underground wiring enclosure \u203a Al",
+    "label": "Underground wiring enclosure \u203a in separate enclosures \u203a Al",
     "unit": "A"
    }
   ],
@@ -2474,11 +2436,7 @@
    "8 For conductor sizes up to 10 mm2 in Column 22, the values are based on ratings for wiring in underground wiring enclosures."
   ],
   "confidence": "high",
-  "problems": [
-   "The reference drawings printed under the column headings are graphics and are absent from the text extraction, so they could not be transcribed. They are the only thing distinguishing columns 24-26 from 27-28; that distinction was recovered from the Table 3(4) cross-references (see meta.columns_24_to_28), not read off Table 5's own header.",
-   "The nominated source file as3008-2009-p010-040.txt ends at p.37, which carries only columns 1-13 and the title block. Columns 14-28 with Notes 1-4 (p.38) and Notes 5-8 (p.39) were read from the first two pages of the companion file as3008-2009-p041-075.txt in the same directory.",
-   "No cell was unreadable. Every value in columns 2-13 and 15-28 was re-parsed from the source text and each of the 20 rows produced exactly 12 tokens on p.37 and 14 tokens on p.38, matching the printed column counts with no leftover tokens."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -2493,7 +2451,7 @@
    "insulation types": "R-HF-110, R-E-110 OR X-HF-110",
    "maximum conductor temperature": "110\u00b0C",
    "reference ambient temperature": "40\u00b0C IN AIR, 25\u00b0C IN GROUND",
-   "conductor material": "Cu (copper only; no aluminium columns in this Table)",
+   "conductor material": "Copper",
    "conductor size units": "mm2",
    "value units": "A (current-carrying capacity)",
    "amendment marker": "A1 printed against the notes block on p.41",
@@ -3017,12 +2975,7 @@
    "6   For conductor sizes up to 10 mm 2   in Column 15, the values are based on ratings for wiring in underground wiring enclosures."
   ],
   "confidence": "high",
-  "problems": [
-   "Column 10 is the conductor-size column repeated at the head of the continuation page (p.41); it carries no current rating, so it is omitted from the columns list. The numbering of the rating columns (11-18) is confirmed by Table 3(2) (Table 6 Columns 11 and 12 = wiring enclosure in air; Column 13 = partially surrounded; Column 14 = completely surrounded), Table 3(3) (Column 15 = buried direct) and Table 3(4) (Columns 16 and 17 = single enclosure; Column 18 = separate enclosures).",
-   "The extracted header for the continuation page does not print the sub-labels that separate Columns 16-17 from Column 18; the wording 'in same enclosure' / 'in separate enclosures' used in the labels for Columns 16-18 is taken from Table 3(4), which cross-references exactly these Table 6 columns. All other column labels are as printed in the Table 6 header.",
-   "Table 3(1) Item 4 in the extraction cross-references 'Table 6 Columns 2 and 3' for the spaced-from-surface installation, where the parallel Item 5 gives 'Table 9 Columns 4 and 5'; Table 6's own Note 3(c) confirms Columns 4 and 5 are the spaced-from-surface columns. Not a transcription problem with Table 6 itself.",
-   "Column 15 (buried direct) repeats the Column 16 values for sizes 1 to 10 mm2, which is expected behaviour stated in Note 6, not a mis-read."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -3154,27 +3107,27 @@
    },
    {
     "n": 23,
-    "label": "Underground wiring enclosure \u203a Cu \u203a Solid/Stranded",
+    "label": "Underground wiring enclosure \u203a in same enclosure \u203a Cu \u203a Solid/Stranded",
     "unit": "A"
    },
    {
     "n": 24,
-    "label": "Underground wiring enclosure \u203a Cu \u203a Flexible",
+    "label": "Underground wiring enclosure \u203a in same enclosure \u203a Cu \u203a Flexible",
     "unit": "A"
    },
    {
     "n": 25,
-    "label": "Underground wiring enclosure \u203a Al",
+    "label": "Underground wiring enclosure \u203a in same enclosure \u203a Al",
     "unit": "A"
    },
    {
     "n": 26,
-    "label": "[Installation heading not captured by the text extraction] \u203a Cu",
+    "label": "Underground wiring enclosure \u203a in separate enclosures \u203a Cu",
     "unit": "A"
    },
    {
     "n": 27,
-    "label": "[Installation heading not captured by the text extraction] \u203a Al",
+    "label": "Underground wiring enclosure \u203a in separate enclosures \u203a Al",
     "unit": "A"
    }
   ],
@@ -3812,10 +3765,7 @@
   ],
   "confidence": "medium",
   "problems": [
-   "Columns 27 and 28 (a Cu/Al pair, the last two data columns of the continuation page): the values are read cleanly, but the installation heading that spans them was not present in the text extraction of p.43. The extracted heading row lists only four top-level groups (Enclosed / Thermal insulation / Buried direct / Underground wiring enclosure) and three sub-headings (Wiring enclosure in air / Partially surrounded by thermal insulation / Completely surrounded by thermal insulation), which account for only 12 of the 14 data columns, while the 'Cu Al' metal row carries 12 entries (six Cu/Al leaf groups). Columns 27/28 are therefore an unlabelled sixth leaf group. Verify these two column headings against the printed page before using them.",
-   "Column numbering of the continuation page: the printed header on p.43 lists '14 15 ... 28' (15 numbers) but the page carries only 14 data columns. The first of those numbers (14) belongs to the repeated 'Conductor size' column, so the data columns of the second half are 15-28. This is confirmed by Note 7, which calls the buried-direct copper column 'Column 22' (its values for sizes up to 10mm\u00b2 are identical to the underground-wiring-enclosure column, exactly as the note describes), and by the same one-off pattern in Tables 6, 9, 12, 15 and 20 of this document, whose notes likewise land on the correct column only under this reading. Column 14 is therefore not a rating column and is not listed here.",
-   "Aluminium columns (4, 7, 10, 13, 17, 19, 21, 23, 26, 28) are printed as '\u2014' for all sizes 1-10mm\u00b2 and are recorded as null.",
-   "Columns 20 and 21 (completely surrounded by thermal insulation) are printed as '\u2014' for all sizes 50mm\u00b2 and larger and are recorded as null."
+   "Columns 27\u201328 heading taken from Table 3(4)."
   ]
  },
  {
@@ -3950,27 +3900,27 @@
    },
    {
     "n": 23,
-    "label": "Underground wiring enclosure \u203a (first sub-group) \u203a Cu \u203a Solid/Stranded",
+    "label": "Underground wiring enclosure \u203a in same enclosure \u203a Cu \u203a Solid/Stranded",
     "unit": "A"
    },
    {
     "n": 24,
-    "label": "Underground wiring enclosure \u203a (first sub-group) \u203a Cu \u203a Flexible",
+    "label": "Underground wiring enclosure \u203a in same enclosure \u203a Cu \u203a Flexible",
     "unit": "A"
    },
    {
     "n": 25,
-    "label": "Underground wiring enclosure \u203a (first sub-group) \u203a Al",
+    "label": "Underground wiring enclosure \u203a in same enclosure \u203a Al",
     "unit": "A"
    },
    {
     "n": 26,
-    "label": "Underground wiring enclosure \u203a (second sub-group \u2014 sub-heading not recoverable from the text extraction) \u203a Cu",
+    "label": "Underground wiring enclosure \u203a in separate enclosures \u203a Cu",
     "unit": "A"
    },
    {
     "n": 27,
-    "label": "Underground wiring enclosure \u203a (second sub-group \u2014 sub-heading not recoverable from the text extraction) \u203a Al",
+    "label": "Underground wiring enclosure \u203a in separate enclosures \u203a Al",
     "unit": "A"
    }
   ],
@@ -4608,10 +4558,8 @@
   ],
   "confidence": "medium",
   "problems": [
-   "Column numbering on the continued page (p.46): the printed number row reads 14 15 16 ... 28 (15 numbers) but that page carries 15 printed columns \u2014 the reprinted Conductor size column plus 14 rating columns. Column 14 is therefore the reprinted Conductor size column (same physical column as column 1) and is not emitted here as a data column; the second-half ratings are columns 15-28. This is corroborated by the sibling tables' notes, which only work under this scheme: Table 5 Note 8 and Table 7 Note 7 call the buried-direct Cu column 'Column 22' (identical layout to Table 8), Table 6 Note 6 and Table 9 Note 6 call it 'Column 15', Table 12 Note 6 calls it 'Column 13'.",
-   "Table 8 Note 8 says 'Column 21' for the buried-direct column whose 1-10 mm\u00b2 values come from underground-wiring-enclosure ratings. Under the numbering used here that is column 22: its values for 1, 1.5, 2.5, 4, 6 and 10 mm\u00b2 (18, 22, 31, 40, 50, 67) are identical to column 24, which is exactly what the note describes. Column 21 as numbered here is 'Completely surrounded by thermal insulation, Al', which has no values at all below 16 mm\u00b2. Note 8's reference appears to be off by one (Amendment 1 page); the identically laid-out Tables 5 and 7 say 'Column 22'. Read Note 8 as applying to column 22.",
-   "Second-half sub-headings: the extracted header gives 6 Cu/Al column groups but only 5 recoverable group names (Wiring enclosure in air; Partially surrounded by thermal insulation; Completely surrounded by thermal insulation; Buried direct; Underground wiring enclosure). Columns 24-26 (Cu Solid/Stranded, Cu Flexible, Al) and columns 27-28 (Cu, Al) are two distinct groups both falling after the 'Underground wiring enclosure' top heading; the sub-heading that distinguishes them (e.g. cables in one enclosure vs separate enclosures) is not present in the text extraction. Column 27/28 values sit between buried direct (col 22/23) and columns 24-26 \u2014 e.g. at 16 mm\u00b2: 117/91 buried direct, 101/79 (cols 27/28), 86/85/66 (cols 24-26). Verify columns 24-28 against the printed page before relying on them.",
-   "Superscripts are lost in the source extraction ('mm 2' for mm\u00b2, 'current- carrying' hyphen-split across lines). Notes 3, 4 and 5 have been rejoined/normalised to mm\u00b2 and 'current-carrying'; wording is otherwise verbatim."
+   "Columns 24\u201328 headings taken from Table 3(4).",
+   "Note 8 says Column 21; it means Column 22 (buried direct, Cu)."
   ]
  },
  {
@@ -4629,7 +4577,7 @@
    "reference_ambient_temperature": "40\u00b0C in air, 25\u00b0C in ground",
    "units": "A (current-carrying capacity)",
    "conductor_size_units": "mm\u00b2",
-   "conductor_material": "Copper (Cu) only \u2014 this table has no aluminium columns",
+   "conductor_material": "Copper",
    "source_pages": "pp. 48-49 (table continued across two pages; columns 1-9 on p.48, remaining columns on p.49)"
   },
   "columns": [
@@ -4705,17 +4653,17 @@
    },
    {
     "n": 15,
-    "label": "Underground wiring enclosure \u203a Cu \u203a Solid/Stranded",
+    "label": "Underground wiring enclosure \u203a in same enclosure \u203a Cu \u203a Solid/Stranded",
     "unit": "A"
    },
    {
     "n": 16,
-    "label": "Underground wiring enclosure \u203a Cu \u203a Flexible",
+    "label": "Underground wiring enclosure \u203a in same enclosure \u203a Cu \u203a Flexible",
     "unit": "A"
    },
    {
     "n": 17,
-    "label": "Underground wiring enclosure (final unlabelled group \u2014 heading not recovered from the extraction) \u203a Cu",
+    "label": "Underground wiring enclosure \u203a in separate enclosures \u203a Cu",
     "unit": "A"
    }
   ],
@@ -5151,10 +5099,7 @@
   ],
   "confidence": "medium",
   "problems": [
-   "Second-half column numbering is ambiguous in the extraction. The continuation page (p.49) prints nine column numbers (10 11 12 13 14 15 16 17 18) but only EIGHT columns of values per row are present (180 tokens per page = 20 sizes x 8 columns + the size labels, verified programmatically for both halves), and the header's own 'Cu' cells (six) plus two Solid/Stranded-Flexible splits also give eight columns. I assigned the eight second-half columns the numbers 11-18 so that the buried-direct column is Column 15, as Note 6 requires: for 1-10 mm2 the buried-direct values (20/25/36, 46/57/77) are identical to the underground-wiring-enclosure Solid/Stranded values, which is exactly what Note 6 describes. If the correct assignment were instead 10-17, every second-half column number would be one lower (buried direct = 14). Column 10 is unaccounted for in the extracted data.",
-   "The last second-half column (numbered 18 here; values 24/30/42 at 1/1.5/2.5 rising to 815/920 at 500/630) has no heading recovered by the extraction. The header row lists six 'Cu' group cells but only five group names (Wiring enclosure in air; Partially surrounded by thermal insulation; Completely surrounded by thermal insulation; Buried direct; Underground wiring enclosure). The same unnamed sixth group appears in the corresponding halves of Tables 5, 6, 7 and 8. Its heading must be read off the printed PDF before this column is used.",
-   "Column 14 (Completely surrounded by thermal insulation) is '\u2014' (no value) for all sizes 50 mm2 and above, transcribed as null.",
-   "Notes 1-6 are as printed on p.49; the '2' in 'up to 10mm 2' in Note 6 is a superscript square in the original."
+   "Column 18 heading taken from Table 3(4)."
   ]
  },
  {
@@ -5894,12 +5839,7 @@
   ],
   "confidence": "high",
   "problems": [
-   "Column 14 is the conductor-size column repeated at the head of the continuation page (p.51). It carries no ratings, so it is deliberately absent from the column list; the second-half data columns are 15-27. The printed number row on p.51 is '14 15 16 17 18 19 20 21 22 23 24 25 26 27' (14 numbers) against only 13 data columns in every row of that half (e.g. the 500 mm2 row reads '500  534  429  449  360  \u2014  \u2014  \u2014  \u2014  741  595  628  629  504'). The same one-number-for-the-repeated-size-column convention is confirmed elsewhere in the same source: Table 9 (pp.48-49) prints 10-18 on its continuation page for 8 data columns and its Note 6 cites 'Column 15', which lands on Buried direct Cu only under this convention; Table 12 (pp.56-57) prints 8-15 for 7 data columns and its Note 6 cites 'Column 13', likewise landing on Buried direct Cu only under this convention.",
-   "Note 7 of this table cites 'Column 21', but the column whose 1-10 mm2 values are identical to the underground-wiring-enclosure ratings (17/21/30, 39/50/66) is Buried direct - Cu, which is Column 23 under the printed numbering. Column 21 as printed is 'Completely surrounded by thermal insulation, in a wiring enclosure - Cu'. The page carries the A1 amendment marker and the note appears not to have been renumbered when the thermal-insulation columns were expanded; the equivalent notes in Tables 11, 13 and 14 also read 'Column 21'. Note transcribed verbatim as printed; treat the cross-reference as stale. The first-half cross-references are exact (Note 4(c) 'Columns 2 to 4' = Unenclosed/Spaced; Note 4(b) 'Columns 5 to 7' = Unenclosed/Touching).",
-   "Solid/Stranded vs Flexible for Columns 25 and 26 (Underground wiring enclosure, Cu) is assigned from the split header token row 'mm 2   Solid/ Stranded   Flexible' on p.51 plus the data pattern (the two columns differ by 1-2 A and track the same solid-vs-flexible relationship as Columns 2/3, 5/6, 8/9 and 11/12); the printed sub-heading position itself is not preserved in the extracted text.",
-   "Table 10 has no 630 mm2 row; the conductor-size list ends at 500 mm2 on both pages.",
-   "Superscripts are lost in the text extraction ('mm 2' is mm squared); note text is reproduced as extracted.",
-   "Non-monotonic-looking but as-printed values, re-read and confirmed in the source: at 400 mm2, Column 3 = 636 A exceeds Column 2 = 631 A; Column 6 = 593 A exceeds Column 5 = 589 A; Column 12 = 500 A exceeds Column 11 = 482 A; Column 26 = 560 A exceeds Column 25 = 548 A. The same flexible-over-solid pattern appears at 50 and 500 mm2."
+   "Note 7 says Column 21; it means Column 23 (buried direct, Cu)."
   ]
  },
  {
@@ -6636,10 +6576,7 @@
   ],
   "confidence": "high",
   "problems": [
-   "Column numbering of the continuation page (p.54): the printed header there lists 14 numbers (14-27) but the page carries only 13 data columns. Cross-checking the sibling tables whose notes pin a column number to a known column (Table 6 Note 6 'Column 15', Table 9 Note 6 'Column 15', Table 12 Note 6 'Column 13', Table 15 Note 6 'Column 13', Table 5 Note 8 'Column 22', Table 7 Note 7 'Column 22') shows the repeated 'Conductor size' column on a continuation page takes the first number of that page. Table 11 is therefore transcribed as: 14 = repeated conductor size column, 15-27 = the 13 data columns. There is no data column numbered 14 in this transcription.",
-   "Table 11 Note 8 ('Column 21') does not match that mapping. The column whose values for sizes up to 10 mm2 are copied from the underground wiring enclosure ratings is Buried direct / Cu (values 45, 56, 75 at 4, 6, 10 mm2, identical to Underground wiring enclosure / Cu Solid/Stranded), which is column 23 under the mapping above (22 if the size column were not numbered). The same discrepancy appears in Tables 10, 13 and 14 (all say 'Column 21') and Table 8 says 'Column 21' where the identically laid-out Tables 5 and 7 say 'Column 22', so the note's column number appears to be an error carried in the standard. The note is transcribed verbatim as printed.",
-   "The extracted text gives no sub-heading (Solid/Stranded vs Flexible) for the Al columns; in this table each aluminium column is a single column, as the header 'Cu Al' pairs and the value counts confirm.",
-   "Table 11 has no 630 mm2 row; the largest conductor size is 500 mm2 (as printed)."
+   "Note 8 says Column 21; it means Column 23 (buried direct, Cu)."
   ]
  },
  {
@@ -6655,7 +6592,7 @@
    "insulation_types": "R-HF-110, R-E-110 or X-HF-110",
    "max_conductor_temperature": "110\u00b0C",
    "reference_ambient_temperature": "40\u00b0C in air, 25\u00b0C in ground",
-   "conductor_material": "Copper only (every rating column is headed Cu; there are no aluminium columns in this table)",
+   "conductor_material": "Copper",
    "units": "Current-carrying capacity in amperes (A); conductor size in mm\u00b2",
    "pages": "Columns 1\u20137 on p.56, columns 8\u201315 on p.57 (continued); p.57 carries the A1 (Amendment 1:2011) margin mark",
    "quantity": "Current-carrying capacity, A"
@@ -6698,7 +6635,7 @@
    },
    {
     "n": 8,
-    "label": "Conductor size (column 1 repeated at the left of the continuation page, p.57 \u2014 not a current rating)",
+    "label": "Conductor size",
     "unit": "mm\u00b2"
    },
    {
@@ -7109,15 +7046,7 @@
    "6 For conductor sizes up to 10 mm\u00b2 in Column 13 the values are based on ratings for wiring in underground wiring enclosures."
   ],
   "confidence": "high",
-  "problems": [
-   "Column 8 carries no current rating. The continuation page (p.57) prints column numbers 8\u201315 but only seven rating columns (five \"Cu\" headings, two Solid/Stranded\u2013Flexible pairs) plus a repeated \"Conductor size mm\u00b2\" column at its left. The standard's own cross-references confirm the rating columns are 9\u201315: Table 3(2) item 7 cites Table 12 Columns 9 and 10 for cables in wiring enclosures, item 9 cites Column 11 (partially surrounded by thermal insulation), item 11 cites Column 12 (completely surrounded); Table 3(3) item 3 cites Column 13 (buried direct); Table 3(4) item 3 cites Columns 14 and 15 (underground wiring enclosure); Note 6 cites Column 13. Column 8 is never cited anywhere. The same one-number offset appears on every continuation page in the document (Table 4 col 14, Table 6 col 10, Table 10 col 14 are likewise uncited), so column 8 is the repeated conductor-size column. It is included here with the size as its value so column numbers stay aligned with the standard; do not treat it as a rating.",
-   "The seven rating triples on p.57 appear in the text stream in the order enclosure S/S, enclosure Flexible, partially surrounded, completely surrounded, buried direct, underground S/S, underground Flexible, i.e. columns 9\u201315 left to right. This order was confirmed by content: columns 13 and 14 are identical for 1\u201310 mm\u00b2 (Note 6), the S/S\u2013Flexible pairs differ by \u00b11\u20132 A like those on p.56, and partially > completely surrounded throughout.",
-   "The p.57 header text extracted as \"Enclosed | Thermal insulation | Buried direct | Underground wiring enclosure\" (upper row) and \"Metallic wiring enclosure in air | Partially surrounded by thermal insulation | Completely surrounded by thermal insulation\" (lower row). Column labels here place \"Metallic wiring enclosure in air\" under \"Enclosed\" (columns 9\u201310) and the two thermal-insulation conditions under \"Thermal insulation\" (columns 11\u201312); if the printed page instead spans \"Enclosed\" over columns 9\u201312, only the group-heading path differs, not the column numbers or values.",
-   "Note 3(a) reads \"approximate derating factors\" in this extraction, where the corresponding note under Tables 10, 13 and 15 reads \"appropriate derating factors\". Transcribed as extracted.",
-   "Note 3(b) reads \"Column 4 and 5\" (singular \"Column\") as extracted.",
-   "Column 12 (completely surrounded by thermal insulation) is printed \"\u2014\" for every size from 50 mm\u00b2 upward; transcribed as null.",
-   "The p.56 column heading is printed simply \"Spaced\" (Table 6 by contrast prints both \"Spaced\" and \"Spaced from surface\"); transcribed as printed."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -7205,7 +7134,7 @@
    },
    {
     "n": 14,
-    "label": "Conductor size (mm\u00b2) \u2014 repeated on continued page (p.59); not a rating",
+    "label": "Conductor size",
     "unit": "mm\u00b2"
    },
    {
@@ -7877,10 +7806,7 @@
   ],
   "confidence": "high",
   "problems": [
-   "Column numbering of the continued page (p.59): the header prints 14\u201327 (14 numbers) but the page carries only 13 rating columns (header sub-labels: six Cu/Al pairs plus one Solid/Stranded\u2013Flexible split; every size row has exactly 13 value groups). I have assigned column 14 to the repeated conductor-size column and 15\u201327 to the ratings (15\u201322 thermal insulation Cu/Al x4, 23\u201324 buried direct Cu/Al, 25\u201327 underground wiring enclosure Cu Solid/Stranded, Cu Flexible, Al). Column 14 values are the conductor size, not a rating. A second reader should confirm this against the PDF page image.",
-   "Note 7 says 'Column 21' is based on underground wiring enclosure ratings for sizes up to 10 mm2, but the data column that actually equals the underground-wiring-enclosure Cu values for 1\u201310 mm2 is 'Buried direct \u203a Cu' (column 23 under the numbering used here; it would be column 22 if the repeated size column were unnumbered). Under no numbering does column 21 fit the note. The note is transcribed verbatim; the inconsistency appears to be in the standard (the same 'Column 21' wording appears in Tables 10, 11 and 14, while Tables 4 and 7 say 'Column 22').",
-   "The first-half heading 'Spaced' is transcribed as extracted; the extraction does not include the words 'from surface' for this table.",
-   "The Buried direct section has no Flexible sub-column in the extraction (the single 'Solid/Stranded / Flexible' split on p.59 belongs to Underground wiring enclosure, confirmed by value ratios: 73/71 Cu S-S vs Flex, 56 Al at 16 mm2)."
+   "Note 7 says Column 21; it means Column 23 (buried direct, Cu)."
   ]
  },
  {
@@ -7969,7 +7895,7 @@
    },
    {
     "n": 14,
-    "label": "Conductor size (repeated on the continuation page; the standard numbers this repeated size column 14 \u2014 it holds no current rating)",
+    "label": "Conductor size",
     "unit": "mm\u00b2"
    },
    {
@@ -8642,12 +8568,7 @@
   ],
   "confidence": "high",
   "problems": [
-   "Column 14 is not a rating column. The continuation page (p.62) prints fourteen column numbers, 14 to 27, over only thirteen data columns (Thermal insulation: 4 x Cu/Al = 8; Buried direct: Cu, Al = 2; Underground wiring enclosure: Cu Solid/Stranded, Cu Flexible, Al = 3), so the first of those numbers belongs to the repeated 'Conductor size' column at the left of the page and the ratings are Columns 15 to 27. Cross-checked against Table 12, whose continuation page numbers 8 to 15 likewise cover seven data columns plus the repeated size column, and whose Note 6 ('Column 13') then correctly lands on Buried direct Cu (1/1.5/2.5 = 22/28/39, equal to the underground-enclosure values as the note states). Column 14 is kept here, holding the conductor size, so that Columns 15 to 27 carry the numbers the standard prints. A consumer must not read Column 14 as an ampacity.",
-   "Note 8 as printed says 'Column 21'. Under the numbering above, Column 21 is 'Completely surrounded by thermal insulation, in a wiring enclosure, Cu' (1 to 10 mm\u00b2: 6, 8, 12, 15, 19, 26), which are not underground-enclosure ratings. The column whose 1 to 10 mm\u00b2 values do equal the underground wiring enclosure Cu ratings of Column 25 (16, 20, 29, 37, 46, 63) is Column 23, Buried direct Cu. The note is transcribed verbatim; its intended reference is the buried-direct copper column. The same 'Column 21' wording appears under Table 13, which has the identical layout.",
-   "Note 8 as printed ends without a full stop; transcribed as printed.",
-   "Note 2 as printed under Table 14 is the thermoplastic / V-90 wording (identical to Table 13's Note 2) even though Table 14 covers X-90, R-EP-90 and similar thermosetting insulations; transcribed verbatim.",
-   "Note 9 as printed cross-refers to 'Table 11'; transcribed verbatim.",
-   "No cell was unreadable. Every '\u2014' is recorded as null: aluminium columns (4, 7, 10, 13, 16, 18, 20, 22, 24, 27) are blank for 1 to 10 mm\u00b2; the thermal-insulation Columns 19 to 22 are blank from 50 mm\u00b2 up; Columns 11 to 13 and 15 to 22 are blank for 300, 400 and 500 mm\u00b2 (with 240 mm\u00b2 carrying values in 11-13 and 15-18)."
+   "Note 8 says Column 21; it means Column 23 (buried direct, Cu)."
   ]
  },
  {
@@ -8663,12 +8584,11 @@
    "insulation_types": "R-HF-110, R-E-110 or X-HF-110",
    "maximum_conductor_temperature": "110\u00b0C",
    "reference_ambient_temperature": "40\u00b0C in air, 25\u00b0C in ground",
-   "conductor_material": "Copper (Cu) only \u2014 this table has no aluminium columns",
+   "conductor_material": "Copper",
    "units": "Conductor size mm\u00b2; current-carrying capacity A",
    "pages": "64\u201365 (columns 1\u20137 on p.64, columns 8\u201315 on the continuation page p.65)",
    "amendment": "The continuation page (p.65) carries the A1 marker (Amendment 1)",
-   "column_8": "Column 8 is the conductor-size column reprinted at the left of the continuation page, not a current rating. It is retained so the column numbers match the standard.",
-   "source_file": "/tmp/claude-0/-home-user-Safe-QLD/95b47080-12e4-52bf-8b08-91ab1cf7e072/scratchpad/wiring/src/as3008-2009-p041-075.txt (lines 27 and 28)"
+   "column_8": "Column 8 is the conductor-size column reprinted at the left of the continuation page, not a current rating. It is retained so the column numbers match the standard."
   },
   "columns": [
    {
@@ -8708,7 +8628,7 @@
    },
    {
     "n": 8,
-    "label": "Conductor size (column 1 reprinted at the left of the continuation page, p.65 \u2014 not a current rating)",
+    "label": "Conductor size",
     "unit": "mm\u00b2"
    },
    {
@@ -9120,13 +9040,7 @@
   ],
   "confidence": "high",
   "problems": [
-   "Column 8 is not a current rating. The continuation page (p.65) prints eight column numbers (8 9 10 11 12 13 14 15) but carries only seven rating columns: every data block on that page yields exactly seven value groups after the conductor sizes (e.g. size 500 reads \"\u2014 \u2014 \u2014 \u2014 797 680 680\"). The first number therefore sits over the reprinted conductor-size column. Confirmed two ways: (a) Note 6 says Column 13 is the buried-direct column whose values for sizes up to 10 mm\u00b2 equal the underground-wiring-enclosure values \u2014 under this mapping column 13 reads 19/24/33/43/53/71 and column 14 reads the same, and they diverge from 16 mm\u00b2 up (122 vs 93), exactly as Note 6 requires; (b) the cross-references in Tables 3(1)\u20133(4) (source file as3008-2009-p010-040.txt) cite Table 15 \"Columns 2 and 3\", \"Columns 4 and 5\", \"Columns 9 and 10\", \"Column 11\", \"Column 12\", \"Column 13\" and \"Column 14 and 15\" \u2014 column 8 is never cited. Column 8 is kept here, holding the conductor size with unit mm\u00b2, purely so the column numbers line up with the standard; it must not be read as a rating.",
-   "Reader A and Reader B differed only on this point: A carried column 8 (with the size as its value) and B dropped it, which shifted every one of B's p.65 values one column number to the left of A's. Read against the source, A's column numbering and A's values are correct throughout; B's underlying numbers are the same numbers, just mis-numbered. Every cell on both pages was re-read from the source line and matches A exactly.",
-   "Notes 3(b) and 3(c) cite \"Columns 5 to 7\" and \"Columns 2 to 4\". In this copper-only table Columns 2\u20133 are Spaced, 4\u20135 Touching and 6\u20137 Exposed to sun, so those two ranges appear to be carried over from the Cu/Al tables (Tables 13 and 14, where each arrangement spans three columns). Transcribed verbatim as printed; do not rely on those two ranges without checking the printed page.",
-   "Extraction artefacts in the notes, normalised here: Note 2 was broken as \"current- carrying\" and is transcribed \"current-carrying\"; superscripts are lost in the text layer (\"10mm 2\") and are transcribed as 10mm\u00b2.",
-   "Dashes are recorded as null, never 0. Column 12 (completely surrounded by thermal insulation) is \"\u2014\" for every size from 50 mm\u00b2 up; columns 9, 10 and 11 are \"\u2014\" at 300, 400 and 500 mm\u00b2; columns 13, 14 and 15 carry values at every size.",
-   "As printed, the Flexible columns slightly exceed the Solid/Stranded columns at some sizes (e.g. at 400 mm\u00b2, column 2 = 810 vs column 3 = 817; at 500 mm\u00b2, 921 vs 936; column 10 = 65 vs column 9 = 64 at 10 mm\u00b2). Re-read against the source line and confirmed as printed, not a transcription error.",
-   "No cell in this table was unreadable; nothing has been guessed or inferred. The table runs from 1 mm\u00b2 to 500 mm\u00b2 (19 rows); there is no 630 mm\u00b2 row, unlike Table 6."
+   "Notes 3(b) and 3(c) column ranges look copied from Tables 13 and 14."
   ]
  },
  {
@@ -9205,11 +9119,7 @@
    "4   To determine the three-phase voltage drop, refer to the appropriate value in Table 46, Table 47 or Table 48. To determine the single-phase voltage drop, multiply the three-phase value by 1.155."
   ],
   "confidence": "high",
-  "problems": [
-   "Table 16 prints no column-number header row in the source (unlike Table 17, which prints 1 to 5). Column 1 (conductor size, the row key) and column 2 (current-carrying capacity) are numbered here by position, not by the standard's own printed numbers.",
-   "The 0.5 mm2 capacity cell is printed as '3 (See Note 2)'. Transcribed as the number 3; the '(See Note 2)' cross-reference is preserved in meta and Note 2 is given in full.",
-   "The source text renders the table body as a de-columnated run ('0.5 0.75 1.0 3 (See Note 2) 7.5 10 1.5 2.5 4.0 16 20 25'); the size-to-capacity pairing was reconstructed from the two blocks of three sizes and is unambiguous, but it is not a cell-by-cell grid in the extracted text."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -9223,8 +9133,8 @@
    "standard": "AS/NZS 3008.1.1:2009 (incorporating Amendment 1)",
    "cable_types": "CABLES AND FLEXIBLE CORDS",
    "insulation_types": "R-S-150, TYPE 150 FIBROUS OR 150\u00b0C RATED FLUOROPOLYMER",
-   "max_conductor_temperature": "Not printed in the title block; the insulation types are 150\u00b0C rated (Note 1 permits the values to be applied to fibrous or fluoropolymer cables rated to 200\u00b0C)",
-   "reference_ambient_temperature": "Not printed in the title block; Note 3 states the ratings are based on 40\u00b0C ambient air temperature",
+   "max_conductor_temperature": "150\u00b0C (see Note 1)",
+   "reference_ambient_temperature": "40\u00b0C in air (see Note 3)",
    "units": "Conductor size in mm2; current-carrying capacity in A",
    "column_numbering": "The standard prints the column numbers 1 to 5 above the header; 1 is the conductor size column (the row key), 2 to 5 are the current-carrying capacity columns"
   },
@@ -9362,10 +9272,7 @@
    "3   These ratings are based on 40\u00b0C ambient air temperature. For other conditions, see Clause 3.5.3."
   ],
   "confidence": "high",
-  "problems": [
-   "The title block prints no MAXIMUM CONDUCTOR TEMPERATURE or REFERENCE AMBIENT TEMPERATURE line (unlike Tables 4 to 15); the ambient (40\u00b0C in air) is stated only in Note 3 and the 150\u00b0C conductor temperature only via the insulation type designations.",
-   "The source text renders the table body as a de-columnated run in blocks of three sizes ('0.5 0.75 1.0 | 19 24 28 | 15 20 23 | 15 20 24 | 13 16 19', etc.); the grid was reconstructed from those blocks. Every value is legible and the reconstruction is unambiguous, but it is not a cell-by-cell grid in the extracted text."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -9380,8 +9287,8 @@
    "conductor_material": "Copper",
    "insulation": "Mineral insulated metal sheathed (MIMS)",
    "sheath_temperature": "100\u00b0C (external surface of the bare copper sheath)",
-   "maximum_conductor_temperature": "Not stated in the title block \u2014 this Table is rated by sheath temperature (100\u00b0C), see Note 1",
-   "reference_ambient": "40\u00b0C ambient air temperature (from Note 5, not the title block)",
+   "maximum_conductor_temperature": "100\u00b0C sheath (see Note 1)",
+   "reference_ambient": "40\u00b0C in air (see Note 5)",
    "units": "Column 1 conductor size in mm\u00b2; Columns 2 to 7 current-carrying capacity in A",
    "column_1": "Conductor size, mm\u00b2 \u2014 carried in each row's 'key'; Columns 2-7 are the value columns listed in 'columns'",
    "row_sections": "Column 1 is printed in two voltage-designation blocks, '0.6/0.6 kV cables' and '1/1 kV cables'. Each block heading is kept as its own row with all-null values; sizes 1.5, 2.5 and 4 mm\u00b2 therefore appear once in each block.",
@@ -9666,10 +9573,7 @@
   ],
   "confidence": "high",
   "problems": [
-   "Column 1 ('Conductor size', mm\u00b2) is printed in the standard's header row but is not listed in 'columns': it is the key column, and each row's 'key' carries it, so 'columns' holds only the value columns 2-7 and stays one-to-one with 'values'. (This was the disagreement between the two readers; the source does print the numeral 1 over the conductor-size column.)",
-   "The group headings above Columns 2-4 (two single-core cables) and Columns 5-7 (three single-core cables) are printed as installation illustrations and carry no extractable text, so the labels for Columns 2 and 5, and for Columns 4 and 7, are identical strings distinguished only by column number.",
-   "1/1 kV, 1.5 mm\u00b2, Column 6 (Trefoil\u2014 spaced from wall) reads 22 A in the source text, equal to Column 7 at the same size and off the ratio trend of every other size (Column 6 \u2248 0.82-0.86 \u00d7 Column 5 elsewhere; Column 5 here is 29 A). Transcribed exactly as printed \u2014 22 \u2014 not corrected; worth a check against the printed page.",
-   "The title block gives no reference ambient temperature; the 40\u00b0C air ambient in meta comes from Note 5."
+   "Column 6, 1/1 kV 1.5 mm\u00b2: 22 A as printed, off trend."
   ]
  },
  {
@@ -9685,8 +9589,8 @@
    "conductor_material": "Copper",
    "insulation": "Mineral insulated metal sheathed (MIMS)",
    "sheath_temperature": "100\u00b0C (external surface of the bare copper sheath)",
-   "maximum_conductor_temperature": "Not stated in the title block \u2014 this Table is rated by sheath temperature (100\u00b0C), see Note 1",
-   "reference_ambient": "40\u00b0C ambient air temperature (from Note 5, not the title block)",
+   "maximum_conductor_temperature": "100\u00b0C sheath (see Note 1)",
+   "reference_ambient": "40\u00b0C in air (see Note 5)",
    "units": "Column 1 conductor size in mm\u00b2; Columns 2 to 7 current-carrying capacity in A",
    "column_1": "Conductor size, mm\u00b2 \u2014 carried in each row's 'key'; Columns 2-7 are the value columns listed in 'columns'",
    "row_sections": "Column 1 is printed in two voltage-designation blocks, '0.6/0.6 kV cables' and '1/1 kV cables'. Each block heading is kept as its own row with all-null values; sizes 1.5, 2.5 and 4 mm\u00b2 therefore appear once in each block."
@@ -9859,11 +9763,7 @@
    "5 These ratings are based on 40\u00b0C ambient air temperature. For other conditions, see Clause 3.5.3."
   ],
   "confidence": "high",
-  "problems": [
-   "Column 1 ('Conductor size', mm\u00b2) is printed in the standard's header row but is not listed in 'columns': it is the key column, and each row's 'key' carries it, so 'columns' holds only the value columns 2-7 and stays one-to-one with 'values'. (This was the disagreement between the two readers; the source does print the numeral 1 over the conductor-size column.)",
-   "0.6/0.6 kV, 4 mm\u00b2 is printed with values only in Columns 2 and 3; Columns 4 to 7 are em-dashes (null). Likewise 1/1 kV sizes 6, 10, 16 and 25 mm\u00b2 are em-dashes in the seven-core Columns 6 and 7. These are dashes in the source, not unreadable cells.",
-   "The title block gives no reference ambient temperature; the 40\u00b0C air ambient in meta comes from Note 5."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -10543,12 +10443,7 @@
    "4   These ratings are based on 40\u00b0C ambient air temperature. For other conditions, see Clause 3.5.3."
   ],
   "confidence": "high",
-  "problems": [
-   "Column-number disagreement between the two readers settled from the source: the continuation-page header prints ten numbers (11 12 13 14 15 16 17 18 19 20) above only nine rating columns, so 11 is the repeated conductor-size key column and 12-20 are the rating columns. The same scheme is visible elsewhere in this extract: the Table 6 continuation header prints \"10 11 12 13 14 15 16 17 18\" (nine numbers) above eight rating columns of data, and the Table 12 continuation header prints \"8 9 10 11 12 13 14 15\" above seven. Column 1 (and its repeat, column 11) is the key column, held in each row's \"key\"; the 18 values per row are therefore columns 2-10 and 12-20, and column 1 is not listed as a value column. Reader B's inclusion of a column n=1 is rejected because it would leave 19 declared columns against 18 values per row.",
-   "The text extraction renders the key-column heading as \"Conductor size (mm 2 ) or standing (No./mm)\"; \"standing\" is an extraction artefact for \"stranding\", and superscripts are lost throughout (\"mm 2\" is mm\u00b2, \"W/m 2\" is W/m\u00b2). The em dash in the title is also dropped by the extraction and is restored here.",
-   "Rows keyed by a stranding designation (7/1.00, 7/1.25, 7/1.75, 7/2.00, 7/2.75, 19/1.75, 19/2.00, 7/3.50, 7/3.75, 37/1.75, 19/2.75, 19/3.00, 37/2.50) carry values only in the bare-conductor columns 2-4; every insulated-cable cell on those rows is a dash. This is as printed, not a gap in the reading.",
-   "Row order follows the printed order, which is the order of the bare-conductor still-air rating rather than of conductor size; the printed page interleaves the mm2 and No./mm rows in three-row blocks."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -11068,12 +10963,7 @@
   ],
   "confidence": "high",
   "problems": [
-   "Column-number disagreement between the two readers settled from the source: the page 73 continuation header prints ten numbers (11 12 13 14 15 16 17 18 19 20) above only nine rating columns, so 11 is the repeated conductor-size key column and 12-20 are the rating columns; column 1 is the key column on page 72 and is held in each row's \"key\". The 18 values per row are columns 2-10 and 12-20. Reader B's extra column n=1 is rejected because it would leave 19 declared columns against 18 values per row.",
-   "Row 70 (70 mm2), column 10 (PVC insulated two-core twisted / single-core neutral screened / parallel-webbed, 2 m/s wind) is printed as 158 and is transcribed as printed. It is anomalous: it is lower than the 1 m/s value of 167 on the same row, and identical to the 50 mm2 value in the same column, where every other row in the group rises with wind speed. Both readers read 158 and the source text is unambiguous, so no correction was invented; verify against the printed page before relying on this one cell. 158 errs low, i.e. on the conservative side.",
-   "The continuation half of this table (columns 11-20 and the notes) is printed on page 73, which falls outside /tmp/claude-0/-home-user-Safe-QLD/95b47080-12e4-52bf-8b08-91ab1cf7e072/scratchpad/wiring/src/as3008-2009-p041-075.txt; it was read from the first page of the adjoining extract /tmp/claude-0/-home-user-Safe-QLD/95b47080-12e4-52bf-8b08-91ab1cf7e072/scratchpad/wiring/src/as3008-2009-p076-110.txt, which begins with page 73.",
-   "The text extraction renders the key-column heading as \"Conductor size (mm 2 ) or standing (No./mm)\"; \"standing\" is an extraction artefact for \"stranding\", and superscripts are lost throughout (\"mm 2\" is mm\u00b2, \"W/m 2\" is W/m\u00b2). The em dash in the title is also dropped by the extraction and is restored here.",
-   "Rows keyed by a stranding designation (7/2.50, 7/2.75, 7/3.00, 7/3.75, 7/4.50, 7/4.75, 19/3.25, 19/3.50) carry values only in the bare-conductor columns 2-4; every insulated-cable cell on those rows is a dash. This is as printed.",
-   "For 120 mm2 and 150 mm2 the only insulated ratings printed beyond column 7 are in columns 18-20 (XLPE three-core and four-core twisted cable and ABC); columns 8-10 and 12-17 are dashes on those rows. For 185 mm2 and above, all columns beyond 7 are dashes."
+   "Column 10, 70 mm\u00b2: 158 A as printed, below the 1 m/s figure."
   ]
  },
  {
@@ -11307,11 +11197,7 @@
    "6   No derating factor is applicable for the minimum spacings specified in Clause 3.5.2.2 (c) and Figure 1."
   ],
   "confidence": "high",
-  "problems": [
-   "Table 22 is NOT in the nominated source file /tmp/claude-0/-home-user-Safe-QLD/95b47080-12e4-52bf-8b08-91ab1cf7e072/scratchpad/wiring/src/as3008-2009-p041-075.txt \u2014 that extract covers printed pages 38-72 and ends part-way through Table 21. Table 22 was transcribed from printed page 74, which is line 2 of the sibling extract /tmp/claude-0/-home-user-Safe-QLD/95b47080-12e4-52bf-8b08-91ab1cf7e072/scratchpad/wiring/src/as3008-2009-p076-110.txt.",
-   "Columns 2 and 3 are one merged 'Arrangement of cables' header in the printed table (Note 1 refers to 'Columns 2 and 3'). For items 1 and 2 the arrangement text spans both columns, so column 3 is recorded as null; for items 3-6 the outer arrangement ('Single layer on wall or floor', 'Single layer under ceiling') is printed once as a spanned cell and has been repeated into column 2 of each of its two rows.",
-   "Column 1 (Item No.) is used as the row key; the number-of-circuits condition is the column header, not the row key, for this table."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -11327,8 +11213,7 @@
    "value type": "Derating factor (dimensionless multiplier applied to single-circuit current-carrying capacity; see Note 3)",
    "applies to ratings from": "Columns 5 to 7 of Tables 4, 5, 7 and 8; Columns 4 and 5 of Tables 6 and 9; Tables 16 to 19 (Note 3)",
    "row key": "Item No. (column 1); merged cells for Installation and Arrangement are repeated on every row they span",
-   "column layout": "Header numbers 8 columns; 'Installation' spans columns 2 and 3 (column 3 is a figure column with no extractable text), tiers = column 4, arrangement = column 5, derating factors = columns 6, 7, 8",
-   "adjudication": "Both readers agreed on every cell of this table; all 22 rows, 8 notes and page number re-verified against the source text on pages 75-76."
+   "column layout": "Header numbers 8 columns; 'Installation' spans columns 2 and 3 (column 3 is a figure column with no extractable text), tiers = column 4, arrangement = column 5, derating factors = columns 6, 7, 8"
   },
   "columns": [
    {
@@ -11341,7 +11226,7 @@
    },
    {
     "n": 3,
-    "label": "Installation \u203a figure (cable/support illustration; not recoverable from text extraction)"
+    "label": "Installation \u203a Drawing"
    },
    {
     "n": 4,
@@ -11642,9 +11527,7 @@
   ],
   "confidence": "medium",
   "problems": [
-   "The header numbers columns 1 to 8 but only seven headings are printed (Item No.; Installation; Number of tiers; Arrangements; three derating-factor columns). Which heading spans two columns cannot be settled from the text extraction; Installation is taken to span columns 2 and 3 (text plus a figure column with no extractable text, given as null), consistent with Table 24 where the same heading demonstrably spans two columns. If the Arrangements heading spans two columns instead, columns 3 to 5 shift; the derating factors are columns 6 to 8 under either reading.",
-   "Items 1-11 and items 12-22 both print the arrangement text '2 or 3 cables in horizontal formation' (or 'vertical formation' for vertical trays). In the printed table the two blocks are distinguished by figures (Note 1 defines the dimension D used in them), which are not present in the text extraction, so the distinction between the two blocks (e.g. touching versus spaced) cannot be confirmed from the source text. The second block carries the higher factors.",
-   "Installation and Arrangement cells are merged across the tier rows in the printed table; the merged text has been repeated on every row it spans."
+   "Items 12\u201322 repeat items 1\u201311 with higher factors; only the drawing tells them apart."
   ]
  },
  {
@@ -11662,8 +11545,7 @@
    "applies to ratings from": "Columns 2 to 4 of Tables 10, 11, 13 and 14; Columns 2 and 3 of Tables 12 and 15; Tables 16 to 19 (Note 3)",
    "row key": "Item No. (column 1); merged cells for Installation and Touching/Spaced are repeated on every row they span",
    "column layout": "Header numbers 10 columns; 'Installation' spans columns 2 (support type, with figure) and 3 (Touching / Spaced), tiers = column 4, derating factors for 1, 2, 3, 4, 6, 9 cables = columns 5 to 10",
-   "notes location": "Notes printed on page 78",
-   "adjudication": "Disputed cells (columns 2 and 3, all 22 rows) settled from the source text: support type and Touching/Spaced qualifier are separately spanned cells and are kept in columns 2 and 3 respectively. All 132 derating-factor cells, 8 notes and page number re-verified against the source text on pages 77-78."
+   "notes location": "Notes printed on page 78"
   },
   "columns": [
    {
@@ -12028,11 +11910,7 @@
    "8 No derating factor is applicable for the minimum spacings specified in Clause 3.5.2.2 (c) and Figure 1(b)."
   ],
   "confidence": "high",
-  "problems": [
-   "The header numbers columns 1 to 10 for nine printed headings; 'Installation' spans columns 2 and 3. The source text prints two separately spanned cells under it: the support type once per six-item block (column 2) and the 'Touching (see Note 6)' / 'Spaced (see Note 6)' qualifier once per three-item group (column 3), e.g. at items 4, 10 and 16 only ' Spaced (see Note 6)' is printed because the support type is merged from above. Figures showing the cable spacing D (Note 1) are not present in the text extraction. The six derating-factor columns are columns 5 to 10.",
-   "Items 19-22 (Vertical perforated trays): the extraction prints 'Touching (see Note 7)' beside item 20 and 'Spaced (see Note 7)' beside item 22 because the two-row merged cells are vertically centred; read as Touching spanning items 19-20 and Spaced spanning items 21-22, corroborated by the 9-cable factor being present for 19-20 and '\u2014' for 21-22.",
-   "Installation and Touching/Spaced cells are merged across the tier rows in the printed table; the merged text has been repeated on every row it spans."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -12211,9 +12089,7 @@
    "2 The derating factors have been determined from the hottest cable in the group and assume that all cables are of the same thermal grade of insulation."
   ],
   "confidence": "high",
-  "problems": [
-   "No notes are printed on p.79 under Table 25(1) itself; the two NOTES listed here are printed on p.80 beneath Table 25(2) and refer to both single-core and multicore cables laid direct in the ground, so they have been carried onto this part as well."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -12508,9 +12384,7 @@
    "NOTE: For derating factors applicable to other arrangements of cables in underground wiring enclosures, refer to ERA Report 69-30 or alternative specifications."
   ],
   "confidence": "high",
-  "problems": [
-   "No note is printed on p.81 under Table 26(1) itself; the NOTE listed here is printed on p.82 beneath Table 26(2) and refers to cables in underground wiring enclosures generally, so it has been carried onto this part as well."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -12903,10 +12777,7 @@
    "3 For cables with a maximum permissible operating temperature above the normal use temperatures specified in Table 3, derating may not be necessary (see Notes to Table 1 for further details)"
   ],
   "confidence": "high",
-  "problems": [
-   "Extraction header read '15 20 ... 90 100 110 120 130 140 150 110 90' before the data. The column numbers run 1-22 (21 factor columns) and the first row group has exactly 21 triplets, so '150' is the first row key (conductor temperature 150\u00b0C), not a 22nd ambient column; row keys for the triplet group are 150/110/90 and for the pair group 80/75. Row order and assignment were verified against the dashes (each row goes to '\u2014' where ambient reaches the conductor temperature) and against the familiar 75/80/90\u00b0C values.",
-   "Ambient temperature columns above 90\u00b0C step by 10 (100, 110, 120, 130, 140) as printed."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -14160,9 +14031,7 @@
    "* These reactance values may also be used as a conservative estimate for cables that are not strictly arranged \u2018flat touching\u2019, e.g. where cables are installed in a wiring enclosure."
   ],
   "confidence": "high",
-  "problems": [
-   "Row 35 column 3 is printed as '0.1010' (four decimals); transcribed as the numeric value 0.101."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -14349,12 +14218,7 @@
   ],
   "notes": [],
   "confidence": "high",
-  "problems": [
-   "No column numbers are printed in the extraction for this table; n=1..3 assigned in printed left-to-right order.",
-   "Row keys carry the voltage-grade sub-heading ('0.6/0.6 kV cables' or '1/1 kV cables') as a prefix, since the printed size values repeat across the two groups.",
-   "1/1 kV row 1.5 column 3 is printed as '0.1010'; transcribed as 0.101.",
-   "Single-core values for 1/1 kV sizes 150-400 are not monotonic as printed (150: 0.0772, 185: 0.0784, 240: 0.0768, 300: 0.0777, 400: 0.0784); transcribed exactly as extracted."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -14605,11 +14469,7 @@
    "* Values are based on a spacing of 0.4 m."
   ],
   "confidence": "high",
-  "problems": [
-   "No column numbers are printed in the extraction for this table; n=1..3 assigned in printed left-to-right order.",
-   "Column 1 mixes mm2 sizes (e.g. '6', '10') and strandings (e.g. '7/1.00'); keys are kept exactly as printed, in printed order.",
-   "The header reads 'Reactance (Xc) of 50 Hz' (not 'at') in the extraction; kept as printed."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -14627,8 +14487,7 @@
    "cable_type": "Single-core",
    "conductor_materials": "Copper (columns 2\u20136); Aluminium (columns 7\u201310)",
    "conductor_temperatures": "Copper 45, 60, 75, 90, 110 \u00b0C; Aluminium 45, 60, 75, 90 \u00b0C",
-   "amendment_marker": "Page carries an 'A1' (Amendment 1:2011) marker in the margin; tinned copper footnote applies",
-   "source_verification": "All values re-read from the source text by an independent parse of the printed table body; both readers matched the source on every cell."
+   "amendment_marker": "Page carries an 'A1' (Amendment 1:2011) marker in the margin; tinned copper footnote applies"
   },
   "columns": [
    {
@@ -14985,8 +14844,7 @@
    "standard": "AS/NZS 3008.1.1:2009 incl. Amdt 1:2011",
    "cable_type": "Multicore with circular conductors",
    "conductor_materials": "Copper (columns 2\u20136); Aluminium (columns 7\u201310)",
-   "conductor_temperatures": "Copper 45, 60, 75, 90, 110 \u00b0C; Aluminium 45, 60, 75, 90 \u00b0C",
-   "source_verification": "All values re-read from the source text by an independent parse of the printed table body; both readers matched the source on every cell."
+   "conductor_temperatures": "Copper 45, 60, 75, 90, 110 \u00b0C; Aluminium 45, 60, 75, 90 \u00b0C"
   },
   "columns": [
    {
@@ -15330,8 +15188,7 @@
    "cable_type": "Multicore with shaped conductors",
    "conductor_materials": "Copper (columns 2\u20135); Aluminium (columns 6\u20139)",
    "conductor_temperatures": "Copper 45, 60, 75, 90 \u00b0C; Aluminium 45, 60, 75, 90 \u00b0C",
-   "size_range": "16 mm\u00b2 to 500 mm\u00b2 only (shaped conductors)",
-   "source_verification": "All values re-read from the source text by an independent parse of the printed table body; both readers matched the source on every cell."
+   "size_range": "16 mm\u00b2 to 500 mm\u00b2 only (shaped conductors)"
   },
   "columns": [
    {
@@ -15573,8 +15430,7 @@
    "cable_type": "Flexible cords and flexible cables with copper conductors",
    "conductor_materials": "Copper only",
    "construction": "Single-core (columns 2\u20136); Multicore (columns 7\u201311)",
-   "conductor_temperatures": "45, 60, 75, 90, 110 \u00b0C for both single-core and multicore",
-   "source_verification": "All values re-read from the source text by an independent parse of the printed table body; both readers matched the source on every cell."
+   "conductor_temperatures": "45, 60, 75, 90, 110 \u00b0C for both single-core and multicore"
   },
   "columns": [
    {
@@ -15971,8 +15827,7 @@
    "standard": "AS/NZS 3008.1.1:2009 incl. Amdt 1:2011",
    "cable_type": "MIMS (mineral insulated metal sheathed)",
    "conductor_materials": "Copper",
-   "conductor_temperatures": "45, 60, 75, 90, 100, 105 \u00b0C",
-   "source_verification": "All values re-read from the source text by an independent parse of the printed table body; both readers matched the source on every cell except row 400 col 3 (see problems)."
+   "conductor_temperatures": "45, 60, 75, 90, 100, 105 \u00b0C"
   },
   "columns": [
    {
@@ -16214,7 +16069,7 @@
   "notes": [],
   "confidence": "medium",
   "problems": [
-   "Row 400, column 3 (60 \u00b0C): the source text prints '0.550' and it is transcribed as printed (0.55). This is inconsistent with its neighbours (0.0527 at 45 \u00b0C, 0.0574 at 75 \u00b0C) and is almost certainly a printing error for 0.0550; it was NOT corrected because the corrected value would be a guess. Verify against the printed page before relying on this cell."
+   "400 mm\u00b2 at 60 \u00b0C: printed 0.550, likely 0.0550."
   ]
  },
  {
@@ -16234,8 +16089,7 @@
    "conductor_materials": "Copper (columns 2\u20135); Aluminium (columns 6\u20139)",
    "conductor_temperatures": "Copper 45, 60, 75, 80 \u00b0C; Aluminium 45, 60, 75, 80 \u00b0C",
    "spacing": "0.4 m",
-   "key_format": "Column 1 is either a nominal size in mm\u00b2 (e.g. '16') or a stranding No./mm (e.g. '7/1.75'); rows are printed in the interleaved order shown and a dash means the size/stranding is not tabulated for that material",
-   "source_verification": "All values re-read from the source text by an independent parse of the printed table body; both readers matched the source on every cell."
+   "key_format": "Column 1 is either a nominal size in mm\u00b2 (e.g. '16') or a stranding No./mm (e.g. '7/1.75'); rows are printed in the interleaved order shown and a dash means the size/stranding is not tabulated for that material"
   },
   "columns": [
    {
@@ -17063,9 +16917,7 @@
    "NOTE: These Vc values apply to a balanced three-phase circuit in which no current flows in the neutral conductor. To determine the single phase Vc the current in the neutral conductor needs to be considered by multiplying the three-phase value by 2/\u221a3 = 1.155."
   ],
   "confidence": "high",
-  "problems": [
-   "The note's fraction was extracted as '3 2' (radical and fraction bar lost); transcribed as 2/\u221a3 since 2/\u221a3 = 1.155 as printed."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -17448,9 +17300,7 @@
    "NOTE: These Vc values apply to a balanced three-phase circuit in which no current flows in the neutral conductor. To determine the single phase Vc the current in the neutral conductor needs to be considered by multiplying the three-phase value by 2/\u221a3 = 1.155."
   ],
   "confidence": "high",
-  "problems": [
-   "The note's fraction was extracted as '3 2' (radical and fraction bar lost); transcribed as 2/\u221a3 since 2/\u221a3 = 1.155 as printed."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -17818,9 +17668,7 @@
    "NOTE: These Vc values apply to a balanced three-phase circuit in which no current flows in the neutral conductor. To determine the single phase Vc the current in the neutral conductor needs to be considered by multiplying the three-phase value by 2/\u221a3 = 1.155."
   ],
   "confidence": "high",
-  "problems": [
-   "The note's fraction was extracted as '3 2' (radical and fraction bar lost); transcribed as 2/\u221a3 since 2/\u221a3 = 1.155 as printed."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -18074,9 +17922,7 @@
    "These Vc values apply to a balanced three-phase circuit in which no current flows in the neutral conductor. To determine the single phase Vc the current in the neutral conductor needs to be considered by multiplying the three-phase value by 2/\u221a3 = 1.155."
   ],
   "confidence": "high",
-  "problems": [
-   "The NOTE's fraction was extracted as '3 2' with the radical lost; transcribed as 2/\u221a3 (= 1.155, matching the printed figure)."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -18330,9 +18176,7 @@
    "These Vc values apply to a balanced three-phase circuit in which no current flows in the neutral conductor. To determine the single phase Vc the current in the neutral conductor needs to be considered by multiplying the three-phase value by 2/\u221a3 = 1.155."
   ],
   "confidence": "high",
-  "problems": [
-   "The NOTE's fraction was extracted as '3 2' with the radical lost; transcribed as 2/\u221a3 (= 1.155, matching the printed figure)."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -18610,10 +18454,7 @@
    "2 These Vc values apply to a balanced three-phase circuit in which no current flows in the neutral conductor. To determine the single phase Vc the current in the neutral conductor needs to be considered by multiplying the three-phase value by 2/\u221a3 = 1.155."
   ],
   "confidence": "high",
-  "problems": [
-   "The NOTE 2's fraction was extracted as '3 2' with the radical lost; transcribed as 2/\u221a3 (= 1.155, matching the printed figure).",
-   "Row 500 is the only size in the last group (no 630 row in this table); the 80\u00b0C columns (8, 9) for 185, 240, 300, 400 and 500 are printed as dashes, as are columns 7 and 11 for 240\u2013400 \u2014 transcribed as null exactly as printed."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -19024,9 +18865,7 @@
    "NOTE: These Vc values apply to a balanced three-phase circuit in which no current flows in the neutral conductor. To determine the single phase Vc the current in the neutral conductor needs to be considered by multiplying the three-phase value by 2/\u221a3 = 1.155."
   ],
   "confidence": "high",
-  "problems": [
-   "The NOTE's multiplier is printed as a stacked fraction (2 over \u221a3), which the text extraction renders as '3 2'; transcribed as 2/\u221a3 = 1.155, consistent with the 1.155 printed beside it."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -19437,10 +19276,7 @@
    "NOTE: These Vc values apply to a balanced three-phase circuit in which no current flows in the neutral conductor. To determine the single phase Vc the current in the neutral conductor needs to be considered by multiplying the three-phase value by 2/\u221a3 = 1.155."
   ],
   "confidence": "high",
-  "problems": [
-   "The NOTE's multiplier is printed as a stacked fraction (2 over \u221a3), which the text extraction renders as '3 2'; transcribed as 2/\u221a3 = 1.155, consistent with the 1.155 printed beside it.",
-   "As printed: row 185 has 0.8 p.f. values at 45/60/75\u00b0C (columns 3, 5, 7) but '\u2014' at 90/110\u00b0C (columns 9, 11); verified against source and kept as printed."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -19836,10 +19672,7 @@
    "NOTE: These Vc values apply to a balanced three-phase circuit in which no current flows in the neutral conductor. To determine the single phase Vc the current in the neutral conductor needs to be considered by multiplying the three-phase value by 2/\u221a3 = 1.155."
   ],
   "confidence": "high",
-  "problems": [
-   "The NOTE's multiplier is printed as a stacked fraction (2 over \u221a3), which the text extraction renders as '3 2'; transcribed as 2/\u221a3 = 1.155, consistent with the 1.155 printed beside it.",
-   "As printed: row 240 has 0.8 p.f. values at 45/60/75\u00b0C (columns 3, 5, 7) but '\u2014' at 90/110\u00b0C (columns 9, 11); verified against source. Table 48 has no 630 mm2 row."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -20288,11 +20121,7 @@
    "NOTE: These Vc values apply to a balanced three-phase circuit in which no current flows in the neutral conductor. To determine the single phase Vc the current in the neutral conductor needs to be considered by multiplying the three-phase value by 2/\u221a3 = 1.155."
   ],
   "confidence": "high",
-  "problems": [
-   "The NOTE's multiplier is printed as a stacked fraction (2 over \u221a3), which the text extraction renders as '3 2'; transcribed as 2/\u221a3 = 1.155, consistent with the 1.155 printed beside it.",
-   "Rows are printed under two sub-headings, '0.6/0.6 kV Cables' (sizes 1, 1.5, 2.5, 4) and '1/1 kV Cables' (sizes 1.5 to 400). Because sizes 1.5, 2.5 and 4 occur in both groups, each row key is prefixed with its sub-heading using the '\u203a' separator; the conductor size as printed is the part after '\u203a'.",
-   "As printed and verified: 0.6/0.6 kV 2.5 mm2 column 11 reads 12.7 and 4 mm2 columns 11/13 read 8.00/8.11, whereas the 1/1 kV rows for the same sizes read 12.8 and 8.02/8.13."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -20676,10 +20505,7 @@
    "NOTE: These Vc values apply to a balanced three-phase circuit in which no current flows in the neutral conductor. To determine the single phase Vc the current in the neutral conductor needs to be considered by multiplying the three-phase value by 2/\u221a3 = 1.155."
   ],
   "confidence": "high",
-  "problems": [
-   "The NOTE's multiplier is printed as a stacked fraction (2 over \u221a3), which the text extraction renders as '3 2'; transcribed as 2/\u221a3 = 1.155, consistent with the 1.155 printed beside it.",
-   "Column 1 mixes nominal areas in mm2 (e.g. 6, 10, 16) with strandings in No./mm (e.g. 7/1.00, 19/2.75); keys kept exactly as printed and in printed order. This table prints the header as 'Max' and '0.8 p.f' without full stops."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -20972,10 +20798,7 @@
    "NOTE: These Vc values apply to a balanced three-phase circuit in which no current flows in the neutral conductor. To determine the single phase Vc the current in the neutral conductor needs to be considered by multiplying the three-phase value by 2/\u221a3 = 1.155."
   ],
   "confidence": "high",
-  "problems": [
-   "The NOTE's multiplier is printed as a stacked fraction (2 over \u221a3), which the text extraction renders as '3 2'; transcribed as 2/\u221a3 = 1.155, consistent with the 1.155 printed beside it.",
-   "As printed and verified: row 95 has 0.776 in column 3 (45\u00b0C, 0.8 p.f.) but '\u2014' in columns 5, 7 and 9 (60/75/80\u00b0C, 0.8 p.f.). Column 1 mixes mm2 areas with No./mm strandings; keys kept as printed and in printed order."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -21382,11 +21205,7 @@
   ],
   "notes": [],
   "confidence": "high",
-  "problems": [
-   "The standard prints no column numbers on Table 52; columns 1-15 are assigned in printed left-to-right order (1 = initial temperature; 2-7 Copper 140/150/160/220/250/350; 8-11 Aluminium 140/150/160/250; 12-13 Lead 150/200; 14-15 Steel 150/200).",
-   "No NOTE is printed under Table 52. The only nearby notes are in Clause 5.3 under the definition of K ('Refer to Table 52 for values of constant (K).') and S ('For conductors and metallic sheaths, it is sufficient to take the nominal cross-sectional area but in the case of screens, this quantity requires careful consideration.').",
-   "Initial-temperature rows printed are 130, 125, 110, 90, 85, 80, 75, 70, 65, 60, 55, 50, 45, 40, 35, 30, 25 (no 120/100/95 rows). Every cell was re-parsed from the source text's 3-row column-major groups and matched both readers exactly."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -21447,10 +21266,7 @@
   ],
   "notes": [],
   "confidence": "high",
-  "problems": [
-   "Row keys for the two thermoplastic sub-rows follow the source spelling '\u2014up to and including 300 mm\u00b2' / '\u2014greater than 300 mm\u00b2' (no space after the em dash); Reader B's '\u2014 up to' / '\u2014 greater than' variant was a spacing difference only, values agree (160, 140).",
-   "Designation printed as 'TP 90' in the extraction (possibly 'TP-90' in the original); kept as extracted."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -21505,9 +21321,7 @@
   ],
   "notes": [],
   "confidence": "high",
-  "problems": [
-   "Spellings 'polyetheylene' and 'chlorosuphonated' are as printed in the extraction (apparent typographical errors in the standard for polyethylene / chlorosulphonated)."
-  ]
+  "problems": []
  },
  {
   "doc": "as3008",
@@ -21612,9 +21426,7 @@
   ],
   "confidence": "medium",
   "problems": [
-   "The extraction emits the copper/aluminium block as 'Conductor only* Welded joint \u2020 \u2020 Exothermic welded joint Soldered joint Compression (mechanical deformation) joint Mechanical (bolted) joint 250\u2021 160 250\u2021 \u00a7', i.e. label box (rows 1-2), value box '\u2020 \u2020', label box (rows 3-6), value box '250\u2021 160 250\u2021 \u00a7'. Because '250\u2021 160 250\u2021 \u00a7' is one contiguous run, those four values occupy adjacent rows 3-6 and the two '\u2020' occupy rows 1-2. Mapping settled as: Conductor only = \u2020, Welded joint = \u2020, Exothermic welded joint = 250\u2021, Soldered joint = 160, Compression joint = 250\u2021, Mechanical (bolted) joint = \u00a7. Footnote semantics agree (\u2021 describes a joint so cannot attach to 'Conductor only'; \u2020 'limited by the material in contact' is the conductor-only case governed by Tables 53/54). Reader B's alternative (Conductor only = 250\u2021, Exothermic welded joint = \u2020) is rejected.",
-   "Lead, Lead alloy and Steel have no printed Condition entry (null); their limits are read from the run 'Lead Lead alloy Steel 170 200 \u2020'.",
-   "Column 3 values kept as strings because footnote markers are part of the printed cell."
+   "Joint limits matched to rows by print order."
   ]
  },
  {
@@ -21635,9 +21447,7 @@
    "MCB tripping current": "MCB Type C curve, mean tripping current Ia = 7.5 x rated current (Paragraph B4.5)",
    "demand current for voltage drop": "0.8 x IN",
    "Vc reference": "Vc from Table 41 of AS/NZS 3008 at 60 degrees C, mV/A.m, three phase",
-   "units": "conductor area mm2; rated current A; Vc mV/A.m; all route lengths in metres",
-   "completeness": "Table starts on printed page 453 and is marked '(continued)' at the foot; the continuation page (printed page 454) is NOT present in the supplied extraction, so rows above 16 mm2 / 63 A and the numbered notes (1)-(4) are missing",
-   "source file": "as3000-2018-p416-456-section8-appB.txt (pages 416-456 of 611)"
+   "units": "conductor area mm2; rated current A; Vc mV/A.m; all route lengths in metres"
   },
   "columns": [
    {
@@ -22042,14 +21852,8 @@
   "notes": [],
   "confidence": "medium",
   "problems": [
-   "TABLE B1 IS INCOMPLETE. The printed table ends on page 453 with '( continued )'. The continuation page (printed page 454) is not present in the supplied extraction, so rows for conductor sizes above 16 mm2 and rated currents above 63 A are missing. Note 1 to Table 8.1 states Table B1 covers final subcircuits up to 200 A, so a substantial part of the table is absent.",
-   "NOTES NOT CAPTURED. The column headings carry note references '(1,2)' on column 4 and '(3,4)' on columns 5-11, but the numbered notes themselves are printed at the foot of the continued table on page 454, which is not in the extraction. The 'notes' array is therefore empty \u2014 it is NOT the case that the table has no notes.",
-   "Lost symbols in the text extraction, reconstructed from context: the multiplication sign in 'maximum demand current 0.8 \u00d7 IN' (extracted as '0.8  I N') and the less-than-or-equal sign in 'mean operating current for \u2264 0.4 s' (extracted as 'for  0.4 s'). Also 'Circuit- breaker' is hyphen-broken across a line in the source; transcribed as 'Circuit-breaker'.",
-   "Column 1 is not unique as a key: the size/rating grid repeats a conductor size on consecutive rows for two different device ratings (1 mm2 at 6 A and 10 A; 1.5 mm2 at 10 A and 16 A; 2.5 mm2 at 16 A and 20 A; 4 mm2 at 25 A and 32 A; 6 mm2 at 32 A and 40 A). A row in this table is identified by columns 1+2+3 together, not by column 1 alone.",
-   "Cross-check observation (value transcribed exactly as printed, no reading doubt): column 12 for 6 mm2 active / 2.5 mm2 earth at 32 A reads 75 m. Every other column scales strictly with Sph.Spe/(Sph+Spe) between the 4/2.5 and 6/2.5 rows at 32 A (column 4 goes 52 -> 60, ratio 1.147), but column 12 goes 70 -> 75 (ratio 1.071) rather than the ~80 that proportionality implies. This is an inconsistency in the printed table, not an extraction error; a second reader should confirm 75 against the PDF.",
-   "Confidence basis: every value in columns 4 and 6-11 was independently recomputed. Column 4 reproduces Equation B7 with rho = 22.5e-3 and Ia = 7.5 x IN (MCB Type C) to within 1 m on all 12 rows. Columns 6-8 reproduce L = 10 x 230 x Vd% / (IN x 0.8 x Vc x 1.1547) and columns 9-11 reproduce L = 10 x 400 x Vd% / (IN x 0.8 x Vc x sqrt(3)) exactly on all 12 rows. The worked example in Paragraph B5.2.4 (2.5 mm2, 20 A, 4% -> 33 m single phase, compared with 'the EFL loop length of 68 m') matches the 2.5/2.5/20 row exactly (column 8 = 33, column 4 = 68). Column 12 was not independently verifiable.",
-   "No Table B2 exists in the supplied extraction. Appendix B in this file runs from printed page 439 to page 453 and contains only one numbered table, Table B1. Appendix B's protective-device guidance is given as prose (Paragraphs B3 and B4), not as a table. The other tables present in this file belong to Section 8, not Appendix B: Table 8.1 (maximum values of earth fault-loop impedance, page 427) and Table 8.2 (maximum values of resistance of final subcircuits, page 428); neither was requested here.",
-   "Rows 13-21 were missing from the first transcription, which stopped at 16 mm2 / 63 A. Recovered from an independent second extraction whose first twelve rows matched this one value for value."
+   "Notes 1\u20134 not included; see the printed table.",
+   "Column 12, 6/2.5 mm\u00b2 at 32 A: 75 m as printed, off trend."
   ]
  },
  {
@@ -22282,16 +22086,7 @@
   ],
   "confidence": "medium",
   "problems": [
-   "Disagreement between two independent readers on row (m), columns 2-5, was settled against the source text on page 460: the source prints no sentence-ending full stop between the two lines of each cell, so the lines are joined by a single space.",
-   "Header band: on each of the three pages the header block ends with the phrase 'Loading associated with individual units' printed under the 'Blocks of living units' columns. It is a band label, not a column of its own; it is not repeated in the column labels here. Load groups (a)\u2013(g) are loading associated with the individual units; load groups (h)\u2013(m) are the communal (not associated with individual units) loads (see Note 14 and the worked example in Paragraph C2.3.2.3).",
-   "Merged cells (text repeated across the columns it spans in this transcription): (a)(ii) columns 3\u20135; (b)(ii) and (b)(iii) columns 2\u20135; (g) columns 2\u20135; (h), (i), (j)(i), (j)(ii), (j)(iii) columns 3\u20135; (k) columns 2\u20135 (printed as two identical cells, columns 2 and 3\u20135); (l) columns 3\u20135; (m) columns 3\u20135.",
-   "Row (c): the extraction yields only three distinct cells ('50% connected load', '15 A', '2.8 A per living unit') for four columns. Column 4 = '2.8 A per living unit' is confirmed by the worked example in Paragraph C2.3.2.3 (6 ranges on the heaviest phase, Column 4, 6 \u00d7 2.8 = 16.8 A); '15 A' is therefore column 3 and column 5 is taken as part of the same merged cell as column 4. Column 5 for this row could not be read independently from the extraction.",
-   "Row (d): three identical cells '75% connected load' were extracted for four columns; all four columns are recorded as '75% connected load' (consistent with Paragraph C2.3.2.3 where 27 units on Column 5 use 75% connected load). The exact cell boundaries (which columns are merged) could not be determined.",
-   "Rows (e) and (f): three cells extracted for four columns; '6 A per living unit' is taken as the merged cell for columns 3 and 4 and '100 A + 0.8 A per living unit' as column 5 (column 5 confirmed by Paragraph C2.3.2.3: 100 + (27 \u00d7 0.8) = 121.6 A).",
-   "Row (i): the phrase 'Permanently connected electrical equipment not exceeding 10 A' appears in the extraction after the column values. It is transcribed as the second line of the load group description (column 1), mirroring load group (b)(i); it could alternatively be a second line of the column 3\u20135 cell.",
-   "Row (l), column 2: the extraction reads 'In accordance with Paragraph C2.4.1,and Table C2, Column 2' \u2014 a missing space after the comma, kept verbatim.",
-   "Row (m): the printed cell holds two lines. The source text reads '... and the like Connected load 5 A or less\u2014 no assessment for purpose of maximum demand Connected load 10 A or less\u2014 no assessment for purpose of maximum demand Connected load over 5 A\u2014by assessment Connected load over 10 A\u2014 by assessment' \u2014 i.e. the four fragments are the first line of both cells followed by the second line of both cells. The two lines of each cell are joined with a single space; the standard prints NO full stop between them (a transcription that reads '...maximum demand. Connected load over...' adds punctuation the source does not have). The space after the em dash in 'less\u2014 no' is an end-of-line artifact and has been closed up. Column 2 = the 5 A cell; columns 3-5 = one 10 A cell spanning three columns.",
-   "Runs of whitespace introduced by the PDF text extraction have been collapsed to single spaces; wording, punctuation and note numbering are unchanged."
+   "Row (c), column 5 read from a merged cell."
   ]
  },
  {
@@ -22425,12 +22220,7 @@
    "5 For the purpose of determining maximum demand, a multiple combination socket-outlet is regarded as the same number of points as the number of integral socket-outlets in the combination."
   ],
   "confidence": "high",
-  "problems": [
-   "Merged cells (text repeated across both columns it spans in this transcription): (b)(ii), (e) Lifts, (f) Fuel dispensing units, (g), (h), (i) and (j) are single cells spanning columns 2 and 3. (c)(ii) is printed as two separate cells with identical wording.",
-   "Rows (e) and (f) contain sub-item lists ((i), (ii), (iii)) within a single cell; the sub-items are joined into one string in reading order.",
-   "In row (b)(iii) and (c)(i)/(c)(ii) the printed cells hyphenate 'socket-outlet' across a line break ('socket- outlet'); the hyphenation has been closed up. Column 2 of (b)(iii) prints a comma after 'socket-outlet' and column 3 does not \u2014 both kept as printed.",
-   "Runs of whitespace introduced by the PDF text extraction have been collapsed to single spaces; wording and note numbering are unchanged."
-  ]
+  "problems": []
  },
  {
   "doc": "as3000",
@@ -22456,7 +22246,7 @@
    },
    {
     "n": 2,
-    "label": "Type of occupancy \u203a item (unheaded sub-column as printed)"
+    "label": "Type of occupancy \u203a Item"
    },
    {
     "n": 3,
@@ -22643,15 +22433,7 @@
    "NOTE: EV charging relates to charging equipment associated with electric vehicles and should be considered in addition to all other energy demands."
   ],
   "confidence": "high",
-  "problems": [
-   "Table C3 prints no column numbers; 1\u20134 are assigned in printed left-to-right order and are not cited by the Standard.",
-   "Column 2 (the item list) carries no printed heading of its own \u2014 it sits under the 'Type of occupancy' span. It is kept as a separate column because the ranges and averages attach to the item, not to the occupancy.",
-   "The column 1 'Type of occupancy' cell is vertically merged over its item rows in print; it is repeated on each item row here, so the key is duplicated within an occupancy group (six 'Offices' rows, four 'Carparks' rows, etc.).",
-   "Offices 'Airconditioning:' is a sub-heading line with no values of its own; recorded with nulls in columns 3 and 4. The source text stream separates it from '\u2014 Cooling' by a line break exactly as it separates every other row, so it is read as its own valueless row rather than as part of the '\u2014 Cooling' label; the two cannot be distinguished by spacing alone.",
-   "Under Carparks the source gives four item labels (Open air, EV charging, Basement, EV charging) followed by four ranges (0\u201310, 5\u201315, 10\u201320, 10\u201330) and four averages (5, 10, 15, 20) as three column blocks; they are paired by print order. The two 'EV charging' rows print identically \u2014 from context the first belongs with open-air carparks and the second with basement carparks, but the source text does not make the indentation explicit.",
-   "'Special equipment' rows (Warehouses, Light industrial) print '(use load details)' where the Range figure would be, with nothing in the Average column; recorded as the printed string in column 3 and null in column 4.",
-   "'Offices \u2014 Variable volume' (20) and 'Warehouses Ventilation' (5) print a single figure rather than a range in column 3; kept as printed strings."
-  ]
+  "problems": []
  },
  {
   "doc": "as3000",
@@ -22807,10 +22589,7 @@
   ],
   "confidence": "medium",
   "problems": [
-   "Minus signs are missing from the text extraction in column 4 (Minimum ambient). The stream reads \"0   20 0   20 0\" for the thermoplastic group and \"  40   20 *   50\" for the elastomeric group, with an extra space where the minus glyph was dropped. Transcribed as 0, -20, 0, -20, 0 and -40, -20, *, -50 respectively \u2014 a positive minimum-ambient limit of +20/+40/+50\u00b0C is not physically sensible for these cables. Verify against the printed PDF before use.",
-   "Column 4 for MIMS is a note reference \"(6)\" rather than a numeric value; recorded as the string \"(6)\".",
-   "This table prints no column numbers; the numbering 1-4 used here is left-to-right and is not the standard's own.",
-   "Group headings (Thermoplastic (4), Elastomeric, Cross-linked polyethylene, Other types) span the value columns in the printed table; they are recorded as rows with null values."
+   "Minimum ambient: minus signs need confirming."
   ]
  },
  {
@@ -22910,11 +22689,7 @@
    "NOTE: The size of unprotected consumer mains should be coordinated with the electricity distributor."
   ],
   "confidence": "high",
-  "problems": [
-   "This table prints no column numbers; the numbering 1-4 used here is left-to-right and is not the standard's own.",
-   "The second \"Aerial wiring\" row (Aluminium 16) has no separately printed \"Use of the circuit\" cell in the extraction; the em dash from the merged Aerial wiring row is repeated.",
-   "\"Copper\" is printed once as a merged cell for the three insulated-conductor rows; it is repeated on each row here."
-  ]
+  "problems": []
  },
  {
   "doc": "as3000",
@@ -22970,10 +22745,7 @@
   ],
   "notes": [],
   "confidence": "high",
-  "problems": [
-   "Table C4 prints no column numbers; 1 and 2 are assigned in printed left-to-right order.",
-   "No notes are printed under Table C4."
-  ]
+  "problems": []
  },
  {
   "doc": "as3000",
@@ -23037,10 +22809,7 @@
   ],
   "notes": [],
   "confidence": "high",
-  "problems": [
-   "Table C5 prints no column numbers; 1 and 2 are assigned in printed left-to-right order.",
-   "No notes are printed under Table C5."
-  ]
+  "problems": []
  },
  {
   "doc": "as3000",
@@ -23230,10 +22999,7 @@
    "\u2020   A larger earthing conductor may be required to satisfy Clause 5.3.3.1.1."
   ],
   "confidence": "high",
-  "problems": [
-   "The \u2265 sign in the 400/500/630/>630 rows is encoded in the source as the Symbol-font private-use character U+F0B3 (Symbol 0xB3 = greaterequal) and has been decoded as \u2265. It is present in the source ahead of every one of those six values, so those cells are minima ('\u2265120', '\u226595', '\u226525% of active size'), not fixed sizes.",
-   "The column 1 header is set as 'Nominal size of active conductor mm 2' with the superscript 2 extracted as a separate token; it has been read as mm2 and carried in the column's unit field."
-  ]
+  "problems": []
  },
  {
   "doc": "as3000",
@@ -23370,13 +23136,7 @@
   ],
   "notes": [],
   "confidence": "high",
-  "problems": [
-   "No numbered NOTES are printed beneath Table 5.2; the text runs straight from the last row into Clause 5.3.6.3, so the notes array is empty. (The 'NOTE: Consideration should be given to the nature of the soil and environmental conditions.' sits in Clause 5.3.6.2 above the table, not under it, and is therefore not a table note.)",
-   "Three glyphs are encoded in the source as Symbol-font private-use characters and have been mapped to the semantically correct Unicode symbol rather than to a look-alike letter: U+F0C6 (Symbol 'emptyset' glyph, used here as the diameter sign) \u2192 \u2300 U+2300 DIAMETER SIGN, not the letter \u00d8 U+00D8; U+F0B4 \u2192 \u00d7 U+00D7; U+F06D (Symbol 'mu') \u2192 \u00b5 U+00B5 MICRO SIGN, the SI prefix character, not the Greek letter \u03bc U+03BC. The glyph identities themselves cannot be read directly from the private-use codepoints and should be spot-checked against the printed page.",
-   "The source prints a space between the diameter sign and the figure ('\u2300 12 mm circular rod'); that spacing is retained. Other runs of two or more spaces, which are column/word separators from the extraction, are normalized to single spaces.",
-   "Superscript 2 in 'cross-sectional area of 200 mm 2' and 'Copper cable ... 25 mm 2' is extracted as a separate token and has been read as mm2.",
-   "Column 1 'Material' is a merged cell reading 'Steel' across the first five vertical-electrode rows; its repetition on rows 2-5 follows the merge and is not printed on each row."
-  ]
+  "problems": []
  },
  {
   "doc": "as3000",
@@ -23515,10 +23275,7 @@
    "3 Other cables and installation methods can be sourced from the AS/NZS 3008.1 series, or conservatively compared with the protective device ratings for the following cable installation conditions: (a) Cables buried direct in the ground may be treated as enclosed in ground. (b) Unenclosed or enclosed cables in air touching a surface may be treated as in air. (c) Cables lying on top of thermal insulation may be treated as in thermal insulation partially surrounded. (d) Cables passing through more than 300 mm of thermal insulation may be treated as in thermal insulation completely surrounded."
   ],
   "confidence": "high",
-  "problems": [
-   "The extraction prints no column numbers for Table C6; the numbers 1-6 used here are assigned left to right and are not the standard's own printed numbers.",
-   "The grouping of the five rating columns under the 'Unenclosed' and 'Enclosed' spanner headings is inferred from the header order in the text stream (Unenclosed = in air / partially surrounded / completely surrounded; Enclosed = in air / in ground), since the extraction flattens the two header rows."
-  ]
+  "problems": []
  },
  {
   "doc": "as3000",
@@ -23654,10 +23411,7 @@
    "NOTE: See Notes to Table C6."
   ],
   "confidence": "high",
-  "problems": [
-   "The extraction prints no column numbers for Table C7; the numbers 1-6 used here are assigned left to right and are not the standard's own printed numbers.",
-   "Column 6 heading in Table C7 is printed as 'In ground' without the '(see Note 3)' qualifier that appears in Table C6."
-  ]
+  "problems": []
  },
  {
   "doc": "as3000",
@@ -23780,11 +23534,7 @@
   ],
   "notes": [],
   "confidence": "high",
-  "problems": [
-   "No notes are printed under Table C8 in the extraction.",
-   "Row keys are printed in the standard as '1 mm2', '1.5 mm2', etc.; the unit has been moved to the column label and the key kept as the bare size.",
-   "Paragraphs C4.1 and C4.2 refer to 'Table C7' where the values quoted (e.g. 1773 and 1643 Am per %Vd) are in fact Table C8; this is an error in the printed Standard, not a transcription error."
-  ]
+  "problems": []
  },
  {
   "doc": "as3000",
@@ -23985,12 +23735,7 @@
    "5   Refer to Clauses 1.5.5.3 and 5.7.2 and Figure B4 for required disconnection times and conditions, e.g. Condition for 5s disconnection time."
   ],
   "confidence": "high",
-  "problems": [
-   "The ohm symbol was dropped by the text extraction throughout (header reads 'Maximum earth fault-loop impedance   Z s' with a blank where the unit symbol sits). Unit recorded as ohms from context.",
-   "The header cell 'Disconnection times 0.4 s   0.4 s   5 s' prints only three cells for five value columns; reconstructed as a merged 0.4 s over the three MCB type columns plus 0.4 s and 5 s over the two fuse columns, confirmed by the identical arrangement printed in Table 8.2.",
-   "Note 4 reads 'manufacturer\u2019s date' in the extraction; this is almost certainly 'manufacturer\u2019s data' in the printed Standard. Transcribed verbatim as extracted.",
-   "The Standard does not print column numbers on this table; columns numbered 1-6 left to right with column 1 the protective device rating."
-  ]
+  "problems": []
  },
  {
   "doc": "as3000",
@@ -24274,13 +24019,7 @@
    "5   To comply with both earth fault loop and voltage drop route length the shortest route length is required."
   ],
   "confidence": "high",
-  "problems": [
-   "The ohm symbol was dropped by the text extraction ('Maximum final subcircuit resistance,' followed by a blank). Unit recorded as ohms from context.",
-   "In Notes 1 and 2 the multiplication signs were lost by the extraction (they appear as runs of spaces: '64%      Z s', '80%      Z s ... )      80% assumes'). Reinstated as '\u00d7' in the transcription; the rest of the note text is verbatim, including the unbalanced closing parenthesis printed in Note 2.",
-   "Rows are keyed on protective device rating; the rating 10 A and the rating 16 A each appear twice with different conductor sizes (10 A with 1.0/1.0 and 1.5/1.5 mm2; 16 A with 1.5/1.5 and 2.5/2.5 mm2). Both duplicates carry identical resistance values, as the values depend on the device only.",
-   "The Standard does not print column numbers on this table; columns numbered 1-13 left to right with column 1 the protective device rating and columns 2-3 the active and earth conductor sizes.",
-   "Cross-check against Note 1 (Rphe = 64% of Zs in Table 8.1) reproduces the printed value in most cells but differs by one unit in the last decimal for a few: 20 A Type B (0.64 x 2.9 = 1.856, printed 1.8), 16 A Type D (0.64 x 1.2 = 0.768, printed 0.7), 25 A Type D (0.64 x 0.7 = 0.448, printed 0.5), 50 A Type B (0.64 x 1.2 = 0.768, printed 0.7), 50 A Type D (0.64 x 0.4 = 0.256, printed 0.2), 50 A HRC fuse 0.4 s (0.64 x 0.7 = 0.448, printed 0.5). Values transcribed exactly as printed, not as recomputed."
-  ]
+  "problems": []
  },
  {
   "doc": "as3000",
@@ -24686,10 +24425,7 @@
   ],
   "confidence": "medium",
   "problems": [
-   "Table C9 does not print column numbers; columns have been numbered 1\u20139 left to right as printed.",
-   "Column 8 (Permanently connected fixed or stationary appliances (6, 10) or water heaters) is a single merged cell in the printed table reading 'Connected load'; that string has been repeated on every row.",
-   "The split of the '10 A single-phase or multiphase socket-outlets (3, 7, 8, 9)' heading into the two sub-columns 'Non-domestic installations without permanent airconditioning' (2 A) and 'All domestic installations and non-domestic installations with permanent airconditioning' (1 A) is reconstructed from the header order in the extraction and the constant 2 / 1 value pattern; the extraction flattened the multi-row header so the physical alignment could not be read directly.",
-   "The footnote reference (2) printed against the 6 mm\u00b2 and 10 mm\u00b2 rows in column 1 is recorded in meta rather than in the row key."
+   "Socket-outlet sub-column headings read from the layout."
   ]
  },
  {
@@ -25468,13 +25204,7 @@
   "notes": [],
   "confidence": "medium",
   "problems": [
-   "Table C10 does not print column numbers; columns have been numbered 1\u201327 left to right as printed.",
-   "The extraction flattened the multi-row column header. The four conduit-type groups were split 12 / 4 / 4 / 6 columns (26 conduit columns in total) to match the printed size sequence 20 25 32 40 50 63 80 80 100 100 125 150 | 100 100 125 150 | 20 25 32 40 | 16 20 25 32 40 50 and the 26 values on every PVC/PVC V90 row.",
-   "The six (NZ)/(AUS) qualifiers printed in the header were assigned to the three adjacent duplicated conduit sizes \u2014 Heavy duty rigid UPVC 80 and 100, and Corflo 100 \u2014 because those are the only duplicated adjacent sizes and there are exactly six markers. This assignment is inferred, not read from the printed alignment.",
-   "The XLPE/PVC rows (25 mm\u00b2 to 630 mm\u00b2) print only 16 values each: the 'Medium duty corrugated' and 'Medium duty rigid UPVC conduit' columns are blank for those sizes and are recorded as null.",
-   "'>100' is printed as an inequality and is kept as the string '>100'. A printed 0 means no cable of that size fits and is kept as 0 (it is not a dash).",
-   "No NOTES are printed under Table C10 within the supplied text; the extraction ends at page 488, so any notes on a later page could not be read.",
-   "The task brief described Table C10 as a guide to the maximum number of single-phase circuits supplied through a given cable size/protective device. The table actually printed as Table C10 in this document is the guide to the maximum number of single-core sheathed cables installed in conduit, transcribed here as printed."
+   "(NZ) and (AUS) conduit labels read from the layout."
   ]
  }
 ]

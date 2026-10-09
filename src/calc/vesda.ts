@@ -1,4 +1,7 @@
-import { calculateBattery, type BatteryInput, type BatteryResult, type Issue, type LoadItem } from './battery';
+import {
+  calculateBattery, standbySupplyLoad,
+  type BatteryInput, type BatteryResult, type Issue, type LoadItem,
+} from './battery';
 
 /**
  * VESDA aspirating smoke detection battery sizing.
@@ -306,30 +309,103 @@ export function calculateVesda(input: VesdaInput): VesdaResult {
   // so the panel-oriented warning about it does not apply here.
   const issues = [...result.issues.filter((i) => !i.title.includes('alarm signalling')), ...extraIssues];
 
+  // Overload and heavy load in standby are the battery engine's own check
+  // now, against the supply rating passed in above; this adds only what is
+  // particular to a VESDA supply.
   let psuUtilisation: number | undefined;
   if (psu) {
-    psuUtilisation = result.quiescentA / psu.ratedA;
-    if (psuUtilisation > 1) {
-      issues.push({
-        level: 'error',
-        title: 'Supply is overloaded in standby',
-        detail: `Standby draw of ${(result.quiescentA * 1000).toFixed(0)} mA exceeds the ${psu.model}'s ${psu.ratedA} A rating. Aspirating detectors draw this continuously, not just in alarm.`,
-      });
-    } else if (psuUtilisation > 0.8) {
-      issues.push({
-        level: 'warning',
-        title: 'Supply is heavily loaded in standby',
-        detail: `Standby draw is ${(psuUtilisation * 100).toFixed(0)}% of the ${psu.model}'s rating, continuously. Consider the next size up before adding anything else.`,
-      });
-    }
+    psuUtilisation = standbySupplyLoad(result.quiescentA, psu.ratedA);
     if (!psu.verified) {
       issues.push({
         level: 'info',
         title: 'Unverified supply figures',
-        detail: `Ratings for the ${psu.model} come from distributor listings rather than a manufacturer datasheet. Confirm before relying on them.`,
+        detail: `${psu.model} figures are from distributor listings. Confirm on the datasheet.`,
       });
     }
   }
 
   return { ...result, issues, psuUtilisation, psuModel: psu?.model };
+}
+
+// ---------------------------------------------------------------------------
+// As devices, for the FIP battery calculator
+// ---------------------------------------------------------------------------
+
+/**
+ * One VESDA load, ready to drop into a battery load schedule.
+ *
+ * The VESDA screen ran these figures through the same battery engine as the
+ * FIP calculator, with its own detector picker in front. They live in the FIP
+ * calculator's device list now: one entry per detector at each published
+ * aspirator setting, and one per accessory, each already in milliamps.
+ */
+export interface VesdaDevice {
+  id: string;
+  kind: 'detector' | 'accessory';
+  /** What goes in the load row's description. */
+  label: string;
+  /** One line under it in the picker: what it is and the published figure. */
+  detail: string;
+  standbyMa: number;
+  alarmMa: number;
+  /** A short line for the load row, where the figure needs one. */
+  note?: string;
+}
+
+/** Milliamps to two places, which is finer than any datasheet. */
+function ma2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/**
+ * Every published VESDA-E detector setting and accessory, as loads.
+ *
+ * The same rules as `detectorCurrents`: current is derived from published
+ * watts at 24 V, and alarm current is never taken below standby.
+ */
+export function vesdaDevices(): VesdaDevice[] {
+  const out: VesdaDevice[] = [];
+  for (const m of VESDA_MODELS) {
+    for (const v of m.variants) {
+      const r = detectorCurrents({ modelId: m.id, setting: v.setting, quantity: 1 });
+      if (r.issues.length) continue;
+      const fixed = v.setting === 'fixed';
+      const published = v.watts !== undefined
+        ? `${v.watts} W standby, ${v.wattsAlarm ?? v.watts} W alarm`
+        : `${v.ma ?? 0} mA standby, ${v.maAlarm ?? v.ma ?? 0} mA alarm`;
+      const raised = v.watts !== undefined && v.wattsAlarm !== undefined && v.wattsAlarm < v.watts;
+      out.push({
+        id: `${m.id}@${String(v.setting)}`,
+        kind: 'detector',
+        label: fixed ? m.model : `${m.model}, aspirator ${v.setting}`,
+        detail: `${m.description} · ${published}`,
+        standbyMa: ma2(r.maQuiescent),
+        alarmMa: ma2(r.maAlarm),
+        note: v.watts !== undefined
+          ? `From ${published} at ${VESDA_SUPPLY_VOLTAGE} V.${raised ? ' Alarm taken at standby.' : ''}`
+          : undefined,
+      });
+    }
+  }
+  for (const a of VESDA_ACCESSORIES) {
+    const display = a.id.startsWith('display');
+    out.push({
+      id: `acc:${a.id}`,
+      kind: 'accessory',
+      // "Display module" reads as "VESDA display module"; "VIC-010" stays as it is.
+      label: `VESDA ${/^[A-Z][a-z]/.test(a.label) ? a.label.charAt(0).toLowerCase() + a.label.slice(1) : a.label}`,
+      detail: `${a.maQuiescent} mA standby, ${a.maAlarm} mA alarm${display ? ' · not for A10 models' : ''}`,
+      standbyMa: a.maQuiescent,
+      alarmMa: a.maAlarm,
+      note: display
+        ? 'A10 models already include a display.'
+        : a.published ? undefined : 'From published watts at 24 V.',
+    });
+  }
+  return out;
+}
+
+/** A VESDA supply's two figures, for the panel and supply boxes. */
+export function vesdaSupplyNote(psu: VesdaPsu): string {
+  return `${psu.model}: ${psu.ratedA} A, ${psu.maxBatteryAh} Ah max.${psu.verified ? '' : ' Distributor figures; confirm on the datasheet.'}`;
 }

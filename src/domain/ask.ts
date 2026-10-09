@@ -95,8 +95,8 @@ export const CALCULATORS: CalculatorDef[] = [
   },
   {
     title: 'VESDA and aspirating sizing',
-    body: 'Aspirator current from the published watts, for published settings only.',
-    route: '/tools/vesda',
+    body: 'VESDA-E aspirator loads, in the FIP battery calculator.',
+    route: '/tools/battery',
     terms: ['vesda', 'aspirating', 'asd', 'aspirator', 'laserplus', 'vlf', 'vli', 'sampling'],
   },
   {

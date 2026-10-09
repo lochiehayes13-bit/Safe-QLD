@@ -1,71 +1,96 @@
 import React, { useMemo, useState } from 'react';
 import { View } from 'react-native';
-import { Stack } from 'expo-router';
-import { autonomyHours, currentForLoad, power, solveOhms } from '@/calc/electrical';
+import { Stack, router } from 'expo-router';
+import { autonomyHours, power } from '@/calc/electrical';
+import { readNumber } from '@/calc/fieldNumber';
+import { OHMS_FIELDS, filledFields, solveFromLatest, touchField, type OhmsField } from '@/calc/ohmsEntry';
+import { formatValue } from '@/calc/units';
 import { useTheme } from '@/theme';
-import { Banner, Card, Field, H2, Label, ResultBlock, Rowed, Screen, Segmented, Txt } from '@/components/ui';
+import { Banner, Button, Card, Field, H2, Label, ResultBlock, Rowed, Screen, Segmented, Txt } from '@/components/ui';
 
-/** Ohm's law, power and battery runtime — the arithmetic that turns up daily. */
+const FIELD_LABEL: Record<OhmsField, string> = { volts: 'Volts', amps: 'Amps', ohms: 'Ohms', watts: 'Watts' };
+const FIELD_UNIT: Record<OhmsField, string> = { volts: 'V', amps: 'A', ohms: 'Ω', watts: 'W' };
+const BLANK: Record<OhmsField, string> = { volts: '', amps: '', ohms: '', watts: '' };
+
+/** Ohm's law, power and battery runtime. */
 export default function OhmsScreen() {
   const t = useTheme();
-  const [volts, setVolts] = useState('24');
-  const [amps, setAmps] = useState('0.5');
-  const [ohms, setOhms] = useState('');
-  const [watts, setWatts] = useState('');
+  const [texts, setTexts] = useState<Record<OhmsField, string>>(BLANK);
+  const [order, setOrder] = useState<OhmsField[]>([]);
 
-  const [pVolts, setPVolts] = useState('240');
-  const [pAmps, setPAmps] = useState('10');
+  const [pVolts, setPVolts] = useState('');
+  const [pAmps, setPAmps] = useState('');
   const [pf, setPf] = useState('1');
   const [phase, setPhase] = useState<'single' | 'three'>('single');
 
-  const [capAh, setCapAh] = useState('17');
-  const [loadA, setLoadA] = useState('0.5');
+  const [capAh, setCapAh] = useState('');
+  const [loadA, setLoadA] = useState('');
 
-  const num = (s: string): number | undefined => {
-    const v = parseFloat(s);
-    return Number.isFinite(v) ? v : undefined;
+  const edit = (field: OhmsField) => (text: string) => {
+    setTexts((prev) => ({ ...prev, [field]: text }));
+    setOrder((prev) => touchField(prev, field));
   };
 
-  const ohmsResult = useMemo(
-    () => solveOhms({ volts: num(volts), amps: num(amps), ohms: num(ohms), watts: num(watts) }),
-    [volts, amps, ohms, watts],
-  );
+  const filled = useMemo(() => filledFields(texts, order), [texts, order]);
+  const ohmsResult = useMemo(() => solveFromLatest(texts, order), [texts, order]);
+  const usedPair = OHMS_FIELDS.filter((f) => filled.slice(0, 2).includes(f));
+  const anyTyped = OHMS_FIELDS.some((f) => texts[f].trim());
 
-  const powerResult = useMemo(
-    () => power({ volts: num(pVolts) ?? 0, amps: num(pAmps) ?? 0, powerFactor: num(pf), phase }),
-    [pVolts, pAmps, pf, phase],
-  );
+  const powerResult = useMemo(() => {
+    const v = readNumber(pVolts);
+    const a = readNumber(pAmps);
+    if (v === undefined || a === undefined) return undefined;
+    return power({ volts: v, amps: a, powerFactor: readNumber(pf), phase });
+  }, [pVolts, pAmps, pf, phase]);
 
-  const runtime = useMemo(() => autonomyHours(num(capAh) ?? 0, num(loadA) ?? 0), [capAh, loadA]);
+  const runtime = useMemo(() => {
+    const cap = readNumber(capAh);
+    const load = readNumber(loadA);
+    return cap === undefined || load === undefined ? null : autonomyHours(cap, load);
+  }, [capAh, loadA]);
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Electrical' }} />
+      <Stack.Screen options={{ title: "Ohm's law" }} />
       <Screen>
-        <H2>Ohm's law</H2>
-        <Txt size="sm" tone="muted">Fill any two. The rest follow.</Txt>
+        <H2>{"Ohm's law"}</H2>
+        <Txt size="sm" tone="muted">Enter any two.</Txt>
         <Rowed gap={2} align="flex-start">
-          <View style={{ flex: 1 }}><Field label="Volts" value={volts} onChangeText={setVolts} keyboardType="decimal-pad" suffix="V" /></View>
-          <View style={{ flex: 1 }}><Field label="Amps" value={amps} onChangeText={setAmps} keyboardType="decimal-pad" suffix="A" /></View>
+          {(['volts', 'amps'] as const).map((f) => (
+            <View key={f} style={{ flex: 1 }}>
+              <Field label={FIELD_LABEL[f]} value={texts[f]} onChangeText={edit(f)} keyboardType="decimal-pad" suffix={FIELD_UNIT[f]} />
+            </View>
+          ))}
         </Rowed>
         <Rowed gap={2} align="flex-start">
-          <View style={{ flex: 1 }}><Field label="Resistance" value={ohms} onChangeText={setOhms} keyboardType="decimal-pad" suffix="Ω" /></View>
-          <View style={{ flex: 1 }}><Field label="Power" value={watts} onChangeText={setWatts} keyboardType="decimal-pad" suffix="W" /></View>
+          {(['ohms', 'watts'] as const).map((f) => (
+            <View key={f} style={{ flex: 1 }}>
+              <Field label={FIELD_LABEL[f]} value={texts[f]} onChangeText={edit(f)} keyboardType="decimal-pad" suffix={FIELD_UNIT[f]} />
+            </View>
+          ))}
         </Rowed>
 
         {ohmsResult ? (
           <Card>
-            <Label>From {ohmsResult.derivedFrom}</Label>
+            <Label>From {usedPair.map((f) => FIELD_LABEL[f].toLowerCase()).join(' and ')}</Label>
             <View style={{ marginTop: t.space(2), gap: t.space(1) }}>
-              <Row label="Voltage" value={`${ohmsResult.volts.toFixed(3)} V`} />
-              <Row label="Current" value={`${ohmsResult.amps.toFixed(4)} A`} />
-              <Row label="Resistance" value={`${ohmsResult.ohms.toFixed(3)} Ω`} />
-              <Row label="Power" value={`${ohmsResult.watts.toFixed(3)} W`} />
+              <Row label="Volts" value={`${formatValue(ohmsResult.volts)} V`} />
+              <Row label="Amps" value={`${formatValue(ohmsResult.amps)} A`} />
+              <Row label="Ohms" value={`${formatValue(ohmsResult.ohms)} Ω`} />
+              <Row label="Watts" value={`${formatValue(ohmsResult.watts)} W`} />
             </View>
           </Card>
-        ) : (
-          <Banner tone="info" title="Enter two values" body="Any two of volts, amps, resistance or power determine the other two." />
-        )}
+        ) : filled.length >= 2 ? (
+          <Banner tone="warn" title="Check the values" body="Zero or negative values won't solve." />
+        ) : null}
+        {anyTyped ? (
+          <Button
+            title="Clear"
+            variant="ghost"
+            compact
+            onPress={() => { setTexts(BLANK); setOrder([]); }}
+          />
+        ) : null}
 
         <H2>Power</H2>
         <Segmented
@@ -74,19 +99,27 @@ export default function OhmsScreen() {
           options={[{ value: 'single', label: 'Single phase' }, { value: 'three', label: 'Three phase' }]}
         />
         <Rowed gap={2} align="flex-start">
-          <View style={{ flex: 1 }}><Field label="Volts" value={pVolts} onChangeText={setPVolts} keyboardType="decimal-pad" suffix="V" /></View>
+          <View style={{ flex: 1 }}>
+            <Field
+              label={phase === 'three' ? 'Line volts' : 'Volts'}
+              value={pVolts}
+              onChangeText={setPVolts}
+              keyboardType="decimal-pad"
+              suffix="V"
+            />
+          </View>
           <View style={{ flex: 1 }}><Field label="Amps" value={pAmps} onChangeText={setPAmps} keyboardType="decimal-pad" suffix="A" /></View>
           <View style={{ flex: 1 }}><Field label="PF" value={pf} onChangeText={setPf} keyboardType="decimal-pad" /></View>
         </Rowed>
-        {powerResult ? (
+        {powerResult === null ? (
+          <Banner tone="warn" title="Check the power factor" body="Between 0 and 1." />
+        ) : (
           <ResultBlock
             label="Real power"
-            value={powerResult.kw.toFixed(3)}
+            value={powerResult ? formatValue(powerResult.kw) : '—'}
             unit="kW"
-            detail={`${powerResult.kva.toFixed(3)} kVA apparent · ${powerResult.watts.toFixed(0)} W`}
+            detail={powerResult ? `${formatValue(powerResult.kva)} kVA apparent · ${formatValue(powerResult.watts)} W` : undefined}
           />
-        ) : (
-          <Banner tone="warn" title="Check the inputs" body="Power factor has to be between 0 and 1." />
         )}
 
         <H2>Battery runtime</H2>
@@ -98,8 +131,9 @@ export default function OhmsScreen() {
           label="Approximate runtime"
           value={runtime !== null ? runtime.toFixed(1) : '—'}
           unit="hours"
-          detail="Plain capacity divided by load. This is a rough guide, not a design figure — sizing a standby battery needs the de-rating the battery calculator applies."
+          detail="Capacity ÷ load, no de-rating. Rough guide only."
         />
+        <Button title="FIP battery" variant="secondary" onPress={() => router.push('/tools/battery')} />
       </Screen>
     </>
   );

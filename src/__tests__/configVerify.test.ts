@@ -670,7 +670,7 @@ describe('the result', () => {
       })],
     }));
     expect(clean.findings).toEqual([]);
-    expect(describeVerdict(clean)).toMatch(/^Nothing found by the \d+ checks/);
+    expect(describeVerdict(clean)).toMatch(/^All \d+ checks clean/);
   });
 });
 

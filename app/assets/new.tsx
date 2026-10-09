@@ -8,7 +8,7 @@ import { nextChangeNo, queueAssetChange } from '@/db/assetChangeRepo';
 import { listOfficeAssetTypes } from '@/db/assetTypeRepo';
 import {
   ASSET_TYPES, SYSTEM_LABELS, activeSystems, assetTypeById,
-  type AssetTypeDef, type AttributeDef, type SystemKind,
+  type AttributeDef, type SystemKind,
 } from '@/seed/assetTypes';
 import { DevicePicker } from '@/components/DevicePicker';
 import type { CatalogueItem } from '@/db/catalogueRepo';
@@ -140,7 +140,7 @@ export default function NewAssetScreen() {
       return;
     }
     if (!d.assetTypeId) {
-      showAlert('What is it?', 'Choose the asset type so the right details are recorded.');
+      showAlert('What is it?', 'Choose the asset type.');
       return;
     }
     const toSimpro = Boolean(simproSite && alsoInSimpro);
@@ -148,8 +148,8 @@ export default function NewAssetScreen() {
       showAlert(
         'Which office type?',
         officeTypes.length
-          ? 'Pick the type the office files this under, or turn off "Also create in Simpro" to keep it on the phone only.'
-          : 'The office\'s asset types have not been read yet, so the asset cannot be created there. Try again with signal, or turn off "Also create in Simpro" to keep it on the phone only.',
+          ? 'Pick the Simpro type, or choose Phone only.'
+          : 'Simpro types not loaded. Try again with signal, or choose Phone only.',
       );
       return;
     }
@@ -215,7 +215,7 @@ export default function NewAssetScreen() {
       <Stack.Screen options={{ title: 'New asset' }} />
       <Screen>
         {draft.recovered ? (
-          <Banner tone="info" title="Picked up where you left off" body="This asset was still being entered when the app last closed." />
+          <Banner tone="info" title="Picked up where you left off" body="Your unsaved asset is back." />
         ) : null}
 
         {/*
@@ -263,7 +263,7 @@ export default function NewAssetScreen() {
               <Card>
                 <Label>Asset code</Label>
                 <Txt size="lg" mono weight="700" tone="accent" style={{ marginTop: 4 }}>{code}</Txt>
-                <Txt size="xs" tone="faint" style={{ marginTop: 4 }}>Assigned automatically when you save.</Txt>
+                <Txt size="xs" tone="faint" style={{ marginTop: 4 }}>Set when you save.</Txt>
               </Card>
             ) : null}
 
@@ -288,7 +288,7 @@ export default function NewAssetScreen() {
             </Rowed>
 
             <H2>Make and model</H2>
-            <Button title="Find in the parts catalogue" variant="secondary" onPress={() => setPicking(true)} />
+            <Button title="Pick from catalogue" variant="secondary" onPress={() => setPicking(true)} />
             <Rowed gap={2} align="flex-start">
               <View style={{ flex: 1 }}><Field label="Manufacturer" value={d.manufacturer} onChangeText={(v) => set({ manufacturer: v })} /></View>
               <View style={{ flex: 1 }}><Field label="Model" value={d.model} onChangeText={(v) => set({ model: v })} /></View>
@@ -316,7 +316,7 @@ export default function NewAssetScreen() {
             <Button title="Save asset" onPress={save} loading={saving} />
           </>
         ) : (
-          <Txt tone="muted" size="sm">Pick a system and type to see the details that apply.</Txt>
+          <Txt tone="muted" size="sm">Pick a system and type.</Txt>
         )}
 
         <DevicePicker visible={picking} onClose={() => setPicking(false)} onPick={applyCatalogue} />
@@ -357,10 +357,10 @@ function OfficeTypeCard({ alsoInSimpro, onToggle, officeTypes, loading, failed, 
       </View>
       {alsoInSimpro ? (
         <View style={{ marginTop: t.space(2), gap: t.space(1.5) }}>
-          {loading ? <Txt size="sm" tone="muted">Reading the office's asset types…</Txt> : null}
+          {loading ? <Txt size="sm" tone="muted">Loading Simpro types…</Txt> : null}
           {failed ? (
             <>
-              <Banner tone="warn" title="The office's asset types could not be read" body={failed} />
+              <Banner tone="warn" title="Couldn't load Simpro types" body={failed} />
               <Button title="Try again" variant="secondary" compact onPress={onRetry} />
             </>
           ) : null}
@@ -368,8 +368,8 @@ function OfficeTypeCard({ alsoInSimpro, onToggle, officeTypes, loading, failed, 
             <>
               <Txt size="sm" tone="muted">
                 {chosen
-                  ? `Filed in the office as “${chosen.name}”${suggested && chosen.id === suggested.id ? ' — suggested from the type above' : ''}.`
-                  : 'No office type matches this one. Pick the register it belongs on.'}
+                  ? `Simpro type: “${chosen.name}”${suggested && chosen.id === suggested.id ? ' (suggested)' : ''}.`
+                  : 'No match. Pick the Simpro type.'}
               </Txt>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2) }}>
                 {officeTypes.map((o) => (
@@ -379,7 +379,7 @@ function OfficeTypeCard({ alsoInSimpro, onToggle, officeTypes, loading, failed, 
             </>
           ) : null}
           <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-            Queued, not sent straight away: you get half a minute on the asset's screen to take it back, and it waits for signal.
+            You get 30 seconds to undo. Sends once there’s signal.
           </Txt>
         </View>
       ) : null}

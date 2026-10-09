@@ -45,14 +45,24 @@ export default function ImpairmentsScreen() {
         <View style={{ padding: t.space(4), paddingBottom: t.space(2), gap: t.space(2) }}>
           <Segmented value={scope} onChange={setScope} options={[{ value: 'open', label: 'Open' }, { value: 'all', label: 'All' }]} />
           <Button title="Declare impairment" variant="danger" onPress={() => router.push('/impairment/new')} />
-          {failed ? <Banner tone="fail" title="This list could not be read" body={failed} /> : null}
+          {failed ? (
+            <>
+              <Banner tone="fail" title="Couldn't load impairments" body={failed} />
+              <Button title="Try again" variant="secondary" onPress={() => { void load(); }} />
+            </>
+          ) : null}
         </View>
         <FlatList
           data={items}
           keyExtractor={(i) => i.id}
           contentContainerStyle={{ padding: t.space(4), paddingTop: 0, gap: t.space(3), paddingBottom: t.space(20) }}
-          ListEmptyComponent={failed ? null : <EmptyState
-          icon="shield-check-outline" title="No systems impaired" body="Declaring an impairment here keeps the clock and the notifications visible until the system is back." />}
+          ListEmptyComponent={failed ? null : (
+            <EmptyState
+              icon="shield-check-outline"
+              title={scope === 'open' ? 'No systems impaired' : 'No impairments yet'}
+              body="Declare one when you take a system out of service."
+            />
+          )}
           renderItem={({ item }) => {
             const outstanding = impairmentOutstanding(item);
             return (

@@ -10,6 +10,7 @@ import { getSite } from '@/db/repo';
 import type { Site } from '@/domain/types';
 import { nowIso } from '@/db';
 import { qldMoment } from '@/domain/qldTime';
+import { readRestoreTime, restoreBoxes } from '@/domain/restoreTime';
 import { loadPrefs } from '@/app-prefs';
 import { impairmentNoticeHtml } from '@/export/impairmentNotice';
 import { shareFile, writePdf } from '@/export/files';
@@ -19,6 +20,7 @@ import { useTheme } from '@/theme';
 import { Banner, Button, Card, Divider, Field, H2, Label, Rowed, Screen, Txt } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
 import { JobFileCard } from '@/components/JobFileCard';
+import { RestoreTimeFields } from '@/components/RestoreTimeFields';
 import { useRecordPatch } from '@/hooks/useRecordPatch';
 import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { showAlert } from '@/components/alert';
@@ -42,6 +44,8 @@ export default function ImpairmentScreen() {
   // And a read that threw is neither. See RecordGate.
   const [failed, setFailed] = useState<string | null>(null);
   const [, tick] = useState(0);
+  /** The expected restore time, while it is being changed. Null when it is not. */
+  const [restoreDraft, setRestoreDraft] = useState<{ date: string; time: string } | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -110,7 +114,7 @@ export default function ImpairmentScreen() {
         showAlert(said.title, said.body);
       }
     } catch (e) {
-      showAlert('Could not produce the notice', describeActionFailure(e, 'producing the impairment notice'));
+      showAlert("Couldn't make the notice", describeActionFailure(e, 'make the impairment notice'));
     } finally {
       setBusy(false);
     }
@@ -138,6 +142,17 @@ export default function ImpairmentScreen() {
       return;
     }
     update({ restoredAt: nowIso() });
+  };
+
+  const saveRestore = () => {
+    if (!restoreDraft) return;
+    const read = readRestoreTime(restoreDraft.date, restoreDraft.time, Date.now());
+    if ('why' in read) {
+      showAlert('Check the restore time', read.why);
+      return;
+    }
+    setRestoreDraft(null);
+    void update({ expectedRestoreAt: read.at });
   };
 
   return (
@@ -168,7 +183,7 @@ export default function ImpairmentScreen() {
             {String(hours).padStart(2, '0')}:{String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
           </Txt>
           <Txt size="sm" tone="muted">
-            {restored ? 'Total time out of service' : 'Elapsed since declared'}
+            {restored ? 'Time out of service' : 'Since declared'}
           </Txt>
         </View>
 
@@ -185,12 +200,43 @@ export default function ImpairmentScreen() {
               <Txt size="sm" tone="muted" style={{ marginTop: 2, lineHeight: 20 }}>{rec.reason}</Txt>
             </>
           ) : null}
+          <Divider />
+          <Rowed gap={2}>
+            <View style={{ flex: 1 }}>
+              <Label>Expected back</Label>
+              <Txt size="sm" style={{ marginTop: 2 }}>
+                {rec.expectedRestoreAt ? (qldMoment(rec.expectedRestoreAt) ?? rec.expectedRestoreAt) : 'Not known'}
+              </Txt>
+            </View>
+            {!restored && !restoreDraft ? (
+              <Button
+                title="Change"
+                variant="ghost"
+                compact
+                onPress={() => setRestoreDraft(restoreBoxes(rec.expectedRestoreAt))}
+              />
+            ) : null}
+          </Rowed>
+          {restoreDraft ? (
+            <View style={{ marginTop: t.space(2), gap: t.space(2) }}>
+              <RestoreTimeFields
+                label="New time"
+                date={restoreDraft.date}
+                time={restoreDraft.time}
+                onChange={setRestoreDraft}
+              />
+              <Rowed gap={2}>
+                <Button title="Save" compact onPress={saveRestore} />
+                <Button title="Cancel" variant="ghost" compact onPress={() => setRestoreDraft(null)} />
+              </Rowed>
+            </View>
+          ) : null}
         </Card>
 
         {!restored && outstanding.length ? (
           <Banner
             tone="warn"
-            title={`${outstanding.length} thing${outstanding.length === 1 ? '' : 's'} still to do`}
+            title={`${outstanding.length} still to do`}
             body={outstanding.join('\n')}
           />
         ) : null}
@@ -218,16 +264,14 @@ export default function ImpairmentScreen() {
           value={rec.alternativeMeasures ?? ''}
           onChangeText={(v) => update({ alternativeMeasures: v })}
           multiline
-          placeholder="e.g. Hourly fire watch by site security, portable extinguishers staged at stair cores"
+          placeholder="e.g. Hourly fire watch by site security"
         />
         <Field label="Notes" value={rec.notes ?? ''} onChangeText={(v) => update({ notes: v })} multiline />
 
-        <H2>The notice</H2>
+        <H2>Notice</H2>
         <Card>
           <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-            Ticking &ldquo;responsible person notified&rdquo; records that a conversation happened. It is not the notice.
-            This is: what is off, what is being done instead, and when it goes back on, in words a building manager can
-            read.
+            Give this notice to the building manager.
           </Txt>
           <Rowed gap={2} style={{ marginTop: t.space(3) }}>
             <Button title="Print or share" style={{ flex: 1 }} loading={busy} onPress={() => { void shareNotice(); }} />
@@ -253,16 +297,16 @@ export default function ImpairmentScreen() {
           attachedAt={rec.attachedAt}
           what="impairment notice"
           filename={`${safeFileName(`Impairment notice ${site?.name ?? ''}`, 'impairment-notice')}.pdf`}
-          subject={`Impairment — ${rec.system}${site?.name ? ` — ${site.name}` : ''}`}
+          subject={`Impairment: ${rec.system}${site?.name ? `, ${site.name}` : ''}`}
           buildFile={notice}
           onPickJob={(job) => update({ jobExternalId: job?.externalId, jobTitle: job?.title })}
           onAttached={(at) => update({ attachedAt: at })}
           disabled={!site}
-          disabledWhy={site ? undefined : 'The site this impairment belongs to is not on this phone yet. Sync first.'}
+          disabledWhy={site ? undefined : 'Site not on this phone yet. Sync first.'}
         />
 
         {!restored ? (
-          <Button title="System restored — close impairment" onPress={close} />
+          <Button title="Mark system restored" onPress={close} />
         ) : (
           <Txt size="sm" tone="pass">Closed {qldMoment(rec.restoredAt) ?? rec.restoredAt}</Txt>
         )}

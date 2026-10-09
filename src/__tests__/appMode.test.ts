@@ -153,14 +153,14 @@ describe('nothing is ever unreachable', () => {
   });
 
   it('says a hidden screen is still opened by the action that opens it, rather than sending you to search', () => {
-    // Van stock ends a restock request on the purchase request it just made,
-    // and it does that in Technician mode too. Telling somebody to search for
-    // a screen they were standing on is how a true setting reads as a broken one.
+    // Things I need ends a request on the purchase request it just made, and
+    // it does that in Technician mode too. Telling somebody to search for a
+    // screen they were standing on is how a true setting reads as a broken one.
     const po = reach('/work/purchases', 'technician')!;
     expect(po.channel).toBe('opened');
     expect(po.proven).toBe(true);
-    expect(po.chain).toEqual(['/work', '/work/stock', '/work/purchases']);
-    expect(po.sentence).toContain('Van stock still opens it');
+    expect(po.chain).toEqual(['/work', '/work/needs', '/work/purchases']);
+    expect(po.sentence).toContain('Things I need still opens it');
   });
 });
 

@@ -17,7 +17,7 @@ describe('a list of the office own records', () => {
     const words = officeEmptyState(fresh, 'jobs');
     expect(words.title).toMatch(/not connected/i);
     expect(words.body).toMatch(/Simpro/);
-    expect(words.action).toEqual({ label: 'Connect to the office', route: '/settings' });
+    expect(words.action).toEqual({ label: 'Connect to Simpro', route: '/settings' });
   });
 
   it('never tells somebody to add one by hand when the office has thousands', () => {

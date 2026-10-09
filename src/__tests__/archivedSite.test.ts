@@ -1,7 +1,7 @@
 /**
  * A building the office has archived is still findable.
  *
- * This is the gap behind the owner's "why the fuck is Storage Choice
+ * This is the gap behind the owner's "why the fuck is Fictional Storage
  * Maroochydore not in this". Simpro's `sites/` list returns current sites; an
  * archived one is simply absent. The sync read that list, wrote what came
  * back, and nothing anywhere recorded that a whole class of buildings was
@@ -33,10 +33,10 @@ let db: NodeSqliteDb;
 
 const ARCHIVED = {
   id: 'arch',
-  name: 'Storage Choice - Maroochydore',
+  name: 'Fictional Storage - Maroochydore',
   suburb: 'Maroochydore',
   postcode: '4558',
-  clientName: 'Storage Choice',
+  clientName: 'Fictional Storage',
   siteRef: 'SIMPRO:4471',
   externalId: '4471',
   externalSource: 'simpro',
@@ -45,8 +45,8 @@ const ARCHIVED = {
 
 const LIVE = {
   id: 'live',
-  name: 'Storage Choice - Sumner Park',
-  suburb: 'Sumner Park',
+  name: 'Fictional Storage - Northside',
+  suburb: 'Northside',
   siteRef: 'SIMPRO:3349',
   externalId: '3349',
   externalSource: 'simpro',

@@ -51,11 +51,8 @@ export function officeEmptyState(state: DeviceDataState, what: string): EmptySta
   if (!state.connected) {
     return {
       title: 'This device is not connected yet',
-      body:
-        `The office's ${what} live in Simpro, and nothing has been pulled onto this device. `
-        + 'Connect it once in Settings and everything comes down — on a phone, in a browser, '
-        + 'wherever this is open.',
-      action: { label: 'Connect to the office', route: '/settings' },
+      body: `Connect to Simpro in Settings to load ${what}.`,
+      action: { label: 'Connect to Simpro', route: '/settings' },
     };
   }
   if (!state.everSynced) {
@@ -91,7 +88,7 @@ export function needsSiteState(state: DeviceDataState, what: string): EmptyState
       body:
         `${what} belongs to a building, and this device has none. Connect it to the office in `
         + 'Settings to bring the sites down, or add one by hand if this is somewhere new.',
-      action: { label: 'Connect to the office', route: '/settings' },
+      action: { label: 'Connect to Simpro', route: '/settings' },
     };
   }
   return {

@@ -131,8 +131,8 @@ export default function PointsScreen() {
       showAlert(
         'Nothing to export',
         debounced
-          ? 'Nothing matches that search, so there are no rows to put in a spreadsheet. Clear the search first.'
-          : 'This site has no points yet. Import a device list from the panel, and they will be here.',
+          ? 'Nothing matches that search. Clear it first.'
+          : 'No points here. Import the panel config first.',
       );
       return;
     }
@@ -179,7 +179,7 @@ export default function PointsScreen() {
             <TextInput
               value={search}
               onChangeText={setSearch}
-              placeholder="Search device text, zone or address"
+              placeholder="Search text, zone or address"
               placeholderTextColor={t.color.textFaint}
               autoCapitalize="none"
               autoCorrect={false}
@@ -252,17 +252,17 @@ export default function PointsScreen() {
             windowSize={11}
             removeClippedSubviews
             ListHeaderComponent={
-              failed ? <Banner tone="fail" title="The points could not be read" body={failed} /> : null
+              failed ? <Banner tone="fail" title="Could not load points" body={failed} /> : null
             }
             ListEmptyComponent={
               failed ? null : (
                 <EmptyState
-          icon="dots-hexagon"
+                  icon="dots-hexagon"
                   title={debounced ? 'Nothing matched' : 'No points'}
                   body={
                     debounced
-                      ? 'Try a shorter search, or turn on unused points if you are looking at a spare address.'
-                      : 'Import a device list to populate this site.'
+                      ? 'Try a shorter search, or show unused points.'
+                      : 'Import the panel config or device list.'
                   }
                 />
               )

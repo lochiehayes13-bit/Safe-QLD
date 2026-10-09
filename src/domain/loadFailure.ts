@@ -54,24 +54,19 @@ function adviceFor(lower: string): string | undefined {
       + 'thing on a work phone — and try again. Nothing that was already saved has been lost.';
   }
   if (/database is locked|sqlite_busy|database table is locked/.test(lower)) {
-    return 'Something else on the phone still has the database open. This usually clears on its '
-      + 'own in a moment, so try again; if it does not, close the app fully and reopen it.';
+    return 'The database is busy. Try again; if it keeps happening, close and reopen the app.';
   }
   if (/no such table|no such column|readonly database|file is not a database|malformed/.test(lower)) {
-    return 'The app\'s own storage is not in the shape this build expects, which is not something '
-      + 'to fix on site. Send this message to the office before doing more work in the app.';
+    return 'The app\'s storage needs repair. Send this message to the office.';
   }
   if (/disk i\/o|sqlite_ioerr|input\/output error/.test(lower)) {
-    return 'The phone could not read its own storage. Restart it and try again; if it keeps '
-      + 'happening the handset needs looking at, not the app.';
+    return 'The phone could not read its storage. Restart it and try again.';
   }
   if (/enoent|no such file|could not be found on disk/.test(lower)) {
-    return 'A file this needed is not on the device any more. It may have been cleared to make '
-      + 'room, in which case producing it again will rebuild it.';
+    return 'A file is no longer on this device. Make it again.';
   }
   if (/network|timed out|timeout|fetch failed|econnrefused|enotfound/.test(lower)) {
-    return 'That step needed the office and could not reach it. Everything recorded on this phone '
-      + 'is still here and still works offline.';
+    return 'No connection to the office. Your work is saved on this phone.';
   }
   return undefined;
 }
@@ -87,7 +82,7 @@ export function describeLoadFailure(error: unknown, what: string): string {
   const message = messageOf(error);
   const opening = message
     ? `${capitalise(what)} could not be read: ${message}`
-    : `${capitalise(what)} could not be read, and the device did not say why.`;
+    : `${capitalise(what)} could not be read.`;
   const advice = adviceFor(message.toLowerCase());
   return advice ? `${opening}\n\n${advice}` : opening;
 }
@@ -105,8 +100,8 @@ export function describeLoadFailure(error: unknown, what: string): string {
 export function describeActionFailure(error: unknown, what: string): string {
   const message = messageOf(error);
   const opening = message
-    ? `The app could not ${what}: ${message}`
-    : `The app could not ${what}, and the device did not say why.`;
+    ? `Couldn't ${what}: ${message}`
+    : `Couldn't ${what}.`;
   const advice = adviceFor(message.toLowerCase());
   return advice ? `${opening}\n\n${advice}` : opening;
 }

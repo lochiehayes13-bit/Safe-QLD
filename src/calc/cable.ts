@@ -194,7 +194,7 @@ export function combineDerating(factors: DeratingFactor[]): DeratingResult {
     } else if (f.factor > MAX_SANE_FACTOR) {
       rejected.push({ factor: f, reason: `above ${MAX_SANE_FACTOR}, which reads as a mistyped lookup` });
     } else if (!f.source.trim()) {
-      rejected.push({ factor: f, reason: 'no source, and a derating nobody can point at is not a derating' });
+      rejected.push({ factor: f, reason: 'no source given' });
     } else {
       applied.push(f);
     }
@@ -296,7 +296,7 @@ export function coordinate(input: CoordinationInput): CoordinationResult {
   });
 
   if (!Number.isFinite(ib) || ib <= 0) return bad('Enter the current the load will draw.');
-  if (!Number.isFinite(iz) || iz <= 0) return bad('The cable has no capacity to protect — load a table figure first.');
+  if (!Number.isFinite(iz) || iz <= 0) return bad('No capacity figure for this size.');
 
   const chosen = input.deviceRatingA !== undefined && Number.isFinite(input.deviceRatingA)
     ? input.deviceRatingA
@@ -307,7 +307,7 @@ export function coordinate(input: CoordinationInput): CoordinationResult {
     return bad(
       smallest === undefined
         ? `No listed device rating reaches ${round(ib, 1)} A.`
-        : `The smallest device that carries ${round(ib, 1)} A is ${smallest} A, and the cable only takes ${round(iz, 1)} A. The cable is too small, not the device too large.`,
+        : `Smallest device for ${round(ib, 1)} A is ${smallest} A, but the cable takes only ${round(iz, 1)} A. The cable is too small.`,
     );
   }
 
@@ -880,18 +880,18 @@ export function sizeCable(input: SizingInput): SizingResult {
  */
 function refusalFor(considered: SizedCandidate[], input: SizingInput): string {
   if (!considered.length) {
-    return 'No table rows are loaded for this cable and installation method. Load your own figures in Cable tables and the sizing runs against them.';
+    return 'No sizes for this arrangement. Pick another.';
   }
   const largest = considered[considered.length - 1]!;
   switch (largest.failedOn) {
     case 'capacity':
-      return `Even ${largest.row.areaMm2} mm² only carries ${largest.capacityA} A where this is installed, against a ${round(input.designCurrentA, 1)} A load. The installation method or the derating is what has to change.`;
+      return `Even ${largest.row.areaMm2} mm² carries only ${largest.capacityA} A here, against ${round(input.designCurrentA, 1)} A. Change the installation method or derating.`;
     case 'volt drop':
-      return `Every size loaded exceeds the ${largest.drop?.limitPercent ?? DEFAULT_DROP_LIMIT_PERCENT}% volt drop over ${input.lengthM} m. Shorten the run, raise the supply voltage, or load larger sizes.`;
+      return `Every size exceeds ${largest.drop?.limitPercent ?? DEFAULT_DROP_LIMIT_PERCENT}% volt drop over ${input.lengthM} m. Shorten the run or raise the voltage.`;
     case 'protection':
-      return `No device rating sits between the ${round(input.designCurrentA, 1)} A load and what these cables carry. ${largest.protection.reason}`;
+      return `No device rating fits between ${round(input.designCurrentA, 1)} A and the cable. ${largest.protection.reason}`;
     case 'fault':
-      return `Every size loaded is below the ${largest.faultMinimumMm2} mm² the fault current needs. A faster protective device or a larger cable.`;
+      return `Every size is below the ${largest.faultMinimumMm2} mm² the fault current needs. Use a faster device or larger cable.`;
     default:
       return 'Nothing passed every check.';
   }

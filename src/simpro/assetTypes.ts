@@ -214,7 +214,7 @@ export function retryKeyFor(
 }
 
 export const NO_RETRY_KEY_WORDS =
-  'This asset type has no tag field in Simpro, so a retry could create it twice. Give it a location, or create it in the office instead and keep it on the phone only here.';
+  'No tag field for this type in Simpro. Add a location, or create it in the office.';
 
 /**
  * Every custom field of the office type, with the asset's value for it.

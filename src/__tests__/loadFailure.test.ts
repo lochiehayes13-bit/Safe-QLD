@@ -55,7 +55,7 @@ describe('a read that failed', () => {
 
   it('still says something when the device says nothing', () => {
     const said = describeLoadFailure(undefined, 'this asset');
-    expect(said).toBe('This asset could not be read, and the device did not say why.');
+    expect(said).toBe('This asset could not be read.');
   });
 
   it('does not swallow a message it has no advice for', () => {
@@ -73,12 +73,12 @@ describe('an action that failed', () => {
      * write sends them looking in the wrong place.
      */
     const said = describeActionFailure(new Error('ENOSPC: no space left'), 'export this timesheet');
-    expect(said).toContain('The app could not export this timesheet');
+    expect(said).toContain("Couldn't export this timesheet");
     expect(said).toMatch(/run out of storage/i);
   });
 
   it('says so plainly when nothing came back with the failure', () => {
     expect(describeActionFailure(null, 'produce the zone chart'))
-      .toBe('The app could not produce the zone chart, and the device did not say why.');
+      .toBe("Couldn't produce the zone chart.");
   });
 });

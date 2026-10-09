@@ -97,7 +97,7 @@ export default function ConfigScreen() {
       setTying(false);
       reload();
     } catch (e) {
-      showAlert('Could not tie it to that site', describeActionFailure(e, 'tie this configuration to a site'));
+      showAlert("Couldn't tie it to that site", describeActionFailure(e, 'tie this configuration to a site'));
     } finally {
       setBusy(false);
     }
@@ -121,11 +121,11 @@ export default function ConfigScreen() {
       showAlert(
         'Written in',
         `${result.pointCount.toLocaleString()} devices and ${result.zoneCount.toLocaleString()} zones `
-        + `are now on ${siteName}.`,
+        + `added to ${siteName}.`,
       );
       router.push({ pathname: '/site/[id]', params: { id: siteId } });
     } catch (e) {
-      showAlert('Could not write it in', describeActionFailure(e, 'write this configuration into the site'));
+      showAlert("Couldn't write it in", describeActionFailure(e, 'write this configuration into the site'));
     } finally {
       setBusy(false);
     }
@@ -135,7 +135,7 @@ export default function ConfigScreen() {
     const siteId = record?.siteId;
     const siteName = record?.siteName;
     if (!siteId || !siteName) {
-      showAlert('Which site?', 'Tie this configuration to a site first, so it is clear where the devices go.');
+      showAlert('Which site?', 'Choose a site first.');
       return;
     }
     /*
@@ -160,19 +160,14 @@ export default function ConfigScreen() {
     const already = typeof panelsOnSite === 'number' ? panelsOnSite : 0;
     showAlert(
       `Write into ${siteName}?`,
-      `${record.summary.points.toLocaleString()} devices and ${record.summary.zones.toLocaleString()} zones `
-      + `will be added to that site's register.\n\n`
+      `Adds ${record.summary.points.toLocaleString()} devices and ${record.summary.zones.toLocaleString()} zones. `
+      + 'Nothing on the site is replaced.'
       + (panelsOnSite === 'failed'
-        ? `What ${siteName} already holds could not be read, so this cannot say whether the building is `
-          + 'already on it. Writing adds panels rather than replacing them, so if it is, the site ends up '
-          + 'holding the building twice and only deleting the old panel by hand undoes that. Open the site '
-          + 'and check first.'
+        ? `\n\n${siteName} could not be read. Open the site and check the building isn't already on it.`
         : already > 0
-          ? `${siteName} already has ${already} panel${already === 1 ? '' : 's'} on it, and this adds to them `
-            + 'rather than replacing them. If this file is a newer version of what is already there, delete the '
-            + 'old panel first — otherwise the site holds the building twice.'
-          : 'This adds panels to the site rather than replacing anything, so writing the same file in twice '
-            + 'would hold the building twice.'),
+          ? `\n\n${siteName} already has ${already} panel${already === 1 ? '' : 's'}. `
+            + 'If this file is newer, delete the old panel first.'
+          : ''),
       [
         { text: 'Not now', style: 'cancel' },
         { text: 'Write it in', onPress: () => { void runImport(siteId, siteName); } },
@@ -184,7 +179,7 @@ export default function ConfigScreen() {
     if (!id || !record) return;
     showAlert(
       `Remove ${record.fileName}?`,
-      'The file goes off this phone. Anything already written into a site stays where it is.',
+      'Anything written into a site stays.',
       [
         { text: 'Keep it', style: 'cancel' },
         {
@@ -193,7 +188,7 @@ export default function ConfigScreen() {
           onPress: () => {
             void forgetConfig(id)
               .then(() => router.replace('/config'))
-              .catch((e: unknown) => showAlert('Could not remove it', describeActionFailure(e, 'remove this configuration')));
+              .catch((e: unknown) => showAlert("Couldn't remove it", describeActionFailure(e, 'remove this configuration')));
           },
         },
       ],
@@ -205,7 +200,7 @@ export default function ConfigScreen() {
     setBusy(true);
     void createSite({ name })
       .then((site) => tie(site.id))
-      .catch((e: unknown) => showAlert('Could not create the site', describeActionFailure(e, 'create a site')))
+      .catch((e: unknown) => showAlert("Couldn't create the site", describeActionFailure(e, 'create a site')))
       .finally(() => setBusy(false));
   };
 
@@ -251,24 +246,24 @@ export default function ConfigScreen() {
         <Banner
           tone="pass"
           title={`Written into ${record.siteName ?? 'a site'}`}
-          body={`This configuration's devices and zones were added to the register on ${formatAuDate(record.importedAt)}.`}
+          body={`Added to the register ${formatAuDate(record.importedAt)}.`}
         />
       ) : (
         <Banner
           tone="info"
-          title="Nothing has been written into a site"
-          body="This file has been read, not imported. The register is untouched, and stays that way until you use Write into a site below."
+          title="Read only"
+          body="Not written into a site."
         />
       )}
 
       {opened.unreadable ? (
-        <Banner tone="warn" title="This build could not read the contents" body={opened.unreadable} />
+        <Banner tone="warn" title="Couldn't read the contents" body={opened.unreadable} />
       ) : null}
 
       {summary?.warnings.length ? (
         <Banner
           tone="warn"
-          title={`${summary.warnings.length} thing${summary.warnings.length === 1 ? '' : 's'} the reader could not do`}
+          title={`${summary.warnings.length} warning${summary.warnings.length === 1 ? '' : 's'}`}
           body={summary.warnings.join('\n\n')}
         />
       ) : null}
@@ -286,40 +281,40 @@ export default function ConfigScreen() {
         </>
       ) : null}
 
-      <SectionHeader title="Look through it" />
+      <SectionHeader title="Browse" />
       <Card>
         <Row
           icon="format-list-bulleted"
           title="Devices"
-          body="Every point, searchable by text, address, zone or what it is."
+          body="Search by text, address, zone or type."
           onPress={() => router.push({ pathname: '/config/points', params: { id } })}
         />
         <Divider />
         <Row
           icon="shield-check-outline"
           title="Check it"
-          body="What is wrong with this configuration, and what each finding would mean on site."
+          body="Clashes and gaps in the programming."
           onPress={() => router.push({ pathname: '/config/verify', params: { id } })}
         />
         <Divider />
         <Row
           icon="sitemap-outline"
           title="Cause and effect"
-          body="The logic as the panel holds it, with the equations it was written from."
+          body="Rules and the equations behind them."
           onPress={() => router.push({ pathname: '/config/logic', params: { id } })}
         />
         <Divider />
         <Row
           icon="compare-horizontal"
           title="Compare with a site"
-          body="What is in the file that is not on the register, and the other way round."
+          body="The file against the site register."
           onPress={() => router.push({ pathname: '/config/compare', params: { id } })}
         />
         <Divider />
         <Row
           icon="table-eye"
           title="Inside the file"
-          body="The vendor tool's own tables, including the ones this app does not read."
+          body="Raw tables from the vendor tool."
           onPress={() => router.push({ pathname: '/config/raw', params: { id } })}
         />
       </Card>
@@ -348,9 +343,9 @@ export default function ConfigScreen() {
                 <View style={{ marginVertical: t.space(2) }}><Divider /></View>
                 {loops.map((loop) => (
                   <Txt key={loop.number} size="xs" tone="muted" style={{ lineHeight: 18 }}>
-                    {`Loop ${loop.number}${loop.label ? ` — ${loop.label}` : ''}: `}
+                    {`Loop ${loop.number}${loop.label ? ` (${loop.label})` : ''}: `}
                     {loop.empty
-                      ? 'declared, nothing addressed on it'
+                      ? 'empty'
                       : `${loop.devices} device${loop.devices === 1 ? '' : 's'}`
                         + `${loop.spare ? `, ${loop.spare} spare` : ''}`
                         + `${loop.lowestAddress !== undefined ? `, addresses ${loop.lowestAddress}–${loop.highestAddress}` : ''}`
@@ -375,7 +370,7 @@ export default function ConfigScreen() {
               ))}
               {chart.rows.length > 40 ? (
                 <Txt size="xs" tone="faint" style={{ marginTop: t.space(2) }}>
-                  {`${(chart.rows.length - 40).toLocaleString()} more zones. Devices lists every one of them.`}
+                  {`${(chart.rows.length - 40).toLocaleString()} more. See Devices.`}
                 </Txt>
               ) : null}
             </Card>
@@ -383,7 +378,7 @@ export default function ConfigScreen() {
         </View>
       ))}
 
-      <SectionHeader title="Where it belongs" />
+      <SectionHeader title="Site" />
       {record?.siteName ? (
         <Card>
           <Rowed gap={2}>
@@ -391,18 +386,18 @@ export default function ConfigScreen() {
             <Button title="Change" variant="ghost" compact onPress={() => setTying(true)} />
           </Rowed>
           <Txt size="xs" tone="muted" style={{ marginTop: t.space(1), lineHeight: 17 }}>
-            Tying it to a site is a label, not an import. It is what lets the comparison know which register to read.
+            Sets the register Compare reads. Nothing is written in.
           </Txt>
         </Card>
       ) : (
         <Card>
           <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-            Not tied to a site yet. Tie it to one and the comparison knows which register to read against.
+            Not tied to a site. Compare needs one.
           </Txt>
           <View style={{ height: t.space(2) }} />
           <Rowed gap={2}>
             <Button title="Choose a site" variant="secondary" compact onPress={() => setTying(true)} />
-            <Button title="Create one from the file" variant="ghost" compact onPress={newSiteFromFile} />
+            <Button title="New site from file" variant="ghost" compact onPress={newSiteFromFile} />
           </Rowed>
         </Card>
       )}
@@ -418,7 +413,7 @@ export default function ConfigScreen() {
             sites={sites}
             value={record?.siteId}
             onChange={(siteId) => { void tie(siteId); }}
-            label="Tie this configuration to"
+            label="Tie to site"
             suggested={record?.siteId ? [record.siteId] : []}
           />
           <View style={{ height: t.space(2) }} />

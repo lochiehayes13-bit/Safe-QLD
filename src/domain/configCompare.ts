@@ -222,7 +222,7 @@ export function compareConfig(
    * Second pass: the same device at a different address. Only where the text
    * names exactly one device on each side, because a name shared by two is not
    * an identity — the same reasoning that stops the site importers matching
-   * three buildings called "Luggage Direct" onto one.
+   * three buildings called "Bag Depot" onto one.
    */
   const byText = (list: readonly ConfigPoint[]) => {
     const map = new Map<string, ConfigPoint[]>();
@@ -318,9 +318,9 @@ export function describeComparison(c: ConfigComparison): string {
       : 'Nothing could be compared.';
   }
   const parts: string[] = [];
-  if (c.added.length) parts.push(`${c.added.length} in the file and not here`);
-  if (c.removed.length) parts.push(`${c.removed.length} here and not in the file`);
-  if (c.changed.length) parts.push(`${c.changed.length} different`);
+  if (c.added.length) parts.push(`${c.added.length} in file only`);
+  if (c.removed.length) parts.push(`${c.removed.length} on register only`);
+  if (c.changed.length) parts.push(`${c.changed.length} changed`);
   const zones = c.zonesAdded.length + c.zonesRemoved.length + c.zonesRetexted.length;
   if (zones) parts.push(`${zones} zone${zones === 1 ? '' : 's'} changed`);
   return `${parts.join(', ')}.`;

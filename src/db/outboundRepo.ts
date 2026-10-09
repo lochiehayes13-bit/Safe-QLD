@@ -167,7 +167,7 @@ export async function resultsForRun(run: RoutineRun): Promise<OutboundResult[]> 
       WHERE a.siteId = ?
         AND e.occurredAt BETWEEN ? AND ?
         AND e.kind IN ('passed','failed','not-tested')
-      ORDER BY e.occurredAt ASC`,
+      ORDER BY e.occurredAt ASC, CASE e.kind WHEN 'not-tested' THEN 0 WHEN 'passed' THEN 1 ELSE 2 END ASC`,
     [run.siteId, window.from, window.to],
   );
   if (!rows.length) return [];

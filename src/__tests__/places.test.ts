@@ -23,7 +23,7 @@ const NOMINATIM_ROWS = [
     lat: '-27.5601',
     lon: '152.9302',
     name: 'Example Hardware',
-    display_name: 'Example Hardware, 12, Example Street, Sumner Park, Brisbane City, Queensland, 4074, Australia',
+    display_name: 'Example Hardware, 12, Example Street, Northside, Brisbane City, Queensland, 4074, Australia',
     type: 'hardware',
   },
   {
@@ -42,7 +42,7 @@ const GOOGLE_BODY = {
     {
       id: 'ChIJexample',
       displayName: { text: 'Example Hardware', languageCode: 'en' },
-      formattedAddress: '12 Example St, Sumner Park QLD 4074, Australia',
+      formattedAddress: '12 Example St, Northside QLD 4074, Australia',
       location: { latitude: -27.5601, longitude: 152.9302 },
     },
     { id: 'ChIJnolocation', displayName: { text: 'Nowhere' }, formattedAddress: 'x' },
@@ -91,7 +91,7 @@ describe('the Nominatim request', () => {
       {
         id: 'osm:123456',
         name: 'Example Hardware',
-        address: '12, Example Street, Sumner Park, Brisbane City, Queensland, 4074',
+        address: '12, Example Street, Northside, Brisbane City, Queensland, 4074',
         latitude: -27.5601,
         longitude: 152.9302,
         source: 'osm',
@@ -211,7 +211,7 @@ describe('the Google Places request', () => {
     expect(mapGooglePlaces(GOOGLE_BODY)).toEqual([{
       id: 'google:ChIJexample',
       name: 'Example Hardware',
-      address: '12 Example St, Sumner Park QLD 4074',
+      address: '12 Example St, Northside QLD 4074',
       latitude: -27.5601,
       longitude: 152.9302,
       source: 'google',

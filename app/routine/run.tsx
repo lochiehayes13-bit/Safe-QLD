@@ -16,7 +16,9 @@ import {
 import { SYSTEM_LABELS, assetTypeById } from '@/seed/assetTypes';
 import type { Defect, Site } from '@/domain/types';
 import { jobIsOpen } from '@/domain/jobPresentation';
-import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
+import { describeLoadFailure } from '@/domain/loadFailure';
+import { assetResult, decidingLast, recordedMessage } from '@/domain/routineRunResult';
+import { officeNumber } from '@/domain/assetLookup';
 import { loadPrefs } from '@/app-prefs';
 import { nowIso } from '@/db';
 import { useDraft } from '@/hooks/useDraft';
@@ -80,7 +82,7 @@ const NOT_TESTED_REASONS = [
 
 /** The words a technician might type to find an asset. */
 function searchText(a: AssetRecord): string {
-  return [a.name, a.code, a.level, a.room, a.locationNote, a.serial, assetTypeById(a.assetTypeId)?.label]
+  return [a.name, a.code, officeNumber(a.attributes), a.level, a.room, a.locationNote, a.serial, assetTypeById(a.assetTypeId)?.label]
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
@@ -243,11 +245,13 @@ export default function RunRoutineScreen() {
     try {
       const prefs = await loadPrefs();
       const now = nowIso();
+      const technician = prefs.technicianName || undefined;
       let defectsRaised = 0;
-      let recorded = 0;
+      let checks = 0;
       let gaps = 0;
       let passed = 0;
       let failed = 0;
+      let assetsFailed = 0;
       /*
        * The defects this run raises, kept so each one can be reported to the
        * office once the run itself is on the phone. Nothing is queued inside the
@@ -256,88 +260,106 @@ export default function RunRoutineScreen() {
        */
       const raised: Defect[] = [];
 
-      for (const test of routine.tests) {
-        const targets = test.assetTypeId
-          ? assets.filter((a) => a.assetTypeId === test.assetTypeId)
-          : [null];
+      /** Counts an answered check, and raises its coded defect when it failed. */
+      const tallyCheck = async (test: TestDef, a: Answer, asset: AssetRecord | null) => {
+        checks++;
+        if (a.verdict === 'fail') failed++;
+        else if (a.verdict === 'pass') passed++;
 
-        for (const asset of targets) {
-          const key = asset ? `${test.id}:${asset.id}` : test.id;
-          const a = draft.value[key];
-          if (!a) continue;
+        // A failed check raises its coded defect, so nothing depends on the
+        // technician remembering to write one afterwards.
+        if (a.verdict !== 'fail' || !test.defectCode) return;
+        const code = defectByCode(test.defectCode);
+        if (!code) return;
+        raised.push(await createDefect({
+          siteId: site.id,
+          pointId: asset?.id,
+          // The office's job on the row, where the site has exactly one
+          // open. It is what carries the defect out of this phone, and what
+          // every later screen reads to answer "where did this one go?".
+          jobId: officeJob,
+          location: asset
+            ? [asset.level, asset.room, asset.name || assetTypeById(asset.assetTypeId)?.label].filter(Boolean).join(' ')
+            : site.name,
+          description: [code.reportWording, a.comment?.trim()].filter(Boolean).join(' '),
+          severity: code.severity === 'critical' ? 'critical' : 'non-critical',
+          // The library rates every code; keeping the grade is what lets
+          // the worst of the non-critical work sort to the top.
+          priority: code.severity === 'critical' ? undefined : code.severity,
+          status: 'open',
+          photos: [],
+          notes: `${code.code} · raised from ${routine.label}, ${test.label}`,
+          // The code it was raised from, kept as a field rather than only
+          // in the note, so the quote and the parts list can find it. The
+          // library's rating stands in for the AS 1851 class until the
+          // notice screen asks the question properly.
+          defectCode: code.code,
+          as1851Class: code.severity === 'critical' ? 'critical' : 'non-critical',
+        }));
+        defectsRaised++;
+      };
 
+      // System checks are answered once and belong to no asset.
+      for (const test of systemChecks) {
+        const a = draft.value[test.id];
+        if (!a) continue;
+        if (a.verdict === 'not-tested') {
+          if (a.reason) gaps++;
+          continue;
+        }
+        await tallyCheck(test, a, null);
+      }
+
+      /*
+       * Each asset once, from all of its checks. Its result on the register is
+       * worked out from every answer together: saving it check by check let a
+       * later pass overwrite an earlier fail, and wrote N/A as a pass.
+       */
+      for (const asset of applicable) {
+        const answers = assetChecks
+          .filter((test) => test.assetTypeId === asset.assetTypeId)
+          .flatMap((test) => {
+            const a = draft.value[`${test.id}:${asset.id}`];
+            // A check left as not tested with no reason is a blank, not an answer.
+            if (!a || (a.verdict === 'not-tested' && !a.reason)) return [];
+            return [{ test, answer: a, verdict: a.verdict }];
+          });
+        if (!answers.length) continue;
+
+        for (const { test, answer: a } of decidingLast(answers)) {
           // A check that could not be carried out is still part of the record.
           // It is written with its reason so the gap is visible and defensible
           // later, but it does not touch lastServicedAt — nothing was serviced.
           if (a.verdict === 'not-tested') {
-            if (!a.reason) continue;
-            if (asset) {
-              await addAssetEvent({
-                assetId: asset.id,
-                kind: 'not-tested',
-                occurredAt: now,
-                technician: prefs.technicianName || undefined,
-                summary: `${test.label} — not tested: ${a.reason}`,
-                detail: a.comment,
-                measurements: {},
-              });
-            }
+            await addAssetEvent({
+              assetId: asset.id,
+              kind: 'not-tested',
+              occurredAt: now,
+              technician,
+              summary: `${test.label} — not tested: ${a.reason}`,
+              detail: a.comment,
+              measurements: {},
+            });
             gaps++;
             continue;
           }
 
-          if (asset) {
-            await addAssetEvent({
-              assetId: asset.id,
-              kind: a.verdict === 'fail' ? 'failed' : a.verdict === 'pass' ? 'passed' : 'tested',
-              occurredAt: now,
-              technician: prefs.technicianName || undefined,
-              summary: `${test.label} — ${a.verdict === 'fail' ? 'failed' : a.verdict === 'pass' ? 'passed' : 'not applicable'}`,
-              detail: a.comment,
-              measurements: a.measurement && test.measurementKey ? { [test.measurementKey]: a.measurement } : {},
-            });
-            await updateAsset(asset.id, {
-              lastServicedAt: now,
-              lastResult: a.verdict === 'fail' ? 'fail' : 'pass',
-            });
-            recorded++;
-          }
-          if (a.verdict === 'fail') failed++;
-          else if (a.verdict === 'pass') passed++;
+          await addAssetEvent({
+            assetId: asset.id,
+            kind: a.verdict === 'fail' ? 'failed' : a.verdict === 'pass' ? 'passed' : 'tested',
+            occurredAt: now,
+            technician,
+            summary: `${test.label} — ${a.verdict === 'fail' ? 'failed' : a.verdict === 'pass' ? 'passed' : 'not applicable'}`,
+            detail: a.comment,
+            measurements: a.measurement && test.measurementKey ? { [test.measurementKey]: a.measurement } : {},
+          });
+          await tallyCheck(test, a, asset);
+        }
 
-          // A failed check raises its coded defect, so nothing depends on the
-          // technician remembering to write one afterwards.
-          if (a.verdict === 'fail' && test.defectCode) {
-            const code = defectByCode(test.defectCode);
-            if (code) {
-              raised.push(await createDefect({
-                siteId: site.id,
-                pointId: asset?.id,
-                // The office's job on the row, where the site has exactly one
-                // open. It is what carries the defect out of this phone, and what
-                // every later screen reads to answer "where did this one go?".
-                jobId: officeJob,
-                location: asset
-                  ? [asset.level, asset.room, asset.name || assetTypeById(asset.assetTypeId)?.label].filter(Boolean).join(' ')
-                  : site.name,
-                description: [code.reportWording, a.comment?.trim()].filter(Boolean).join(' '),
-                severity: code.severity === 'critical' ? 'critical' : 'non-critical',
-                // The library rates every code; keeping the grade is what lets
-                // the worst of the non-critical work sort to the top.
-                priority: code.severity === 'critical' ? undefined : code.severity,
-                status: 'open',
-                photos: [],
-                notes: `${code.code} · raised from ${routine.label}, ${test.label}`,
-                // The code it was raised from, kept as a field rather than only
-                // in the note, so the quote and the parts list can find it. The
-                // library's rating stands in for the AS 1851 class until the
-                // notice screen asks the question properly.
-                defectCode: code.code,
-                as1851Class: code.severity === 'critical' ? 'critical' : 'non-critical',
-              }));
-              defectsRaised++;
-            }
-          }
+        const result = assetResult(answers.map((x) => x.verdict));
+        if (result) {
+          await updateAsset(asset.id, { lastServicedAt: now, lastResult: result });
+          if (result === 'fail') assetsFailed++;
         }
       }
 
@@ -351,7 +373,7 @@ export default function RunRoutineScreen() {
         frequency: routine.frequency,
         system: routine.system,
         completedAt: now,
-        technician: prefs.technicianName || undefined,
+        technician,
         checksPassed: passed,
         checksFailed: failed,
         checksNotTested: gaps,
@@ -376,15 +398,13 @@ export default function RunRoutineScreen() {
        * surprised by it: a critical defect gets this note now and its written
        * notice later, and the two are not the same document.
        */
-      let notesQueued = 0;
-      let notesAlready = 0;
-      let noteFailure: string | undefined;
+      let notesOnJob = 0;
       if (officeJob) {
         for (const defect of raised) {
           try {
-            const note = await queueDefectNote(defect, officeJob, {
+            await queueDefectNote(defect, officeJob, {
               siteName: site.name,
-              technician: prefs.technicianName || undefined,
+              technician,
               foundDuring: routine.label,
               // The instant the routine was carried out, and the same one for
               // every defect in the run. A critical defect's statutory clocks run
@@ -393,52 +413,27 @@ export default function RunRoutineScreen() {
               // re-composed later stating a different deadline and posting twice.
               maintenanceAt: now,
             });
-            if (note.queued) notesQueued++; else notesAlready++;
-          } catch (e) {
-            noteFailure ??= describeActionFailure(e, 'queue the defect notes to the office');
+            // Queued now or already on the job word for word: on the job either way.
+            notesOnJob++;
+          } catch {
+            // Counted below as not queued, and the summary says to ring it through.
           }
         }
       }
-      const notesFailed = raised.length - notesQueued - notesAlready;
 
       await draft.discard();
-      showAlert(
-        'Routine recorded',
-        [
-          `${recorded} asset result${recorded === 1 ? '' : 's'} written to history.`,
-          defectsRaised ? `${defectsRaised} defect${defectsRaised === 1 ? '' : 's'} raised automatically.` : null,
-          notesQueued
-            ? `${notesQueued} of them queued as ${notesQueued === 1 ? 'a note' : 'notes'} on job ${officeJob}, `
-              + 'going up with the next send. A critical defect still needs its written notice, which goes with the '
-              + 'run\'s record on the Send screen.'
-            : null,
-          notesAlready
-            ? `${notesAlready} ${notesAlready === 1 ? 'was' : 'were'} already on job ${officeJob} word for word, so `
-              + `${notesAlready === 1 ? 'it was' : 'they were'} not sent twice.`
-            : null,
-          // Counted rather than assumed: a defect that failed to queue and one
-          // raised with no job are different states and a technician needs the
-          // difference. Both say the office has not got it.
-          officeJob && notesFailed
-            ? `${notesFailed} could not be queued, so the office has not been told about `
-              + `${notesFailed === 1 ? 'it' : 'them'}. ${noteFailure ?? ''} Ring them through.`
-            : null,
-          !officeJob && raised.length
-            ? `The office has not been told about ${raised.length === 1 ? 'it' : 'them'}: `
-              + `${jobsHere?.failed
-                ? 'this site\'s jobs could not be read on this phone'
-                : jobsHere?.open.length
-                  ? `the office has ${jobsHere.open.length} jobs open at this site and the app will not guess which `
-                    + 'one this run belongs to'
-                  : 'the office has no open job at this site'}`
-              + '. Send the run from the Send screen and pick the job there, or ring the failures through.'
-            : null,
-          gaps ? `${gaps} check${gaps === 1 ? '' : 's'} recorded as not tested, with the reason against the asset.` : null,
-          progress.total - progress.done - gaps > 0
-            ? `${progress.total - progress.done - gaps} check${progress.total - progress.done - gaps === 1 ? '' : 's'} left blank — these show as a coverage gap, not a pass.`
-            : null,
-        ].filter(Boolean).join('\n\n'),
-      );
+      showAlert('Routine recorded', recordedMessage({
+        checks,
+        assetsFailed,
+        defects: defectsRaised,
+        notTested: gaps,
+        job: officeJob,
+        onJob: notesOnJob,
+        notQueued: officeJob ? raised.length - notesOnJob : 0,
+        critical: raised.some((d) => d.severity === 'critical'),
+        jobsUnreadable: Boolean(jobsHere?.failed),
+        openJobs: jobsHere?.open.length ?? 0,
+      }));
       router.back();
     } catch (e) {
       showAlert('Could not record', e instanceof Error ? e.message : String(e));
@@ -461,7 +456,7 @@ export default function RunRoutineScreen() {
     if (blank > 0) {
       showAlert(
         `${blank} check${blank === 1 ? ' has' : 's have'} no answer`,
-        `${blank === 1 ? 'It' : 'They'} will be recorded as a coverage gap, not as a pass. Record the routine anyway?`,
+        `${blank === 1 ? "It won't" : "They won't"} count as passed. Record anyway?`,
         [
           { text: 'Go back', style: 'cancel' },
           { text: 'Record', onPress: () => void record() },
@@ -486,8 +481,7 @@ export default function RunRoutineScreen() {
         <Stack.Screen options={{ title: 'Run a routine' }} />
         <Screen>
           <Txt tone="muted" size="sm" style={{ lineHeight: 20 }}>
-            Pick the routine you are carrying out. The app finds the assets it applies to and records the results against
-            each one.
+            Pick the routine you’re doing.
           </Txt>
           {SERVICE_ROUTINES.map((r) => (
             <Card key={r.id} onPress={() => setRoutine(r)}>
@@ -530,7 +524,7 @@ export default function RunRoutineScreen() {
       </Card>
 
       {draft.recovered ? (
-        <Banner tone="info" title="Picked up where you left off" body="Answers from your last session were still here." />
+        <Banner tone="info" title="Picked up where you left off" body="Your earlier answers are back." />
       ) : null}
 
       {/*
@@ -545,26 +539,19 @@ export default function RunRoutineScreen() {
           <Label>Defects to the office</Label>
           {jobsHere.failed ? (
             <Txt size="sm" tone="warn" style={{ marginTop: 4, lineHeight: 19 }}>
-              {jobsHere.failed} Until they can be read, a failure here records on the phone and goes no further. Send
-              the run from the Send screen afterwards and pick the job there.
+              Couldn’t read this site’s jobs. Send defects from Waiting to send.
             </Txt>
           ) : officeJob ? (
             <Txt size="sm" style={{ marginTop: 4, lineHeight: 19 }}>
-              Each failure raises its coded defect and is queued as its own note on job {officeJob} — the only job the
-              office has open at this site. A critical defect still needs its written notice, which goes with the run’s
-              record on the Send screen.
+              Defects go to job {officeJob}. Critical notices go from Waiting to send.
             </Txt>
           ) : jobsHere.open.length ? (
             <Txt size="sm" tone="warn" style={{ marginTop: 4, lineHeight: 19 }}>
-              The office has {jobsHere.open.length} jobs open at this site, and filing a fault against the wrong one
-              makes it somebody else’s work — so nothing is chosen here. Failures still raise their defects on the
-              phone. Send the run from the Send screen afterwards and pick the job there.
+              {jobsHere.open.length} open jobs here. Pick one on Waiting to send.
             </Txt>
           ) : (
             <Txt size="sm" tone="warn" style={{ marginTop: 4, lineHeight: 19 }}>
-              The office has no open job at this site, so there is nowhere in Simpro for a defect raised here to go.
-              Failures still record on the phone and on the site’s defect list — ring them through, or ask the office to
-              raise a job.
+              No open job here. Defects stay on the phone; ring the office.
             </Txt>
           )}
         </Card>
@@ -589,9 +576,9 @@ export default function RunRoutineScreen() {
           <H2>Assets</H2>
           {!applicable.length ? (
             <EmptyState
-          icon="format-list-checks"
-              title="No assets for this system yet"
-              body="Add them to the site's register first, or import a device list. System checks above can still be recorded."
+              icon="format-list-checks"
+              title="No assets for this system"
+              body="Add them to the site register. System checks still record."
             />
           ) : (
             <>
@@ -606,10 +593,10 @@ export default function RunRoutineScreen() {
                 label="Find an asset"
                 value={search}
                 onChangeText={setSearch}
-                placeholder="Name, level, room, serial or type"
+                placeholder="Name, asset #, room or serial"
                 autoCapitalize="none"
               />
-              <Txt tone="faint" size="sm">Tap an asset to record its checks; tap it again to close it.</Txt>
+              <Txt tone="faint" size="sm">Tap an asset to answer its checks.</Txt>
             </>
           )}
         </>
@@ -619,14 +606,10 @@ export default function RunRoutineScreen() {
 
   const footer = (
     <View style={{ gap: t.space(3), marginTop: t.space(2) }}>
-      <Button title="Record this routine" onPress={finish} loading={saving} disabled={nothingAnswered} />
-      <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-        {nothingAnswered
-          ? 'Answer at least one check first. A run recorded with nothing on it would still count as the routine done, and push its next due date out.'
-          : officeJob
-            ? `Failures raise their coded defect automatically, and each one is queued as a note on job ${officeJob}. Anything left untested is reported as a coverage gap, never as a pass.`
-            : 'Failures raise their coded defect automatically, on this phone only — no job here for them to go on. Anything left untested is reported as a coverage gap, never as a pass.'}
-      </Txt>
+      <Button title="Record routine" onPress={finish} loading={saving} disabled={nothingAnswered} />
+      {nothingAnswered ? (
+        <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>Answer at least one check first.</Txt>
+      ) : null}
     </View>
   );
 
@@ -756,7 +739,7 @@ function CheckCard({
           </Rowed>
           {test.verify ? (
             <Txt size="xs" tone="warn" style={{ lineHeight: 17 }}>
-              The actual figure or interval must come from the current standard or the manufacturer's documentation.
+              Confirm the figure in the current standard or maker’s data.
             </Txt>
           ) : null}
         </View>

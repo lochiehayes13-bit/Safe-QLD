@@ -1,6 +1,8 @@
 import { getDb, inTransaction, newId, nowIso } from './index';
 import { ASSET_TYPES, type SystemKind } from '@/seed/assetTypes';
 import { DEFECT_LIBRARY } from '@/seed/defectLibrary';
+import { normalise } from '@/domain/assetTag';
+import { SEPARATORS, identifierKeys, type AssetMatch, type IdentifierKeys } from '@/domain/assetLookup';
 
 /**
  * Asset engine persistence.
@@ -156,9 +158,9 @@ export async function queryAssets(q: AssetQuery): Promise<AssetRecord[]> {
   if (q.status) { where.push('a.status = ?'); args.push(q.status); }
   if (q.dueBefore) { where.push('a.nextDueAt IS NOT NULL AND a.nextDueAt <= ?'); args.push(q.dueBefore); }
   if (q.search?.trim()) {
-    const term = `%${q.search.trim()}%`;
-    where.push('(a.name LIKE ? OR a.code LIKE ? OR a.serial LIKE ? OR a.model LIKE ? OR a.room LIKE ?)');
-    args.push(term, term, term, term, term);
+    const clause = searchClause(q.search);
+    where.push(clause.sql);
+    args.push(...clause.args);
   }
 
   args.push(q.limit ?? 2000);
@@ -175,6 +177,162 @@ export async function queryAssets(q: AssetQuery): Promise<AssetRecord[]> {
     ...args,
   );
   return rows.map(hydrate);
+}
+
+/*
+ * The office's own asset number, as the sync and the register importer file
+ * it: `tag` from every Simpro sync, `assetNumber` from the importer and the
+ * current sync. Guarded by json_valid so one malformed row cannot fail the
+ * whole search.
+ */
+const officeAttr = (...keys: ('tag' | 'assetNumber')[]) =>
+  `(CASE WHEN json_valid(a.attributes) THEN json_extract(a.attributes, ${keys.map((k) => `'$.${k}'`).join(', ')}) END)`;
+const OFFICE_TAG = officeAttr('tag');
+const OFFICE_NUMBER = officeAttr('assetNumber');
+/** Both keys in one read, as a JSON array's text: enough for a "contains" search. */
+const OFFICE_EITHER = officeAttr('tag', 'assetNumber');
+
+/**
+ * A column with the separators in SEPARATORS removed, to compare with a
+ * compact key. Compared case-blind by the caller (LIKE, or COLLATE NOCASE),
+ * which is cheaper than upper-casing every row first.
+ */
+function stripped(column: string): string {
+  return SEPARATORS.reduce((sql, ch) => `REPLACE(${sql}, '${ch}', '')`, column);
+}
+
+/** Any character that is neither a letter, a digit nor one of SEPARATORS. */
+const UNSTRIPPED = new RegExp(`[^0-9A-Za-z${SEPARATORS.map((c) => `\\${c}`).join('')}]`);
+
+/**
+ * The search box's WHERE clause: name, location, model and serial as typed;
+ * our code and the office's asset number with their separators stripped, so
+ * a tag typed without hyphens still finds the asset.
+ */
+function searchClause(search: string): { sql: string; args: string[] } {
+  const typed = search.trim();
+  const term = `%${typed}%`;
+  const parts = ['a.name LIKE ?', 'a.serial LIKE ?', 'a.model LIKE ?', 'a.room LIKE ?', 'a.level LIKE ?', 'a.locationNote LIKE ?'];
+  const args = parts.map(() => term);
+  const compact = normalise(typed);
+  // Stripping both sides keeps every match the typed form would make, unless
+  // what was typed has a separator the SQL does not strip.
+  const keepsTyped = !compact || UNSTRIPPED.test(typed);
+  for (const column of ['a.code', OFFICE_EITHER]) {
+    if (compact) {
+      parts.push(`${stripped(column)} LIKE ?`);
+      args.push(`%${compact}%`);
+    }
+    if (keepsTyped) {
+      parts.push(`${column} LIKE ?`);
+      args.push(term);
+    }
+  }
+  return { sql: `(${parts.join(' OR ')})`, args };
+}
+
+/** An asset with the site it is on, for a list that spans every site. */
+export interface AssetHit extends AssetRecord {
+  siteName?: string;
+}
+
+/** An asset that answered an identifier, and how. */
+export interface AssetIdentifierHit extends AssetHit {
+  match: AssetMatch;
+}
+
+/**
+ * How well a row answers an identifier: 0 our code, 1 the office's asset
+ * number, 2 the serial, 3 not at all. Each is compared whole with every form
+ * in `keys.exact`; the code and the office number again with separators
+ * stripped, against `keys.compact`. A serial is compared whole only: it is
+ * the maker's, and its separators are part of it.
+ */
+function identifierRank(keys: IdentifierKeys): { sql: string; args: string[] } {
+  const exact = keys.exact.filter(Boolean);
+  const args: string[] = [];
+  const matches = (column: string, compact = true): string => {
+    const tests: string[] = [];
+    if (exact.length) {
+      tests.push(`TRIM(${column}) COLLATE NOCASE IN (${exact.map(() => '?').join(',')})`);
+      args.push(...exact);
+    }
+    if (compact && keys.compact) {
+      tests.push(`${stripped(column)} = ? COLLATE NOCASE`);
+      args.push(keys.compact);
+    }
+    return tests.length ? `(${tests.join(' OR ')})` : '0';
+  };
+  // Built in the order the placeholders appear in the statement.
+  const byCode = matches('a.code');
+  const byNumber = `(${matches(OFFICE_TAG)} OR ${matches(OFFICE_NUMBER)})`;
+  const bySerial = matches('a.serial', false);
+  return { sql: `(CASE WHEN ${byCode} THEN 0 WHEN ${byNumber} THEN 1 WHEN ${bySerial} THEN 2 ELSE 3 END)`, args };
+}
+
+/**
+ * Assets matching what was typed in the find box, across every site.
+ *
+ * The same search as the site register's, with the site's name on each row,
+ * because an office asset number or a room name repeats across sites. An
+ * asset whose tag, office number or serial is exactly what was typed comes
+ * first; the rank is only worked out for rows the search already matched.
+ */
+export async function searchAssets(search: string, limit = 40): Promise<AssetHit[]> {
+  if (!search.trim()) return [];
+  const db = await getDb();
+  const clause = searchClause(search);
+  const rank = identifierRank(identifierKeys(search));
+  const rows = await db.getAllAsync<AssetRow & { siteName: string | null }>(
+    `SELECT a.*, s.name AS siteName FROM asset a
+     LEFT JOIN asset_type t ON a.assetTypeId = t.id
+     LEFT JOIN site s ON s.id = a.siteId
+     WHERE ${clause.sql}
+     ORDER BY ${rank.sql}, COALESCE(t.sortIndex, 100000), s.name, a.level, a.room, a.name LIMIT ?`,
+    ...clause.args, ...rank.args, limit,
+  );
+  return rows.map(hydrateHit);
+}
+
+/**
+ * Assets whose code, office asset number or serial is the identifier, whole.
+ *
+ * For a scan, where only an exact answer will do. Ordered best match first:
+ * our own code, then the office's number, then the serial.
+ */
+export async function findAssetsByIdentifier(keys: IdentifierKeys, limit = 40): Promise<AssetIdentifierHit[]> {
+  if (!keys.exact.some(Boolean) && !keys.compact) return [];
+  const db = await getDb();
+  const rank = identifierRank(keys);
+  const rows = await db.getAllAsync<AssetRow & { siteName: string | null; matchRank: number }>(
+    `SELECT * FROM (
+       SELECT a.*, s.name AS siteName, ${rank.sql} AS matchRank
+       FROM asset a LEFT JOIN site s ON s.id = a.siteId
+     ) WHERE matchRank < 3
+     ORDER BY matchRank, siteName, name LIMIT ?`,
+    ...rank.args, limit,
+  );
+  const MATCH: AssetMatch[] = ['code', 'office-number', 'serial'];
+  return rows.map(({ matchRank, ...row }) => ({ ...hydrateHit(row), match: MATCH[matchRank] ?? 'serial' }));
+}
+
+/** Assets whose serial contains the value, for a maker's barcode with more on it than the serial. */
+export async function findBySerialContaining(value: string, limit = 5): Promise<AssetIdentifierHit[]> {
+  const typed = value.trim();
+  if (typed.length < 4) return [];
+  const db = await getDb();
+  const rows = await db.getAllAsync<AssetRow & { siteName: string | null }>(
+    `SELECT a.*, s.name AS siteName FROM asset a LEFT JOIN site s ON s.id = a.siteId
+     WHERE LENGTH(a.serial) >= 4 AND (a.serial LIKE ? OR ? LIKE '%' || a.serial || '%')
+     LIMIT ?`,
+    `%${typed}%`, typed, limit,
+  );
+  return rows.map((r) => ({ ...hydrateHit(r), match: 'serial' as const }));
+}
+
+function hydrateHit(row: AssetRow & { siteName: string | null }): AssetHit {
+  const { siteName, ...rest } = row;
+  return { ...hydrate(rest), siteName: siteName ?? undefined };
 }
 
 export async function getAsset(id: string): Promise<AssetRecord | null> {

@@ -4,7 +4,7 @@
  * The other half of "every site appears in every module". A screen can hold
  * every site, search every column of every one of them, and still lose the
  * building a technician wants — by drawing the first four matches and saying
- * nothing. Three of this company's sites are called "Storage Choice - Sumner
+ * nothing. Three of this company's sites are called "Fictional Storage - Sumner
  * Park"; a client with eleven buildings typing their name into a box that
  * offers four of them, with no line to say so, is told the other seven do not
  * exist. That is the same fault as having no search at all, dressed as a

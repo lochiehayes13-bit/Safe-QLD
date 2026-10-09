@@ -116,6 +116,14 @@ interface Undoable {
   label: string;
 }
 
+/** The register's status words as a technician says them. */
+const STATUS_LABEL: Record<string, string> = {
+  'in-service': 'In service',
+  isolated: 'Isolated',
+  decommissioned: 'Decommissioned',
+  removed: 'Removed',
+};
+
 const isSimproAsset = (a: AssetRecord): a is AssetRecord & { externalId: string } =>
   a.externalSource === 'simpro' && Boolean(a.externalId);
 
@@ -254,7 +262,7 @@ export default function AssetScreen() {
         showAlert('Taken back', revert.note);
       } else {
         setUndo(null);
-        showAlert('Too late to take back', 'The change has already left the phone. Ask the office to reverse it, or make the opposite change here.');
+        showAlert('Too late to undo', 'Already sent. Ask the office to reverse it, or change it back here.');
       }
       void load();
     } catch (e) {
@@ -308,7 +316,7 @@ export default function AssetScreen() {
           before: snapshot(asset),
         }, { now: nowIso(), changeNo: await nextChangeNo(asset.id) });
         if (updateHasContent(built.payload)) await queue(built);
-        else showAlert('Saved on the phone', 'Nothing the office holds changed, so nothing was sent to Simpro.');
+        else showAlert('Saved on the phone', 'No Simpro fields changed. Nothing sent.');
       }
       void load();
     } catch (e) {
@@ -361,7 +369,7 @@ export default function AssetScreen() {
   const askToRemove = () => {
     showAlert(
       'Remove from Simpro?',
-      'Archiving takes it off the register but the office can bring it back. Deleting removes it for good.',
+      'The office can restore an archived asset. Delete is permanent.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Archive', onPress: () => { void archiveInSimpro(); } },
@@ -370,7 +378,7 @@ export default function AssetScreen() {
           style: 'destructive',
           onPress: () => showAlert(
             'Delete from Simpro?',
-            'This cannot be undone in the office once it has gone. You have half a minute on this screen to take it back before it is sent.',
+            "Can't be undone once sent. You have 30 seconds to undo it here.",
             [
               { text: 'Cancel', style: 'cancel' },
               { text: 'Delete', style: 'destructive', onPress: () => { void deleteFromSimpro(); } },
@@ -398,8 +406,8 @@ export default function AssetScreen() {
    * A Simpro asset's number is edited under the office's own heading; an
    * imported one has no such heading, so its box stays.
    */
-  const editableRegister = fromRegister.filter((a) => !(PHONE_KEYS.has(a.key) && (simpro || a.key !== 'assetNumber')));
   const simpro = isSimproAsset(asset);
+  const editableRegister = fromRegister.filter((a) => !(PHONE_KEYS.has(a.key) && (simpro || a.key !== 'assetNumber')));
   const secondsLeft = undo ? Math.ceil(undoMsLeft(now, undo.notBefore) / 1000) : 0;
 
   return (
@@ -418,7 +426,7 @@ export default function AssetScreen() {
           <Card>
             <Txt weight="700">{undo.label}</Txt>
             <Txt size="sm" tone="muted" style={{ marginTop: 4 }}>
-              Not sent yet. Goes to the office in {secondsLeft} second{secondsLeft === 1 ? '' : 's'}, or when the phone next has signal after that.
+              Sends in {secondsLeft} second{secondsLeft === 1 ? '' : 's'}, or once there’s signal.
             </Txt>
             <Rowed gap={2} style={{ marginTop: t.space(2) }}>
               <Button title="Undo" variant="secondary" compact onPress={() => { void takeBack(); }} />
@@ -429,13 +437,15 @@ export default function AssetScreen() {
         <Rowed gap={2} wrap>
           {type ? <Chip label={SYSTEM_LABELS[type.system]} /> : null}
           <Chip
-            label={asset.status}
+            label={STATUS_LABEL[asset.status] ?? asset.status}
             tone={asset.status === 'in-service' ? 'pass' : asset.status === 'isolated' ? 'warn' : 'fail'}
           />
           {asset.lastResult ? (
-            <Chip label={`Last ${asset.lastResult}`} tone={asset.lastResult === 'pass' ? 'pass' : 'fail'} />
+            <Chip label={asset.lastResult === 'pass' ? 'Last passed' : 'Last failed'} tone={asset.lastResult === 'pass' ? 'pass' : 'fail'} />
           ) : null}
-          {asset.openDefects ? <Chip label={`${asset.openDefects} open defect`} tone="fail" /> : null}
+          {asset.openDefects ? (
+            <Chip label={`${asset.openDefects} open defect${asset.openDefects === 1 ? '' : 's'}`} tone="fail" />
+          ) : null}
           {simpro ? <Chip label="In Simpro" /> : null}
         </Rowed>
 
@@ -453,8 +463,8 @@ export default function AssetScreen() {
         {failures >= 3 ? (
           <Banner
             tone="warn"
-            title={`This has failed ${failures} times`}
-            body="Repeated failure on one asset is usually the environment, the location or the device type — worth a root cause rather than another replacement."
+            title={`Failed ${failures} times`}
+            body="Find the cause before replacing it again."
           />
         ) : null}
 
@@ -463,12 +473,12 @@ export default function AssetScreen() {
             <H2>Edit</H2>
             {simpro ? (
               <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-                The office identifies this asset by its Location and the fields from the register below; those go to Simpro when you save. The name, notes, level and room are the phone's own.
+                Location and register fields go to Simpro. Name, notes, level and room stay here.
               </Txt>
             ) : null}
             <Field label="Name or description" value={form.name} onChangeText={(v) => setForm({ ...form, name: v })} />
             <Field
-              label={simpro ? 'Location (as the office records it)' : 'Location'}
+              label={simpro ? 'Location (Simpro)' : 'Location'}
               value={form.locationNote}
               onChangeText={(v) => setForm({ ...form, locationNote: v })}
             />
@@ -524,7 +534,7 @@ export default function AssetScreen() {
 
         {routines.length ? (
           <>
-            <H2>What the register says is due</H2>
+            <H2>Due dates</H2>
             {/*
               * One line per routine, because they are different visits. An
               * extinguisher's six-monthly is a look and a tag; its five-yearly
@@ -541,7 +551,7 @@ export default function AssetScreen() {
                       {r.lastDone ? (
                         <Txt size="sm" tone="muted">
                           Last done {r.lastDone}
-                          {r.lastDoneImprecise ? ' — the register records no day for it' : ''}
+                          {r.lastDoneImprecise ? ' (month only)' : ''}
                         </Txt>
                       ) : null}
                     </View>
@@ -554,9 +564,7 @@ export default function AssetScreen() {
               ))}
             </Card>
             <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-              These dates come from the office system's own register, as exported. They are not
-              worked out from the service history on this device, and where the two disagree the
-              service history is the record of what was actually done.
+              From the office register. History below shows what was done.
             </Txt>
           </>
         ) : null}
@@ -579,17 +587,6 @@ export default function AssetScreen() {
                 params: { siteId: asset.siteId, assetId: asset.id, location: [asset.level, asset.room, asset.name].filter(Boolean).join(' ') },
               })
             }
-          />
-          {/*
-            The timeline above says what happened at each service. This says
-            what has been happening across them, which is the question a single
-            reading cannot answer.
-          */}
-          <Button
-            title="Trend"
-            variant="secondary"
-            style={{ flex: 1 }}
-            onPress={() => router.push({ pathname: '/assets/trend', params: { id: asset.id } })}
           />
         </Rowed>
         {!editing ? (
@@ -699,7 +696,7 @@ export default function AssetScreen() {
 
         {changes.length ? (
           <>
-            <H2>Changes sent to the office</H2>
+            <H2>Changes to Simpro</H2>
             {/*
               * Every change asked for from this screen and where it has got
               * to, in words: waiting for its window, waiting for signal,
@@ -767,7 +764,7 @@ export default function AssetScreen() {
             ))}
           </Card>
         ) : (
-          <Txt tone="faint" size="sm">Nothing recorded yet. Everything done to this asset from now on lands here.</Txt>
+          <Txt tone="faint" size="sm">Nothing recorded yet.</Txt>
         )}
       </Screen>
     </>
@@ -807,7 +804,7 @@ function RegisterField({ label, office, value, onChange }: {
       <View style={{ gap: 2 }}>
         <Label>{label}</Label>
         <Txt size="sm" tone={value ? 'default' : 'faint'}>{value || 'Not set'}</Txt>
-        <Txt size="xs" tone="faint">The office locked this one; it can only be changed in Simpro.</Txt>
+        <Txt size="xs" tone="faint">Locked by the office. Change it in Simpro.</Txt>
       </View>
     );
   }
@@ -823,7 +820,7 @@ function RegisterField({ label, office, value, onChange }: {
         </View>
         {value && !office.listItems.includes(value) ? (
           <Txt size="xs" tone="warn">
-            This asset holds "{value}", which is not on the office's list. Picking one above replaces it.
+            “{value}” isn’t on the office list. Pick one to replace it.
           </Txt>
         ) : null}
       </View>

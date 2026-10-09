@@ -161,7 +161,7 @@ describe('devices that arrived and went', () => {
   });
 
   it('summarises in one line', () => {
-    expect(describeComparison(c)).toBe('1 in the file and not here, 1 here and not in the file.');
+    expect(describeComparison(c)).toBe('1 in file only, 1 on register only.');
   });
 });
 
@@ -249,7 +249,7 @@ describe('is this even the right building', () => {
   });
 
   it('is not troubled by punctuation or spacing', () => {
-    expect(siteMismatches({ siteNameInFile: 'Storage Choice - Sumner Park', siteName: 'Storage Choice Sumner Park' }))
+    expect(siteMismatches({ siteNameInFile: 'Fictional Storage - Northside', siteName: 'Fictional Storage Northside' }))
       .toEqual([]);
   });
 

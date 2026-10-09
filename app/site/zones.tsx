@@ -70,16 +70,14 @@ export default function ZonesScreen() {
     if (!panel) {
       showAlert(
         'No panel selected',
-        'A zone list belongs to a panel. Pick one above, or import the panel\u2019s configuration '
-        + 'if this site has none on the phone yet.',
+        'Pick a panel above, or import the panel config.',
       );
       return;
     }
     if (!zones.length) {
       showAlert(
         'This panel has no zones',
-        'There is nothing to put in a zone list yet. Zones arrive with the panel\u2019s '
-        + 'configuration, or can be added on this screen.',
+        'Import the panel config first.',
       );
       return;
     }
@@ -168,8 +166,9 @@ export default function ZonesScreen() {
           data={zones}
           keyExtractor={(z) => z.id}
           contentContainerStyle={{ paddingHorizontal: t.space(4), paddingBottom: t.space(20) }}
-          ListEmptyComponent={<EmptyState
-          icon="shape-outline" title="No zones" body="Import a config or device list that carries zone data." />}
+          ListEmptyComponent={(
+            <EmptyState icon="shape-outline" title="No zones" body="Import the panel config or device list." />
+          )}
           renderItem={({ item }) => (
             <View
               style={{

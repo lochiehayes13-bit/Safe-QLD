@@ -444,7 +444,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
   'as-1670-1-2004|3.1': {
     covers:
       'The general installation rule — equipment goes where its performance will not be prejudiced and where it can actually be serviced. A detector installed where nobody can reach it is a finding under this clause before it is anything else.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2004|3.2': {
     covers:
@@ -458,7 +458,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
   'as-1670-1-2004|3.5': {
     covers:
       'Installing a multi-point aspirating detector — pipe runs and sampling point orientation set so the system can actually be maintained and so its performance holds up over years rather than only at commissioning.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2004|3.6': {
     covers:
@@ -537,7 +537,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
   'as-1670-1-2004|3.26': {
     covers:
       'The list of places a detector is genuinely not required — small air locks, low or inaccessible concealed spaces, open covered areas, water heater cupboards, small sanitary spaces, certain skylights, and areas covered by a complying sprinkler system. Read it before writing a device up as missing.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2004|3.27': {
     covers:
@@ -546,7 +546,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
   'as-1670-1-2004|3.28': {
     covers:
       'Multi-sensor detectors, including what happens when the smoke element is disabled at the panel: the device then has to be treated as a heat detector for spacing purposes. A quiet trap on sites that disable smoke sensing to stop unwanted alarms and never revisit the coverage.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2004|4.1': {
     covers:
@@ -563,7 +563,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
   'as-1670-1-2004|5.2': {
     covers:
       'Multi-point aspirating detection as a design rather than an installation: the sampling points have to add up to at least the sensitivity of the point detectors they replace, a significant loss of airflow has to be indicated at the panel, and one aspirating detector cannot cover more than a single alarm zone would.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2004|6.1': {
     covers:
@@ -2211,7 +2211,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'every area of the building. A system installed purely to satisfy the building code instead takes its ' +
       'protected areas from the code. This is the clause behind the argument about whether an unprotected ' +
       'store room or roof space is a defect or was never in scope to begin with.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|1.3': {
     covers:
@@ -2258,7 +2258,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'head or an aspirating sampling point the tape is pulled from. It sounds pedantic until two people ' +
       'measure the same ceiling and disagree about whether a head clears an obstruction, because one ' +
       'measured to the edge of the base and the other to the middle of the sensor.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|1.7': {
     covers:
@@ -2418,7 +2418,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'for servicing. Its notes cover the minimum environmental protection expected of control equipment ' +
       'and the trap of fitting detectors that construction dust will contaminate before handover. The ' +
       'clause behind a defect for a head sitting in an airstream or a panel walled in behind racking.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|3.2': {
     covers:
@@ -2842,7 +2842,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'detectors. Underneath it sit the awkward spaces — service tunnels, ductwork, ceiling voids, ' +
       'cupboards, open grids, locked areas, residential units, stairs and shafts. When an auditor queries ' +
       'coverage of a space nobody thought about, the answer is somewhere in this group.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|3.27.1': {
     covers:
@@ -2854,7 +2854,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'point; and indicators have to be readable from the normal way in and from trafficable floor. A ' +
       'commentary lists what to try when a detector keeps giving unwanted alarms, and warns against simply ' +
       'swapping smoke for heat.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|3.27.2': {
     covers:
@@ -2874,7 +2874,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'installation craft: where a sampling probe may sit relative to bends, corners, centrifugal fans and ' +
       'attenuators, which side of the duct it enters, keeping the detector housing reachable without ' +
       'dismantling duct, and labelling the zone at the unit.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|3.27.4': {
     covers:
@@ -2925,7 +2925,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'surface sits tight up under the ceiling it may be treated as the ceiling, with nothing needed above ' +
       'it. The gap between the surface and a wall or the next structure decides whether ceiling detection ' +
       'at the high point still does the job.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|3.27.7': {
     covers:
@@ -2988,7 +2988,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       '— nothing stored there, no electrical equipment, a size limit — and a space that breaks one of them ' +
       'falls straight back under the general requirement. Read it with the concealed spaces clause it ' +
       'cross-refers to.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|3.29': {
     covers:
@@ -2997,7 +2997,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'the layout has to satisfy the spacing rules for whatever stays active. It comes up where a smoke ' +
       'element is disabled during a dusty process or out of hours, leaving heat sensing to carry an area ' +
       'laid out at a spacing it was never designed for.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|SECTION 4': {
     covers:
@@ -3006,7 +3006,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'and how heat-sensing cable is treated. Come here when the head being installed responds to ' +
       'temperature rather than to smoke, and the argument on site is about coverage rather than about ' +
       'product selection.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|4.1': {
     covers:
@@ -3014,7 +3014,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'and apexes, proximity to walls and to air supply, ceilings segmented by beams, and cavities above ' +
       'the ceiling line. A technician arguing that a head is near enough to the right place is arguing ' +
       'against the sub-clauses gathered under this heading.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|4.1.1': {
     covers:
@@ -3031,7 +3031,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'allowance for small rooms, where a head near each wall and a bounded step between heads replaces a ' +
       'full rectangular layout. Reach for it when a room has been set out to satisfy one of those measures ' +
       'and quietly fails the other.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|4.1.3': {
     covers:
@@ -3040,7 +3040,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'and a horizontal step governs the rows below; the wider spacing permitted within a lower row is ' +
       'earned only by offsetting heads against the row above. Apply it before assuming a flat-ceiling grid ' +
       'transfers to a roof with a ridge.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|4.1.4': {
     covers:
@@ -3073,7 +3073,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'than the spacing rule would require, and that the sensing length must not straddle detection zones ' +
       'unless a single fault cannot confuse which zone is in alarm. It also caps the area one device may ' +
       'claim and calls for the run to be kept clear of mechanical damage.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|SECTION 5': {
     covers:
@@ -3083,7 +3083,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'space cases, and a full treatment of aspirating detectors and their pipe networks. Optical beam ' +
       'devices and ASD sampling points are handled alongside point heads rather than in a section of their ' +
       'own.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|5.1': {
     covers:
@@ -3091,7 +3091,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'level: how deep they hang, how far apart they sit, how close to walls and diffusers they may come, ' +
       'and what changes under deep beams, in high airflow, or inside a void. When a design is challenged on ' +
       'coverage rather than on detector technology, this is the group of sub-clauses the argument lives in.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|5.1.1': {
     covers:
@@ -3109,7 +3109,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'between adjacent beams, how far the outermost beam sits in from the side of the room, and how close ' +
       'transmitters, receivers and reflectors may sit to the far end or a smoke curtain. Aspirating ' +
       'sampling points inherit the point-detector spacing, and small rooms get a staggered-grid concession.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|5.1.3': {
     covers:
@@ -3117,7 +3117,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'top row, a longitudinal step along it, a horizontal step between lower rows, and permission to ' +
       'stretch spacing within a lower row only where its heads are offset against the row above. Optical ' +
       'beam detectors on a slope carry their own limit on how far a beam may run from the side wall.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|5.1.4': {
     covers:
@@ -3133,7 +3133,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'before a normally spaced head can accumulate enough of it to respond. The clause sends you to the ' +
       'selection table, where the air exchange rate drives both a reduction in spacing and a step up in ' +
       'detector class, from standard point heads towards more sensitive aspirating equipment.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|Table 5.1.5': {
     covers:
@@ -3142,7 +3142,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'point detectors at the quiet end through to multipoint aspirating detectors as air movement climbs, ' +
       'with the product standards each row is certified to. A note flags asset-protection settings such as ' +
       'computer rooms and data centres, where more than the table may be warranted.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2015|5.1.6': {
     covers:
@@ -3166,7 +3166,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'protected, what the design has to demonstrate, and how the installed network is marked and mounted. ' +
       'Duct sampling smoke detectors are expressly outside it. Read the sub-clauses together before signing ' +
       'off a pipe network somebody else designed and somebody else installed.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2015|5.2.1': {
     covers:
@@ -3176,7 +3176,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'locked or restricted access, or inside sole occupancy units, count as separate point detectors when ' +
       'working out remote indicators, and the clause fixes the mechanical grade of sampling pipe and ' +
       'capillary tube.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2015|5.2.2': {
     covers:
@@ -3186,7 +3186,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'it replaces, static hole sensitivity derived from the manufacturer\'s design tool, and sample ' +
       'transport time within the limit for the detector\'s class. Airflow faults have to show both audibly ' +
       'and visually at the indicating equipment.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2015|5.2.3': {
     covers:
@@ -3196,7 +3196,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'capillary branches fixed so they cannot pull out, the network run as electrical conduit is run, and ' +
       'sampling points held within a depth of the ceiling. A painted hole or a lost capillary removes ' +
       'coverage silently, which is what all this marking exists to prevent.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2015|SECTION 6': {
     covers:
@@ -3211,7 +3211,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'members and other objects must not block the field of view, and where the environment deposits ' +
       'particles on the lens, baffles or purging equipment have to hold sensitivity between service visits. ' +
       'The device that silted up quietly since the last inspection is the failure it exists to prevent.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|6.2': {
     covers:
@@ -3220,7 +3220,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'create significant unseen areas, extra detectors go in to cover them. The note pushes you to the ' +
       'manufacturer\'s instructions and to Appendix A for which detection principle suits the fuel and the ' +
       'level of protection wanted.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|SECTION 7': {
     covers:
@@ -3291,7 +3291,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'sprinkler. It fixes which detector technologies qualify, a spacing regime of its own, siting ' +
       'relative to smoke migration paths and exit doors, and the matching of sensitivities across zones. ' +
       'Read it whenever a head is there for fan control rather than for the evacuation alarm.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|7.5.1': {
     covers:
@@ -3317,7 +3317,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'smoke will actually take rather than dropping a uniform grid over the plan. Where a tenancy fit-out ' +
       'puts in floor-to-ceiling partitions, detection has to be extended to cover every circulation space ' +
       'that fit-out creates, which is a standing source of defects after a floor is re-partitioned.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|7.5.2.2': {
     covers:
@@ -3327,7 +3327,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'exceptions: rooms beyond a stated dimension in any horizontal direction, and any room opening onto a ' +
       'fire-isolated pressurized exit path. Hot layer smoke control is different, its detection being ' +
       'spread through the whole smoke control zone it serves.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|7.5.3': {
     covers:
@@ -3345,7 +3345,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'close enough that smoke heading for the exit is caught before it gets in. A tighter alternative ' +
       'covers the case where partitions put a room door right beside the exit door, and heads are not ' +
       'needed inside a fire-isolated exit path pressurized to AS/NZS 1668.1.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|7.6': {
     covers:
@@ -3456,7 +3456,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'by lifts or by pressurized fire-isolated exit paths, smoke detection or aspirated sampling points ' +
       'are added in the circulation spaces and at each required exit and lift landing door. Use it when ' +
       'auditing coverage on a basement and deciding whether the exit and lift doors were ever picked up.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|7.6.8.2': {
     covers:
@@ -3880,7 +3880,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'aspirating, carbon monoxide and flame detection in turn, giving the environments each suits and the ' +
       'conditions that make each unreliable. Being guidance rather than requirement, it is what you argue ' +
       'from when proposing a detector change, not what you certify against.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|A1': {
     covers:
@@ -3900,7 +3900,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'favours smoke sensing while a fast hot fire with little smoke may reach a heat element first. Go ' +
       'here when a client wants to know why the detector in their kitchen is not the same one that is in ' +
       'the corridor.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|A3': {
     covers:
@@ -4004,7 +4004,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'roofs send smoke along the high line instead. For high ceilings such as rack storage warehouses and ' +
       'atria it raises detection at more than one level, since the concentration lower down may be the only ' +
       'usable signal. Read it before setting out heads in anything other than a flat plasterboard ceiling.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|A4.2.4': {
     covers:
@@ -4056,7 +4056,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'monitoring, dust handling, and the applications that suit. This is the background behind most of ' +
       'what a technician does standing at an aspirating unit\'s front panel, and the place to start when a ' +
       'client asks what the pre-alarm stages on their detector are actually for.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2015|A6.1': {
     covers:
@@ -4084,7 +4084,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'chamber at the heart of the unit and — the part that bites at commissioning — that a design tool ' +
       'verifies each hole’s contribution to sensitivity and the transport time for its sample to reach the ' +
       'detector. That calculation is what you check against when transport time is measured on site.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2015|A6.4': {
     covers:
@@ -4094,7 +4094,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'dilution or an unusually high ceiling; and the normal class used as a straight alternative to point ' +
       'or beam detection where maintenance access, building deflection or line of sight rule those out. ' +
       'Choosing the class wrong at design time is why some systems sit in permanent pre-alarm.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2015|A6.5': {
     covers:
@@ -4104,7 +4104,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'are — which is why adding holes to an existing network quietly degrades it. It also explains the ' +
       'aggregation effect, where smoke arriving at several points combines in the chamber to raise an alarm ' +
       'that no single point would have produced on its own.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2015|A6.6': {
     covers:
@@ -4114,7 +4114,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'systems to drive an automatic extinguishing release. The real message is that the stage settings ' +
       'have to be matched to the sensitivity and to how the building operates — thresholds copied across ' +
       'from another site produce alarms nobody knows how to answer.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2015|A6.7': {
     covers:
@@ -4144,7 +4144,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'where pipework has to be concealed for appearance; and dirty environments served by units with dust ' +
       'recognition built in. Sampled air can be warmed, cooled or filtered before it is measured, which is ' +
       'what opens up so many of these spaces.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2015|A7': {
     covers:
@@ -4229,7 +4229,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'the inverse-square relationship between fire size and detection distance, then warns that real ' +
       'detectors work on modulated energy and will not follow that arithmetic, so coverage is settled from ' +
       'the manufacturer\'s data rather than the formula.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2015|A8.2': {
     covers:
@@ -4643,7 +4643,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'dilution the pipework introduces, not the sensitivity the detector head is set to on its own. A wide ' +
       'sampling network can drag a very sensitive detector into a lower class. Read it before writing a ' +
       'class onto a design or accepting one written on a commissioning sheet.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2015|Table I1': {
     covers:
@@ -4653,7 +4653,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'strong air movement, and the lowest simply aims to match what an equivalent arrangement of point ' +
       'detectors would have delivered. Use it to sanity check that the class on the drawing suits the risk ' +
       'the room presents.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2015|Table I2': {
     covers:
@@ -4662,7 +4662,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'footnote is the trap: that test fire is burned at a different rate for each class, so the bands are ' +
       'not a single scale you can read across or interpolate along. Turn to it when a designer\'s ' +
       'calculation and a detector\'s alarm threshold have to be reconciled against a claimed class.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2015|Appendix J': {
     covers:
@@ -5737,7 +5737,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'ceilings, sole occupancy units, stairways and passageways, transportable buildings, and vertical ' +
       'shafts. Read it alongside the exclusions clause that follows, because between them they decide ' +
       'whether a space missing a device on a coverage drawing is deliberately unprotected or simply missed.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2018|3.27.1': {
     covers:
@@ -5751,7 +5751,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'point for access, and indicators are visible on the normal way into the area. The commentary on ' +
       'nuisance alarms sits here too, and warns against dropping heat detectors in where smoke detection is ' +
       'required.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2018|3.27.2': {
     covers:
@@ -5877,7 +5877,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'spaces, certain skylight recesses, and switchboards already covered by the protection of the room ' +
       'they stand in. Every exemption carries its own conditions, and a space qualifies only if it meets ' +
       'all of them — not because it resembles one of the headings.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2018|3.29': {
     covers:
@@ -5932,7 +5932,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'heads may be. It also carries a staggered-grid allowance for small rooms, with its own conditions ' +
       'about proximity to each wall. Come here when a layout looks sparse in one corner and you need to ' +
       'decide whether the design leaves a pocket of ceiling outside any detector\'s reach.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2018|4.1.3': {
     covers:
@@ -5942,7 +5942,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'outside wall and from a partition, with a wider spacing permitted only where rows are offset equally ' +
       'against their neighbours. Reach for it in a gable-roofed warehouse or plant room where hot gas banks ' +
       'up at the ridge instead of spreading evenly.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2018|4.1.4': {
     covers:
@@ -6011,7 +6011,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'beam sits in from the side of the room, and how close transmitters, receivers and reflectors sit to ' +
       'the far end or a smoke curtain. Aspirated sampling points are tied to the point-type spacing, and a ' +
       'staggered arrangement is allowed in small areas on stated conditions.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2018|5.1.3': {
     covers:
@@ -6020,7 +6020,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'horizontal gap between lower rows and from the outside wall or partition, and the wider spacing ' +
       'permitted only where rows are offset equally against their neighbours. Optical beam detectors on a ' +
       'slope get their own limit on how far a beam may be from the side wall.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1-2018|5.1.4': {
     covers:
@@ -6072,7 +6072,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'itself. Aspirating systems tend to fail quietly, by a blocked hole or a painted sampling point ' +
       'rather than an obvious fault, so these subclauses are as much about keeping the pipework legible and ' +
       'maintainable as about sensitivity.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2018|5.2.1': {
     covers:
@@ -6082,7 +6082,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'area, treats sampling points inside restricted, locked or sole occupancy areas as separate detectors ' +
       'when working out remote indicators, and grades sampling pipe and capillary tube by whether the run ' +
       'is exposed to mechanical damage. Useful when one unit has been stretched across too much floor.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2018|5.2.2': {
     covers:
@@ -6093,7 +6093,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'sensitivity class. Flow fault supervision is required, with a fault raised at the panel where a ' +
       'compartment served by a lone sampling point loses its sample, and an airflow fault annunciated both ' +
       'audibly and visually. This is the clause behind a transport time figure on a commissioning sheet.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2018|5.2.3': {
     covers:
@@ -6104,7 +6104,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'capillary branches get a minimum pull-out strength, and sampling points a maximum depth below the ' +
       'ceiling. Most of this exists because a painter or a following trade can disable an aspirating system ' +
       'without ever touching the detector.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2018|SECTION 6': {
     covers:
@@ -7392,7 +7392,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'pipe network and the detector work as one thing, and what their sensitivity classes and staged ' +
       'alarms are for. This is the background reading for anyone commissioning or maintaining a sampling ' +
       'system, where the pipework is as much part of the detector as the sensing chamber is.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2018|M.6.1': {
     covers:
@@ -7402,7 +7402,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'time for somebody to intervene. It also answers the obvious objection, that something this sensitive ' +
       'must cry wolf, by pointing to its tolerance of dust, draughts and electrical interference, and it ' +
       'sketches the range of sensing technologies vendors put in the chamber.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2018|M.6.2': {
     covers:
@@ -7411,7 +7411,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'heads would get knocked about, somewhere the air moves too fast, or simply a space where visible ' +
       'detectors are unacceptable. Handy when you have to justify the system already installed, or argue ' +
       'for one on a refit.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2018|M.6.3': {
     covers:
@@ -7421,7 +7421,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'pipe layout is not arbitrary. A design tool models what each hole contributes and how long a sample ' +
       'takes to reach the chamber, so drilling an extra hole or extending a run changes the effective ' +
       'sensitivity at every point and the transport time with it.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2018|M.6.4': {
     covers:
@@ -7431,7 +7431,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'stand-in for point and beam devices where maintenance access, building deflection or obstructed ' +
       'sight lines defeat them. Read it before accepting a design whose class was chosen by habit rather ' +
       'than by the risk in the room.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2018|M.6.5': {
     covers:
@@ -7441,7 +7441,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'smoke aggregated across the points. Gives the rough arithmetic for estimating what a single balanced ' +
       'hole is worth, and the test it has to pass — matching or bettering a point detector. This is the ' +
       'clause a commissioning argument about hole count ends up in.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2018|M.6.6': {
     covers:
@@ -7450,7 +7450,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'starts evacuation, with a further stage on some systems able to drive an extinguishing release. The ' +
       'point of the clause is that each stage has to be matched to the response threshold and to how the ' +
       'building is actually run; a staged scheme nobody investigates is just a delayed alarm.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2018|M.6.7': {
     covers:
@@ -7459,7 +7459,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'normal flow is captured at commissioning as the reference every later reading is judged against, and ' +
       'why systems that sense flow on a per-pipe basis rather than across the whole network catch the ' +
       'change sooner and tell you which run to walk.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2018|M.6.8': {
     covers:
@@ -7468,7 +7468,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'pass through unchanged, and software discrimination that recognizes dust for what it is. The failure ' +
       'it exists to prevent is the nuisance alarm caused by one oversized particle crossing the laser path ' +
       'and scattering enough light to be misread as a substantial smoke signal.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2018|M.6.9': {
     covers:
@@ -7479,7 +7479,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'where condensation and icing beat point detectors; places where the pipework has to be concealed for ' +
       'appearance; and dirty or harsh environments. Useful when a client asks why the design did not simply ' +
       'use more point detectors.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2018|M.7': {
     covers:
@@ -7770,7 +7770,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'system as tested with its sampling device, dilution included, not the bare sensitivity of the ' +
       'detector head. Quoting a detector\'s chamber figure as though it were the system class is exactly the ' +
       'confusion this appendix exists to head off.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1-2018|Table N.1': {
     covers:
@@ -7779,7 +7779,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'extra degree of confidence is needed to offset unusually high ceilings or significant air movement, ' +
       'and normal sensitivity designed to perform like a system of point detectors. Use it to check that ' +
       'the class written on a design actually matches the risk the design brief describes.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   // -------------------------------------------------------------------------
   // AS 1670-1986
@@ -7837,14 +7837,14 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'figure is applied. Where a room has been subdivided by partitions or racking reaching close to the ' +
       'ceiling, each part becomes its own room, which is the commonest reason an office fitout leaves a ' +
       'space unprotected.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1986|2.3.1': {
     covers:
       'Detectors go throughout the protected area, and this clause adds the two things most often lost on ' +
       'site: a subdivided space is still a space needing its own head, and a clear envelope has to be kept ' +
       'around every detector and sampling point. Stock stacked against a head is written up from here.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1986|2.3.2': {
     covers:
@@ -7852,7 +7852,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'cupboards, shafts, stairs, doors held open, air handling, open grid ceilings, sole-occupancy units, ' +
       'sloping roofs, external walls, ducts, walkways, service tunnels, strongrooms and stored goods. Work ' +
       'down it when auditing coverage on an unfamiliar building.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1986|2.3.2.1': {
     covers:
@@ -7872,7 +7872,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'Risers, lift shafts and floor openings that let fire run between storeys, protected at the top of ' +
       'the shaft and where it passes each storey, plus a ring of detectors around a large floor opening. ' +
       'Reach for it on an atrium or a stair void where nobody is sure who owns the detection.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1986|2.3.2.4': {
     covers:
@@ -7893,7 +7893,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'the furthest practicable downstream point of an exhaust duct carrying cooking fumes, vapours or ' +
       'lint, and a head downstream of a supply fan feeding more than one storey. It also lets these heads ' +
       'count towards the smoke control duties of the ventilation code.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1986|2.3.2.7': {
     covers:
@@ -7908,7 +7908,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'provided the unit stays under the floor area limit, and excuses the bathroom itself. This is the ' +
       'clause behind most motel and unit block coverage arguments, and it works together with the zone ' +
       'rules for multi-occupancy buildings.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1986|2.3.2.9': {
     covers:
@@ -7962,7 +7962,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'construction, free-standing switchboards, small non-ventilating skylights, air locks, and concealed ' +
       'spaces inside the stated size and construction limits. Read it before writing up a missing detector, ' +
       'because it is often the answer.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1986|2.5': {
     covers:
@@ -8172,7 +8172,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'The heat detection spacing rules taken as a group, covering flat ceilings, distance from walls and ' +
       'registers, reductions for deep segmentation, and concealed spaces. Where a heat head is on the list ' +
       'to be moved, this group says how far.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1986|3.1.1': {
     covers:
@@ -8187,14 +8187,14 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'on a ceiling to the nearest head, plus a cap on the gap between adjacent heads, with a tighter ' +
       'figure for corridors and an allowance for modular ceiling grids. It is the clause a coverage check ' +
       'on an office or a corridor gets worked against.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1986|3.1.3': {
     covers:
       'Maximum and minimum distance from a heat head to a wall or partition, a separate figure for the end ' +
       'wall of a corridor, and a keep-out distance from any supply air register. A head that looks well ' +
       'placed can still fail because it was fitted too close to a diffuser.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1986|3.1.4': {
     covers:
@@ -8202,7 +8202,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'ducts deeper than the stated threshold, and the separate coverage cap on the special purpose fixed ' +
       'temperature type. Reach for it in a building with exposed deep purlins where flat ceiling spacing ' +
       'would leave pockets.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1986|3.1.5': {
     covers:
@@ -8210,7 +8210,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'relaxed spacing in a low void whose downward projections stay within the stated depth, and a ' +
       'distinct arrangement for voids with an apex and a sloping roof. Missing the apex case is how the top ' +
       'of a void ends up unprotected.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1986|3.2': {
     covers:
@@ -8237,7 +8237,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'The smoke detection spacing group: mounting depth below the ceiling for point and beam types, ' +
       'spacing between heads and from walls, the tighter layout for heavily ventilated rooms, concealed ' +
       'spaces, and ceilings broken up by deep beams.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1986|4.2.1': {
     covers:
@@ -8252,7 +8252,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'detection point, plus a cap on the gap between adjacent heads with a longer allowance for beam ' +
       'types. Sampling tubes are spaced as though they were a row of point heads, and corridors get no ' +
       'relaxation here.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1986|4.2.3': {
     covers:
@@ -8260,14 +8260,14 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'area a beam has to traverse together with its own limits from walls, and a keep-out distance from ' +
       'supply air registers. Smoke barriers count as partitions here, which catches people out in open-plan ' +
       'retail.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1986|4.2.4': {
     covers:
       'Tightens smoke head spacing in computer rooms and similar spaces where the air change rate is high, ' +
       'because the air movement dilutes smoke before it reaches a head. The note carries the thinking on to ' +
       'high velocity areas, where either closer spacing again or more sensitive detection is called for.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1986|4.2.5': {
     covers:
@@ -8275,7 +8275,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'where the void is low and its projections stay within the stated depth, and a separate arrangement ' +
       'at the apex and down a sloping roof. The figures differ from the heat detection equivalent, so do ' +
       'not read across from the heat section.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1986|4.2.6': {
     covers:
@@ -8283,14 +8283,14 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'It works through combinations of ceiling height, beam depth and interbeam area to decide whether ' +
       'ordinary spacing holds, whether a head goes in each pocket, or whether heads mount on the underside ' +
       'of the beams. Reach for it in a car park or a beam-and-slab warehouse.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1986|4.3': {
     covers:
       'Opens the aspirating detection part of the document, covering system design, pipework, sampling ' +
       'points, filtering, response, and the pumps that draw the sample. Anything with a pipe network ' +
       'feeding a sensing head, rather than a head on the ceiling, is governed here.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1986|4.3.1': {
     covers:
@@ -8298,7 +8298,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'duct, requires airflow and electronic failures that would leave a zone unprotected to annunciate ' +
       'both visually and audibly at the panel, and caps the area one sensing head may cover. The flow fault ' +
       'requirement is what makes a blocked pipe discoverable.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1986|4.3.2': {
     covers:
@@ -8307,14 +8307,14 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'point opening size and spacing, insect filters or doubled points, marking of unfiltered points, ' +
       'non-metallic conduit type and fixing, red pipe identification, ceiling plates over concealed points, ' +
       'and capillary tube fixing and bore. Most aspirating defects raised on service trace back into here.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1986|4.3.3': {
     covers:
       'The aspirator itself has to cope with the environment of the zone it samples, and where it runs from ' +
       'mains it changes over automatically to standby battery when the mains drops. A sampling system that ' +
       'stops drawing air on a power failure has quietly stopped protecting the zone.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1670-1986|SECTION 5': {
     covers:
@@ -8557,7 +8557,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'Turns a detector\'s cone of vision and perpendicular sensitivity into a real protected floor area at ' +
       'a given mounting height, using the maker\'s data, and argues for overlapping coverage so one failed ' +
       'device does not open a hole. The worked aircraft hangar layout is the illustration.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1670-1986|A5.5': {
     covers:
@@ -9907,7 +9907,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'A visual look, usually from floor level, aimed at the building rather than the hardware: has the ' +
       'occupancy, the layout or the environment changed in a way that has quietly compromised a system that ' +
       'still tests fine. This is where most real-world failures hide.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1851-2012|1.5.19': {
     covers:
@@ -10170,7 +10170,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'Requires the sprinkler survey activities in the schedules to be carried out, with the commentary ' +
       'making clear it is a floor-level look for changes to the building that could impair the system ' +
       'rather than an inspection of the hardware.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1851-2012|2.2.3': {
     covers:
@@ -10245,7 +10245,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'proving test, remote alarm valve test, the end-to-end interface test, water motor alarm cleaning, ' +
       'standalone signalling equipment batteries, plus the long list of survey items that look at the ' +
       'building rather than the pipework.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1851-2012|2.4.2.4': {
     covers:
@@ -10303,7 +10303,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'The annual deluge visit: a full discharge test where that can be done, foam concentrate sampling and ' +
       'strainer cleaning, pilot line strainers, the yearly detection activities, and a check that the ' +
       'pipework and the system layout still suit what is being protected.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1851-2012|2.4.4.4': {
     covers:
@@ -10332,7 +10332,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'The annual pre-action additions: draining the air receiver, and surveying that the sprinkler piping ' +
       'and the detection above it still match each other and still suit what the system was designed to ' +
       'protect.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1851-2012|2.4.5.4': {
     covers:
@@ -10454,7 +10454,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'Requires the hydrant survey activities to be done, with the commentary framing them as a floor-level ' +
       'look for changes to the building or its surrounds that would impair hydrant performance rather than ' +
       'as an inspection of the valve itself.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1851-2012|4.2.3': {
     covers:
@@ -10605,7 +10605,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'Requires the detection survey activities, framed by the commentary as a floor-level look for changes ' +
       'to the building or its occupancy that would impair detection — new walls, new stock, new partitions ' +
       'over a detector.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1851-2012|6.2.4': {
     covers:
@@ -10656,7 +10656,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'The annual alarm work: proving that interconnected alarms sound each other, and testing every alarm ' +
       'against the spacing and location the approved design required rather than just the ones that are ' +
       'easy to reach.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1851-2012|6.4.3': {
     covers:
@@ -10917,7 +10917,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'The annual reel work on top of the six-monthly: anchor points and mounting, the hose guide, ' +
       'fittings, bearings, hose condition, ancillary equipment, and the flow measurement taken at the most ' +
       'disadvantaged reel on the system. The survey items ask whether the reel still reaches the hazard.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1851-2012|10.1': {
     covers:
@@ -11316,7 +11316,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'Requires a survey of the fire and smoke control features, including fans that keep running or stop ' +
       'in fire mode, aimed at whether occupancy, building or plant alterations have quietly undermined a ' +
       'system that still passes its function test.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1851-2012|13.2.3': {
     covers:
@@ -11550,7 +11550,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
     covers:
       'Parent clause for the mechanical services surveys, which look at the building and the plant room ' +
       'rather than at any single component.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1851-2012|13.4.3.1': {
     covers:
@@ -11562,20 +11562,20 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'The annual survey of active smoke control: physical impediments to safe operation, and whether ' +
       'mechanical additions and removals, building work or accidental obstructions have changed what the ' +
       'original design could achieve.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1851-2012|13.4.3.3': {
     covers:
       'The annual survey of relief openings, looking at the draught curtain frames that form roof ' +
       'compartments and at the inlet openings, for alterations or additions that would inhibit their ' +
       'function.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1851-2012|13.4.3.4': {
     covers:
       'The annual smoke reservoir survey: whether anything has been added into or cut through a reservoir — ' +
       'light fittings, new openings — that would let smoke escape the volume it was meant to be held in.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1851-2012|Table 13.2.1': {
     covers:
@@ -11988,21 +11988,21 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'transport time and compare it with the baseline within a stated tolerance and an absolute ceiling. ' +
       'Where it drifts, clean the holes, check the filters and verify sensitivity — and the direction of ' +
       'the drift tells you where the contamination is.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1851-2012|G10': {
     covers:
       'Verify and record that the detector\'s sensitivity calibration is still within tolerance of its ' +
       'original value, which may mean sending the unit or part of it back to the manufacturer. Budget for ' +
       'it before promising a same-day aspirating service.',
-    appFeature: 'tools/vesda',
+    appFeature: 'tools/battery',
   },
   'as-1851-2012|G11': {
     covers:
       'Flame detectors are functionally tested every year and their area of coverage inspected for change ' +
       'against the approved design, using an approved light source suitable for the environment where ' +
       'manual optical integrity is not used.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-1851-2012|G12': {
     covers:
@@ -12573,7 +12573,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'How much of the building has to be covered, splitting a sprinklered building from a sprinklered area ' +
       'and listing the spaces that may be left out. This is the clause behind most coverage arguments on a ' +
       'residential block.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-2118-4-1995|2.10.1': {
     covers:
@@ -12599,14 +12599,14 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'closets and pantries inside a unit, open external porches, balconies, walkways and stairs, unused ' +
       'roof and concealed spaces, and fire isolated stairways. Check it before writing up a missing-head ' +
       'defect in a linen cupboard.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-2118-4-1995|2.11': {
     covers:
       'Caps the floor area one installation may protect, and calls for a separate installation per building ' +
       'where several smaller buildings are covered. It is the reason a larger estate ends up with multiple ' +
       'valve sets rather than one central control point.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-2118-4-1995|2.12': {
     covers:
@@ -12854,7 +12854,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'bathrooms and toilets, open external areas, detached garages, and small window features. It also ' +
       'puts a cut-off head on the garage side of any door into the house. This is the clause behind most ' +
       'arguments about a room that was skipped.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-2118-5-2008|Table 2.2': {
     covers:
@@ -13072,7 +13072,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'Makes the maker\'s listing the primary control on head positioning and the spacing table the ' +
       'backstop, with whichever is stricter winning. Steeper ceilings, obstructions and anything else out ' +
       'of the ordinary fall back to the data sheet.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'as-2118-5-2008|Table 4.3.1': {
     covers:
@@ -16546,7 +16546,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'Acceptable practice for smoke alarms in dwellings and small boarding accommodation, covering the ' +
       'alarm type and power source, where alarms go in each class of dwelling, and evacuation lighting in ' +
       'shared accommodation. This is the sub-Part behind almost every residential alarm job.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
     confidence: 'medium',
   },
   'bca-1996-v2|3.7.2.1': {
@@ -16569,7 +16569,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'Fixes where alarms go in a detached or attached dwelling, tying them to the bedrooms, to the paths ' +
       'between bedrooms and the rest of the house, and to each storey. Work from here when setting out ' +
       'alarms rather than guessing from the ceiling layout.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
     confidence: 'medium',
   },
   'bca-1996-v2|3.7.2.4': {
@@ -16577,7 +16577,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'Fixes where alarms go in boarding, guest house and hostel type accommodation, which is denser and ' +
       'holds people who do not know the building. Placement is stricter than for an ordinary house, so ' +
       'confirm the class before you set out.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
     confidence: 'medium',
   },
   'bca-1996-v2|3.7.2.5': {
@@ -17204,7 +17204,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'detector type or an alarm acknowledgement facility is allowed in kitchens and similar spots prone to ' +
       'spurious signals. In unsprinklered buildings it also picks up public corridors and internal public ' +
       'spaces.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'bca-part-e2|Specification E2.2a Clause 4': {
     covers:
@@ -17214,7 +17214,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'photoelectric heads in patient care areas and an alternating pattern along the paths of travel out, ' +
       'and aged care buildings get per-zone indication on a mimic or annunciator panel. Manual call point ' +
       'spacing on a floor is capped.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   'bca-part-e2|Specification E2.2a Clause 5': {
     covers:
@@ -17899,7 +17899,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'has to stand clear of, and the awkward cases of stairways, raked ceilings and exposed beams. It also ' +
       'warns off dead air space and positions washed by moving air. Go here when a ceiling layout offers no ' +
       'obvious clean spot.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   's28c-scan|Smoke alarms must not be placed within:': {
     covers:
@@ -17907,7 +17907,7 @@ export const CLAUSE_NOTES: Record<string, ClauseNote> = {
       'outlets and from the swept path of ceiling fan blades. Consult it before marking out a ceiling, ' +
       'since a unit set too close either sits in trapped air and misses smoke, or gets blown through and ' +
       'nuisance trips.',
-    appFeature: 'site/coverage',
+    appFeature: 'site/assets',
   },
   's28c-scan|For dwellings being sold, leased or an existing lease renewed': {
     covers:

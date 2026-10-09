@@ -28,7 +28,7 @@ describe('the words for a screen with no record', () => {
     const site = missingContext('site', 'what is due');
     expect(site.title).toBe('Which site?');
     expect(site.body).toContain('what is due');
-    expect(site.body).toMatch(/nothing has failed/i);
+    expect(site.body).toMatch(/^Pick a site/);
   });
 
   it('offers the screen that picks one', () => {

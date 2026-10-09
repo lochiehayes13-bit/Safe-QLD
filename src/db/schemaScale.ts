@@ -66,7 +66,7 @@ CREATE INDEX IF NOT EXISTS idx_simpro_quote_open ON simpro_quote(isClosed, jobEx
 CREATE INDEX IF NOT EXISTS idx_site_name ON site(name COLLATE NOCASE);
 
 /* Whether another site is called the same thing. Three of Safe QLD's sites
-   are "Storage Choice - Sumner Park" and the register carries no address for
+   are "Fictional Storage - Northside" and the register carries no address for
    any of them, so the list says which is which — and it has to be able to say
    it about a row without reading every other site to find out. */
 CREATE INDEX IF NOT EXISTS idx_site_name_key ON site(LOWER(TRIM(name)));

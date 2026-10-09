@@ -83,7 +83,7 @@ describe('a search that found nothing on a phone that holds sites', () => {
   });
 
   it('says so plainly where the office’s list has never come down at all', () => {
-    expect(MISS({ sites: undefined }).lines.join(' ')).toMatch(/never come down/);
+    expect(MISS({ sites: undefined }).lines.join(' ')).toMatch(/not synced/);
   });
 
   it('offers the two things that could change the answer', () => {
@@ -96,7 +96,7 @@ describe('a phone with no sites on it at all', () => {
   it('does not pretend the search was the problem', () => {
     const words = MISS({ held: 0, connected: false, sites: undefined });
     expect(words.title).toBe('No sites on this phone yet');
-    expect(words.lines.join(' ')).toMatch(/nothing to search/i);
+    expect(words.lines.join(' ')).toMatch(/load sites/i);
   });
 
   it('offers the connection rather than a sync, where there is no connection', () => {
@@ -138,7 +138,7 @@ describe('a named site the phone does not hold', () => {
 
   it('says the thing a technician cannot work out alone', () => {
     expect(siteNotHereNote()).toContain('archived');
-    expect(siteNotHereNote()).toMatch(/never comes down with the site list/);
+    expect(siteNotHereNote()).toMatch(/don't sync/);
   });
 
   it('is the same words the empty search uses, not a second sentence about one fact', () => {

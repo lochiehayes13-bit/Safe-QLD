@@ -60,8 +60,14 @@ describe('Table B1 covers the whole printed table', () => {
     }
   });
 
-  it('says in the record that the rows were recovered', () => {
-    // A table that quietly grew nine rows is a table nobody can audit.
-    expect((b1!.problems ?? []).join(' ')).toMatch(/missing from the first transcription/i);
+  it('no longer tells the technician the table stops at 16 mm², now that it does not', () => {
+    // The record used to say both "incomplete" and "recovered". The rows are
+    // all there (above), so the only doubts left are the ones a technician
+    // can act on: the notes are not carried, and one printed figure is off
+    // trend.
+    const doubts = (b1!.problems ?? []).join(' ');
+    expect(doubts).not.toMatch(/incomplete|missing|transcription|extraction/i);
+    expect(doubts).toContain('Notes 1–4 not included');
+    expect(doubts).toContain('Column 12');
   });
 });

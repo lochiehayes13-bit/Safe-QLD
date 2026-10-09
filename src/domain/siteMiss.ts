@@ -15,7 +15,7 @@ import type { SiteSearchColumn } from '@/domain/siteSearch';
  * way to tell a typo from a site that never came down from the office, and the
  * screen quietly implies the first.
  *
- * The search itself is sound: the real SQL finds a site called "Storage Choice
+ * The search itself is sound: the real SQL finds a site called "Fictional Storage
  * - Maroochydore" by that word, in any casing, with or without surrounding
  * spaces, whether it carries an address or not, and whether it came from the
  * office or was typed in here (src/__tests__/siteFindable.test.ts runs it
@@ -98,8 +98,7 @@ const SEARCHED = SEARCH_ORDER.map((c) => SITE_COLUMN_WORDS[c])
  * a sync cannot fix, and the only one where the right next step is to ring the
  * office rather than to press a button.
  */
-export const ARCHIVED_NOTE = 'A site the office has archived never comes down with the site list, '
-  + 'however many times it is synced — if the office has it and this does not, that is usually why.';
+export const ARCHIVED_NOTE = "Sites archived in Simpro don't sync. Ask the office.";
 
 /**
  * Why one named site is not here, where the office says it exists.
@@ -123,8 +122,7 @@ export function siteSearchMiss(input: SiteMissInput): SiteMissWords {
     return {
       title: 'No sites on this phone yet',
       lines: [
-        'Nothing has come down from the office, so there is nothing to search.',
-        'Connect this device once in Settings and the whole book arrives — on a phone, in a browser, wherever this is open.',
+        'Connect to Simpro in Settings to load sites.',
       ],
       offerPull: false,
       offerAdd: true,
@@ -156,7 +154,7 @@ export function siteSearchMiss(input: SiteMissInput): SiteMissWords {
    */
   const age = input.sites ? describeStaleness(input.sites, input.now) : undefined;
   if (!age || age.state === 'never') {
-    lines.push('The office’s site list has never come down onto this device, so what is here was typed in.');
+    lines.push('Site list not synced yet.');
   } else {
     lines.push(`The site list ${age.label.charAt(0).toLowerCase()}${age.label.slice(1)}`);
   }

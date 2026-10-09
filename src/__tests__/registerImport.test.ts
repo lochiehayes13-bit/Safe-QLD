@@ -142,8 +142,8 @@ describe('a register imported twice', () => {
      * stayed on the old building for as long as it was on the books.
      */
     attachDb(wrapNodeSqlite(db));
-    await importAssetRegister(parsed('S-1', 'Storage Choice - Sumner Park'));
-    await importAssetRegister(parsed('S-2', 'Storage Choice - Sumner Park 2'));
+    await importAssetRegister(parsed('S-1', 'Fictional Storage - Northside'));
+    await importAssetRegister(parsed('S-2', 'Fictional Storage - Northside 2'));
 
     const sites = db.prepare("SELECT id, siteRef FROM site WHERE siteRef LIKE 'asset-register:S-%' ORDER BY siteRef").all() as
       { id: string; siteRef: string }[];
