@@ -22,8 +22,8 @@ describe('where the photos go', () => {
   });
 
   it('says on the button what it is for', () => {
-    expect(PHOTO_DROP_TITLE).toBe('Upload nice photos of fire equipment systems here');
-    expect(PHOTO_DROP_SUBTITLE).toBe('(for the website etc)');
+    expect(PHOTO_DROP_TITLE).toBe('Photos for the website');
+    expect(PHOTO_DROP_SUBTITLE).toBe('Good shots of fire systems go to Lachlan');
   });
 });
 

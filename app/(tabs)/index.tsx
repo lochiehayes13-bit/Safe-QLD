@@ -109,16 +109,15 @@ export default function HomeScreen() {
   return (
     <Screen>
       <Hero name={prefs?.technicianName ?? ''} />
-      <PhotoDrop />
       <AskBar />
       <FindRow />
+      <PhotoDrop />
 
       {failed ? (
         <Banner
           tone="fail"
-          title="This screen could not read what is running"
-          body={`${failed}\n\nAnything against a clock — an impairment, a notice owed — is not shown `
-            + 'below, because it could not be read. Do not take the quiet page as good news.'}
+          title="Could not load today's work"
+          body={`${failed}\n\nImpairments and notices owed may be missing below.`}
         />
       ) : null}
       {impairments.map((imp) => <ImpairmentBanner key={imp.id} impairment={imp} />)}
@@ -138,7 +137,7 @@ export default function HomeScreen() {
       />
       {editing ? (
         <Txt size="xs" tone="muted" style={{ lineHeight: 17, marginTop: -t.space(1) }}>
-          Arrows move a tile earlier or later. The cross takes it off; it stays in the list below.
+          Arrows move a tile. The cross takes it off the home screen.
         </Txt>
       ) : null}
       <ModuleGrid
@@ -258,7 +257,7 @@ function AskBar() {
           </Bounce>
         </Rowed>
         <Txt size="xs" tone="faint" style={{ paddingHorizontal: 2 }}>
-          Clauses, defect wording, EOL values, calculators and your own documents. Works offline.
+          Standards, defect wording, EOL values and calculators.
         </Txt>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2) }}>
@@ -304,8 +303,8 @@ function FindRow() {
         >
           <IconPlate icon="text-box-search-outline" size={34} muted />
           <View style={{ flex: 1 }}>
-            <Txt weight="700" numberOfLines={1}>Find a job, invoice, order, site, customer or part</Txt>
-            <Txt size="xs" tone="muted" numberOfLines={1}>Any number or name the office has. Works offline.</Txt>
+            <Txt weight="700" numberOfLines={1}>Find a job, site, customer or part</Txt>
+            <Txt size="xs" tone="muted" numberOfLines={1}>Any number or name in Simpro</Txt>
           </View>
           <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
         </View>
@@ -391,9 +390,9 @@ function NamePrompt() {
         <Rowed gap={3}>
           <IconPlate icon="account-edit-outline" size={44} muted />
           <View style={{ flex: 1 }}>
-            <Txt weight="800">Put your name on this phone</Txt>
+            <Txt weight="800">Add your name</Txt>
             <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-              Timesheets, questions and photos for the website go out under it. One field, once.
+              Timesheets and requests go out under it.
             </Txt>
           </View>
           <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />

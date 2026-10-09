@@ -30,17 +30,17 @@ export function PhotoDrop() {
         style={{
           flexDirection: 'row', alignItems: 'center', gap: t.space(3),
           backgroundColor: t.color.accent, borderRadius: t.radius.lg,
-          paddingVertical: t.space(4), paddingHorizontal: t.space(4),
-          minHeight: 84,
+          paddingVertical: t.space(3), paddingHorizontal: t.space(4),
+          minHeight: 64,
         }}
       >
-        <MaterialCommunityIcons name="camera-plus-outline" size={34} color={t.color.onAccent} />
+        <MaterialCommunityIcons name="camera-plus-outline" size={28} color={t.color.onAccent} />
         <View style={{ flex: 1 }}>
-          <Txt weight="800" size="lg" style={{ color: t.color.onAccent, letterSpacing: -0.2, lineHeight: 22 }}>
+          <Txt weight="800" style={{ color: t.color.onAccent, letterSpacing: -0.2 }}>
             {PHOTO_DROP_TITLE}
           </Txt>
           <Txt size="sm" weight="600" style={{ color: t.color.onAccent, opacity: 0.85, marginTop: 2 }}>
-            {PHOTO_DROP_SUBTITLE} — they go straight to Lachlan
+            {PHOTO_DROP_SUBTITLE}
           </Txt>
         </View>
         <MaterialCommunityIcons name="chevron-right" size={22} color={t.color.onAccent} />

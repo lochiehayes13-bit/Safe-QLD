@@ -36,8 +36,8 @@
 /** Where completed photographs go when there is no endpoint. */
 export const WEBSITE_PHOTOS_INBOX = 'lachlan@safeqld.com.au';
 
-export const PHOTO_DROP_TITLE = 'Upload nice photos of fire equipment systems here';
-export const PHOTO_DROP_SUBTITLE = '(for the website etc)';
+export const PHOTO_DROP_TITLE = 'Photos for the website';
+export const PHOTO_DROP_SUBTITLE = 'Good shots of fire systems go to Lachlan';
 
 export type PhotoRoute =
   /** POSTed to the company's own endpoint. No mail app opens. */
