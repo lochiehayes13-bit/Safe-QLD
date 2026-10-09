@@ -548,24 +548,24 @@ describe('the job list as a query', () => {
     // The fault this replaces: the picker held the first sixty open jobs and
     // filtered them in the screen, so a client's name found nothing unless
     // that client happened to be in the sixty.
-    await upsertJob({ id: 'j-ymca', externalId: '44432', title: 'Annual Portables September 2026', siteName: 'YMCA - Bowen Hills', customerName: 'YMCA Brisbane', status: 'scheduled' });
+    await upsertJob({ id: 'j-tower', externalId: '9432', title: 'Annual Portables September 2026', siteName: 'Fictional Tower - Northgate', customerName: 'Fictional Body Corporate', status: 'scheduled' });
     await upsertJob({ id: 'j-old', externalId: '41000', title: 'Monthly HYD', siteName: 'Fictional Tower', customerName: 'Fictional Holdings', status: 'complete' });
-    await upsertJob({ id: 'j-order', externalId: '41001', title: 'Repairs', siteName: 'Somewhere Else', orderNo: 'PO-8891', status: 'scheduled' });
+    await upsertJob({ id: 'j-order', externalId: '9001', title: 'Repairs', siteName: 'Somewhere Else', orderNo: 'PO-8891', status: 'scheduled' });
 
-    const bySite = await searchJobPicks('ymca');
-    expect(bySite.map((p) => p.externalId)).toContain('44432');
+    const bySite = await searchJobPicks('tower');
+    expect(bySite.map((p) => p.externalId)).toContain('9432');
 
-    const byCustomer = await searchJobPicks('brisbane');
-    expect(byCustomer.map((p) => p.externalId)).toContain('44432');
+    const byCustomer = await searchJobPicks('corporate');
+    expect(byCustomer.map((p) => p.externalId)).toContain('9432');
 
-    const byNumber = await searchJobPicks('4443');
-    expect(byNumber.map((p) => p.externalId)).toContain('44432');
+    const byNumber = await searchJobPicks('943');
+    expect(byNumber.map((p) => p.externalId)).toContain('9432');
 
     const byOrder = await searchJobPicks('PO-8891');
-    expect(byOrder.map((p) => p.externalId)).toContain('41001');
+    expect(byOrder.map((p) => p.externalId)).toContain('9001');
 
     const byTitle = await searchJobPicks('portables');
-    expect(byTitle.map((p) => p.externalId)).toContain('44432');
+    expect(byTitle.map((p) => p.externalId)).toContain('9432');
   });
 
   it('reaches a job past the fifty rows a site picker starts from', async () => {

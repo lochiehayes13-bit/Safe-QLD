@@ -90,7 +90,7 @@ describe('what it refuses to guess', () => {
     // fields with fragments of it is worse than filling none: the
     // connection then fails with the office rejecting the device, and the
     // fields look filled in.
-    const r = readPastedConnection('Hi Lochie, can you look at the panel at Bowen Hills tomorrow morning?');
+    const r = readPastedConnection('Hi, can you look at the panel at the tower tomorrow morning?');
     expect(r.found).toEqual({});
     expect(r.problem).toContain('no client ID, client secret or token URL');
   });

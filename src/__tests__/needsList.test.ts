@@ -42,11 +42,11 @@ describe('reading a line the way it gets typed', () => {
   });
 
   it('pulls the count and the building out of a line somebody wrote in full', () => {
-    expect(parseNeedLine('2 x 4.5kg ABE for YMCA Bowen Hills')).toEqual({
+    expect(parseNeedLine('2 x 4.5kg ABE for Fictional Tower')).toEqual({
       what: '4.5kg ABE',
-      whatWithWhere: '4.5kg ABE for YMCA Bowen Hills',
+      whatWithWhere: '4.5kg ABE for Fictional Tower',
       quantity: 2,
-      siteHint: 'YMCA Bowen Hills',
+      siteHint: 'Fictional Tower',
     });
   });
 
@@ -190,9 +190,9 @@ describe('handing the list on', () => {
   });
 
   it('says one where nobody wrote a number, and names the site in the wording', () => {
-    const lines = [line({ what: '4.5kg ABE', quantity: 2, partNumber: 'ABE45', siteName: 'YMCA Bowen Hills' })];
+    const lines = [line({ what: '4.5kg ABE', quantity: 2, partNumber: 'ABE45', siteName: 'Fictional Tower' })];
     expect(orderableLines(lines)).toEqual([
-      { partNumber: 'ABE45', description: '4.5kg ABE (for YMCA Bowen Hills)', quantity: 2 },
+      { partNumber: 'ABE45', description: '4.5kg ABE (for Fictional Tower)', quantity: 2 },
     ]);
   });
 

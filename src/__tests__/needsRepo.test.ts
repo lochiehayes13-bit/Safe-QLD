@@ -49,13 +49,13 @@ describe('writing a line down', () => {
       quantity: 2,
       partNumber: 'ABE45',
       siteId: 'site-1',
-      siteName: 'YMCA Bowen Hills',
+      siteName: 'Fictional Tower',
       note: 'The one with the wall bracket',
       when: 'future',
     });
     const [read] = await listNeeds();
     expect(read).toEqual(made);
-    expect(read).toMatchObject({ quantity: 2, when: 'future', siteName: 'YMCA Bowen Hills' });
+    expect(read).toMatchObject({ quantity: 2, when: 'future', siteName: 'Fictional Tower' });
   });
 
   it('keeps a line for a site the phone has never heard of', async () => {

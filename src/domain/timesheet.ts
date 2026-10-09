@@ -686,8 +686,8 @@ export function jobOptions(
  * Narrowing the offered list to what was typed.
  *
  * Matches the client as well as the job number and the site, because that is
- * what a technician types: they know they were at the YMCA, not that it was
- * job 44432. Only ever used on the handful of options the screen already
+ * what a technician types: they know which building they were at, not that it was
+ * job 9432. Only ever used on the handful of options the screen already
  * holds — searching the whole book is the database's job, not this one's.
  */
 export function filterJobOptions(options: JobOption[], query: string): JobOption[] {
