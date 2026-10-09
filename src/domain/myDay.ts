@@ -11,8 +11,11 @@ import { qldIsoDay } from './qldTime';
  * morning — are tested rather than trusted.
  */
 
-/** How far either side of today the sync reads schedules. A week back, three weeks ahead. */
-export const SCHEDULE_DAYS_BACK = 7;
+/**
+ * How far either side of today the sync reads schedules. Two weeks back, so a
+ * timesheet filled the Monday after still has its Wednesday; three weeks ahead.
+ */
+export const SCHEDULE_DAYS_BACK = 14;
 export const SCHEDULE_DAYS_AHEAD = 21;
 
 const DAY_MS = 86_400_000;

@@ -161,14 +161,18 @@ export interface Prefs {
   /**
    * Light, dark, or whatever the phone is set to.
    *
-   * The app is built dark-first — the rooms it is used in are switch rooms,
-   * risers and carparks — and followed the operating system, which on a phone
-   * that switches to light at sunrise means the app goes light at exactly the
-   * hour a technician walks into the first plant room of the day. Locking it
-   * is one setting, and 'system' stays the default because most people never
-   * think about this and the operating system is a reasonable guess.
+   * Light is the default, the company website's look. Dark is there for switch
+   * rooms and risers, and following the phone for anyone who wants it; both
+   * are one setting away.
    */
   theme: 'system' | 'dark' | 'light';
+  /**
+   * How this person's timesheet weeks are filled: from their own Simpro
+   * schedule (construction crews, whose week is the schedule), or typed
+   * (service, whose day rarely is). Empty until they answer, which the
+   * timesheet asks once.
+   */
+  timesheetFill: '' | 'schedule' | 'manual';
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -219,6 +223,7 @@ export const DEFAULT_PREFS: Prefs = {
   attendanceAfterHoursMinutes: 180,
   // The website's look, light on paper. Dark is a choice in Settings.
   theme: 'light',
+  timesheetFill: '',
 };
 
 export async function loadPrefs(): Promise<Prefs> {

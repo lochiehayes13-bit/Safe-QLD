@@ -17,7 +17,7 @@ const NOW = '2026-09-01T22:30:00.000Z';
 describe('the window the sync reads', () => {
   it('is anchored on the Queensland day, not the UTC one', () => {
     expect(scheduleWindow(NOW)).toEqual({
-      today: '2026-09-02', tomorrow: '2026-09-03', from: '2026-08-26', to: '2026-09-23',
+      today: '2026-09-02', tomorrow: '2026-09-03', from: '2026-08-19', to: '2026-09-23',
     });
   });
 

@@ -81,8 +81,8 @@ describe('the timesheet at whatever width it is given', () => {
     expect(timesheet.match(/<DayCard\b/g)).toHaveLength(1);
   });
 
-  it('answers an empty Saturday with a quieter card rather than a shorter week', () => {
-    expect(timesheet).toContain('quiet={isWeekendDay(date) && onDay.length === 0}');
+  it('answers an empty day with a one-row card rather than a shorter week', () => {
+    expect(timesheet).toContain('quiet={onDay.length === 0}');
   });
 
   it('lays the week across the screen once there is room for it', () => {
@@ -238,88 +238,40 @@ describe('the lines that were being cut off', () => {
 });
 
 /**
- * The day card's buttons, measured.
+ * The day card's actions.
  *
- * Every number here came off the bundled Manrope 700 at the 17dp the label is
- * actually drawn in, in the width the layout actually leaves: a 360dp phone —
- * the width most Android handsets are — minus the Screen's 16dp either side
- * and the Card's 16dp either side is 296dp.
+ * They were three big tiles under every day, on two rows, measured to fit a
+ * 360dp phone. A week is mostly typed lines, so the actions are chips now:
+ * the same 44dp chip as the rest of the app, on a row that wraps rather than
+ * cuts a label.
  */
-describe('the day card’s actions on the phone the week is filled in on', () => {
-  const PHONE = 360;
-  const CARD = PHONE - 16 * 2 - 16 * 2; // Screen padding, then Card padding.
-  const GAP = 8;
-
-  /** Manrope 700 at 17dp, measured off the TTF. */
-  const TEXT = {
-    'Add a job': 74.9,
-    'Copy previous day': 151.6,
-    'Copy a day': 89.4,
-    'Day off': 58.0,
-    previous: 72.0,
-  } as const;
-
-  /** The block of JSX the three actions are laid out in. */
-  const tileBlock = () => {
-    const from = timesheet.indexOf('Two rows on purpose');
+describe('the day card’s actions', () => {
+  const actions = () => {
+    const from = timesheet.indexOf('Small actions under the day');
     expect(from).toBeGreaterThan(0);
-    return timesheet.slice(from, from + 1200);
+    return timesheet.slice(from, from + 600);
   };
 
-  const sized = (label: keyof typeof TEXT) => 14 + 20 + GAP + TEXT[label] + 14;
-  const filled = (label: keyof typeof TEXT) => 10 + 20 + GAP + TEXT[label] + 10;
-
-  it('is 296dp of card on a 360dp phone', () => {
-    expect(CARD).toBe(296);
+  it('offers a job on every day, on a row that wraps', () => {
+    expect(actions()).toMatch(/<Rowed gap=\{2\} wrap[\s\S]{0,80}<Chip label="\+ Job" onPress=\{onAdd\} \/>/);
   });
 
-  it('shows why the old row could not hold two of them', () => {
-    // This is the fault, as arithmetic: the two tiles sized to their own
-    // labels came to more than the card had, so the second wrapped — on every
-    // day of every week.
-    expect(sized('Add a job') + GAP + sized('Copy previous day')).toBeGreaterThan(CARD);
+  it('offers copying a day and a day off only where the day has nothing on it', () => {
+    expect(actions()).toMatch(/!jobs\.length && !leave && canDuplicate \? <Chip label="Copy day"/);
+    expect(actions()).toMatch(/!jobs\.length && !leave \? <LeaveButton/);
   });
 
-  it('gives the one anybody presses the whole row', () => {
-    const tiles = tileBlock();
-    expect(tiles).toMatch(/label="Add a job"[\s\S]{0,80}primary fill/);
+  it('gives an empty day the same three in one row', () => {
+    const quiet = timesheet.slice(timesheet.indexOf('if (quiet) {'), timesheet.indexOf('if (quiet) {') + 700);
+    expect(quiet).toContain('<Chip label="+ Job" onPress={onAdd} />');
+    expect(quiet).toContain('<Chip label="Copy day" onPress={onDuplicate} />');
+    expect(quiet).toContain('<LeaveButton');
   });
 
-  it('puts the two occasional ones on a row of their own, each half', () => {
-    const tiles = tileBlock();
-    expect(tiles).toMatch(/flexDirection: 'row', gap: t\.space\(2\)/);
-    expect(tiles).toMatch(/label="Copy a day"[\s\S]{0,80}fill/);
-  });
-
-  it('and each half holds its label without wrapping on a 360dp phone', () => {
-    const half = (CARD - GAP) / 2;
-    expect(filled('Copy a day')).toBeLessThanOrEqual(half);
-    expect(filled('Day off')).toBeLessThanOrEqual(half);
-    // The label it replaced could not, which is why it was shortened.
-    expect(filled('Copy previous day')).toBeGreaterThan(half);
-  });
-
-  it('wraps rather than truncating where even a half is too narrow', () => {
-    /*
-     * On a 320dp phone a half is 124dp, which leaves 76dp of label — less than
-     * "Copy a day" at 89.4. It wraps to two lines, which the tile has room for,
-     * and the longest word still fits on one of them. An action whose words
-     * are cut is an action somebody has to guess at.
-     */
-    const narrowHalf = (320 - 16 * 2 - 16 * 2 - GAP) / 2;
-    expect(narrowHalf).toBe(124);
-    expect(filled('Copy a day')).toBeGreaterThan(narrowHalf);
-    // Both words of it fit on a line of their own, so the wrap is a wrap and
-    // not a hyphenless break through the middle of a word.
-    expect(10 + 20 + GAP + 43.0 + 10).toBeLessThanOrEqual(narrowHalf); // "Copy"
-    expect(10 + 20 + GAP + 33.0 + 10).toBeLessThanOrEqual(narrowHalf); // "day"
-    expect(timesheet).toContain("flexShrink: 1 }}>{label}</Txt>");
-    expect(timesheet).not.toMatch(/numberOfLines=\{1\}[\s\S]{0,40}\{label\}/);
-  });
-
-  it('a filled tile is still 48dp of target', () => {
-    const tile = timesheet.slice(timesheet.indexOf('function TileButton'), timesheet.indexOf('function TileButton') + 1600);
-    expect(tile).toContain('minHeight: 48');
+  it('draws a day off as a chip too', () => {
+    const leave = timesheet.slice(timesheet.indexOf('function LeaveButton'), timesheet.indexOf('function LeaveButton') + 400);
+    expect(leave).toContain('<Chip label="Day off"');
+    expect(timesheet).not.toContain('function TileButton');
   });
 });
 
@@ -391,14 +343,13 @@ describe('a day the sheet says is both', () => {
   it('still lets a job be added to a day that is marked off', () => {
     /*
      * Half a day's sick leave and an afternoon on site is an ordinary thing
-     * and the sheet had no way to say it: the tiles were inside the else arm,
-     * so a day with leave on it offered nothing but the leave picker. The Add
-     * tile is unconditional now, and only the two occasional ones are gated.
+     * and the sheet had no way to say it: the actions were inside the else
+     * arm, so a day with leave on it offered nothing but the leave picker.
+     * "+ Job" is unconditional now, and only the two occasional ones are gated.
      */
-    const from = timesheet.indexOf('Two rows on purpose');
-    const block = timesheet.slice(from, from + 1200);
-    expect(block).toMatch(/<TileButton icon="plus" label="Add a job"[\s\S]{0,80}primary fill \/>/);
-    // Gated, by name, so this reads as a decision rather than an accident.
-    expect(block).toMatch(/\(canDuplicate \|\| !jobs\.length\) && !leave \?/);
+    const from = timesheet.indexOf('Small actions under the day');
+    const block = timesheet.slice(from, from + 600);
+    expect(block).toMatch(/^[\s\S]{0,200}<Chip label="\+ Job" onPress=\{onAdd\} \/>/);
+    expect(block).toMatch(/\{!jobs\.length && !leave \? <LeaveButton/);
   });
 });

@@ -3,7 +3,7 @@ import { FlatList, View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { createTimesheet, listTimesheets, saveTimesheet } from '@/db/timesheetRepo';
 import { copyForNextWeek, timesheetTotals, weekStartFor, type Timesheet } from '@/domain/timesheet';
-import { loadPrefs } from '@/app-prefs';
+import { loadPrefs, patchPrefs } from '@/app-prefs';
 import { qldIsoDay } from '@/domain/qldTime';
 import { newId, nowIso } from '@/db';
 import { addDays } from '@/domain/clockOn';
@@ -11,7 +11,7 @@ import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
 import { showAlert } from '@/components/alert';
 import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
-import { Banner, Button, Card, Chip, EmptyState, H2, Rowed, Screen, Txt } from '@/components/ui';
+import { Banner, Button, Card, Chip, EmptyState, H2, Rowed, Screen, Segmented, Txt } from '@/components/ui';
 
 /**
  * Weekly timesheets, newest first.
@@ -41,10 +41,12 @@ export default function TimesheetsScreen() {
   // A week that will not load is a week somebody re-enters from memory, so the
   // empty state is withheld until the read has actually answered.
   const [failed, setFailed] = useState<string | null>(null);
+  const [fillPref, setFillPref] = useState<'' | 'schedule' | 'manual'>('');
 
   const load = useCallback(async () => {
     setFailed(null);
     try {
+      setFillPref((await loadPrefs()).timesheetFill);
       setSheets(await listTimesheets());
     } catch (e) {
       setSheets([]);
@@ -176,7 +178,7 @@ export default function TimesheetsScreen() {
               {pickingWeek ? (
                 <Card>
                   <Txt size="sm" tone="muted" style={{ marginBottom: t.space(2) }}>
-                    Weeks run Wednesday to Tuesday. A week that already has a sheet opens it rather than starting a second one.
+                    Weeks run Wednesday to Tuesday.
                   </Txt>
                   <Rowed gap={2} wrap>
                     {weeks.map((w) => (
@@ -190,11 +192,23 @@ export default function TimesheetsScreen() {
                   </Rowed>
                 </Card>
               ) : null}
+              {/* Construction crews fill from their schedule; service types theirs. */}
+              <View style={{ gap: t.space(1) }}>
+                <Txt size="xs" tone="muted" weight="700">NEW WEEKS</Txt>
+                <Segmented
+                  options={[
+                    { value: 'schedule' as const, label: 'From my schedule' },
+                    { value: 'manual' as const, label: 'I type mine' },
+                  ]}
+                  value={fillPref === 'schedule' ? 'schedule' : 'manual'}
+                  onChange={(v) => { setFillPref(v); void patchPrefs({ timesheetFill: v }); }}
+                />
+              </View>
               {failed ? <Banner tone="fail" title="This list could not be read" body={failed} /> : null}
               {sheets.length ? <H2>Your weeks</H2> : null}
             </>
           )}
-          ListEmptyComponent={failed ? null : <EmptyState icon="calendar-clock" title="No timesheets yet" body="Start a week and fill it in as you go, rather than reconstructing it on Friday afternoon." />}
+          ListEmptyComponent={failed ? null : <EmptyState icon="calendar-clock" title="No timesheets yet" body="Start this week and fill it in as you go." />}
           renderItem={({ item }) => {
             const totals = timesheetTotals(item);
             return (

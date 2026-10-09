@@ -1,10 +1,14 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, TextInput, View, useWindowDimensions, type ViewStyle } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getTimesheet, listTimesheets, saveTimesheet } from '@/db/timesheetRepo';
-import { jobCount, openJobPicks, searchJobPicks, type JobPick } from '@/db/opsRepo';
+import { jobCount, jobSummariesByExternalIds, openJobPicks, searchJobPicks, type JobPick } from '@/db/opsRepo';
+import { listScheduleFor } from '@/db/scheduleRepo';
+import { getEmployee } from '@/db/employeeRepo';
+import { whoseSchedule, type ScheduleEntry } from '@/domain/myDay';
+import { entriesFromSchedule, fillFromPosition, fillSummary, fillsOnOpen, type TimesheetFill } from '@/domain/timesheetFromSchedule';
 import { listSiteSummaries } from '@/db/repo';
 import { deleteEntry, insertClosedEntry, listEntriesBetween } from '@/db/clockRepo';
 import { listSetupActivities } from '@/db/moreRepo';
@@ -13,11 +17,11 @@ import {
   bookableLeaveKind, buildLeaveEntry, isLeaveEntry, leaveActivityFor, leaveKind as leaveKindById,
   type OfficeActivity,
 } from '@/domain/leaveBooking';
-import { loadPrefs } from '@/app-prefs';
+import { loadPrefs, patchPrefs } from '@/app-prefs';
 import {
   DEFAULT_EXTRAS, LEAVE_KINDS, LEAVE_LABEL, STANDARD_DAY_HOURS, STANDARD_WEEK_HOURS,
   blankEntry, copyDay, dayName, dayWorkedHours, entryHours, filterJobOptions, jobOptions, mergeJobOptions,
-  isWeekendDay, leaveOf, nextTimesFor, previousDayWithEntries, setLeave, timesheetTotals, toggleExtra, usualTimes,
+ leaveOf, nextTimesFor, previousDayWithEntries, setLeave, timesheetTotals, toggleExtra, usualTimes,
   weekDates, weekPeak, weekSummary,
   type DaySummary, type HourKind, type JobOption, type LeaveKind, type Timesheet, type TimesheetEntry,
 } from '@/domain/timesheet';
@@ -96,6 +100,17 @@ export default function TimesheetScreen() {
   const [activities, setActivities] = useState<OfficeActivity[]>([]);
   const [employeeId, setEmployeeId] = useState('');
   const [bookingLeave, setBookingLeave] = useState(false);
+  /*
+   * This person's own Simpro schedule for the week, and the site of each job
+   * on it, so a construction crew's week fills in one tap. `who` is false
+   * where the device does not know whose schedule to read.
+   */
+  const [schedule, setSchedule] = useState<{ blocks: ScheduleEntry[]; sites: Map<string, { siteName: string; siteId?: string }> } | null>(null);
+  const [knowsWho, setKnowsWho] = useState(true);
+  const [fillPref, setFillPref] = useState<'' | TimesheetFill>('');
+  const [suggestedFill, setSuggestedFill] = useState<TimesheetFill | undefined>(undefined);
+  const [autoFilled, setAutoFilled] = useState(false);
+  const autoTried = useRef(false);
 
   /*
    * One read, not three. The week, the job list and the history each used to be
@@ -131,6 +146,44 @@ export default function TimesheetScreen() {
       const [prefs, synced] = await Promise.all([loadPrefs(), listSetupActivities()]);
       setEmployeeId(prefs.simproEmployeeId.trim());
       setActivities(synced.map((a) => ({ id: a.id, name: a.name })));
+      setFillPref(prefs.timesheetFill);
+
+      // The person's own schedule for the week, read off the last sync.
+      const who = whoseSchedule(prefs);
+      setKnowsWho(!!who);
+      if (who && week.length) {
+        const blocks = await listScheduleFor({
+          staffId: who.by === 'id' ? who.staffId : undefined,
+          staffName: who.by === 'name' ? who.staffName : undefined,
+          from: week[0]!, to: week[week.length - 1]!,
+        });
+        const held = await jobSummariesByExternalIds(blocks.map((b) => b.jobId).filter((j): j is string => !!j));
+        const sites = new Map(held
+          .filter((j) => j.externalId)
+          .map((j) => [j.externalId!, { siteName: j.siteName ?? '', siteId: j.siteId ?? undefined }]));
+        setSchedule({ blocks, sites });
+        /*
+         * A construction crew's new week fills itself. Only a week nobody has
+         * touched — created and never saved since — so clearing a day by hand
+         * is not undone the next time the week opens.
+         */
+        if (found && !autoTried.current && fillsOnOpen(found, prefs.timesheetFill)) {
+          autoTried.current = true;
+          const fill = entriesFromSchedule({ week, blocks, sites, existing: [], newId });
+          if (fill.entries.length) {
+            const next = { ...found, entries: fill.entries };
+            await saveTimesheet(next);
+            setSheet(next);
+            setAutoFilled(true);
+          }
+        }
+        if (!prefs.timesheetFill && prefs.simproEmployeeId.trim()) {
+          const me = await getEmployee(prefs.simproEmployeeId.trim()).catch(() => null);
+          setSuggestedFill(fillFromPosition(me?.position));
+        }
+      } else {
+        setSchedule(null);
+      }
       if (week.length) {
         const booked = (await listEntriesBetween(week[0]!, week[week.length - 1]!)).filter(isLeaveEntry);
         setLeaveDays(booked.map((e) => e.date));
@@ -229,6 +282,24 @@ export default function TimesheetScreen() {
   const setEntries = useCallback((entries: TimesheetEntry[]) => {
     void persist({ entries });
   }, [persist]);
+
+  /** Fills the days that are still empty from this person's Simpro schedule. */
+  const fillFromSchedule = useCallback(() => {
+    if (!sheet || !schedule) return;
+    const fill = entriesFromSchedule({
+      week: weekDates(sheet.weekStarting), blocks: schedule.blocks, sites: schedule.sites,
+      existing: sheet.entries, newId,
+    });
+    if (fill.entries.length) setEntries([...sheet.entries, ...fill.entries]);
+    const said = fillSummary(fill);
+    showAlert(said.title, said.body);
+  }, [sheet, schedule, setEntries]);
+
+  const chooseFill = (choice: TimesheetFill) => {
+    setFillPref(choice);
+    void patchPrefs({ timesheetFill: choice });
+    if (choice === 'schedule') fillFromSchedule();
+  };
 
   const totals = useMemo(() => (sheet ? timesheetTotals(sheet) : null), [sheet]);
   const days = useMemo(() => (sheet ? weekDates(sheet.weekStarting) : []), [sheet]);
@@ -500,15 +571,67 @@ export default function TimesheetScreen() {
         {!sheet.employeeName.trim() ? <Txt size="sm" tone="fail">· no name set</Txt> : null}
       </Rowed>
 
-      <View style={{ height: 1, backgroundColor: t.color.border, marginVertical: t.space(2) }} />
-
-      <View style={[{ gap: t.space(1.5) }, spread ? { flex: 1, justifyContent: 'space-between' } : null]}>
-        {byDay.map((d) => (
-          <DayBar key={d.date} day={d} peak={peak} theme={t} />
-        ))}
-      </View>
+      {/* The day bars once there is something to compare; an empty week's are the day cards again. */}
+      {totals.grand > 0 ? (
+        <>
+          <View style={{ height: 1, backgroundColor: t.color.border, marginVertical: t.space(2) }} />
+          <View style={[{ gap: t.space(1.5) }, spread ? { flex: 1, justifyContent: 'space-between' } : null]}>
+            {byDay.map((d) => (
+              <DayBar key={d.date} day={d} peak={peak} theme={t} />
+            ))}
+          </View>
+        </>
+      ) : null}
     </Card>
   );
+
+  /*
+   * The week from the schedule. Offered where the schedule has something for a
+   * day that is still empty; the question of whether to do it every week is
+   * asked once, beside it. Someone who said they type their own (service, whose
+   * day is rarely what was booked) is not asked again here; Timesheets has the
+   * setting.
+   */
+  const emptyScheduledDays = schedule
+    ? [...new Set(schedule.blocks.map((b) => b.date))].filter((d) => days.includes(d) && !sheet.entries.some((e) => e.date === d))
+    : [];
+  const fromSchedule = sheet.status === 'draft' && fillPref !== 'manual'
+    && (emptyScheduledDays.length || autoFilled || (!knowsWho && fillPref === 'schedule')) ? (
+    <Card>
+      {autoFilled ? (
+        <Txt size="sm" weight="700">Filled from your Simpro schedule. Check the times.</Txt>
+      ) : null}
+      {!knowsWho ? (
+        <Txt size="sm" tone="muted">Pick yourself in Settings to fill this from your Simpro schedule.</Txt>
+      ) : null}
+      {emptyScheduledDays.length ? (
+        <Button
+          title={sheet.entries.length ? 'Fill empty days from my schedule' : 'Fill from my Simpro schedule'}
+          variant={sheet.entries.length ? 'secondary' : 'primary'}
+          onPress={() => fillFromSchedule()}
+          icon={<MaterialCommunityIcons name="calendar-import" size={20} color={sheet.entries.length ? t.color.accentText : t.color.onAccent} />}
+          style={autoFilled ? { marginTop: t.space(2) } : undefined}
+        />
+      ) : null}
+      {emptyScheduledDays.length && !fillPref ? (
+        <View style={{ marginTop: t.space(2), gap: t.space(1) }}>
+          <Txt size="sm" tone="muted">Do this every week?</Txt>
+          <Rowed gap={2} wrap>
+            <Chip
+              label={suggestedFill === 'schedule' ? 'Yes, every week (construction)' : 'Yes, every week'}
+              selected={suggestedFill === 'schedule'}
+              onPress={() => chooseFill('schedule')}
+            />
+            <Chip
+              label={suggestedFill === 'manual' ? 'No, I type mine (service)' : 'No, I type mine'}
+              selected={suggestedFill === 'manual'}
+              onPress={() => chooseFill('manual')}
+            />
+          </Rowed>
+        </View>
+      ) : null}
+    </Card>
+  ) : null;
 
   const notBooked = unbookedLeave.length ? (
     <Card>
@@ -543,7 +666,10 @@ export default function TimesheetScreen() {
               entries={onDay}
               theme={t}
               extraChoices={extraChoices}
-              quiet={isWeekendDay(date) && onDay.length === 0}
+              // An empty day is one line with its actions on it, weekday or
+              // weekend: a week of full cards with a big button each was a
+              // page of buttons before anything had been entered.
+              quiet={onDay.length === 0}
               grid={columns > 1}
               onAdd={() => setPicking({ date })}
               onQuickAdd={() => addJob(date, null)}
@@ -643,6 +769,8 @@ export default function TimesheetScreen() {
         ) : (
           <Reveal index={0}>{summary}</Reveal>
         )}
+
+        {fromSchedule}
 
         {notBooked}
 
@@ -769,12 +897,9 @@ function DayCard({
   };
 
   /*
-   * Saturday and Sunday used to be a dashed line that became a day when it was
-   * tapped, which put a day of the week behind a gesture nobody is told about.
-   * The objection that produced it is real — a full card for each of two empty
-   * days is what made the sheet a long scroll — so this is a card one row high
-   * instead: the day, and the two things anyone ever does to a weekend. Nothing
-   * to discover, and hours go on it in one tap.
+   * An empty day is one row: the day and its three actions. Seven full cards
+   * of nothing made the week a long scroll before anything was in it; this
+   * keeps every day visible and one tap from having hours on it.
    */
   if (quiet) {
     return (
@@ -784,7 +909,8 @@ function DayCard({
             <Txt weight="800" tone="muted" style={{ letterSpacing: -0.2 }}>{dayName(date)}</Txt>
             <Txt size="xs" tone="faint">{formatAuDate(date)}</Txt>
           </View>
-          <Chip label="Add a job" onPress={onAdd} />
+          <Chip label="+ Job" onPress={onAdd} />
+          {canDuplicate ? <Chip label="Copy day" onPress={onDuplicate} /> : null}
           <LeaveButton onLeave={onLeave} theme={t} compact />
         </Rowed>
       </Card>
@@ -856,24 +982,12 @@ function DayCard({
         * worked part of is an ordinary thing — half a day's sick leave and an
         * afternoon on site — and the sheet had no way to say it.
         */}
-      {/*
-        * Two rows on purpose, rather than three by accident.
-        *
-        * All three used to sit in one wrapping row and none of them fitted
-        * beside another on a 360dp phone, so every day card carried two or
-        * three lines of buttons and the week was a scroll. The one anybody
-        * presses goes full width; the two occasional ones share the row under
-        * it, each half, label wrapping rather than cut.
-        */}
-      <View style={{ gap: t.space(2), marginTop: t.space(2.5) }}>
-        <TileButton icon="plus" label="Add a job" onPress={onAdd} theme={t} primary fill />
-        {(canDuplicate || !jobs.length) && !leave ? (
-          <View style={{ flexDirection: 'row', gap: t.space(2) }}>
-            {canDuplicate ? <TileButton icon="content-copy" label="Copy a day" onPress={onDuplicate} theme={t} fill /> : null}
-            {!jobs.length ? <LeaveButton onLeave={onLeave} theme={t} /> : null}
-          </View>
-        ) : null}
-      </View>
+      {/* Small actions under the day's lines, so the lines are what the eye lands on. */}
+      <Rowed gap={2} wrap style={{ marginTop: t.space(2) }}>
+        <Chip label="+ Job" onPress={onAdd} />
+        {!jobs.length && !leave && canDuplicate ? <Chip label="Copy day" onPress={onDuplicate} /> : null}
+        {!jobs.length && !leave ? <LeaveButton onLeave={onLeave} theme={t} compact /> : null}
+      </Rowed>
     </Card>
   );
 }
@@ -1008,12 +1122,10 @@ function JobEntry({
   );
 }
 
-function LeaveButton({ onLeave, theme: t, compact }: { onLeave: (kind: LeaveKind, hours: number) => void; theme: Theme; compact?: boolean }) {
+function LeaveButton({ onLeave, theme: t }: { onLeave: (kind: LeaveKind, hours: number) => void; theme: Theme; compact?: boolean }) {
   const [open, setOpen] = useState(false);
   if (!open) {
-    return compact
-      ? <Chip label="Day off" onPress={() => setOpen(true)} />
-      : <TileButton icon="palm-tree" label="Day off" onPress={() => setOpen(true)} theme={t} fill />;
+    return <Chip label="Day off" onPress={() => setOpen(true)} />;
   }
   return (
     <View style={{ width: '100%', gap: t.space(2) }}>
@@ -1266,42 +1378,3 @@ function Timeless({ value, onChange, theme: t }: { value: string; onChange: (v: 
   );
 }
 
-/**
- * One of the day card's actions.
- *
- * `fill` shares a row with its sibling instead of sizing to its own label,
- * which is what stopped the week being a scroll. Measured against the bundled
- * Manrope at the 17dp/700 the label is actually drawn in: "Add a job" is 75dp
- * of text, so the tile is 131dp, and "Copy previous day" is 152dp, so 208dp.
- * Side by side with the 8dp gap that is 347dp inside a card that has 296dp on
- * a 360dp phone — the width most Android handsets are — so the second tile
- * wrapped to its own line, on every day of every week.
- *
- * A filled tile centres its content and keeps its padding tighter, which
- * leaves 96dp for the label at 360dp and 76dp at 320dp. The label wraps rather
- * than truncating: an action whose words are cut is an action somebody has to
- * guess at, and the tile is free to be two lines tall.
- */
-function TileButton({ icon, label, onPress, theme: t, primary, fill }: {
-  icon: React.ComponentProps<typeof MaterialCommunityIcons>['name']; label: string; onPress: () => void;
-  theme: Theme; primary?: boolean; fill?: boolean;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => ({
-        flexDirection: 'row', alignItems: 'center', gap: t.space(2),
-        ...(fill
-          ? { flex: 1, flexBasis: 0, justifyContent: 'center', paddingHorizontal: t.space(2.5), paddingVertical: t.space(2) }
-          : { paddingHorizontal: t.space(3.5) }),
-        minHeight: 48, borderRadius: t.radius.md,
-        backgroundColor: primary ? t.color.accent : pressed ? t.color.surfaceAlt : t.color.surface,
-        borderWidth: primary ? 0 : 1, borderColor: t.color.border,
-        opacity: pressed ? 0.85 : 1,
-      })}
-    >
-      <MaterialCommunityIcons name={icon} size={20} color={primary ? t.color.onAccent : t.color.accentText} />
-      <Txt weight="700" style={{ color: primary ? t.color.onAccent : t.color.text, flexShrink: 1 }}>{label}</Txt>
-    </Pressable>
-  );
-}
