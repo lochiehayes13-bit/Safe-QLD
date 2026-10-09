@@ -18,7 +18,9 @@ import { queueJobAttachment } from '@/simpro/sync';
 import { photosWithSizes } from '@/simpro/attachmentFiles';
 import { formatAuDate } from '@/export/sheets';
 import { loadPrefs } from '@/app-prefs';
-import { dismissSync, failedSync, forgetSync, retrySync, unknownSync, type SyncEntry } from '@/db/opsRepo';
+import {
+  dismissSync, failedSync, forgetSync, pendingSyncCount, retrySync, unknownSync, waitingSyncList, type SyncEntry,
+} from '@/db/opsRepo';
 import { getEntry, markEntrySent } from '@/db/clockRepo';
 import { CLOCK_QUEUE_KIND, describeEntry, type ClockEntry } from '@/domain/clockOn';
 import { flushSoon } from '@/simpro/flushSoon';
@@ -29,6 +31,7 @@ import { describeJobChange } from '@/domain/jobActions';
 import { describeAssetChange, isAssetChangeKind } from '@/domain/assetChanges';
 import { describeScheduleChange, isScheduleKind } from '@/domain/scheduling';
 import type { Site } from '@/domain/types';
+import { describeLoadFailure } from '@/domain/loadFailure';
 import { formatBytes } from '@/share/pack';
 import { useTheme } from '@/theme';
 import { showAlert } from '@/components/alert';
@@ -90,23 +93,42 @@ export default function OutboundScreen() {
    * finished last on screen rather than whichever was asked for last.
    */
   const planRequest = useRef(0);
+  /** Why the open service's plan could not be read, in place of the reading line. */
+  const [planFailure, setPlanFailure] = useState<string | null>(null);
   const loadPlan = useCallback(async (run: RoutineRun) => {
     const request = ++planRequest.current;
+    setPlanFailure(null);
     const site = sites.get(run.siteId);
-    // The file system is looked up here and not in the repository, which has
-    // to run under the test runner where expo-file-system does not load.
-    const next = await planForRun(run, site?.name ?? 'Unknown site', { sendPhotos, photoSizes: photosWithSizes });
-    if (planRequest.current === request) setPlan(next);
+    try {
+      // The file system is looked up here and not in the repository, which has
+      // to run under the test runner where expo-file-system does not load.
+      const next = await planForRun(run, site?.name ?? 'Unknown site', { sendPhotos, photoSizes: photosWithSizes });
+      if (planRequest.current === request) setPlan(next);
+    } catch (e) {
+      if (planRequest.current === request) setPlanFailure(describeLoadFailure(e, 'this service'));
+    }
   }, [sites, sendPhotos]);
 
+  /** Why the services or the queue could not be read. */
+  const [servicesFailure, setServicesFailure] = useState<string | null>(null);
+  const [queueFailure, setQueueFailure] = useState<string | null>(null);
+  /** Whether the services have been read once; see queuesRead. */
+  const [servicesRead, setServicesRead] = useState(false);
+
   const load = useCallback(async () => {
-    const [r, s, keys, prefs] = await Promise.all([listRoutineRuns(undefined, 60), listSites(), acceptedKeys(), loadPrefs()]);
-    setRuns(r);
-    setSites(new Map(s.map((x) => [x.id, x])));
-    setSent(new Set(keys));
-    setSendPhotos(prefs.simproSendPhotos);
-    const links = await Promise.all(r.map(async (run) => [run.id, await jobForRun(run.id)] as const));
-    setJobs(new Map(links.filter((l): l is [string, string] => !!l[1])));
+    setServicesFailure(null);
+    try {
+      const [r, s, keys, prefs] = await Promise.all([listRoutineRuns(undefined, 60), listSites(), acceptedKeys(), loadPrefs()]);
+      setRuns(r);
+      setSites(new Map(s.map((x) => [x.id, x])));
+      setSent(new Set(keys));
+      setSendPhotos(prefs.simproSendPhotos);
+      const links = await Promise.all(r.map(async (run) => [run.id, await jobForRun(run.id)] as const));
+      setJobs(new Map(links.filter((l): l is [string, string] => !!l[1])));
+      setServicesRead(true);
+    } catch (e) {
+      setServicesFailure(describeLoadFailure(e, 'your finished services'));
+    }
   }, []);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
@@ -118,20 +140,34 @@ export default function OutboundScreen() {
    * retried without being shown is a technician's work silently dropped.
    */
   const [failed, setFailed] = useState<SyncEntry[]>([]);
+  /**
+   * Everything still on its way: hours, leave, schedule changes, notes,
+   * photos and files. Read without the note bodies; see waitingSyncList.
+   */
+  const [waiting, setWaiting] = useState<SyncEntry[]>([]);
+  /** Pending rows in all, for the line under a list cut at its limit. */
+  const [pendingTotal, setPendingTotal] = useState(0);
   /** The clock entries behind the timesheet rows above, so a row can be named by its hours rather than its kind. */
   const [clockEntries, setClockEntries] = useState<Map<string, ClockEntry>>(new Map());
+  /** Whether the queue has been read once, so an empty screen is not called empty before it is. */
+  const [queuesRead, setQueuesRead] = useState(false);
   const loadQueues = useCallback(async () => {
-    const [u, f] = await Promise.all([unknownSync(), failedSync()]);
-    setUnknown(u);
-    setFailed(f);
-    const found = new Map<string, ClockEntry>();
-    for (const row of [...u, ...f]) {
-      const id = clockEntryIdOf(row);
-      if (!id || found.has(id)) continue;
-      const entry = await getEntry(id);
-      if (entry) found.set(id, entry);
+    setQueueFailure(null);
+    try {
+      const [u, f, w, total] = await Promise.all([unknownSync(), failedSync(), waitingSyncList(), pendingSyncCount()]);
+      setUnknown(u);
+      setFailed(f);
+      setWaiting(w);
+      setPendingTotal(total);
+      const ids = [...new Set([...u, ...f, ...w].map(clockEntryIdOf).filter((id): id is string => !!id))];
+      const entries = await Promise.all(ids.map((id) => getEntry(id)));
+      const found = new Map<string, ClockEntry>();
+      for (const entry of entries) if (entry) found.set(entry.id, entry);
+      setClockEntries(found);
+      setQueuesRead(true);
+    } catch (e) {
+      setQueueFailure(describeLoadFailure(e, 'the send queue'));
     }
-    setClockEntries(found);
   }, []);
 
   /**
@@ -149,7 +185,7 @@ export default function OutboundScreen() {
   useFocusEffect(useCallback(() => { void loadQueues(); }, [loadQueues]));
 
   const openRun = useCallback(async (run: RoutineRun) => {
-    if (open === run.id) { setOpen(null); setPlan(null); setReport(null); return; }
+    if (open === run.id) { setOpen(null); setPlan(null); setReport(null); setPlanFailure(null); return; }
     setOpen(run.id);
     setReport(null);
     setPlan(null);
@@ -182,11 +218,7 @@ export default function OutboundScreen() {
     try {
       const prefs = await loadPrefs();
       if (!prefs.simproProxyUrl && !(await SimproClient.hasSecret())) {
-        showAlert(
-          'No Simpro credentials',
-          'Set the client secret in Settings, or point the app at a proxy so the secret never sits '
-          + 'on this handset at all.',
-        );
+        showAlert('No Simpro login', 'Set up Simpro in Settings first.');
         return;
       }
       const client = new SimproClient(simproConfigFromPrefs(prefs));
@@ -210,7 +242,7 @@ export default function OutboundScreen() {
       await load();
       await loadPlan(run);
     } catch (e) {
-      showAlert('Could not send', e instanceof Error ? e.message : String(e));
+      showAlert("Couldn't send", e instanceof Error ? e.message : String(e));
     } finally {
       setSending(false);
     }
@@ -223,105 +255,34 @@ export default function OutboundScreen() {
    */
   const unlinked = useMemo(() => runs.filter((r) => !jobs.has(r.id)).length, [runs, jobs]);
 
+  const pendingShown = waiting.filter((w) => w.status === 'pending').length;
+  const nothingAtAll = queuesRead && servicesRead && !queueFailure && !servicesFailure
+    && !unknown.length && !failed.length && !waiting.length && !runs.length;
+
   return (
     <Screen>
-      <Stack.Screen options={{ title: 'Send to the office' }} />
+      <Stack.Screen options={{ title: 'Waiting to send' }} />
 
-      <Txt tone="muted" size="sm" style={{ lineHeight: 20 }}>
-        A finished service and the defects it raised, pushed to the job in Simpro as notes, with each
-        defect photograph filed as a job attachment. Nothing sends without a job linked, and everything
-        held back is listed with the reason.
-      </Txt>
-
-      {unlinked ? (
-        <Banner
-          tone="warn"
-          title={`${unlinked} recorded service${unlinked === 1 ? '' : 's'} with no job linked`}
-          body="Nothing can be sent for these. A service sitting on a phone because nobody linked a job is the one the office never hears about."
-        />
+      {queueFailure || servicesFailure ? (
+        <>
+          <Banner tone="fail" title="Couldn't load Waiting to send" body={[queueFailure, servicesFailure].filter(Boolean).join('\n\n')} />
+          <Button title="Try again" variant="secondary" onPress={() => { void loadQueues(); void load(); }} />
+        </>
       ) : null}
 
-      {!runs.length ? (
+      {nothingAtAll ? (
         <EmptyState
           icon="cloud-check-outline"
-          title="No recorded services yet"
-          body="Run a routine and record it, and it shows here ready to go to the office."
+          title="Nothing waiting to send"
+          body="Everything has reached Simpro."
         />
       ) : null}
-
-      {runs.map((run) => {
-        const site = sites.get(run.siteId);
-        const jobId = jobs.get(run.id) ?? '';
-        const isOpen = open === run.id;
-        return (
-          <Card key={run.id}>
-            <Rowed>
-              <View style={{ flex: 1 }}>
-                <Txt weight="700">{run.routineLabel}</Txt>
-                <Txt size="sm" tone="muted">
-                  {site?.name ?? 'Unknown site'} · {formatAuDate(run.completedAt)}
-                </Txt>
-              </View>
-              <Chip
-                label={jobId ? `Job ${jobId}` : 'No job'}
-                tone={jobId ? 'accent' : 'warn'}
-              />
-            </Rowed>
-
-            <Rowed gap={2} wrap>
-              <Chip label={`${run.checksPassed} passed`} tone="pass" />
-              {run.checksFailed ? <Chip label={`${run.checksFailed} failed`} tone="fail" /> : null}
-              {run.checksNotTested ? <Chip label={`${run.checksNotTested} not tested`} tone="warn" /> : null}
-              {run.defectsRaised ? <Chip label={`${run.defectsRaised} defects`} /> : null}
-            </Rowed>
-
-            <Button
-              title={isOpen ? 'Hide' : 'Review what would be sent'}
-              variant="secondary"
-              compact
-              onPress={() => void openRun(run)}
-            />
-
-            {isOpen ? (
-              <View style={{ gap: t.space(2.5), marginTop: t.space(2) }}>
-                <Divider />
-                <Field
-                  label="Simpro job"
-                  value={jobDraft}
-                  onChangeText={setJobDraft}
-                  onBlur={() => void linkJob(run)}
-                  placeholder="12345"
-                  hint="Nothing sends without this. A guessed job number posts against somebody else's work."
-                  keyboardType="numeric"
-                />
-                {jobDraft.trim() !== jobId ? (
-                  <Button title="Link this job" variant="secondary" compact onPress={() => void linkJob(run)} />
-                ) : null}
-
-                {plan && plan.run.runId === run.id ? (
-                  <PlanReview
-                    plan={plan}
-                    report={report}
-                    sending={sending}
-                    onSend={() => void send(run)}
-                  />
-                ) : (
-                  <Txt size="sm" tone="muted">Reading the record…</Txt>
-                )}
-              </View>
-            ) : null}
-          </Card>
-        );
-      })}
 
       {unknown.length ? (
         <>
-          <Divider />
-          <H2>Sent, but no reply came</H2>
+          <H2>No reply from Simpro</H2>
           <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-            The request went out and the connection dropped before Simpro answered. It may have
-            landed. Sending again could post it twice, so the app will not — each one below says
-            where to look in Simpro. Have a look, then tell it which.
+            These may already be in Simpro. Check there, then pick one.
           </Txt>
           {unknown.map((u) => {
             const described = describeUnknown(u, clockEntries);
@@ -343,14 +304,14 @@ export default function OutboundScreen() {
 
                 <Rowed gap={2} style={{ marginTop: t.space(2.5) }}>
                   <Button
-                    title="It is there"
+                    title="It's there"
                     variant="secondary"
                     compact
                     style={{ flex: 1 }}
                     onPress={() => { void dismiss(u).then(loadQueues); }}
                   />
                   <Button
-                    title="It is not — send it"
+                    title="Not there, send it"
                     compact
                     style={{ flex: 1 }}
                     onPress={() => {
@@ -366,13 +327,10 @@ export default function OutboundScreen() {
 
       {failed.length ? (
         <>
-          <Divider />
-          <H2>Could not be sent</H2>
+          {unknown.length ? <Divider /> : null}
+          <H2>Couldn’t send</H2>
           <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-            The app has stopped trying these on its own: Simpro refused them as many times as the
-            queue allows, or the photo file is no longer on this phone. Simpro's last words are under
-            each one. Try again starts the count over; Forget drops it here without sending, and a
-            photograph forgotten is offered again the next time its service is sent.
+            Simpro refused these, or the photo is gone from the phone. Try again, or Forget to drop it.
           </Txt>
           {failed.map((f) => (
             <Card key={f.id}>
@@ -414,26 +372,143 @@ export default function OutboundScreen() {
         </>
       ) : null}
 
-      <Divider />
-      <H2>What goes to the job</H2>
-      {PUSHED_TO_SIMPRO.map((p) => (
-        <Card key={p.what}>
-          <Txt weight="600" size="sm">{p.what}</Txt>
-          <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{p.how}</Txt>
-        </Card>
-      ))}
+      {waiting.length ? (
+        <>
+          {unknown.length || failed.length ? <Divider /> : null}
+          <H2>Queued</H2>
+          <Txt size="sm" tone="muted">Sends when there’s signal.</Txt>
+          {waiting.map((w) => {
+            const state = waitingState(w);
+            return (
+              <Card key={w.id}>
+                <Rowed gap={2} align="flex-start">
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <Txt weight="700">{describeUnknown(w, clockEntries)}</Txt>
+                    <Txt size="xs" tone="muted">
+                      Queued {formatAuDate(w.createdAt)}{w.attempts ? ` · ${w.attempts} attempt${w.attempts === 1 ? '' : 's'}` : ''}
+                    </Txt>
+                    {w.lastError ? <Txt size="sm" tone="warn" style={{ lineHeight: 19 }}>{w.lastError}</Txt> : null}
+                  </View>
+                  <Chip label={state.label} tone={state.tone} />
+                </Rowed>
+              </Card>
+            );
+          })}
+          {pendingTotal > pendingShown ? (
+            <Txt size="sm" tone="muted">{pendingTotal - pendingShown} more queued, not shown.</Txt>
+          ) : null}
+        </>
+      ) : null}
+
+      {unknown.length || failed.length || waiting.length ? <Divider /> : null}
+      <H2>Finished services</H2>
+
+      {unlinked ? (
+        <Banner
+          tone="warn"
+          title={`${unlinked} service${unlinked === 1 ? '' : 's'} with no job linked`}
+          body="Link a job to send them."
+        />
+      ) : null}
+
+      {servicesRead && !runs.length && !nothingAtAll ? (
+        <Txt size="sm" tone="muted">No finished services to send.</Txt>
+      ) : null}
+
+      {runs.map((run) => {
+        const site = sites.get(run.siteId);
+        const jobId = jobs.get(run.id) ?? '';
+        const isOpen = open === run.id;
+        return (
+          <Card key={run.id}>
+            <Rowed>
+              <View style={{ flex: 1 }}>
+                <Txt weight="700">{run.routineLabel}</Txt>
+                <Txt size="sm" tone="muted">
+                  {site?.name ?? 'Unknown site'} · {formatAuDate(run.completedAt)}
+                </Txt>
+              </View>
+              <Chip
+                label={jobId ? `Job ${jobId}` : 'No job'}
+                tone={jobId ? 'accent' : 'warn'}
+              />
+            </Rowed>
+
+            <Rowed gap={2} wrap>
+              <Chip label={`${run.checksPassed} passed`} tone="pass" />
+              {run.checksFailed ? <Chip label={`${run.checksFailed} failed`} tone="fail" /> : null}
+              {run.checksNotTested ? <Chip label={`${run.checksNotTested} not tested`} tone="warn" /> : null}
+              {run.defectsRaised ? <Chip label={`${run.defectsRaised} defects`} /> : null}
+            </Rowed>
+
+            <Button
+              title={isOpen ? 'Hide' : 'Review and send'}
+              variant="secondary"
+              compact
+              onPress={() => void openRun(run)}
+            />
+
+            {isOpen ? (
+              <View style={{ gap: t.space(2.5), marginTop: t.space(2) }}>
+                <Divider />
+                <Field
+                  label="Simpro job"
+                  value={jobDraft}
+                  onChangeText={setJobDraft}
+                  onBlur={() => void linkJob(run)}
+                  placeholder="12345"
+                  hint="Needed to send. A wrong number posts to someone else's job."
+                  keyboardType="numeric"
+                />
+                {jobDraft.trim() !== jobId ? (
+                  <Button title="Link this job" variant="secondary" compact onPress={() => void linkJob(run)} />
+                ) : null}
+
+                {plan && plan.run.runId === run.id ? (
+                  <PlanReview
+                    plan={plan}
+                    report={report}
+                    sending={sending}
+                    onSend={() => void send(run)}
+                  />
+                ) : planFailure ? (
+                  <>
+                    <Banner tone="fail" title="Couldn't load this service" body={planFailure} />
+                    <Button title="Try again" variant="secondary" compact onPress={() => void loadPlan(run)} />
+                  </>
+                ) : (
+                  <Txt size="sm" tone="muted">Loading the service…</Txt>
+                )}
+              </View>
+            ) : null}
+          </Card>
+        );
+      })}
 
       <Divider />
-      <H2>Never sent, on purpose</H2>
-      {WITHHELD_FROM_SIMPRO.map((w) => (
-        <Card key={w.what}>
-          <Txt weight="600" size="sm">{w.what}</Txt>
-          <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{w.why}</Txt>
-        </Card>
-      ))}
+      <H2>What’s sent</H2>
+      <Card>
+        {PUSHED_TO_SIMPRO.map((p) => (
+          <Txt key={p.what} size="sm" style={{ lineHeight: 20 }}>{p.what}</Txt>
+        ))}
+      </Card>
+
+      <H2>Never sent</H2>
+      <Card>
+        {WITHHELD_FROM_SIMPRO.map((w) => (
+          <Txt key={w.what} size="sm" tone="muted" style={{ lineHeight: 20 }}>{w.what}</Txt>
+        ))}
+      </Card>
       <View style={{ height: t.space(4) }} />
     </Screen>
   );
+}
+
+/** The chip on a row still on its way. */
+function waitingState(w: SyncEntry): { label: string; tone: 'accent' | 'warn' } {
+  if (w.status === 'sending') return { label: 'Sending', tone: 'accent' };
+  if (w.lastError) return { label: 'Retrying', tone: 'warn' };
+  return { label: 'Queued', tone: 'accent' };
 }
 
 /**
@@ -489,12 +564,17 @@ function lookupFor(u: SyncEntry, described: string): OutboundLookup {
 
 function describeUnknown(u: SyncEntry, clockEntries: ReadonlyMap<string, ClockEntry>): string {
   try {
-    const p = JSON.parse(u.payload) as { jobId?: string; subject?: string; filename?: string; mimeType?: string; lines?: unknown[]; entryId?: string };
+    const p = JSON.parse(u.payload) as {
+      jobId?: string; subject?: string; filename?: string; mimeType?: string; lines?: unknown[]; entryId?: string;
+      description?: string; result?: string; externalAssetId?: string;
+    };
     switch (u.kind) {
       case 'job-note': return `Note on job ${p.jobId ?? '?'}: ${p.subject ?? ''}`;
       case 'attachment': return `${attachmentWord(p)} on job ${p.jobId ?? '?'}: ${p.filename ?? p.subject ?? ''}`;
       case 'purchase-order':
         return `Parts order${p.jobId ? ` for job ${p.jobId}` : ''}, ${Array.isArray(p.lines) ? p.lines.length : 0} lines`;
+      case 'asset-test':
+        return `Asset test${p.result ? ` (${p.result})` : ''}: ${p.description ?? `asset ${p.externalAssetId ?? '?'}`}`;
       case CLOCK_QUEUE_KIND: {
         const entry = p.entryId ? clockEntries.get(p.entryId) : undefined;
         return entry ? describeEntry(entry) : `Hours${p.jobId ? ` on job ${p.jobId}` : ''}, entry no longer on this phone`;
@@ -538,13 +618,13 @@ function PlanReview({
   return (
     <View style={{ gap: 10 }}>
       {declined.map((w, i) => (
-        <Banner key={`d${i}`} tone="fail" title="Not being sent" body={w.message} />
+        <Banner key={`d${i}`} tone="fail" title="Not sent" body={w.message} />
       ))}
       {cautions.map((w, i) => (
-        <Banner key={`c${i}`} tone="warn" title="Worth knowing" body={w.message} />
+        <Banner key={`c${i}`} tone="warn" title="Check" body={w.message} />
       ))}
 
-      <Label>What the note will say</Label>
+      <Label>Note summary</Label>
       <Rowed gap={2} wrap>
         <Chip label={`${summary.passed} passed`} tone="pass" />
         <Chip label={`${summary.failed} failed`} tone={summary.failed ? 'fail' : 'default'} />
@@ -612,9 +692,8 @@ function NoteCard({ item }: { item: OutboundNoteItem }) {
       </Rowed>
       {item.payload.truncated ? (
         <Txt size="xs" tone="warn">
-          Shortened to fit: {item.payload.omittedChars} characters
-          {item.payload.omittedSections.length ? ` (${item.payload.omittedSections.join(', ')})` : ''} are
-          only in the full record, and the note says so.
+          Shortened to fit: {item.payload.omittedChars} characters left out
+          {item.payload.omittedSections.length ? ` (${item.payload.omittedSections.join(', ')})` : ''}. The full record stays on the phone.
         </Txt>
       ) : null}
       <Txt size="xs" tone="muted" style={{ lineHeight: 17 }} numberOfLines={8}>
@@ -683,14 +762,11 @@ function SendResult({ report }: { report: SendReport }) {
         title={title}
         body={
           (report.remoteCheck === 'checked'
-            ? "The job's existing notes were read first, so a service already reported from another handset was recognised."
+            ? "Checked the job's notes first. Nothing sent twice."
             : report.remoteCheck === 'unavailable'
-              ? `The job's notes could not be read (${report.remoteCheckError ?? 'no reason given'}), so a duplicate `
-                + 'sent from a different handset would not have been caught. What this phone knows it sent was still skipped.'
-              : 'The job\'s notes were not read on this send.')
-          + (report.queued
-            ? ' Queued photos upload the moment there is signal; Settings shows how many are still waiting.'
-            : '')
+              ? `Couldn't check the job's notes (${report.remoteCheckError ?? 'no reason given'}). A copy sent from another phone may be doubled.`
+              : "Job notes not checked.")
+          + (report.queued ? " Photos send when there's signal." : '')
         }
       />
       {report.outcomes.map((o) => (

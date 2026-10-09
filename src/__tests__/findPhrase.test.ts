@@ -11,13 +11,13 @@ import { isPhrase, phraseWords, readPhrase } from '@/domain/findPhrase';
 
 describe('telling a phrase from an identifier', () => {
   it('leaves identifiers alone', () => {
-    expect(isPhrase('44501')).toBe(false);
+    expect(isPhrase('9001')).toBe(false);
     expect(isPhrase('DET-OPT-1')).toBe(false);
     expect(isPhrase('name@example.invalid')).toBe(false);
     expect(isPhrase('0400 000 000')).toBe(false);
     // The search's own prefixes read better than this does.
-    expect(isPhrase('po 80375')).toBe(false);
-    expect(isPhrase('inv 62339')).toBe(false);
+    expect(isPhrase('po 9003')).toBe(false);
+    expect(isPhrase('inv 9002')).toBe(false);
     expect(isPhrase('')).toBe(false);
   });
 
@@ -51,21 +51,19 @@ describe('reading what a phrase asks for', () => {
   });
 
   it('keeps a number in the terms, so the kind and the number go together', () => {
-    expect(readPhrase('purchase orders for job 44501')).toMatchObject({ terms: '44501', kind: 'order' });
+    expect(readPhrase('purchase orders for job 9001')).toMatchObject({ terms: '9001', kind: 'order' });
   });
 
   it('owns up to the words it cannot act on', () => {
     const read = readPhrase('unpaid invoices for Fictional Tower');
     expect(read).toMatchObject({ terms: 'Fictional Tower', kind: 'invoice', ignored: ['unpaid'] });
-    expect(phraseWords(read)).toBe(
-      'Read as: invoices only, matching "Fictional Tower", "unpaid" is not something this box can filter on, so it was left out.',
-    );
+    expect(phraseWords(read)).toBe('Searching invoices for "Fictional Tower". Can\'t filter by "unpaid".');
   });
 
   it('comes back with no terms where every word was scaffolding', () => {
     const read = readPhrase('show me the open purchase orders');
     expect(read).toMatchObject({ terms: '', kind: 'order', ignored: ['open'] });
-    expect(phraseWords(read)).toContain('the most recent');
+    expect(phraseWords(read)).toBe('Showing the latest purchase orders. Can\'t filter by "open".');
   });
 
   it('never puts a word into the terms that was not typed', () => {
@@ -81,6 +79,12 @@ describe('reading what a phrase asks for', () => {
         expect({ phrase, word, typed: typed.has(word) }).toEqual({ phrase, word, typed: true });
       }
     }
+  });
+
+  it('says it searched everything where no kind was named', () => {
+    const read = readPhrase('who do I ring at Fictional Tower');
+    expect(read).toMatchObject({ terms: 'Fictional Tower', kind: undefined });
+    expect(phraseWords(read)).toBe('Searching everything for "Fictional Tower".');
   });
 
   it('says nothing about a phrase it did not change', () => {

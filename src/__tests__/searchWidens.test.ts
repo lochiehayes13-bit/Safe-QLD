@@ -6,8 +6,8 @@
  * and "supplier" each map onto a kind of record. It then asked for that kind
  * and no other.
  *
- * Those words are in real site names. Burson Auto Parts Rockhampton. People
- * First Stadium, at Carrara. So typing the name of a building this company
+ * Those words turn up in site names: an auto parts store, a stadium named
+ * for its sponsor. So typing the name of a building this company
  * services asked the catalogue — or the contacts, or the customers — for it,
  * the site was never queried, and the screen answered "Nothing matched. Try a
  * number on its own, or a shorter piece of the name."
@@ -56,8 +56,8 @@ async function screen(query: string) {
 
 beforeEach(async () => {
   db = openMigrated();
-  await createSite({ id: 'parts', name: 'Burson Auto Parts Rockhampton', suburb: 'Rockhampton' });
-  await createSite({ id: 'stadium', name: 'People First Stadium', suburb: 'Carrara' });
+  await createSite({ id: 'parts', name: 'Smith Auto Parts Northside', suburb: 'Northside' });
+  await createSite({ id: 'stadium', name: 'Good People Stadium', suburb: 'Eastside' });
   await createSite({ id: 'acct', name: 'Account Street Chambers', suburb: 'Brisbane' });
   await createSite({ id: 'plain', name: 'Harbourline Apartments', suburb: 'Hamilton', externalId: '8812', externalSource: 'simpro' });
 });
@@ -66,8 +66,8 @@ afterEach(async () => { await db.closeAsync(); });
 
 describe('a site whose own name carries a kind word', () => {
   it.each([
-    ['Burson Auto Parts Rockhampton', 'parts', 'catalog'],
-    ['People First Stadium', 'stadium', 'contact'],
+    ['Smith Auto Parts Northside', 'parts', 'catalog'],
+    ['Good People Stadium', 'stadium', 'contact'],
     ['Account Street Chambers', 'acct', 'customer'],
   ])('finds %s, which the words were read as a %s search', async (query, id, kind) => {
     const out = await screen(query);
@@ -76,11 +76,11 @@ describe('a site whose own name carries a kind word', () => {
   });
 
   it('says it widened, so the row is not in a list the person was told to ignore', async () => {
-    expect((await screen('Burson Auto Parts Rockhampton')).widened).toBe(true);
+    expect((await screen('Smith Auto Parts Northside')).widened).toBe(true);
   });
 
   it('still finds it typed the lossy way, which was the only way that worked', async () => {
-    expect((await screen('Burson Auto Rockhampton')).ids).toContain('site:parts');
+    expect((await screen('Smith Auto Northside')).ids).toContain('site:parts');
   });
 });
 
@@ -122,7 +122,7 @@ describe('the screen does what this tests', () => {
   });
 
   it('says so on screen', () => {
-    expect(source).toContain('so every kind was searched.');
+    expect(source).toContain('matched. Showing all results.');
   });
 
   it('judges the empty state on what it ended up with, not on the first read', () => {

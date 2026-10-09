@@ -15,11 +15,12 @@ import { addDays, scheduleWindow } from '@/domain/myDay';
 import {
   DEFAULT_END, DEFAULT_START, SCHEDULE_BOOK_KIND, SCHEDULE_MOVE_KIND, SCHEDULE_REMOVE_KIND,
   canChangeFromPhone, conflicts, dayColumns, heldForUndo, mergePending, normaliseClock,
-  notBeforeFrom, parseSchedulePath, spanProblem, weekOf,
+  notBeforeFrom, parseSchedulePath, weekOf,
   type CalendarBlock, type CostCentreRef, type PendingScheduleChange, type SchedulePerson,
 } from '@/domain/scheduling';
 import { shortDay } from '@/domain/clockOn';
 import { qldIsoDay, qldMoment } from '@/domain/qldTime';
+import { checkSpan } from '@/domain/scheduleForm';
 import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { simproConfigFromPrefs } from '@/simpro/config';
 import { syncJobDetail } from '@/simpro/sync';
@@ -89,8 +90,8 @@ function pendingChip(b: CalendarBlock): { label: string; tone: 'accent' | 'warn'
 /** What to say when the same change is on the queue already: it depends how far it got. */
 function duplicateNotice(what: string, state: DuplicateState): string {
   if (state === 'pending') return `That ${what} is already queued.`;
-  if (state === 'unknown') return `That ${what} went to the office and got no reply. It is on Waiting to send.`;
-  return `The office already has that ${what}.`;
+  if (state === 'unknown') return `No reply from Simpro on that ${what}. Check Waiting to send.`;
+  return `Simpro already has that ${what}.`;
 }
 
 /** Whether a change is still on its way: the rows the screen's clock watches. */
@@ -261,7 +262,7 @@ export default function ScheduleScreen() {
     const job = jobs.get(jobId);
     if (job) router.push({ pathname: '/work/job/[id]', params: { id: job.id } });
     else if (jobs.size || held) router.push({ pathname: '/work/job/[id]', params: { id: localJobId(jobId) } });
-    else setNotice(`Job ${jobId} is not on this phone yet. It comes with the next sync.`);
+    else setNotice(`Job ${jobId} isn't on this phone yet. Sync to get it.`);
   };
 
   /**
@@ -278,21 +279,21 @@ export default function ScheduleScreen() {
       let options = await costCentresForJob(job.externalId);
       let why: string | undefined;
       if (!options.length) {
-        if (!prefs) throw new Error('Settings have not loaded yet.');
+        if (!prefs) throw new Error("Settings haven't loaded yet.");
         const outcome = await syncJobDetail(simproConfigFromPrefs(prefs), localJobId(job.externalId), { force: true });
         options = await costCentresForJob(job.externalId);
         if (!options.length) {
           why = outcome.status === 'failed'
-            ? `The job's cost centres could not be read: ${outcome.error}`
+            ? `Couldn't read the job's cost centres (${outcome.error}). Try again with signal.`
             : outcome.status === 'missing' || outcome.status === 'not-simpro'
-              ? 'This job is not held from Simpro, so there is no cost centre to book onto.'
-              : 'Simpro lists no cost centre on this job, and a booking has to go on one. Ask the office to add one.';
+              ? "This job isn't in Simpro, so it can't be booked."
+              : 'This job has no cost centre in Simpro. Ask the office to add one.';
         }
       }
       setPicking(false);
       if (options.length === 1 && !why) {
         setStep(null);
-        setBooking({ job, costCentre: options[0]!, date: day, start: DEFAULT_START, end: DEFAULT_END });
+        setBooking({ job, costCentre: options[0]!, date: formatAuDate(day), start: DEFAULT_START, end: DEFAULT_END });
         return;
       }
       setStep({ job, options, why });
@@ -317,7 +318,7 @@ export default function ScheduleScreen() {
         },
       });
       setBooking(null);
-      setNotice(r.duplicate ? duplicateNotice('booking', r.state) : 'Queued. It goes to the office in a minute; Undo is on the block until then.');
+      setNotice(r.duplicate ? duplicateNotice('booking', r.state) : 'Queued. Sends in a minute. Tap Undo to take it back.');
       await load();
     } catch (e) {
       setNotice(describeActionFailure(e, 'queue the booking'));
@@ -328,17 +329,15 @@ export default function ScheduleScreen() {
 
   const confirmBooking = () => {
     if (!booking) return;
-    const start = normaliseClock(booking.start);
-    const end = normaliseClock(booking.end);
-    const problem = spanProblem({ date: booking.date.trim(), start: start ?? '', end: end ?? '' });
-    if (problem) { setBooking({ ...booking, why: problem }); return; }
-    const form = { ...booking, date: booking.date.trim(), start: start!, end: end!, why: undefined };
+    const checked = checkSpan(booking);
+    if ('why' in checked) { setBooking({ ...booking, why: checked.why }); return; }
+    const form = { ...booking, ...checked, why: undefined };
     const clash = conflicts(myBlocks, { date: form.date, start: form.start, end: form.end });
     const words = `Job ${form.job.externalId}${form.job.siteName ? ` · ${form.job.siteName}` : ''}, ${form.start}–${form.end}, ${shortDay(form.date)}.`;
     const warning = clash.length
-      ? ` You are already booked ${clash.map((c) => `${c.startTime}–${c.endTime} on ${c.jobId ? `job ${c.jobId}` : (c.type ?? 'a block')}`).join(', ')} that day.`
+      ? ` You're already booked ${clash.map((c) => `${c.startTime}–${c.endTime} on ${c.jobId ? `job ${c.jobId}` : (c.type ?? 'a block')}`).join(', ')} that day.`
       : '';
-    showAlert(clash.length ? 'Book over another block?' : 'Book me on?', `${words}${warning} It goes to the office in a minute.`, [
+    showAlert(clash.length ? 'Book over another block?' : 'Book me on?', `${words}${warning} Sends in a minute.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: clash.length ? 'Book anyway' : 'Book', onPress: () => { void queueBooking(form); } },
     ]);
@@ -354,14 +353,14 @@ export default function ScheduleScreen() {
   const pathFor = async (block: CalendarBlock): Promise<{ href?: string; costCentres?: CostCentreRef[] } | { why: string }> => {
     const href = hrefs.get(block.id);
     if (href) return { href };
-    if (!block.jobId) return { why: 'This block is not on a job, so the phone has no path to change it by. Ask the office.' };
+    if (!block.jobId) return { why: "This block isn't on a job. Ask the office to change it." };
     let options = await costCentresForJob(block.jobId);
     if (!options.length && prefs) {
       await syncJobDetail(simproConfigFromPrefs(prefs), localJobId(block.jobId), { force: true });
       options = await costCentresForJob(block.jobId);
     }
     if (!options.length) {
-      return { why: `The phone does not hold job ${block.jobId}'s cost centres, so it cannot tell Simpro which block to change. Sync, or ask the office.` };
+      return { why: `Job ${block.jobId}'s cost centres aren't on this phone. Sync, or ask the office.` };
     }
     return { costCentres: options.map((c) => ({ sectionId: c.sectionExternalId, costCenterId: c.costCenterExternalId })) };
   };
@@ -369,14 +368,14 @@ export default function ScheduleScreen() {
   const startMove = (block: CalendarBlock) => {
     const allowed = canChangeFromPhone(block, employeeId);
     if (!allowed.ok) { setNotice(allowed.why); return; }
-    setMoving({ block, date: block.date, start: block.startTime ?? DEFAULT_START, end: block.endTime ?? DEFAULT_END });
+    setMoving({ block, date: formatAuDate(block.date), start: block.startTime ?? DEFAULT_START, end: block.endTime ?? DEFAULT_END });
   };
 
   const queueMove = async (form: MoveForm) => {
     setBusy(true);
     try {
       const where = await pathFor(form.block);
-      if ('why' in where) { setMoving({ ...form, why: where.why }); return; }
+      if ('why' in where) { setMoving({ ...form, date: formatAuDate(form.date), why: where.why }); return; }
       const r = await queueScheduleChange({
         kind: SCHEDULE_MOVE_KIND,
         payload: {
@@ -387,10 +386,10 @@ export default function ScheduleScreen() {
         },
       });
       setMoving(null);
-      setNotice(r.duplicate ? duplicateNotice('move', r.state) : 'Queued. It goes to the office in a minute; Undo is on the block until then.');
+      setNotice(r.duplicate ? duplicateNotice('move', r.state) : 'Queued. Sends in a minute. Tap Undo to take it back.');
       await load();
     } catch (e) {
-      setMoving({ ...form, why: describeActionFailure(e, 'queue the move') });
+      setMoving({ ...form, date: formatAuDate(form.date), why: describeActionFailure(e, 'queue the move') });
     } finally {
       setBusy(false);
     }
@@ -398,20 +397,18 @@ export default function ScheduleScreen() {
 
   const confirmMove = () => {
     if (!moving) return;
-    const start = normaliseClock(moving.start);
-    const end = normaliseClock(moving.end);
-    const problem = spanProblem({ date: moving.date.trim(), start: start ?? '', end: end ?? '' });
-    if (problem) { setMoving({ ...moving, why: problem }); return; }
-    const form = { ...moving, date: moving.date.trim(), start: start!, end: end!, why: undefined };
+    const checked = checkSpan(moving);
+    if ('why' in checked) { setMoving({ ...moving, why: checked.why }); return; }
+    const form = { ...moving, ...checked, why: undefined };
     if (form.date === form.block.date && form.start === form.block.startTime && form.end === form.block.endTime) {
-      setMoving({ ...form, why: 'That is where it already is.' });
+      setMoving({ ...moving, why: "It's already there." });
       return;
     }
     const clash = conflicts(myBlocks, { id: form.block.id, date: form.date, start: form.start, end: form.end });
     const warning = clash.length
-      ? ` You are already booked ${clash.map((c) => `${c.startTime}–${c.endTime}`).join(', ')} that day.`
+      ? ` You're already booked ${clash.map((c) => `${c.startTime}–${c.endTime}`).join(', ')} that day.`
       : '';
-    showAlert('Move this block?', `To ${form.start}–${form.end}, ${shortDay(form.date)}.${warning} The office sees it in a minute.`, [
+    showAlert('Move this block?', `To ${form.start}–${form.end}, ${shortDay(form.date)}.${warning} Sends in a minute.`, [
       { text: 'Cancel', style: 'cancel' },
       { text: clash.length ? 'Move anyway' : 'Move', onPress: () => { void queueMove(form); } },
     ]);
@@ -430,7 +427,7 @@ export default function ScheduleScreen() {
           siteName: jobs.get(block.jobId ?? '')?.siteName, notBefore: notBeforeFrom(nowIso()),
         },
       });
-      setNotice(r.duplicate ? duplicateNotice('removal', r.state) : 'Queued. It goes to the office in a minute; Undo is on the block until then.');
+      setNotice(r.duplicate ? duplicateNotice('removal', r.state) : 'Queued. Sends in a minute. Tap Undo to take it back.');
       await load();
     } catch (e) {
       setNotice(describeActionFailure(e, 'queue the removal'));
@@ -443,7 +440,7 @@ export default function ScheduleScreen() {
     const allowed = canChangeFromPhone(block, employeeId);
     if (!allowed.ok) { setNotice(allowed.why); return; }
     const what = block.jobId ? `job ${block.jobId}` : (block.type ?? 'this block');
-    showAlert('Take yourself off?', `${what}, ${block.startTime ?? '?'}–${block.endTime ?? '?'}, ${shortDay(block.date)}. The office sees it in a minute.`, [
+    showAlert('Take yourself off?', `${what}, ${block.startTime ?? '?'}–${block.endTime ?? '?'}, ${shortDay(block.date)}. Sends in a minute.`, [
       { text: 'Keep', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: () => { void queueRemove(block); } },
     ]);
@@ -454,7 +451,7 @@ export default function ScheduleScreen() {
     setBusy(true);
     try {
       const taken = await undoScheduleChange(block.queueRowId);
-      setNotice(taken ? 'Taken back. Nothing went to the office.' : 'Too late to take back here: its minute is up and it is being sent, or it is on Waiting to send.');
+      setNotice(taken ? 'Taken back. Nothing was sent.' : "Too late to undo. It's sending, or it's on Waiting to send.");
       await load();
     } catch (e) {
       setNotice(describeActionFailure(e, 'take the change back'));
@@ -482,14 +479,14 @@ export default function ScheduleScreen() {
             </Rowed>
             <Txt weight="700" numberOfLines={2}>{title}</Txt>
             {job?.title ? <Txt size="sm" tone="muted" numberOfLines={1}>{job.title}</Txt> : null}
-            {b.jobId && !job ? <Txt size="xs" tone="faint">Job {b.jobId} is not on this phone yet.</Txt> : null}
+            {b.jobId && !job ? <Txt size="xs" tone="faint">Job {b.jobId} isn’t on this phone yet.</Txt> : null}
             {b.movedFrom ? (
               <Txt size="xs" tone="faint">
                 Moving from {b.movedFrom.start ? `${b.movedFrom.start}–${b.movedFrom.end ?? '?'}, ` : ''}{shortDay(b.movedFrom.date)}
               </Txt>
             ) : null}
-            {b.pending === SCHEDULE_REMOVE_KIND && b.pendingState !== 'sent' ? <Txt size="xs" tone="faint">Coming off once the office has it.</Txt> : null}
-            {b.pendingState === 'sent' ? <Txt size="xs" tone="faint">The office has it. The calendar shows its own copy after the next read.</Txt> : null}
+            {b.pending === SCHEDULE_REMOVE_KIND && b.pendingState !== 'sent' ? <Txt size="xs" tone="faint">Comes off once Simpro has it.</Txt> : null}
+            {b.pendingState === 'sent' ? <Txt size="xs" tone="faint">Simpro has it. Shows here after the next sync.</Txt> : null}
             {b.pendingError ? <Txt size="sm" tone={b.pendingState === 'failed' ? 'fail' : 'warn'}>{b.pendingError}</Txt> : null}
           </View>
           {chip ? <Chip label={chip.label} tone={chip.tone} /> : (b.type && b.type.toLowerCase() !== 'job' ? <Chip label={b.type} /> : null)}
@@ -518,15 +515,15 @@ export default function ScheduleScreen() {
     <>
       <Stack.Screen options={{ title: 'Schedule' }} />
       <Screen>
-        {failed ? <Banner tone="fail" title="The schedule could not be read" body={failed} /> : null}
-        {notice ? <Banner tone={/could not|cannot|Too late|refused/i.test(notice) ? 'warn' : 'info'} title={notice} /> : null}
+        {failed ? <Banner tone="fail" title="Couldn't load the schedule" body={failed} /> : null}
+        {notice ? <Banner tone={/could not|couldn't|cannot|can't|isn't|aren't|Too late|refused/i.test(notice) ? 'warn' : 'info'} title={notice} /> : null}
 
         {prefs && !employeeId ? (
           <Card>
             <Banner
               tone="warn"
               title="Who are you in Simpro?"
-              body="Booking yourself on, or moving a block, needs your Simpro employee, and this phone does not know which one you are yet. The calendar still shows everyone."
+              body="Sign in, or pick yourself, to book or move your blocks."
             />
             <Rowed gap={2} style={{ marginTop: t.space(3) }}>
               <Button title="Sign in" onPress={() => router.push('/signin')} />
@@ -568,8 +565,8 @@ export default function ScheduleScreen() {
         </Rowed>
 
         <Txt size="xs" tone="faint">
-          {asOf ? `Office schedule as of ${qldMoment(asOf) ?? asOf}.` : 'The office schedule has not synced yet.'}
-          {outsideWindow ? ` ${formatAuDate(day)} is outside the days the sync reads (a week back, three ahead).` : ''}
+          {asOf ? `Office schedule as of ${qldMoment(asOf) ?? asOf}.` : 'Schedule not synced yet.'}
+          {outsideWindow ? ' Only a week back and three weeks ahead are synced.' : ''}
         </Txt>
 
         {picking ? (
@@ -594,12 +591,12 @@ export default function ScheduleScreen() {
               </View>
             ) : (
               <View style={{ gap: t.space(2), marginTop: t.space(2) }}>
-                <Txt size="sm" tone="muted">Which cost centre is the booking on?</Txt>
+                <Txt size="sm" tone="muted">Which cost centre?</Txt>
                 {step.options.map((c) => (
                   <Card
                     key={`${c.sectionExternalId}-${c.costCenterExternalId}`}
                     onPress={() => {
-                      setBooking({ job: step.job, costCentre: c, date: day, start: DEFAULT_START, end: DEFAULT_END });
+                      setBooking({ job: step.job, costCentre: c, date: formatAuDate(day), start: DEFAULT_START, end: DEFAULT_END });
                       setStep(null);
                     }}
                   >
@@ -617,7 +614,7 @@ export default function ScheduleScreen() {
             <Txt weight="700">Book me on job {booking.job.externalId}{booking.job.siteName ? ` · ${booking.job.siteName}` : ''}</Txt>
             <Txt size="sm" tone="muted">{booking.costCentre.name} · {booking.costCentre.sectionName}</Txt>
             <View style={{ gap: t.space(2), marginTop: t.space(2) }}>
-              <Field label="Date" value={booking.date} onChangeText={(v) => setBooking({ ...booking, date: v, why: undefined })} placeholder="yyyy-mm-dd" />
+              <Field label="Date" value={booking.date} onChangeText={(v) => setBooking({ ...booking, date: v, why: undefined })} placeholder="dd/mm/yyyy" />
               <Rowed gap={2} align="flex-start">
                 <View style={{ flex: 1 }}>
                   <Field label="Start" value={booking.start} onChangeText={(v) => setBooking({ ...booking, start: v, why: undefined })} placeholder={DEFAULT_START} keyboardType="numeric" />
@@ -640,7 +637,7 @@ export default function ScheduleScreen() {
             <Txt weight="700">Move {moving.block.jobId ? `job ${moving.block.jobId}` : (moving.block.type ?? 'block')}</Txt>
             <Txt size="sm" tone="muted">Now {moving.block.startTime ?? '?'}–{moving.block.endTime ?? '?'}, {shortDay(moving.block.date)}</Txt>
             <View style={{ gap: t.space(2), marginTop: t.space(2) }}>
-              <Field label="Date" value={moving.date} onChangeText={(v) => setMoving({ ...moving, date: v, why: undefined })} placeholder="yyyy-mm-dd" />
+              <Field label="Date" value={moving.date} onChangeText={(v) => setMoving({ ...moving, date: v, why: undefined })} placeholder="dd/mm/yyyy" />
               <Rowed gap={2} align="flex-start">
                 <View style={{ flex: 1 }}>
                   <Field label="Start" value={moving.start} onChangeText={(v) => setMoving({ ...moving, start: v, why: undefined })} placeholder={DEFAULT_START} keyboardType="numeric" />
@@ -681,7 +678,7 @@ export default function ScheduleScreen() {
               ))}
             </ScrollView>
           ) : (
-            <Card><Txt tone="muted">{held ? 'No staff list on this phone yet: run a sync in Settings.' : 'Nothing on this phone yet: run a sync in Settings first.'}</Txt></Card>
+            <Card><Txt tone="muted">{held ? 'No staff list yet. Run a sync in Settings.' : 'Nothing synced yet. Run a sync in Settings.'}</Txt></Card>
           )
         ) : (
           week.days.map((d) => {
@@ -700,9 +697,7 @@ export default function ScheduleScreen() {
           })
         )}
 
-        <Txt size="sm" tone="faint">
-          Bookings, moves and removals go to Simpro as schedule blocks under your employee, a minute after you queue them. Only your own blocks can be changed from here; the office moves everyone else's. Anything refused shows the office's words on the block and on Waiting to send.
-        </Txt>
+        <Txt size="sm" tone="faint">Changes send a minute after you make them. You can only change your own blocks.</Txt>
       </Screen>
     </>
   );

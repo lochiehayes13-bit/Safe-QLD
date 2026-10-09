@@ -12,10 +12,11 @@ import {
 import { qldMoment } from '@/domain/qldTime';
 import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
-import { Button, Card, Chip, H2, Rowed, Screen, Txt } from '@/components/ui';
+import { Button, Card, Chip, EmptyState, H2, Rowed, Screen, Txt } from '@/components/ui';
 import { showAlert } from '@/components/alert';
 import { runAutoSync } from '@/simpro/autoSync';
 import { jobNotHereWords } from '@/domain/syncWords';
+import { describeLoadFailure } from '@/domain/loadFailure';
 
 /**
  * My day.
@@ -32,14 +33,16 @@ export default function MyDayScreen() {
   const [groups, setGroups] = useState<MyDayGroups | null>(null);
   const [asOf, setAsOf] = useState<string | undefined>(undefined);
   const [showEarlier, setShowEarlier] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
 
-  useFocusEffect(useCallback(() => {
-    let cancelled = false;
-    void (async () => {
+  /** One read of the schedule. `live` says whether the screen still wants the answer. */
+  const read = useCallback(async (live: () => boolean) => {
+    setFailed(null);
+    try {
       const prefs = await loadPrefs();
       const w = whoseSchedule(prefs);
       const now = nowIso();
-      if (!w) { if (!cancelled) { setWho(null); setGroups(null); } return; }
+      if (!w) { if (live()) { setWho(null); setGroups(null); } return; }
       const window = scheduleWindow(now);
       const [rows, synced] = await Promise.all([
         listScheduleFor({
@@ -49,7 +52,7 @@ export default function MyDayScreen() {
         }),
         scheduleSyncedAt(),
       ]);
-      if (cancelled) return;
+      if (!live()) return;
       /*
        * The jobs this schedule actually names, asked for by their ids.
        *
@@ -69,18 +72,41 @@ export default function MyDayScreen() {
       const jobs = await jobSummariesByExternalIds(
         rows.map((r) => r.jobId).filter((id): id is string => !!id),
       );
-      if (cancelled) return;
+      if (!live()) return;
       setWho(w);
       setAsOf(synced);
       setGroups(groupScheduleByDay(rows, now, jobs.map((j) => ({
         id: j.id, externalId: j.externalId, siteName: j.siteName, title: j.title, address: j.address,
       }))));
-    })();
+    } catch (e) {
+      if (live()) setFailed(describeLoadFailure(e, 'your schedule'));
+    }
+  }, []);
+
+  useFocusEffect(useCallback(() => {
+    let cancelled = false;
+    void read(() => !cancelled);
     return () => { cancelled = true; };
-  }, []));
+  }, [read]));
+
+  if (failed) {
+    return (
+      <>
+        <Stack.Screen options={{ title: 'My day' }} />
+        <Screen>
+          <EmptyState
+            icon="calendar-alert"
+            title="Couldn't load your schedule"
+            body={failed}
+            action={<Button title="Try again" onPress={() => { void read(() => true); }} />}
+          />
+        </Screen>
+      </>
+    );
+  }
 
   if (who === undefined) {
-    return (<><Stack.Screen options={{ title: 'My day' }} /><Screen><Txt tone="muted">Reading the schedule…</Txt></Screen></>);
+    return (<><Stack.Screen options={{ title: 'My day' }} /><Screen><Txt tone="muted">Loading your schedule…</Txt></Screen></>);
   }
 
   if (who === null) {
@@ -89,10 +115,9 @@ export default function MyDayScreen() {
         <Stack.Screen options={{ title: 'My day' }} />
         <Screen>
           <Card>
-            <Txt weight="700">This phone does not know whose it is yet</Txt>
+            <Txt weight="700">Who are you?</Txt>
             <Txt size="sm" tone="muted" style={{ lineHeight: 20, marginTop: 4 }}>
-              Pick yourself from the staff list, or sign in with your Simpro login, and the jobs the
-              office has scheduled to you show up here.
+              Pick yourself from the staff list to see your jobs.
             </Txt>
             <View style={{ height: t.space(3) }} />
             <Button title="Pick who I am" onPress={() => router.push('/whoami')} />
@@ -123,12 +148,12 @@ export default function MyDayScreen() {
 
         <H2>Today</H2>
         {g && g.today.length ? g.today.map((r) => <ScheduleRow key={r.schedule.id} row={r} />) : (
-          <Card><Txt tone="muted">Nothing scheduled to you today{asOf ? '' : ' — or the schedule has not synced yet'}.</Txt></Card>
+          <Card><Txt tone="muted">{asOf ? 'Nothing scheduled today.' : 'Nothing scheduled today. Schedule not synced yet.'}</Txt></Card>
         )}
 
         <H2>Tomorrow</H2>
         {g && g.tomorrow.length ? g.tomorrow.map((r) => <ScheduleRow key={r.schedule.id} row={r} />) : (
-          <Card><Txt tone="muted">Nothing scheduled to you tomorrow.</Txt></Card>
+          <Card><Txt tone="muted">Nothing scheduled tomorrow.</Txt></Card>
         )}
 
         {g && g.later.length ? (
@@ -187,7 +212,7 @@ function ScheduleRow({ row, withDate }: { row: MyDayRow; withDate?: boolean }) {
           {job?.title ? <Txt size="sm" tone="muted" numberOfLines={1}>{job.title}</Txt> : null}
           {job?.address ? <Txt size="xs" tone="faint" numberOfLines={1}>{job.address}</Txt> : null}
           {!job && s.jobId ? (
-            <Txt size="xs" tone="faint">Job {s.jobId} is not on this phone yet — tap to sync.</Txt>
+            <Txt size="xs" tone="faint">Job {s.jobId} isn’t on this phone yet. Tap to sync.</Txt>
           ) : null}
         </View>
         {job ? <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} /> : <Chip label={s.type ?? 'Block'} />}

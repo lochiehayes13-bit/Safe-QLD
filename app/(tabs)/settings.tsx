@@ -7,11 +7,8 @@ import { simproConfigFromPrefs } from '@/simpro/config';
 import { holdAutoSync, runAutoSync, useAutoSync } from '@/simpro/autoSync';
 import { describeAutoSync } from '@/simpro/autoSyncPolicy';
 import { backgroundSyncNote, registerAutoSyncTask, unregisterAutoSyncTask } from '@/simpro/autoSyncTask';
-import { clearKey as clearAiKey, hasKey as hasAiKey, storeKey as storeAiKey } from '@/ai/client';
 import { clearPlacesKey, hasPlacesKey, storePlacesKey } from '@/geo/placesKey';
-import { PRIVACY_NOTE } from '@/ai/grounding';
 import { WEBSITE_PHOTOS_INBOX, endpointProblem } from '@/domain/photoSend';
-import { JOB_RECORDS_PRIVACY_NOTE } from '@/ai/jobBrief';
 import { loadPrefs, patchPrefs, DEFAULT_PREFS, type Prefs } from '@/app-prefs';
 import { clearExports, exportsSize } from '@/export/files';
 import { listPhotoFiles } from '@/export/photoFiles';
@@ -58,8 +55,6 @@ export default function SettingsScreen() {
   const [secretSource, setSecretSource] = useState<'proxy' | 'keystore' | 'built-in' | 'none'>('none');
   /** The whole oAuth2 details block off Simpro, pasted rather than picked apart by hand. */
   const [pastedDetails, setPastedDetails] = useState('');
-  const [aiKey, setAiKey] = useState('');
-  const [hasAi, setHasAi] = useState(false);
   /** The optional Google Places key for the map's place search. Keystore only; see geo/placesKey. */
   const [placesKey, setPlacesKey] = useState('');
   const [hasPlaces, setHasPlaces] = useState(false);
@@ -109,7 +104,6 @@ export default function SettingsScreen() {
     void loadRateCard().then(setCard);
     void SimproClient.hasSecret().then(setHasSecret);
     void SimproClient.hasSecret('signin').then(setHasSignInSecret);
-    void hasAiKey().then(setHasAi);
     void hasPlacesKey().then(setHasPlaces);
     void hasGhToken().then(setHasGh);
     void readUserSession().then(setSession);
@@ -382,7 +376,7 @@ export default function SettingsScreen() {
       const lines = [
         `${r.sent} sent.`,
         retrying ? `${retrying} will retry.` : null,
-        gaveUp ? `${gaveUp} could not be sent — see Send to the office.` : null,
+        gaveUp ? `${gaveUp} couldn't be sent. See Waiting to send.` : null,
         r.stopped ? `Could not send: ${r.stopped.reason}` : null,
         `${r.remaining} still waiting.`,
       ].filter((line): line is string => !!line);
@@ -561,94 +555,6 @@ export default function SettingsScreen() {
             {endpointProblem(prefs.websitePhotoUrl)}
           </Txt>
         ) : null}
-      </Card>
-
-      <H2>Reading the standards for you</H2>
-      <Card>
-        <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-          The search works offline and always will. With a key set, it can also read the passages it
-          found and tell you which one answers your question — and nothing else. Every claim it
-          makes is numbered to a passage; anything it cannot source, it does not say.
-        </Txt>
-        <View style={{ height: t.space(2.5) }} />
-        {/*
-          * The four places a key does something, and what each one sends. Kept
-          * beside the key itself: a person deciding whether to set one should
-          * not have to find four screens to learn what it is for.
-          */}
-        <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-          A key is used in four places, each with the same rule — it may only order and word what it
-          was given, never add a fact. Reading the standards sends your question and the passages
-          found for it. Writing up a defect sends the code, the system and your own words. Writing up
-          a note to the office sends the words in the box. Reading a typed phrase in Find anything
-          sends the phrase. None of those four sends a site, a customer or a register.
-        </Txt>
-        <View style={{ height: t.space(2.5) }} />
-        <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>{PRIVACY_NOTE}</Txt>
-        <View style={{ height: t.space(3) }} />
-        {hasAi ? (
-          <>
-            <Txt size="sm" tone="pass">A key is held in this device's keystore.</Txt>
-            <View style={{ height: t.space(2.5) }} />
-            <Button
-              title="Remove the key"
-              variant="ghost"
-              compact
-              onPress={() => { void clearAiKey().then(() => setHasAi(false)); }}
-            />
-          </>
-        ) : (
-          <>
-            <Field
-              label="Anthropic API key"
-              value={aiKey}
-              onChangeText={setAiKey}
-              placeholder="sk-ant-…"
-              autoCapitalize="none"
-              hint="Held in the hardware keystore, never in ordinary app storage"
-            />
-            <View style={{ height: t.space(2.5) }} />
-            <Button
-              title="Save the key"
-              variant="secondary"
-              onPress={() => {
-                if (!aiKey.trim()) return;
-                void storeAiKey(aiKey).then(() => { setAiKey(''); setHasAi(true); });
-              }}
-            />
-          </>
-        )}
-
-        {/*
-          * The one switch that sends customer data. Its own switch rather than
-          * part of having a key, because agreeing to send a question and some
-          * standards passages is not agreeing to send a job card with the
-          * customer's name on it. The note says exactly what goes.
-          */}
-        <Divider />
-        <Label>Brief me before a job</Label>
-        <Txt size="xs" tone="faint" style={{ marginTop: 4, marginBottom: t.space(2), lineHeight: 17 }}>
-          {JOB_RECORDS_PRIVACY_NOTE}
-        </Txt>
-        <Rowed gap={2}>
-          <MaterialCommunityIcons
-            name={prefs.aiShareJobRecords ? 'file-send-outline' : 'file-lock-outline'}
-            size={18}
-            color={prefs.aiShareJobRecords ? t.color.warn : t.color.textFaint}
-          />
-          <Txt size="sm" tone={prefs.aiShareJobRecords ? 'warn' : 'faint'} style={{ flex: 1 }}>
-            {prefs.aiShareJobRecords
-              ? hasAi
-                ? 'On. A job\'s record is sent when you press Brief me at the top of that job\'s screen, and not before.'
-                : 'On, but no key is set above, so nothing can be sent yet.'
-              : 'Off. Job records stay on the phone.'}
-          </Txt>
-          <Switch
-            value={prefs.aiShareJobRecords}
-            onValueChange={(on) => update({ aiShareJobRecords: on })}
-            trackColor={{ true: t.color.accent, false: t.color.border }}
-          />
-        </Rowed>
       </Card>
 
       <H2>The map</H2>
@@ -998,7 +904,7 @@ export default function SettingsScreen() {
         <Divider />
         <Label>Send photos to Simpro attachments</Label>
         <Txt size="xs" tone="faint" style={{ marginTop: 4, marginBottom: t.space(2), lineHeight: 17 }}>
-          On by default. When a service is sent from Send to the office, each defect photograph goes
+          On by default. When a service is sent from Waiting to send, each defect photograph goes
           onto the Simpro job as its own attachment, named by site, location and date, and is never
           public. Photos over 4 MB are downscaled first. Off keeps them on the phone and in the
           report, and the job note says so.
@@ -1019,7 +925,7 @@ export default function SettingsScreen() {
                 ? `${attachments.pending} photo${attachments.pending === 1 ? '' : 's'} waiting to upload`
                 : 'No photos waiting to upload',
               attachments.unknown ? `${attachments.unknown} sent with no reply` : null,
-              attachments.failed ? `${attachments.failed} could not be sent; see Send to the office` : null,
+              attachments.failed ? `${attachments.failed} couldn't be sent. See Waiting to send.` : null,
             ].filter(Boolean).join(' · ')}
             {attachments.sent ? ` · ${attachments.sent} uploaded` : ''}
           </Txt>

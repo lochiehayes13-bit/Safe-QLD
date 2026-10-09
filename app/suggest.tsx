@@ -52,7 +52,7 @@ export default function SuggestScreen() {
       return;
     }
     if (!prefs.suggestionsEmail.trim()) {
-      showAlert('Nowhere to send it', 'Set the suggestions address in Settings first.');
+      showAlert('No address set', 'Add the suggestions address in Settings.');
       return;
     }
     setBusy(true);
@@ -64,19 +64,19 @@ export default function SuggestScreen() {
       });
 
       if (outcome === 'no-mail-app') {
-        showAlert('No mail app set up', 'This phone has no email account configured, so the suggestion cannot be sent from here.');
+        showAlert('No mail app set up', 'Add an email account to this phone, then try again.');
       } else if (outcome === 'sent') {
-        showAlert('Sent', 'Thanks. When it turns into a change, the new build lands at the same download link.', [{ text: 'OK', onPress: () => router.back() }]);
+        showAlert('Sent', `Thanks. It's gone to ${prefs.suggestionsEmail.trim()}.`, [{ text: 'OK', onPress: () => router.back() }]);
       } else if (outcome === 'handed-over') {
         // A browser hands the draft to a mail client and never hears back, so
         // this says what actually happened rather than thanking somebody for
         // an email still sitting unsent in another window.
-        showAlert('Draft opened', `An email to ${prefs.suggestionsEmail} is open in your mail app — send it and it lands with the person who builds this.`, [{ text: 'OK', onPress: () => router.back() }]);
+        showAlert('Draft opened', `Your email to ${prefs.suggestionsEmail.trim()} is ready. Tap Send in your mail app.`, [{ text: 'OK', onPress: () => router.back() }]);
       } else {
-        showAlert('Not sent', 'The email was not sent, so nobody has seen it yet.');
+        showAlert('Not sent', "The email wasn't sent. Try again.");
       }
     } catch (e) {
-      showAlert('Could not send', describeActionFailure(e, 'sending the suggestion'));
+      showAlert("Couldn't send", describeActionFailure(e, 'sending the suggestion'));
     } finally {
       setBusy(false);
     }
@@ -92,18 +92,19 @@ export default function SuggestScreen() {
             borderLeftWidth: 3, borderLeftColor: t.color.accent, gap: t.space(1),
           }}
         >
-          <Txt weight="800" size="lg" style={{ letterSpacing: -0.3 }}>This app is built from what you send here.</Txt>
+          <Txt weight="800" size="lg" style={{ letterSpacing: -0.3 }}>What should change?</Txt>
           <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-            An idea, a screen that is wrong, a table that is missing a value, a form we should have.
-            It goes to {prefs?.suggestionsEmail || 'the suggestions address in Settings'} and gets read by the
-            person who builds this. You will see it in a later build at the same download link.
+            An idea, something wrong, a missing value or a form we need.
+          </Txt>
+          <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
+            {prefs?.suggestionsEmail.trim() ? `Goes to ${prefs.suggestionsEmail.trim()}.` : 'Add the suggestions address in Settings first.'}
           </Txt>
         </View>
 
         {prefs && !prefs.technicianName.trim() ? (
           <Card onPress={() => router.push('/settings')}>
             <Txt weight="700">Set your name first</Txt>
-            <Txt size="sm" tone="muted">So whoever reads it can come back and ask you what you meant.</Txt>
+            <Txt size="sm" tone="muted">Tap to add it in Settings.</Txt>
           </Card>
         ) : null}
 
@@ -115,20 +116,20 @@ export default function SuggestScreen() {
           <Field label="Where in the app" value={screen} onChangeText={setScreen} placeholder="Timesheet, resistor values, the home screen…" autoCapitalize="sentences" />
           <View style={{ height: t.space(2.5) }} />
           <Field
-            label={kind === 'problem' ? 'What happened, and what you expected' : kind === 'information' ? 'What should be in here' : 'Your idea'}
+            label={kind === 'problem' ? 'What went wrong?' : kind === 'information' ? "What's missing?" : 'Your idea'}
             value={text}
             onChangeText={setText}
             multiline
             placeholder={kind === 'problem'
               ? 'I tapped Send and it said sent, but accounts never got it.'
               : kind === 'information'
-                ? 'The EOL table is missing the Ampac LoopSense value — it is 3k3.'
+                ? 'The EOL table needs the Ampac LoopSense value.'
                 : 'A button on a job that texts the client I am ten minutes away.'}
           />
         </Card>
 
         <Button
-          title="Send it"
+          title="Send"
           onPress={() => { void send(); }}
           loading={busy}
           icon={<MaterialCommunityIcons name="send-outline" size={20} color={t.color.onAccent} />}

@@ -1517,6 +1517,30 @@ export async function pendingSyncCount(): Promise<number> {
   return row?.n ?? 0;
 }
 
+/** How many rows `waitingSyncList` returns at most. */
+export const WAITING_LIST_LIMIT = 200;
+
+/**
+ * The rows still on their way, oldest first, for Waiting to send to list.
+ *
+ * A list names each row and says where it stands, and nothing it names needs
+ * the bulky text: a job note's `note` and a purchase order's `notes` are the
+ * body that gets posted, often kilobytes each, while the name comes from the
+ * job, subject, file name or entry id beside them. So those two keys are cut
+ * out in SQL and the rest of the payload comes back as JSON, which keeps the
+ * screen's one describe function working on every kind. A payload that is not
+ * JSON comes back as `{}` and the row is named by its kind.
+ */
+export async function waitingSyncList(limit = WAITING_LIST_LIMIT): Promise<SyncEntry[]> {
+  const db = await getDb();
+  return db.getAllAsync<SyncEntry>(
+    `SELECT id, createdAt, kind, attempts, lastError, status, contentKey,
+       CASE WHEN json_valid(payload) THEN json_remove(payload, '$.note', '$.notes') ELSE '{}' END AS payload
+     FROM sync_queue WHERE status IN ('pending', 'sending') ORDER BY createdAt LIMIT ?`,
+    limit,
+  );
+}
+
 export interface AttachmentQueueSummary {
   /** Waiting for signal, or for their turn. */
   pending: number;

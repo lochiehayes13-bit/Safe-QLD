@@ -21,8 +21,8 @@ import {
  * A typed number goes to the id columns first. Every kind's query puts the
  * row whose number is exactly what was typed ahead of the rows that merely
  * contain it, and `rankHits` then puts those exact rows ahead of every
- * other kind, so "44501" opens on job 44501 and not on the invoice whose
- * order number has 44501 in it.
+ * other kind, so "9001" opens on job 9001 and not on the invoice whose
+ * order number has 9001 in it.
  *
  * Nothing here reads a cost, a markup or a margin; the columns do not exist.
  */
@@ -358,7 +358,7 @@ export async function searchKind(kind: SearchKind, q: ParsedQuery, limit: number
 /**
  * Everything that matches, ranked.
  *
- * A prefixed number — "inv 62339" — asks one kind and no other: the person
+ * A prefixed number — "inv 2345" — asks one kind and no other: the person
  * said which record they meant, and an answer from another kind is a wrong
  * answer dressed as a helpful one. Anything else asks every kind that can
  * hold it, each capped at `limitPerKind`, and hands the lot to `rankHits`.

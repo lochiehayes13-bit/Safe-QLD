@@ -249,7 +249,7 @@ describe('what goes to Simpro', () => {
     expect(sendReadiness(work({ sentAt: '2026-09-08T01:00:00.000Z' }))).toEqual({ ready: false, why: 'Already sent' });
     expect(sendReadiness(work({ kind: 'break' })).ready).toBe(false);
     expect(sendReadiness(work({ jobCostCenterExternalId: undefined })))
-      .toEqual({ ready: false, why: 'No cost centre on this job yet' });
+      .toEqual({ ready: false, why: 'No cost centre on this job' });
     expect(sendReadiness(work({ jobExternalId: undefined }))).toEqual({ ready: false, why: 'No job on this entry' });
     expect(sendReadiness(work({ employeeExternalId: '' }))).toEqual({ ready: false, why: 'No Simpro employee on this entry' });
     expect(sendReadiness(work({ kind: 'travel', activityName: 'Travel', activityExternalId: undefined })).ready).toBe(false);

@@ -111,12 +111,12 @@ export type LeaveBuild = { entry: ClockEntry } | { refused: string };
  */
 export function buildLeaveEntry(input: LeaveInput): LeaveBuild {
   if (!/^\d+$/.test(input.employeeId.trim())) {
-    return { refused: 'This phone is not signed in as a Simpro employee yet, so the day cannot be put on anybody\'s schedule.' };
+    return { refused: 'Sign in as yourself in Simpro first.' };
   }
   const startedAt = qldInstant(input.date, LEAVE_START);
   const endedAt = qldInstant(input.date, LEAVE_END);
-  if (!startedAt || !endedAt) return { refused: 'That is not a day the app can read.' };
-  if (!/^\d+$/.test(input.activity.id)) return { refused: `The office's "${input.activity.name}" activity has no id the schedule accepts.` };
+  if (!startedAt || !endedAt) return { refused: "That date isn't valid." };
+  if (!/^\d+$/.test(input.activity.id)) return { refused: `Simpro's "${input.activity.name}" activity has no ID. Ask the office.` };
 
   const note = (input.note ?? '').trim();
   return {
@@ -189,6 +189,6 @@ export function alreadyBooked(date: string, existing: readonly ExistingLeave[]):
   if (!hit) return undefined;
   const what = hit.activityName ? `${hit.activityName}` : 'leave';
   return hit.where === 'office'
-    ? `${what} is already on your Simpro schedule for that day.`
-    : `${what} is already booked for that day and waiting to send.`;
+    ? `${what} is already in Simpro that day.`
+    : `${what} is already booked that day. Waiting to send.`;
 }

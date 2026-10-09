@@ -56,7 +56,7 @@ const SITE_SUGGESTIONS = 8;
  * The typing is the part that had to be got right. "flow meter" is a complete
  * line, because that is what somebody types with one hand free. A count and a
  * building are read out of what was typed where they are there — "2 x 4.5kg
- * ABE for YMCA Bowen Hills" fills in three fields — and the catalogue and the
+ * ABE for Main St" fills in three fields — and the catalogue and the
  * site list are offered as chips underneath. Every one of those is an offer:
  * a lookup that finds nothing, or a database read that fails outright, leaves
  * the line exactly as it was typed and adds it anyway.
@@ -183,7 +183,7 @@ export default function NeedsScreen() {
    * Writes the line.
    *
    * The wording kept depends on whether a building was actually attached: with
-   * a site on the line, "for YMCA Bowen Hills" is already said and comes off
+   * a site on the line, "for Main St" is already said and comes off
    * the words; without one it stays on, because dropping "for the pump room"
    * from a line nobody matched to a site would throw away the only thing that
    * said where the part goes.
@@ -204,7 +204,7 @@ export default function NeedsScreen() {
       clearAdd();
       void load();
     } catch (e) {
-      showAlert('Could not add it', describeActionFailure(e, 'add this to your list'));
+      showAlert("Couldn't add it", describeActionFailure(e, 'add this to your list'));
     }
   };
 
@@ -214,15 +214,14 @@ export default function NeedsScreen() {
       await saveNeed(next);
       void load();
     } catch (e) {
-      showAlert('Could not save that', describeActionFailure(e, what));
+      showAlert("Couldn't save that", describeActionFailure(e, what));
     }
   };
 
   const remove = (line: NeedLine) => {
     showAlert(
       'Take this off the list?',
-      `"${needHeadline(line)}" is removed for good. Ticking it off instead keeps it, in case you `
-      + 'need to know later that you got it.',
+      `"${needHeadline(line)}" goes for good. Tick it off instead to keep a record.`,
       [
         { text: 'Keep it', style: 'cancel' },
         {
@@ -234,7 +233,7 @@ export default function NeedsScreen() {
                 await deleteNeed(line.id);
                 void load();
               } catch (e) {
-                showAlert('Could not remove it', describeActionFailure(e, 'remove this line'));
+                showAlert("Couldn't remove it", describeActionFailure(e, 'remove this line'));
               }
             })();
           },
@@ -262,7 +261,7 @@ export default function NeedsScreen() {
         showAlert(notice.title, notice.body);
       }
     } catch (e) {
-      showAlert('Could not send the list', describeActionFailure(e, 'produce this list'));
+      showAlert("Couldn't share the list", describeActionFailure(e, 'produce this list'));
     } finally {
       setSending(false);
     }
@@ -289,21 +288,20 @@ export default function NeedsScreen() {
       const request = await createPurchaseRequest({
         requestedBy: prefs.technicianName,
         lines: orderableLines(nowNeeded),
-        notes: 'Raised from a technician\'s "things I need" list.',
+        notes: 'From the Things I need list.',
       });
       const at = nowIso();
       for (const line of nowNeeded) {
-        await saveNeed(markOrdered(line, at, `On the request raised ${formatAuDate(at)}`, request.id));
+        await saveNeed(markOrdered(line, at, `On a purchase request ${formatAuDate(at)}`, request.id));
       }
       void load();
       showAlert(
-        'On a purchase request',
-        `${nowNeeded.length} line${nowNeeded.length === 1 ? '' : 's'} went onto a draft request. It `
-        + 'goes to the office from Purchase requests, and the lines stay on your list, marked on order.',
+        'Added to a purchase request',
+        `${nowNeeded.length} line${nowNeeded.length === 1 ? ' is' : 's are'} on a draft request. Send it from Purchase requests.`,
       );
       router.push('/work/purchases');
     } catch (e) {
-      showAlert('Could not raise the request', describeActionFailure(e, 'raise a purchase request'));
+      showAlert("Couldn't raise the request", describeActionFailure(e, 'raise a purchase request'));
     } finally {
       setOrdering(false);
     }
@@ -363,7 +361,7 @@ export default function NeedsScreen() {
             />
           ) : null}
           <Button
-            title={line.when === 'now' ? 'Leave for future works' : 'Need it now'}
+            title={line.when === 'now' ? 'Move to future works' : 'Need it now'}
             variant="ghost"
             compact
             onPress={() => void write(moveNeed(line, otherWhen(line.when), nowIso()), 'move this line')}
@@ -378,7 +376,7 @@ export default function NeedsScreen() {
     <>
       <Stack.Screen options={{ title: 'Things I need' }} />
       <Screen>
-        {failed ? <Banner tone="fail" title="This list could not be read" body={failed} /> : null}
+        {failed ? <Banner tone="fail" title="Couldn't load your list" body={failed} /> : null}
 
         <Card variant="raised">
           <Field
@@ -386,12 +384,12 @@ export default function NeedsScreen() {
             value={text}
             onChangeText={setText}
             placeholder="Flow meter"
-            hint="A count and a site are read out of what you type: 2 x 4.5kg ABE for YMCA Bowen Hills."
+            hint="e.g. 2 x 4.5kg ABE for Main St"
           />
 
           {parsed.quantity !== undefined ? (
             <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5) }}>
-              Reading that as {parsed.quantity} × {parsed.what}
+              Adds as {parsed.quantity} × {parsed.what}
             </Txt>
           ) : null}
 
@@ -436,7 +434,7 @@ export default function NeedsScreen() {
               </Rowed>
               {siteMatches > sites.length ? (
                 <Txt size="xs" tone="faint">
-                  {sites.length} of {siteMatches.toLocaleString()} matches. Add the suburb or the client to narrow it.
+                  {sites.length} of {siteMatches.toLocaleString()} matches. Add the suburb or client to narrow it.
                 </Txt>
               ) : null}
             </View>
@@ -455,23 +453,23 @@ export default function NeedsScreen() {
                 label="Site"
                 value={siteText}
                 onChangeText={setSiteText}
-                placeholder="Start typing a building"
-                hint="Optional. A site the phone has never heard of is fine — type it in the line itself."
+                placeholder="Start typing a site"
+                hint="Optional. Not listed? Type it in the line above."
               />
-              <Field label="Note" value={note} onChangeText={setNote} placeholder="Anything the office would ask" />
+              <Field label="Note" value={note} onChangeText={setNote} placeholder="Anything the office should know" />
             </View>
           ) : null}
 
           <Rowed gap={2} style={{ marginTop: t.space(3) }}>
             <Button
-              title={detail ? 'Less' : 'Site or note'}
+              title={detail ? 'Hide' : 'Add site or note'}
               variant="ghost"
               compact
               style={{ flex: 1 }}
               onPress={() => setDetail(!detail)}
             />
             <Button
-              title="Add to the list"
+              title="Add to list"
               style={{ flex: 2 }}
               disabled={!(siteName ? parsed.what : parsed.whatWithWhere).trim()}
               onPress={() => void add()}
@@ -481,7 +479,7 @@ export default function NeedsScreen() {
 
         <Rowed gap={2} wrap>
           <Button
-            title="Send this list"
+            title="Share list"
             variant="secondary"
             compact
             loading={sending}
@@ -510,7 +508,7 @@ export default function NeedsScreen() {
           <EmptyState
             icon="format-list-checks"
             title="Nothing on the list"
-            body="Write down what you need as you notice it — an extinguisher for a site, a flow meter for next month. Tick it off when you have it."
+            body="Add parts as you need them. Tick them off when you have them."
           />
         ) : null}
 
@@ -522,7 +520,7 @@ export default function NeedsScreen() {
               <Reveal key={line.id} index={i}>{renderLine(line)}</Reveal>
             ))}
             {!group.open.length ? (
-              <Txt size="sm" tone="faint">Nothing wanted here.</Txt>
+              <Txt size="sm" tone="faint">Nothing here.</Txt>
             ) : null}
             {group.got.length ? (
               <>

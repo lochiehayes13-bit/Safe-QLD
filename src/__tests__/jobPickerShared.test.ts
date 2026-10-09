@@ -55,6 +55,7 @@ const USERS = [
   ['the Form 72', 'app/form72/[id].tsx'],
   ['the defect', 'app/defect/[id].tsx'],
   ['the file-it-on-the-job card', 'src/components/JobFileCard.tsx'],
+  ['ask the office', 'app/work/rfi.tsx'],
 ] as const;
 
 describe('the screens that pick a job', () => {

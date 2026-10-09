@@ -130,12 +130,13 @@ describe('what the browser is allowed to do', () => {
     expect(GEOCODE_PROVIDER).toContain('OpenStreetMap');
   });
 
-  it('says on the screen how many are left and that the phone is quicker', () => {
+  it('says on the screen how many sites are not on the map yet', () => {
     const note = geocodeNote(2917)!;
-    expect(note).toContain('2,917');
-    expect(note).toContain('OpenStreetMap');
+    expect(note).toContain('2,917 sites not on the map yet');
     expect(note).toContain(String(GEOCODE_BATCH));
-    expect(note).toContain('phone app');
+    // An iPhone runs this build and has no phone app to switch to.
+    expect(note).not.toMatch(/phone app|quicker/i);
+    expect(geocodeNote(1)).toContain('1 site not on the map yet');
   });
 
   it('says nothing once there is nothing left to place', () => {

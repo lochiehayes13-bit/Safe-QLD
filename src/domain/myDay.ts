@@ -163,6 +163,6 @@ export function whoseSchedule(prefs: WhoPrefs): WhoseSchedule | null {
   const id = prefs.simproEmployeeId.trim();
   const name = prefs.technicianName.trim();
   if (id) return { by: 'id', staffId: id, label: name ? `${name} (employee ${id})` : `employee ${id}` };
-  if (name) return { by: 'name', staffName: name, label: `the name "${name}"` };
+  if (name) return { by: 'name', staffName: name, label: name };
   return null;
 }

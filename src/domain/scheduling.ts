@@ -178,8 +178,8 @@ export function conflicts(mine: readonly ScheduleEntry[], candidate: Candidate):
 
 /** Why a day and span cannot be booked, in a word, or nothing when they can. */
 export function spanProblem(c: { date: string; start: string; end: string }): string | undefined {
-  if (!DAY.test(c.date) || !qldIsoDay(c.date)) return 'The date is yyyy-mm-dd.';
-  if (!isClock(c.start) || !isClock(c.end)) return 'Times are HH:MM, 24 hour: 07:00, 15:30.';
+  if (!DAY.test(c.date) || !qldIsoDay(c.date)) return 'Write the date as dd/mm/yyyy.';
+  if (!isClock(c.start) || !isClock(c.end)) return 'Use 24-hour time, like 07:00.';
   if (c.end <= c.start) return 'The block ends before it starts.';
   return undefined;
 }

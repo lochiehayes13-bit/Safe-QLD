@@ -61,6 +61,12 @@ function jobPhrase(p: LookupPayload): string {
   return p.jobId?.trim() ? `job ${p.jobId.trim()}` : 'the job';
 }
 
+/** Your own row on the Simpro schedule, and what to look for on it. */
+function scheduleLook(describe?: string): string {
+  const what = describe?.trim();
+  return what ? `Check your row on the Simpro schedule for ${what}.` : 'Check your row on the Simpro schedule for that day.';
+}
+
 /**
  * Where to check, for one queued row.
  *
@@ -71,24 +77,21 @@ function jobPhrase(p: LookupPayload): string {
 export function whereToCheck(kind: string, payload: LookupPayload, describe?: string): OutboundLookup {
   if (kind === JOB_NOTE_KIND) {
     return {
-      look: `Open ${jobPhrase(payload)} in Simpro and read its notes. The note carries the reference below, so `
-        + 'searching the job for it finds the one this phone sent.',
+      look: `Open ${jobPhrase(payload)} in Simpro and search its notes for the reference below.`,
       reference: payload.noteKey?.trim() ? markerFor(payload.noteKey.trim()) : undefined,
     };
   }
 
   if (kind === JOB_SIGNOFF_KIND) {
     return {
-      look: `Open ${jobPhrase(payload)} in Simpro and read its notes — a sign-off posts as a note. It carries the `
-        + 'reference below where one was made.',
+      look: `Open ${jobPhrase(payload)} in Simpro and check its notes for the sign-off.`,
       reference: payload.noteKey?.trim() ? markerFor(payload.noteKey.trim()) : undefined,
     };
   }
 
   if (kind === PURCHASE_ORDER_KIND) {
     return {
-      look: `Open ${jobPhrase(payload)} in Simpro and look at its purchase orders. The order's notes carry the `
-        + 'reference below.',
+      look: `Open ${jobPhrase(payload)} in Simpro and check its purchase orders for the reference below.`,
       reference: payload.noteKey?.trim() ? markerFor(payload.noteKey.trim()) : undefined,
     };
   }
@@ -96,8 +99,8 @@ export function whereToCheck(kind: string, payload: LookupPayload, describe?: st
   if (kind === ATTACHMENT_KIND) {
     const named = payload.filename?.trim();
     return {
-      look: `Open ${jobPhrase(payload)} in Simpro and look at its attachments`
-        + (named ? ` for a file called "${named}".` : '.'),
+      look: `Open ${jobPhrase(payload)} in Simpro and check its attachments`
+        + (named ? ` for "${named}".` : '.'),
     };
   }
 
@@ -105,31 +108,25 @@ export function whereToCheck(kind: string, payload: LookupPayload, describe?: st
     // Hours and leave land on the person's own day in the Simpro schedule.
     // There is no reference on them anywhere: the block is either on the day
     // or it is not, and that is a thing somebody can actually look at.
-    return {
-      look: 'Open the Simpro schedule for that day and look at your own row. '
-        + (describe?.trim() ? `You are looking for ${describe.trim()}.` : 'The block is either there or it is not.'),
-    };
+    return { look: scheduleLook(describe) };
   }
 
   if (isScheduleKind(kind)) {
-    return {
-      look: 'Open the Simpro schedule for that day and look at your own row. '
-        + (describe?.trim() ? `You are looking for ${describe.trim()}.` : 'The block is either there or it is not.'),
-    };
+    return { look: scheduleLook(describe) };
   }
 
   if (isAssetChangeKind(kind)) {
     const where = payload.siteName?.trim();
     const which = payload.assetNumber?.trim();
     return {
-      look: `Open the customer asset register in Simpro${where ? ` for ${where}` : ''} and find `
-        + `${which ? `asset ${which}` : 'the asset'}. The change is either on it or it is not.`,
+      look: `Open the customer asset register in Simpro${where ? ` for ${where}` : ''} and check `
+        + `${which ? `asset ${which}` : 'the asset'} for the change.`,
     };
   }
 
   // A status, a line, a cost centre — everything else the job card sends.
   return {
-    look: `Open ${jobPhrase(payload)} in Simpro and see whether the change is on it.`,
+    look: `Open ${jobPhrase(payload)} in Simpro and check whether the change is there.`,
   };
 }
 

@@ -16,7 +16,9 @@ import {
   dayTotals, entrySpan, formatMinutes, openEntryOf, qldClock, qldInstant, sendReadiness, weekStartOf, weekTotals,
   type ClockEntry, type ClockKind, type ClockStart,
 } from '@/domain/clockOn';
+import { entrySendState, neverSendable } from '@/domain/clockSendState';
 import { qldIsoDay } from '@/domain/qldTime';
+import { formatAuDate } from '@/export/sheets';
 import { whoseSchedule } from '@/domain/myDay';
 import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { simproConfigFromPrefs } from '@/simpro/config';
@@ -89,19 +91,6 @@ interface CostCentreStep {
   job: JobPick;
   options: CostCentreChoice[];
   why?: string;
-}
-
-/** The chip beside an entry: what the office has, is getting, or refused. */
-function sendState(e: ClockEntry, q: QueueState | undefined): { label: string; tone: 'pass' | 'fail' | 'warn' | 'muted' | 'accent'; words?: string } {
-  if (e.sentAt) return { label: 'Sent', tone: 'pass' };
-  if (!e.endedAt) return { label: 'Running', tone: 'accent' };
-  if (q?.status === 'unknown') return { label: 'Unsure', tone: 'warn', words: `No reply came back. Check Waiting to send.${q.lastError ? ` ${q.lastError}` : ''}` };
-  if (q?.status === 'failed') return { label: 'Failed', tone: 'fail', words: q.lastError ?? e.sendError };
-  if (q?.status === 'pending' || q?.status === 'sending') return { label: q.lastError ? 'Retrying' : 'Queued', tone: 'accent', words: q.lastError };
-  if (e.sendError) return { label: 'Not sent', tone: 'fail', words: e.sendError };
-  const ready = sendReadiness(e);
-  if (!ready.ready) return { label: e.kind === 'break' ? 'Break' : 'Not sent', tone: 'muted', words: e.kind === 'break' ? undefined : ready.why };
-  return { label: 'To send', tone: 'muted' };
 }
 
 function entryTitle(e: ClockEntry): string {
@@ -247,15 +236,15 @@ export default function ClockScreen() {
       let options = await costCentresForJob(job.externalId);
       let why: string | undefined;
       if (!options.length) {
-        if (!prefs) throw new Error('Settings have not loaded yet.');
+        if (!prefs) throw new Error("Settings haven't loaded yet.");
         const outcome = await syncJobDetail(simproConfigFromPrefs(prefs), localJobId(job.externalId), { force: true });
         options = await costCentresForJob(job.externalId);
         if (!options.length) {
           why = outcome.status === 'failed'
-            ? `The job's cost centres could not be read: ${outcome.error}`
+            ? `Couldn't read the job's cost centres (${outcome.error}). Try again with signal.`
             : outcome.status === 'missing' || outcome.status === 'not-simpro'
-              ? 'This job is not held from Simpro, so it has no cost centre to put hours on.'
-              : 'Simpro lists no cost centre on this job. The hours will wait on the phone until the office adds one.';
+              ? "This job isn't in Simpro."
+              : 'This job has no cost centre in Simpro. Ask the office to add one.';
         }
       }
       if (options.length === 1 && !why) {
@@ -283,7 +272,7 @@ export default function ClockScreen() {
       // The queue holds one row per entry while one is pending or in doubt,
       // so a second press has nothing to add and says so rather than nothing.
       if (r.status === 'duplicate') {
-        setNotice(queue.get(e.id)?.status === 'unknown' ? 'Already on Waiting to send: decide it there.' : 'Already queued.');
+        setNotice(queue.get(e.id)?.status === 'unknown' ? 'Already on Waiting to send. Check it there.' : 'Already queued.');
       }
       await load();
     } catch (err) {
@@ -307,7 +296,7 @@ export default function ClockScreen() {
         if (r.status === 'queued') queued++;
         else if (r.status === 'not-ready') held++;
       }
-      setNotice(queued ? `${queued} queued for the office.${held ? ` ${held} held back, see each entry.` : ''}` : 'Nothing to send today.');
+      setNotice(queued ? `${queued} queued to send.${held ? ` ${held} not ready, see each entry.` : ''}` : 'Nothing to send today.');
       await load();
     } catch (err) {
       setNotice(describeActionFailure(err, 'queue the hours'));
@@ -324,7 +313,7 @@ export default function ClockScreen() {
     const startedAt = qldInstant(entry.date, editing.start);
     const endedAt = editing.end.trim() ? qldInstant(entry.date, editing.end) : undefined;
     if (!startedAt || (editing.end.trim() && !endedAt)) {
-      setEditing({ ...editing, why: 'Times are HH:MM, 24 hour: 07:30, 16:00.' });
+      setEditing({ ...editing, why: 'Use 24-hour time, like 07:30.' });
       return;
     }
     // A running entry keeps running: only its start can move.
@@ -342,7 +331,7 @@ export default function ClockScreen() {
   };
 
   const remove = (e: ClockEntry) => {
-    showAlert('Delete this entry?', `${entryTitle(e)}, ${qldClock(e.startedAt)}–${e.endedAt ? qldClock(e.endedAt) : 'now'}. It has not been sent.`, [
+    showAlert('Delete this entry?', `${entryTitle(e)}, ${qldClock(e.startedAt)}–${e.endedAt ? qldClock(e.endedAt) : 'now'}. It hasn't been sent.`, [
       { text: 'Keep', style: 'cancel' },
       {
         text: 'Delete',
@@ -367,7 +356,7 @@ export default function ClockScreen() {
 
   /** One entry's card: the block, its send state, and what can still be done to it. */
   const renderEntry = (e: ClockEntry) => {
-    const state = sendState(e, queue.get(e.id));
+    const state = entrySendState(e, queue.get(e.id));
     const span = entrySpan(e, now);
     const isEditing = editing?.id === e.id;
     return (
@@ -404,7 +393,7 @@ export default function ClockScreen() {
           // Neither edit nor delete while nobody can say whether the block
           // went: an edit here and a Send again there would post the block
           // twice with different times. Waiting to send decides it first.
-          <Txt size="xs" tone="faint" style={{ marginTop: t.space(2) }}>Decide this one on Waiting to send before changing it.</Txt>
+          <Txt size="xs" tone="faint" style={{ marginTop: t.space(2) }}>Check this one on Waiting to send before changing it.</Txt>
         ) : (
           <Rowed gap={2} wrap style={{ marginTop: t.space(2) }}>
             <Button title="Edit" variant="ghost" compact disabled={busy} onPress={() => setEditing({ id: e.id, start: qldClock(e.startedAt) ?? '', end: e.endedAt ? qldClock(e.endedAt) ?? '' : '' })} />
@@ -425,7 +414,7 @@ export default function ClockScreen() {
     <>
       <Stack.Screen options={{ title: 'Clock on' }} />
       <Screen>
-        {failed ? <Banner tone="fail" title="The clock could not be read" body={failed} /> : null}
+        {failed ? <Banner tone="fail" title="Couldn't load the clock" body={failed} /> : null}
         {notice ? <Banner tone={/could not|Not sent/.test(notice) ? 'warn' : 'info'} title={notice} /> : null}
 
         {prefs && !employeeId ? (
@@ -433,7 +422,7 @@ export default function ClockScreen() {
             <Banner
               tone="warn"
               title="Who are you in Simpro?"
-              body="Hours go on a Simpro job under an employee, and this phone does not know which one yet. Sign in with your Simpro login, or pick yourself from the staff list."
+              body="Sign in, or pick yourself from the staff list, before clocking on."
             />
             <Rowed gap={2} style={{ marginTop: t.space(3) }}>
               <Button title="Sign in" onPress={() => router.push('/signin')} />
@@ -455,6 +444,7 @@ export default function ClockScreen() {
                 {runningMinutes?.refused ? '--:--' : formatMinutes(runningMinutes?.minutes ?? 0)}
               </Txt>
               <Txt size="sm" tone="muted">Since {qldClock(open.startedAt)}{runningMinutes?.refused ? ` · ${runningMinutes.refused}` : ''}</Txt>
+              {neverSendable(open) ? <Txt size="sm" tone="warn">{neverSendable(open)}</Txt> : null}
               <Rowed gap={2} wrap>
                 <Button title="Off" variant="danger" disabled={busy} onPress={() => { void clockOff(); }}
                   icon={<MaterialCommunityIcons name="timer-off-outline" size={18} color="#fff" />} />
@@ -509,9 +499,10 @@ export default function ClockScreen() {
             <Txt weight="700">Job {step.job.externalId}{step.job.siteName ? ` · ${step.job.siteName}` : ''}</Txt>
             {step.why ? (
               <View style={{ gap: t.space(2), marginTop: t.space(2) }}>
-                <Banner tone="warn" title="No cost centre to put the hours on" body={step.why} />
+                <Banner tone="warn" title="No cost centre for these hours" body={step.why} />
+                <Txt size="sm" tone="muted">Clock on anyway and the hours stay on this phone. They can’t be sent.</Txt>
                 <Button
-                  title="Clock on to the job anyway"
+                  title="Clock on anyway"
                   variant="secondary"
                   disabled={busy}
                   onPress={() => { void clockOn({ kind: 'work', jobExternalId: step.job.externalId ?? undefined, jobTitle: step.job.title, siteName: step.job.siteName }); }}
@@ -519,7 +510,7 @@ export default function ClockScreen() {
               </View>
             ) : (
               <View style={{ gap: t.space(2), marginTop: t.space(2) }}>
-                <Txt size="sm" tone="muted">Which cost centre are the hours on?</Txt>
+                <Txt size="sm" tone="muted">Which cost centre?</Txt>
                 {step.options.map((c) => (
                   <Card
                     key={`${c.sectionExternalId}-${c.costCenterExternalId}`}
@@ -550,25 +541,25 @@ export default function ClockScreen() {
           <StatTile label="Breaks" value={formatMinutes(dayT.breakMinutes)} />
         </Rowed>
         {dayT.refused.length ? (
-          <Txt size="sm" tone="warn">{dayT.refused.length} {dayT.refused.length === 1 ? 'entry is' : 'entries are'} left out of the total: {dayT.refused.map((r) => r.why).join('; ')}.</Txt>
+          <Txt size="sm" tone="warn">{dayT.refused.length} left out of the total: {dayT.refused.map((r) => r.why).join('; ')}.</Txt>
         ) : null}
 
         {!todays.length ? (
-          <Card><Txt tone="muted">Nothing clocked today. Press On when you start.</Txt></Card>
+          <Card><Txt tone="muted">Nothing clocked today. Tap On when you start.</Txt></Card>
         ) : todays.map(renderEntry)}
 
         {/* Owed from earlier days. */}
         {unsent.length ? (
           <>
             <H2>Not yet sent</H2>
-            <Txt size="sm" tone="muted">Earlier days the office does not have yet. Each says why, and can be sent from here.</Txt>
+            <Txt size="sm" tone="muted">Earlier days not in Simpro yet.</Txt>
             {unsent.map(renderEntry)}
           </>
         ) : null}
 
         {/* The week. */}
         <H2>This week</H2>
-        <Txt size="sm" tone="muted">Monday {weekT.weekStart} to Sunday {weekT.weekEnd}</Txt>
+        <Txt size="sm" tone="muted">Monday {formatAuDate(weekT.weekStart)} to Sunday {formatAuDate(weekT.weekEnd)}</Txt>
         <Rowed gap={2} wrap>
           <StatTile label="On the tools" value={formatMinutes(weekT.workMinutes)} />
           <StatTile label="Travel" value={formatMinutes(weekT.travelMinutes)} />
@@ -590,9 +581,7 @@ export default function ClockScreen() {
             ))}
           </Card>
         ) : null}
-        <Txt size="sm" tone="faint">
-          Hours are sent as schedule blocks on the job's cost centre, under your Simpro employee. Breaks stay on the phone. Anything refused shows the office's words on the entry and on Waiting to send.
-        </Txt>
+        <Txt size="sm" tone="faint">Hours go to the job’s cost centre in Simpro. Breaks stay on the phone.</Txt>
       </Screen>
     </>
   );

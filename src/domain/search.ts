@@ -17,8 +17,8 @@ import { qldDay } from '@/domain/qldTime';
  * The database half is `src/db/searchRepo.ts`; nothing here touches a row.
  *
  * Two rules decide the order. An exact number match comes first whatever
- * kind it is, because a typed number is a typed number and "44501" is job
- * 44501 before it is the invoice whose order number contains it. After
+ * kind it is, because a typed number is a typed number and "9001" is job
+ * 9001 before it is the invoice whose order number contains it. After
  * that, kinds in the order a technician reaches for them — jobs, then the
  * place, the people, the paperwork, the parts — and within a kind the most
  * recent thing first.
@@ -96,7 +96,7 @@ export interface ParsedQuery {
   text: string;
   /** The digits of a number query, the # and any prefix word dropped. */
   number?: string;
-  /** The kind a prefix named — "inv 62339" is an invoice and nothing else. */
+  /** The kind a prefix named — "inv 2345" is an invoice and nothing else. */
   hint?: SearchKind;
   /** The words of a words query; the one token of a code query. */
   words: string[];
@@ -150,7 +150,7 @@ export function parseQuery(text: string): ParsedQuery {
   // A phone number: digits with spaces, brackets, dashes or a plus in them,
   // or a bare run of digits that starts with a zero and is as long as a
   // number is. The office's ids never start with zero, so "0400 000 000"
-  // and "0400000000" are both a phone and "44501" is not. An Australian
+  // and "0400000000" are both a phone and "9001" is not. An Australian
   // number typed with its country code, "+61 400 000 000", is the one the
   // office typed as "0400 000 000", so the 61 becomes the 0 it stands for.
   if (PHONE_SHAPE.test(trimmed)) {
@@ -306,14 +306,14 @@ export function describeHit(facts: HitFacts): string {
 
 /** What can be typed, for the hint row under an empty box. */
 export const SEARCH_HINTS: readonly { example: string; finds: string }[] = [
-  { example: '44501', finds: 'a job by its number' },
-  { example: 'inv 62339', finds: 'an invoice' },
-  { example: 'po 80375', finds: 'a purchase order' },
-  { example: 'quote 1234', finds: 'a Simpro quote' },
-  { example: 'DET-OPT-1', finds: 'a part in the office catalogue' },
-  { example: '0400 000 000', finds: 'whoever has that number' },
-  { example: 'name@example.com', finds: 'a customer, contact or supplier by email' },
-  { example: 'Fictional Tower', finds: 'a site, customer or lead by name' },
+  { example: '12345', finds: 'Job number' },
+  { example: 'inv 2345', finds: 'Invoice' },
+  { example: 'po 3456', finds: 'Purchase order' },
+  { example: 'quote 1234', finds: 'Quote' },
+  { example: 'DET-OPT-1', finds: 'Part number' },
+  { example: '0400 000 000', finds: 'Phone number' },
+  { example: 'name@example.com', finds: 'Email address' },
+  { example: 'Fictional Tower', finds: 'Site, customer or lead' },
 ];
 
 /** What a search with nothing to show should say, given what was typed. */
@@ -321,12 +321,12 @@ export function nothingFoundWords(query: ParsedQuery): { title: string; body: st
   if (query.hint && query.number) {
     return {
       title: `No ${KIND_LABEL[query.hint].one.toLowerCase()} ${query.number} on this phone`,
-      body: 'It may be older than what the phone holds, or it has not come down yet. Try the number on its own to search every kind of record.',
+      body: `It may not have synced yet. Try ${query.number} on its own.`,
     };
   }
-  if (query.kind === 'phone') return { title: 'Nobody has that number', body: 'Not on any customer, contact, site or supplier the phone holds. Try fewer digits.' };
-  if (query.kind === 'email') return { title: 'Nobody has that email', body: 'Not on any customer, contact or supplier the phone holds. Try the part before the @.' };
-  return { title: 'Nothing matched', body: 'Try a number on its own, or a shorter piece of the name.' };
+  if (query.kind === 'phone') return { title: 'Nobody has that number', body: 'Try fewer digits.' };
+  if (query.kind === 'email') return { title: 'Nobody has that email', body: 'Try just the part before the @.' };
+  return { title: 'Nothing matched', body: 'Try a number on its own, or part of the name.' };
 }
 
 // ---------------------------------------------------------------------------

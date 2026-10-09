@@ -414,7 +414,7 @@ export default function MapScreen() {
       // the rows below say so and offer it.
       else if (!shown.length && !unplaced.shown.length) setPlaceError(`Nothing found for “${q}”`);
     } catch (e) {
-      setPlaceError(e instanceof Error ? e.message : 'The place search did not answer');
+      setPlaceError(e instanceof Error ? e.message : "Place search didn't respond");
     } finally {
       setSearching(false);
     }
@@ -437,8 +437,8 @@ export default function MapScreen() {
         // Once the OS has stopped asking, the only way back on is Settings,
         // and a button that spins and does nothing does not say so.
         setLocationNote(permission.canAskAgain
-          ? { text: 'Location was declined, so the map cannot show where you are or place the sites.', action: 'ask' }
-          : { text: 'Location is off for Safe QLD. Turn it on in the phone’s settings to see where you are and to place the sites.', action: 'settings' });
+          ? { text: 'Location is off. Allow it to see where you are.', action: 'ask' }
+          : { text: 'Location is off for Safe QLD. Turn it on in Settings.', action: 'settings' });
         return;
       }
       // Balanced accuracy: this centres a map, and a high-accuracy fix costs
@@ -448,7 +448,7 @@ export default function MapScreen() {
       setMeFresh(true);
       inject(centreScript(pos.coords.latitude, pos.coords.longitude));
     } catch (e) {
-      setLocationNote({ text: `Could not get a position (${e instanceof Error ? e.message : String(e)}).`, action: 'ask' });
+      setLocationNote({ text: `Couldn't find your location (${e instanceof Error ? e.message : String(e)}).`, action: 'ask' });
     } finally {
       setFinding(false);
     }
@@ -477,13 +477,13 @@ export default function MapScreen() {
   };
 
   const status = (() => {
-    if (!data || !built) return 'Reading sites…';
-    if (!data.sites.length) return 'Nothing to map yet — sync from the office first';
-    let line = `${formatCount(built.pins.length)} of ${formatCount(data.sites.length)} sites located`;
+    if (!data || !built) return 'Loading sites…';
+    if (!data.sites.length) return 'No sites yet. Run a sync first.';
+    let line = `${formatCount(built.pins.length)} of ${formatCount(data.sites.length)} sites on the map`;
     if (locating) {
       line += progress ? ` · locating ${progress.done} of ${progress.total}…` : ' · locating…';
     } else if (locateFault) {
-      line += ' · not locating';
+      line += ' · paused';
     }
     // Where the coordinates come from and how fast, where the platform has
     // anything to say about it. In a browser that is most of the story.
@@ -499,7 +499,7 @@ export default function MapScreen() {
   // exactly the figure that matters when the reason is a missing permission.
   const note: LocationNote | null = locationNote
     ?? (locateFault?.faultKind === 'permission'
-      ? { text: 'Location is off for Safe QLD, so the sites cannot be placed on the map. Allow it to place them.', action: 'ask' }
+      ? { text: 'Location is off. Allow it to place sites on the map.', action: 'ask' }
       : locateFault?.fault
         ? { text: `${GEOCODE_PROVIDER} stopped: ${locateFault.fault}`, action: 'none' }
         : null);
@@ -564,7 +564,7 @@ export default function MapScreen() {
                 value={query}
                 onChangeText={setQuery}
                 onSubmitEditing={() => { void submitSearch(); }}
-                placeholder="Site, client, job number or any place"
+                placeholder="Site, client, job or place"
                 placeholderTextColor={t.color.textFaint}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -635,9 +635,9 @@ export default function MapScreen() {
             <View style={{ ...floating, padding: t.space(2.5), gap: t.space(2) }}>
               <Txt size="xs" tone="muted">
                 {unplaced.matching === 1
-                  ? 'On this phone, but nothing knows where it is yet:'
-                  : `${unplaced.matching} on this phone, but nothing knows where they are yet${
-                    unplaced.matching > unplaced.shown.length ? ` — the first ${unplaced.shown.length}` : ''}:`}
+                  ? 'Not on the map yet:'
+                  : `${unplaced.matching} not on the map yet${
+                    unplaced.matching > unplaced.shown.length ? `. First ${unplaced.shown.length}` : ''}:`}
               </Txt>
               {unplaced.shown.map((site) => (
                 <Pressable
@@ -652,7 +652,7 @@ export default function MapScreen() {
                     <View style={{ flex: 1 }}>
                       <Txt size="sm" weight="700" numberOfLines={1}>{site.name}</Txt>
                       <Txt size="xs" tone="faint" numberOfLines={1}>
-                        {[site.suburb, site.clientName].filter(Boolean).join(' · ') || 'No address recorded'}
+                        {[site.suburb, site.clientName].filter(Boolean).join(' · ') || 'No address'}
                       </Txt>
                     </View>
                     <MaterialCommunityIcons name="chevron-right" size={18} color={t.color.textFaint} />
@@ -795,7 +795,7 @@ function PlaceCard({
 
         <Rowed gap={2} wrap>
           <StatusPill
-            label={ours ? 'Our site' : theirs ? 'Our customer' : 'Not a customer of ours'}
+            label={ours ? 'Our site' : theirs ? 'Our customer' : 'Not a customer'}
             tone={ours ? 'pass' : theirs ? 'info' : 'muted'}
           />
           {model.evidence.length ? (

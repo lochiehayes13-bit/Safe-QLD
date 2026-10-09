@@ -7,7 +7,7 @@ import {
  * The pure half of find-anything: what a typed search means, and the order
  * its hits come back in.
  *
- * The one that matters is the number. "44501" is a job number, an invoice
+ * The one that matters is the number. "9001" is a job number, an invoice
  * number, a purchase order number and a customer number all at once, and
  * the exact match has to lead whatever kind it is — a technician who typed
  * a job number and was handed an invoice whose order number contains it
@@ -16,19 +16,19 @@ import {
 
 describe('reading what was typed', () => {
   it('reads a bare number, with or without the hash', () => {
-    expect(parseQuery('44501')).toMatchObject({ kind: 'number', number: '44501' });
-    expect(parseQuery('44501').hint).toBeUndefined();
-    expect(parseQuery('#44501')).toMatchObject({ kind: 'number', number: '44501' });
+    expect(parseQuery('9001')).toMatchObject({ kind: 'number', number: '9001' });
+    expect(parseQuery('9001').hint).toBeUndefined();
+    expect(parseQuery('#9001')).toMatchObject({ kind: 'number', number: '9001' });
     expect(parseQuery('  1001 ')).toMatchObject({ kind: 'number', number: '1001', text: '1001' });
   });
 
   it('reads the prefix that says which record the number is', () => {
-    expect(parseQuery('job 44501')).toMatchObject({ kind: 'number', number: '44501', hint: 'job' });
-    expect(parseQuery('inv 62339')).toMatchObject({ kind: 'number', number: '62339', hint: 'invoice' });
-    expect(parseQuery('Invoice #62339')).toMatchObject({ kind: 'number', number: '62339', hint: 'invoice' });
-    expect(parseQuery('po 80375')).toMatchObject({ kind: 'number', number: '80375', hint: 'order' });
-    expect(parseQuery('order 80375')).toMatchObject({ hint: 'order' });
-    expect(parseQuery('purchase order 80375')).toMatchObject({ hint: 'order', number: '80375' });
+    expect(parseQuery('job 9001')).toMatchObject({ kind: 'number', number: '9001', hint: 'job' });
+    expect(parseQuery('inv 9002')).toMatchObject({ kind: 'number', number: '9002', hint: 'invoice' });
+    expect(parseQuery('Invoice #9002')).toMatchObject({ kind: 'number', number: '9002', hint: 'invoice' });
+    expect(parseQuery('po 9003')).toMatchObject({ kind: 'number', number: '9003', hint: 'order' });
+    expect(parseQuery('order 9003')).toMatchObject({ hint: 'order' });
+    expect(parseQuery('purchase order 9003')).toMatchObject({ hint: 'order', number: '9003' });
     expect(parseQuery('quote 1234')).toMatchObject({ kind: 'number', number: '1234', hint: 'quote' });
     expect(parseQuery('cust 812')).toMatchObject({ kind: 'number', number: '812', hint: 'customer' });
     expect(parseQuery('supplier 77')).toMatchObject({ hint: 'vendor' });
@@ -164,13 +164,21 @@ describe('the line under a hit', () => {
 
 describe('what an empty result says', () => {
   it('names the kind when a prefix asked for one', () => {
-    expect(nothingFoundWords(parseQuery('inv 62339')).title).toBe('No invoice 62339 on this phone');
+    expect(nothingFoundWords(parseQuery('inv 9002')).title).toBe('No invoice 9002 on this phone');
   });
 
   it('says nobody has the number or the email', () => {
     expect(nothingFoundWords(parseQuery('0400 000 000')).title).toBe('Nobody has that number');
     expect(nothingFoundWords(parseQuery('x@example.invalid')).title).toBe('Nobody has that email');
     expect(nothingFoundWords(parseQuery('tower')).title).toBe('Nothing matched');
+  });
+
+  it('says what to try next in a few words, naming the number that was typed', () => {
+    const words = nothingFoundWords(parseQuery('inv 9001'));
+    expect(words.body).toBe('It may not have synced yet. Try 9001 on its own.');
+    for (const q of ['inv 9001', '0400 000 000', 'x@example.invalid', 'tower']) {
+      expect(nothingFoundWords(parseQuery(q)).body.split(' ').length).toBeLessThan(12);
+    }
   });
 
   it('has a hint for each shape that can be typed', () => {

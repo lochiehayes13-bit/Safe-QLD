@@ -87,9 +87,9 @@ describe('queueing a clock entry', () => {
   it('does not queue an entry that cannot go, and writes why on it', async () => {
     const { opened } = await startEntry({ ...ON, jobSectionExternalId: undefined, jobCostCenterExternalId: undefined }, '2026-09-07T21:00:00.000Z');
     await stopOpenEntry('2026-09-07T23:30:00.000Z');
-    expect(await queueClockEntry((await getEntry(opened.id))!)).toEqual({ status: 'not-ready', why: 'No cost centre on this job yet' });
+    expect(await queueClockEntry((await getEntry(opened.id))!)).toEqual({ status: 'not-ready', why: 'No cost centre on this job' });
     expect(await pendingSync()).toEqual([]);
-    expect((await getEntry(opened.id))?.sendError).toBe('No cost centre on this job yet');
+    expect((await getEntry(opened.id))?.sendError).toBe('No cost centre on this job');
     expect(flushSoon).not.toHaveBeenCalled();
   });
 
@@ -171,8 +171,8 @@ describe('sending', () => {
     const e = await closedWorkEntry();
     await (await getDb()).runAsync('UPDATE clock_entry SET jobCostCenterExternalId = NULL WHERE id = ?', e.id);
     expect(await sendMore(item(e.id), deps(client)))
-      .toEqual({ status: 'abandon', reason: 'Nothing was sent: No cost centre on this job yet.' });
-    expect((await getEntry(e.id))?.sendError).toBe('No cost centre on this job yet');
+      .toEqual({ status: 'abandon', reason: 'Nothing was sent: No cost centre on this job.' });
+    expect((await getEntry(e.id))?.sendError).toBe('No cost centre on this job');
     expect(sent).toEqual([]);
   });
 
@@ -479,7 +479,7 @@ describe('what flushQueue does with each outcome', () => {
     await enqueueSync('timesheet-block', { kind: 'work' }, { contentKey: 'timesheet-block|nothing' });
     expect(await flushQueue(config)).toMatchObject({ sent: 0, failed: 2, remaining: 0 });
     expect(posts).toEqual([]);
-    expect(await rowFor(e.id)).toMatchObject({ status: 'failed', lastError: 'Nothing was sent: No cost centre on this job yet.' });
+    expect(await rowFor(e.id)).toMatchObject({ status: 'failed', lastError: 'Nothing was sent: No cost centre on this job.' });
     const nameless = await (await getDb()).getFirstAsync<SyncEntry>("SELECT * FROM sync_queue WHERE contentKey = 'timesheet-block|nothing'");
     expect(nameless).toMatchObject({ status: 'failed', lastError: expect.stringMatching(/names no entry/) });
   });

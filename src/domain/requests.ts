@@ -11,7 +11,7 @@
  * caller's problem.
  */
 
-export type RequestKind = 'information' | 'leave';
+import { contextId } from './screenContext';
 
 export interface InformationRequest {
   technicianName: string;
@@ -22,21 +22,6 @@ export interface InformationRequest {
   question: string;
   /** Set when the answer decides whether work continues right now. */
   blocking: boolean;
-}
-
-export interface LeaveRequest {
-  technicianName: string;
-  /** 'annual' | 'sick' | 'rdo' | 'unpaid' | 'other' — free-form to survive award changes. */
-  leaveType: string;
-  /** ISO dates. */
-  fromDate: string;
-  toDate: string;
-  reason: string;
-}
-
-function auDate(iso: string): string {
-  const [y, m, d] = iso.split('-');
-  return y && m && d ? `${d}/${m}/${y}` : iso;
 }
 
 // ------------------------------------------------------------- information
@@ -67,105 +52,41 @@ export function informationBody(r: InformationRequest): string {
 
 export function informationNotReady(r: InformationRequest): string | null {
   if (!r.technicianName.trim()) {
-    return 'Set your name in Settings first, so the office knows who is asking.';
+    return 'Set your name in Settings first.';
   }
   if (r.question.trim().length < 10) {
-    return 'Write the question out. A one-word request takes longer to answer than to ask properly.';
+    return 'Write the question out in full.';
   }
   return null;
 }
 
-// ------------------------------------------------------------------- leave
+// --------------------------------------------------------------------- job
 
-export function leaveSubject(r: LeaveRequest): string {
-  const who = r.technicianName.trim() || 'Unnamed technician';
-  const span = r.fromDate === r.toDate
-    ? auDate(r.fromDate)
-    : `${auDate(r.fromDate)} to ${auDate(r.toDate)}`;
-  return `Leave request — ${who} — ${span}`;
-}
-
-export function leaveBody(r: LeaveRequest): string {
-  const lines: string[] = [];
-  lines.push(`${r.technicianName.trim() || 'Unnamed technician'} is requesting leave.`);
-  lines.push('');
-  lines.push(`Type: ${r.leaveType.trim() || 'Not stated'}`);
-  lines.push(`From: ${auDate(r.fromDate)}`);
-  lines.push(`To: ${auDate(r.toDate)}`);
-  lines.push(`Working days: ${workingDays(r.fromDate, r.toDate)}`);
-  if (r.reason.trim()) {
-    lines.push('');
-    lines.push(r.reason.trim());
-  }
-  lines.push('');
-  lines.push('Sent from Safe QLD. This is a request, not an approval.');
-  return lines.join('\n');
+/** The job and site a question is about. */
+export interface RequestJob {
+  jobNumber: string;
+  siteName: string;
 }
 
 /**
- * Weekdays in the range, inclusive.
+ * The job and site a question starts with, from the route that opened it.
  *
- * Weekends only — public holidays are not counted, because the app has no
- * holiday calendar and a number that is wrong three times a year is worse than
- * one the office checks. It is a working-day count for the roster, not a
- * deduction from anybody's balance.
+ * The job screen passes both. expo-router can hand back an array or nothing
+ * for either, and both read as text here.
  */
-export function workingDays(fromIso: string, toIso: string): number {
-  const from = Date.parse(`${fromIso}T00:00:00Z`);
-  const to = Date.parse(`${toIso}T00:00:00Z`);
-  if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return 0;
-  let days = 0;
-  for (let t = from; t <= to; t += 86_400_000) {
-    const day = new Date(t).getUTCDay();
-    if (day !== 0 && day !== 6) days++;
-  }
-  return days;
+export function requestJobFromRoute(params: { job?: string | string[]; site?: string | string[] }): RequestJob {
+  return { jobNumber: contextId(params.job) ?? '', siteName: contextId(params.site) ?? '' };
 }
-
-export function leaveNotReady(r: LeaveRequest): string | null {
-  if (!r.technicianName.trim()) {
-    return 'Set your name in Settings first, so the office knows whose leave this is.';
-  }
-  if (!r.fromDate || !r.toDate) {
-    return 'Pick both dates.';
-  }
-  if (Date.parse(r.toDate) < Date.parse(r.fromDate)) {
-    return 'The last day is before the first day.';
-  }
-  if (!r.leaveType.trim()) {
-    return 'Say what kind of leave this is.';
-  }
-  return null;
-}
-
-// ------------------------------------------------------------------- dates
 
 /**
- * Reads a date the way people here write one: 7/9/2026, 07/09/26, 7.9.2026.
+ * The job and site once a job has been picked, or found on the phone.
  *
- * Returns ISO or null. Two-digit years are this century. There is no date
- * picker in the app, deliberately — a picker is three taps per date with a
- * glove on, and everyone on the crew can type a date faster than they can
- * scroll to it. The cost is that a typed date can be nonsense, and that is why
- * the parse is strict about the day and the month actually existing.
+ * The job's own site replaces a typed one, since the job is the record. A job
+ * with no site name keeps whatever was typed.
  */
-export function parseAuDate(text: string): string | null {
-  const m = text.trim().match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2}|\d{4})$/);
-  if (!m) return null;
-  const d = Number(m[1]);
-  const mo = Number(m[2]);
-  const y = m[3]!.length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
-  if (mo < 1 || mo > 12 || d < 1) return null;
-  const daysInMonth = new Date(Date.UTC(y, mo, 0)).getUTCDate();
-  if (d > daysInMonth) return null;
-  return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+export function withPickedJob(current: RequestJob, job: { externalId?: string; siteName?: string }): RequestJob {
+  return {
+    jobNumber: job.externalId?.trim() || current.jobNumber,
+    siteName: job.siteName?.trim() || current.siteName,
+  };
 }
-
-/** The named leave types, in the order they get asked for. */
-export const LEAVE_TYPES: readonly { value: string; label: string }[] = [
-  { value: 'Annual', label: 'Annual' },
-  { value: 'Sick', label: 'Sick' },
-  { value: 'RDO', label: 'RDO' },
-  { value: 'Unpaid', label: 'Unpaid' },
-  { value: 'Other', label: 'Other' },
-];

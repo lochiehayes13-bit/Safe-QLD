@@ -495,7 +495,7 @@ export function summariseRun(
     if (flush.sent) parts.push(`Sent ${flush.sent} to the office.`);
     // Some of these the queue will try again; some it has given up on. The
     // outbound screen tells them apart, so that is where the line points.
-    if (flush.failed) parts.push(`${flush.failed} could not be sent; see Send to the office.`);
+    if (flush.failed) parts.push(`${flush.failed} couldn't be sent. See Waiting to send.`);
     if (!flush.sent && !flush.failed) {
       parts.push(flush.remaining ? `${flush.remaining} still waiting to send.` : 'Nothing was waiting to send.');
     }

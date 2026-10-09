@@ -154,7 +154,7 @@ describe('a site the map cannot place', () => {
 
   it('offers the matched sites rather than only reporting them', () => {
     // "We have it and cannot show you" is useful only with the way through.
-    expect(map).toContain('On this phone, but nothing knows where it is yet');
+    expect(map).toContain("'Not on the map yet:'");
     expect(map).toContain("router.push({ pathname: '/site/[id]', params: { id: site.id } })");
   });
 

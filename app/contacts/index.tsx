@@ -89,7 +89,7 @@ export default function ContactsScreen() {
           <SearchBox value={typed} onChange={setTyped} placeholder="Name, number, email, role, site or customer" />
           {rows ? (
             <Txt size="xs" tone="faint">
-              {rows.length >= PAGE ? `First ${PAGE} shown. Search to narrow.` : `${rows.length} ${rows.length === 1 ? 'person' : 'people'}${scope ? ` ${scope}` : ''}`}
+              {rows.length >= PAGE ? `First ${PAGE} shown. Search to narrow it.` : `${rows.length} ${rows.length === 1 ? 'person' : 'people'}${scope ? ` ${scope}` : ''}`}
             </Txt>
           ) : null}
         </View>
@@ -100,7 +100,7 @@ export default function ContactsScreen() {
           initialNumToRender={14}
           windowSize={7}
           contentContainerStyle={{ padding: t.space(4), paddingTop: 0, gap: t.space(3), paddingBottom: t.space(20) }}
-          ListHeaderComponent={failed ? <Banner tone="fail" title="The contacts could not be read" body={failed} /> : null}
+          ListHeaderComponent={failed ? <Banner tone="fail" title="Couldn't load contacts" body={failed} /> : null}
           ListEmptyComponent={rows === null && !failed ? null : (
             empty ? (
               <EmptyState icon="account-group-outline" title={empty.title} body={empty.body} />
@@ -110,7 +110,7 @@ export default function ContactsScreen() {
                 title={query.trim() ? 'Nobody matched' : scope ? `Nobody listed ${scope}` : 'No contacts'}
                 body={query.trim()
                   ? 'Try a first name on its own, or part of the number.'
-                  : 'The office lists no contact here. The site or customer record may still carry a name.'}
+                  : 'Check the site or customer record for a name.'}
               />
             )
           )}

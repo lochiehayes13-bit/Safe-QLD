@@ -5,7 +5,7 @@ import { KIND_LABEL, type SearchKind } from './search';
  *
  * The box takes an identifier — a job number, a part number, a phone
  * number — and that is what it is for. But people type sentences at boxes.
- * "unpaid invoices for harbourline", "purchase orders for job 44501",
+ * "unpaid invoices for harbourline", "purchase orders for job 9001",
  * "who do I ring at the tower". Handed to the plain search those are five
  * words that appear in no record together, and the answer is "nothing
  * matched", which is wrong: the records are right there.
@@ -17,11 +17,8 @@ import { KIND_LABEL, type SearchKind } from './search';
  * quietly ignores half of what you typed is worse than one that says it
  * did.
  *
- * This is deliberately not a language model. It runs on a phone with no
- * signal in a plant room, it is the same answer every time, and it can be
- * read in a test. The model layer in `src/ai/findPhrase.ts` sits behind it
- * for the phrasings these lists do not have, and cannot be reached at all
- * without a key.
+ * It runs on a phone with no signal in a plant room, it is the same answer
+ * every time, and it can be read in a test.
  *
  * Nothing here invents a word. The terms are always a subset of what was
  * typed, so the search can only ever look for something the person said.
@@ -98,7 +95,7 @@ export function isPhrase(text: string): boolean {
   if (words.length < 2) return false;
   // A phone number is digits with spaces in it, however many groups.
   if (words.every((w) => NUMBERISH.test(w) || w === '+')) return false;
-  // "PO 80375" and "inv 62339" are the search's own prefixes, and it reads
+  // "PO 3456" and "inv 2345" are the search's own prefixes, and it reads
   // them better than this does.
   if (words.length === 2 && NUMBERISH.test(words[1]!)) return false;
   if (words.length >= 3) return true;
@@ -153,13 +150,12 @@ export function readPhrase(text: string): PhraseReading {
  */
 export function phraseWords(reading: PhraseReading): string | undefined {
   if (!reading.changed) return undefined;
+  const kind = reading.kind ? KIND_LABEL[reading.kind].many.toLowerCase() : undefined;
   const parts: string[] = [];
-  if (reading.kind) parts.push(`${KIND_LABEL[reading.kind].many.toLowerCase()} only`);
-  if (reading.terms) parts.push(`matching "${reading.terms}"`);
-  else parts.push('the most recent');
+  if (reading.terms) parts.push(`Searching ${kind ?? 'everything'} for "${reading.terms}".`);
+  else if (kind) parts.push(`Showing the latest ${kind}.`);
   if (reading.ignored.length) {
-    const list = reading.ignored.join(' and ');
-    parts.push(`"${list}" is not something this box can filter on, so it was left out`);
+    parts.push(`Can't filter by ${reading.ignored.map((w) => `"${w}"`).join(' or ')}.`);
   }
-  return `Read as: ${parts.join(', ')}.`;
+  return parts.length ? parts.join(' ') : undefined;
 }

@@ -144,29 +144,29 @@ export function stuckWords(s: StuckWork): StuckWords | undefined {
   if (s.clear) return undefined;
 
   const parts: string[] = [];
-  if (s.failed) parts.push(`${s.failed} ${s.failed === 1 ? 'thing the office refused' : 'things the office refused'}`);
-  if (s.unknown) parts.push(`${s.unknown} the phone cannot vouch for`);
-  if (s.waiting) parts.push(`${s.waiting} still waiting to go`);
+  if (s.failed) parts.push(`${s.failed} refused by Simpro`);
+  if (s.unknown) parts.push(`${s.unknown} with no reply`);
+  if (s.waiting) parts.push(`${s.waiting} waiting over a day`);
 
   const since = s.oldestAt ? qldMoment(s.oldestAt) : undefined;
   const photos = s.photos
-    ? ` ${s.photos === 1 ? 'One is a photograph' : `${s.photos} of them are photographs`}.`
+    ? ` ${s.photos === 1 ? 'One is a photo' : `${s.photos} are photos`}.`
     : '';
   const worst = s.failed > 0 ? 'fail' : 'warn';
 
   return {
     tone: worst,
     title: s.failed
-      ? 'Work has not reached the office'
-      : 'Work is still waiting to reach the office',
+      ? "Work hasn't reached Simpro"
+      : 'Work still waiting to send',
     body: [
       `${parts.join(', ')}.${photos}`,
-      since ? `The oldest has been sitting since ${since}.` : '',
+      since ? `Oldest from ${since}.` : '',
       s.failed
-        ? 'It is not in Simpro. Open Waiting to send and either fix it or say what happened.'
+        ? 'Not in Simpro. Open Waiting to send to fix it.'
         : s.unknown
-          ? 'A send that got no reply may be in Simpro twice or not at all, and only a person reading Simpro can tell. Open Waiting to send.'
-          : 'The phone has not been able to reach the office since. Check the connection, then open Waiting to send.',
+          ? 'It may already be in Simpro. Check there, then open Waiting to send.'
+          : 'No connection since. Check signal, then open Waiting to send.',
     ].filter(Boolean).join(' '),
   };
 }

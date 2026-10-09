@@ -64,10 +64,10 @@ export function suggestionBody(s: Suggestion): string {
 
 export function suggestionNotReady(s: Suggestion): string | null {
   if (!s.technicianName.trim()) {
-    return 'Set your name in Settings first, so whoever reads this can ask you about it.';
+    return 'Set your name in Settings first.';
   }
   if (s.text.trim().length < 15) {
-    return 'Say a little more. One line about what you expected and what happened is enough.';
+    return 'Say a little more. One line is enough.';
   }
   return null;
 }

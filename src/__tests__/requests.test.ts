@@ -1,28 +1,16 @@
 import {
-  informationBody, informationNotReady, informationSubject,
-  leaveBody, leaveNotReady, leaveSubject, parseAuDate, workingDays,
-  type InformationRequest, type LeaveRequest,
+  informationBody, informationNotReady, informationSubject, requestJobFromRoute, withPickedJob,
+  type InformationRequest,
 } from '@/domain/requests';
 import { copyForNextWeek, type Timesheet, type TimesheetEntry } from '@/domain/timesheet';
 
 function rfi(over: Partial<InformationRequest> = {}): InformationRequest {
   return {
     technicianName: 'Lachlan Hayes',
-    jobNumber: '43747',
-    siteName: 'BRIC Housing Emsworth St',
+    jobNumber: '9001',
+    siteName: 'Fictional Tower Main St',
     question: 'The riser cupboard is locked and the building manager is not answering. Who holds a key?',
     blocking: false,
-    ...over,
-  };
-}
-
-function leave(over: Partial<LeaveRequest> = {}): LeaveRequest {
-  return {
-    technicianName: 'Lachlan Hayes',
-    leaveType: 'Annual',
-    fromDate: '2026-09-07',
-    toDate: '2026-09-11',
-    reason: '',
     ...over,
   };
 }
@@ -30,7 +18,7 @@ function leave(over: Partial<LeaveRequest> = {}): LeaveRequest {
 describe('request for information', () => {
   it('puts the job and site in the subject so the answer can be filed', () => {
     expect(informationSubject(rfi()))
-      .toBe('RFI — 43747 · BRIC Housing Emsworth St — Lachlan Hayes');
+      .toBe('RFI — 9001 · Fictional Tower Main St — Lachlan Hayes');
   });
 
   it('says in the subject when someone is standing still', () => {
@@ -70,56 +58,37 @@ describe('request for information', () => {
   });
 });
 
-describe('leave request', () => {
-  it('names the person and the span', () => {
-    expect(leaveSubject(leave()))
-      .toBe('Leave request — Lachlan Hayes — 07/09/2026 to 11/09/2026');
+describe('the job a question is about', () => {
+  it('takes the job and site the job screen opened it with', () => {
+    expect(requestJobFromRoute({ job: '9001', site: 'Fictional Tower' }))
+      .toEqual({ jobNumber: '9001', siteName: 'Fictional Tower' });
   });
 
-  it('reads as one day when it is one day', () => {
-    expect(leaveSubject(leave({ fromDate: '2026-09-07', toDate: '2026-09-07' })))
-      .toBe('Leave request — Lachlan Hayes — 07/09/2026');
+  it('reads a repeated or blank parameter as text, never as a list or a space', () => {
+    expect(requestJobFromRoute({ job: ['9001', '9002'], site: '  ' }))
+      .toEqual({ jobNumber: '9001', siteName: '' });
+    expect(requestJobFromRoute({})).toEqual({ jobNumber: '', siteName: '' });
   });
 
-  it('counts working days, not calendar days', () => {
-    // Mon to Fri.
-    expect(leaveBody(leave())).toContain('Working days: 5');
+  it('fills the number and the site from a picked job', () => {
+    expect(withPickedJob({ jobNumber: '', siteName: 'Wrong building' }, { externalId: '9001', siteName: 'Fictional Tower' }))
+      .toEqual({ jobNumber: '9001', siteName: 'Fictional Tower' });
   });
 
-  it('says plainly that it is a request', () => {
-    // Nobody should read a sent email as approved leave.
-    expect(leaveBody(leave())).toMatch(/request, not an approval/i);
+  it('keeps the typed site where the job has none', () => {
+    expect(withPickedJob({ jobNumber: '9001', siteName: 'Plant room, Main St' }, { externalId: '9001', siteName: ' ' }))
+      .toEqual({ jobNumber: '9001', siteName: 'Plant room, Main St' });
   });
 
-  it.each([
-    ['no name', { technicianName: '' }, /set your name/i],
-    ['no type', { leaveType: '' }, /what kind of leave/i],
-    ['a backwards range', { fromDate: '2026-09-11', toDate: '2026-09-07' }, /before the first day/i],
-    ['a missing date', { toDate: '' }, /pick both dates/i],
-  ])('refuses %s', (_what, over, pattern) => {
-    expect(leaveNotReady(leave(over))).toMatch(pattern);
-  });
-});
-
-describe('working days', () => {
-  it.each([
-    ['Mon to Fri', '2026-09-07', '2026-09-11', 5],
-    ['a single Wednesday', '2026-09-09', '2026-09-09', 1],
-    ['a single Saturday', '2026-09-12', '2026-09-12', 0],
-    ['a full fortnight', '2026-09-07', '2026-09-18', 10],
-    ['a weekend only', '2026-09-12', '2026-09-13', 0],
-  ])('counts %s as %s', (_what, from, to, expected) => {
-    expect(workingDays(from, to)).toBe(expected);
-  });
-
-  it('is zero when the range runs backwards', () => {
-    expect(workingDays('2026-09-11', '2026-09-07')).toBe(0);
+  it('keeps a typed number where the pick carries none', () => {
+    expect(withPickedJob({ jobNumber: '9001', siteName: '' }, { siteName: 'Fictional Tower' }))
+      .toEqual({ jobNumber: '9001', siteName: 'Fictional Tower' });
   });
 });
 
 describe('copying last week', () => {
   const entry = (over: Partial<TimesheetEntry> = {}): TimesheetEntry => ({
-    id: 'old', date: '2026-08-31', jobNumber: '43747', siteName: 'BRIC Housing',
+    id: 'old', date: '2026-08-31', jobNumber: '9001', siteName: 'Fictional Tower',
     serviceReportNumber: 'SR-9912', startTime: '06:30', finishTime: '14:30', hourKind: 'ord',
     sick: '', rdo: '', annual: '', lwop: '', publicHoliday: '', comments: 'Replaced 3 detectors',
     ...over,
@@ -143,7 +112,7 @@ describe('copying last week', () => {
       jobNumber: copied!.jobNumber, siteName: copied!.siteName,
       startTime: copied!.startTime, finishTime: copied!.finishTime, hourKind: copied!.hourKind,
     }).toEqual({
-      jobNumber: '43747', siteName: 'BRIC Housing',
+      jobNumber: '9001', siteName: 'Fictional Tower',
       startTime: '06:30', finishTime: '14:30', hourKind: 'ord',
     });
   });
@@ -171,34 +140,5 @@ describe('copying last week', () => {
   it('gives every copied day a new id', () => {
     const copied = copyForNextWeek(previous, '2026-09-07', ids);
     expect(copied[0]!.id).not.toBe('old');
-  });
-});
-
-describe('reading a typed date', () => {
-  // There is no date picker, so this is the only way a date gets in.
-  it.each([
-    ['7/9/2026', '2026-09-07'],
-    ['07/09/2026', '2026-09-07'],
-    ['7/9/26', '2026-09-07'],
-    ['7.9.2026', '2026-09-07'],
-    ['7-9-2026', '2026-09-07'],
-    [' 31/12/2026 ', '2026-12-31'],
-  ])('reads %s as %s', (text, iso) => {
-    expect(parseAuDate(text)).toBe(iso);
-  });
-
-  it.each([
-    ['a month that does not exist', '7/13/2026'],
-    ['a day February has not got', '30/2/2026'],
-    ['an American date', '2026-09-07'],
-    ['words', 'next monday'],
-    ['nothing', ''],
-  ])('refuses %s', (_what, text) => {
-    expect(parseAuDate(text)).toBeNull();
-  });
-
-  it('knows a leap year', () => {
-    expect(parseAuDate('29/2/2028')).toBe('2028-02-29');
-    expect(parseAuDate('29/2/2027')).toBeNull();
   });
 });

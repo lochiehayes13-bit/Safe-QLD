@@ -80,8 +80,8 @@ export const WHEN_LABEL: Record<NeedWhen, string> = {
 };
 
 export const WHEN_BLURB: Record<NeedWhen, string> = {
-  now: 'Wanted for the work in front of you.',
-  future: 'Wanted before work that has not come around yet.',
+  now: 'For the work in front of you.',
+  future: 'For work coming up.',
 };
 
 export const STATE_LABEL: Record<NeedState, string> = {

@@ -1,15 +1,18 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { loadPrefs, type Prefs } from '@/app-prefs';
+import { jobSummariesByExternalIds, openJobPicks, type JobPick } from '@/db/opsRepo';
 import {
-  informationBody, informationNotReady, informationSubject, type InformationRequest,
+  informationBody, informationNotReady, informationSubject, requestJobFromRoute, withPickedJob,
+  type InformationRequest,
 } from '@/domain/requests';
 import { queueJobNote } from '@/simpro/sync';
 import { sendMail } from '@/export/mail';
 import { useTheme } from '@/theme';
 import { Banner, Button, Card, Field, Screen, Segmented, Txt } from '@/components/ui';
+import { JobPicker } from '@/components/JobPicker';
 import { showAlert } from '@/components/alert';
 import { describeActionFailure } from '@/domain/loadFailure';
 
@@ -29,14 +32,65 @@ import { describeActionFailure } from '@/domain/loadFailure';
 export default function RequestInformationScreen() {
   const t = useTheme();
   const params = useLocalSearchParams<{ job?: string; site?: string }>();
+  const fromRoute = requestJobFromRoute(params);
   const [prefs, setPrefs] = useState<Prefs | null>(null);
-  const [jobNumber, setJobNumber] = useState(params.job ?? '');
-  const [siteName, setSiteName] = useState(params.site ?? '');
+  const [jobNumber, setJobNumber] = useState(fromRoute.jobNumber);
+  const [siteName, setSiteName] = useState(fromRoute.siteName);
   const [question, setQuestion] = useState('');
   const [blocking, setBlocking] = useState<'no' | 'yes'>('no');
   const [busy, setBusy] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [openJobs, setOpenJobs] = useState<JobPick[]>([]);
 
   useFocusEffect(useCallback(() => { void loadPrefs().then(setPrefs); }, []));
+
+  /*
+   * The job and site the route carries, whenever they change: the job screen
+   * opens this with both, and a second job opened over the first brings its
+   * own. Taken during render rather than in an effect, so the boxes never
+   * show the previous job for a frame.
+   */
+  const routeKey = `${fromRoute.jobNumber}|${fromRoute.siteName}`;
+  const [takenRoute, setTakenRoute] = useState(routeKey);
+  if (routeKey !== takenRoute) {
+    setTakenRoute(routeKey);
+    if (fromRoute.jobNumber || fromRoute.siteName) {
+      setJobNumber(fromRoute.jobNumber);
+      setSiteName(fromRoute.siteName);
+    }
+  }
+
+  // A job number on its own takes its site from the job on the phone. A
+  // failed lookup leaves the site box for the technician to fill.
+  useEffect(() => {
+    if (!fromRoute.jobNumber || fromRoute.siteName) return undefined;
+    let live = true;
+    void jobSummariesByExternalIds([fromRoute.jobNumber])
+      .then(([job]) => {
+        // Only into an empty box: anything typed or picked meanwhile stands.
+        if (live && job?.siteName) setSiteName((typed) => (typed.trim() ? typed : job.siteName));
+      })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, [fromRoute.jobNumber, fromRoute.siteName]);
+
+  // The open jobs are read before the picker opens, so a read that fails is
+  // said as a failure rather than shown as an empty list.
+  const openPicker = async () => {
+    try {
+      setOpenJobs(await openJobPicks(40));
+      setPicking(true);
+    } catch (e) {
+      showAlert("Couldn't load the jobs", describeActionFailure(e, 'reading the jobs'));
+    }
+  };
+
+  const takeJob = (pick: JobPick) => {
+    const next = withPickedJob({ jobNumber, siteName }, pick);
+    setJobNumber(next.jobNumber);
+    setSiteName(next.siteName);
+    setPicking(false);
+  };
 
   const request = (): InformationRequest => ({
     technicianName: prefs?.technicianName ?? '',
@@ -54,24 +108,25 @@ export default function RequestInformationScreen() {
       showAlert('Not ready to send', blocked);
       return;
     }
-    if (!prefs.supervisorEmail.trim()) {
-      showAlert('No supervisor address', 'Set where questions go in Settings first.');
+    const to = prefs.supervisorEmail.trim();
+    if (!to) {
+      showAlert('No supervisor address', 'Add it in Settings.');
       return;
     }
     setBusy(true);
     try {
       const outcome = await sendMail({
-        to: prefs.supervisorEmail.trim(),
+        to,
         subject: informationSubject(r),
         body: informationBody(r),
       });
 
       if (outcome === 'no-mail-app') {
-        showAlert('No mail app set up', 'This phone has no email account configured, so the question cannot be sent from here.');
+        showAlert('No mail app set up', 'Add an email account to this phone, then try again.');
         return;
       }
       if (outcome === 'not-sent') {
-        showAlert('Not sent', 'The email was not sent. Nothing has reached the office.');
+        showAlert('Not sent', "The email wasn't sent. Try again.");
         return;
       }
 
@@ -95,52 +150,78 @@ export default function RequestInformationScreen() {
         });
       }
 
-      const noted = job ? ` It is also noted on job ${job} in Simpro.` : '';
+      const noted = job ? ` Queued as a note on job ${job}.` : '';
       showAlert(
         outcome === 'sent' ? 'Sent' : 'Draft opened',
         outcome === 'sent'
-          ? `Your question has gone to ${prefs.supervisorEmail}.${noted}`
-          : `An email to ${prefs.supervisorEmail} is open in your mail app — send it.${noted}`,
+          ? `Gone to ${to}.${noted}`
+          : `Your email to ${to} is ready. Tap Send in your mail app.${noted}`,
         [{ text: 'OK', onPress: () => router.back() }],
       );
     } catch (e) {
-      showAlert('Could not send', describeActionFailure(e, 'sending the question'));
+      showAlert("Couldn't send", describeActionFailure(e, 'sending the question'));
     } finally {
       setBusy(false);
     }
   };
+
+  const supervisor = prefs?.supervisorEmail.trim();
 
   return (
     <>
       <Stack.Screen options={{ title: 'Ask the office' }} />
       <Screen>
         <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-          Goes to {prefs?.supervisorEmail || 'the supervisor address in Settings'} with the job and
-          site in the subject, so the answer can be filed against the work.
+          {supervisor ? `Goes to ${supervisor}.` : 'Add the supervisor address in Settings first.'}
         </Txt>
 
         {prefs && !prefs.technicianName.trim() ? (
           <Card onPress={() => router.push('/settings')}>
             <Txt weight="700">Set your name first</Txt>
-            <Txt size="sm" tone="muted">The office needs to know who is asking. One field in Settings.</Txt>
+            <Txt size="sm" tone="muted">Tap to add it in Settings.</Txt>
           </Card>
         ) : null}
 
         <Card>
           <Segmented
-            options={[{ value: 'no', label: 'Can wait' }, { value: 'yes', label: 'Held up right now' }]}
+            options={[{ value: 'no', label: 'Can wait' }, { value: 'yes', label: 'Held up now' }]}
             value={blocking}
             onChange={setBlocking}
           />
           {blocking === 'yes' ? (
             <View style={{ marginTop: t.space(2.5) }}>
-              <Banner tone="warn" title="Work is stopped" body="The subject line will say HELD UP and the first line of the email says work has stopped, so it gets read first." />
+              <Banner tone="warn" title="Work is stopped" body="Marked HELD UP in the subject line." />
             </View>
           ) : null}
         </Card>
 
         <Card>
-          <Field label="Job number" value={jobNumber} onChangeText={setJobNumber} keyboardType="numeric" placeholder="Simpro job, if there is one" hint="With a job number the question is also noted on the job in Simpro." />
+          {picking ? (
+            <JobPicker
+              suggested={openJobs}
+              suggestedLabel="Open jobs"
+              emptyWhenNoneSuggested="No open jobs. Search by number, site or customer."
+              emptyWhenNothingOnDevice="No jobs on this phone yet. Type the number below."
+              onPick={takeJob}
+              onClose={() => setPicking(false)}
+            />
+          ) : (
+            <Button
+              title={jobNumber.trim() ? 'Change job' : 'Pick a job'}
+              variant="secondary"
+              icon={<MaterialCommunityIcons name="clipboard-list-outline" size={18} color={t.color.text} />}
+              onPress={() => { void openPicker(); }}
+            />
+          )}
+          <View style={{ height: t.space(2.5) }} />
+          <Field
+            label="Job number"
+            value={jobNumber}
+            onChangeText={setJobNumber}
+            keyboardType="numeric"
+            placeholder="Optional"
+            hint={jobNumber.trim() ? 'Also noted on the job in Simpro.' : 'Not in the list? Type the number.'}
+          />
           <View style={{ height: t.space(2.5) }} />
           <Field label="Site" value={siteName} onChangeText={setSiteName} placeholder="Where you are" autoCapitalize="words" />
           <View style={{ height: t.space(2.5) }} />
@@ -149,7 +230,7 @@ export default function RequestInformationScreen() {
             value={question}
             onChangeText={setQuestion}
             multiline
-            placeholder="Who holds the key to the riser? Is the panel on this job a swap or a repair? Which cost centre does the extra detector go to?"
+            placeholder="Who has the key to the riser?"
           />
         </Card>
 

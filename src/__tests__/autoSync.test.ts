@@ -456,7 +456,7 @@ describe('summarising a run', () => {
   it('counts the problems rather than hiding them', () => {
     // "Fetched everything" with three errors in it is not fetched everything.
     const line = summariseRun('incremental', { ...pull, errors: ['a', 'b', 'c'] }, { sent: 0, failed: 1, remaining: 1 });
-    expect(line).toBe('Fetched changes: 3 sites, 7 jobs and 1 asset changed here. 3 problems on the way. 1 could not be sent; see Send to the office.');
+    expect(line).toBe('Fetched changes: 3 sites, 7 jobs and 1 asset changed here. 3 problems on the way. 1 couldn\'t be sent. See Waiting to send.');
   });
 });
 

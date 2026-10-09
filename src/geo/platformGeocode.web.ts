@@ -19,7 +19,7 @@ import type { GeocodeOptions, GeocodePoint } from './platformGeocode';
  * volunteers, and "no bulk geocoding" is the first line of their usage policy.
  * So a browser is allowed ten a visit — fifteen seconds of work, enough that
  * a small run of sites fills in over a few openings — and the status line says
- * how many are still to place and that the phone app is the tool for the job.
+ * how many are still to place.
  * Everything found is cached like any other position and never asked twice.
  *
  * One thing a browser cannot do: send the User-Agent Nominatim's policy asks
@@ -41,18 +41,18 @@ export const GEOCODE_SOURCE = 'osm';
 export const GEOCODE_BATCH = 10;
 
 /** Names the geocoder in the line the screen shows when it has stopped. */
-export const GEOCODE_PROVIDER = 'The address lookup at OpenStreetMap';
+export const GEOCODE_PROVIDER = 'OpenStreetMap address lookup';
 
 /**
  * What the status line says about the addresses still to place.
  *
- * A map showing 40 of 3,000 sites has to say why, or it reads as a broken map
- * rather than a slow one — and it has to say that the phone app is not slow,
- * because the person looking at it may be one tap from a better answer.
+ * A map showing 40 of 3,000 sites has to say how many are still to come, or it
+ * reads as a broken map rather than a slow one. No pointing at the phone app:
+ * an iPhone runs this build and has no other.
  */
 export function geocodeNote(remaining: number): string | null {
   if (remaining <= 0) return null;
-  return `${formatCount(remaining)} to place — ${GEOCODE_BATCH} a visit from OpenStreetMap; the phone app is far quicker`;
+  return `${formatCount(remaining)} ${remaining === 1 ? 'site' : 'sites'} not on the map yet, up to ${GEOCODE_BATCH} more each visit`;
 }
 
 /**

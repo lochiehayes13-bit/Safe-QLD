@@ -65,7 +65,7 @@ describe('reading the queue', () => {
     const s = assessQueue([item({ status: 'unknown' })], NOW);
     expect(s.unknown).toBe(1);
     expect(s.failed).toBe(0);
-    expect(stuckWords(s)?.body).toContain('may be in Simpro twice or not at all');
+    expect(stuckWords(s)?.body).toContain('may already be in Simpro');
   });
 
   it('leaves a pending item alone until it has been a day', () => {
@@ -117,7 +117,7 @@ describe('reading the queue', () => {
       NOW,
     );
     expect(s.photos).toBe(1);
-    expect(stuckWords(s)?.body).toContain('photograph');
+    expect(stuckWords(s)?.body).toContain('One is a photo.');
   });
 
   it('names the oldest thing that is stuck, not the oldest thing in the queue', () => {
@@ -140,21 +140,21 @@ describe('what it says', () => {
       NOW,
     ));
     expect(w?.tone).toBe('fail');
-    expect(w?.title).toContain('has not reached the office');
-    expect(w?.body).toContain('It is not in Simpro');
+    expect(w?.title).toContain("hasn't reached Simpro");
+    expect(w?.body).toContain('Not in Simpro');
   });
 
   it('is a warning, not a failure, when things are only waiting', () => {
     const w = stuckWords(assessQueue([item({ createdAt: ago(3 * STALE_AFTER_MS) })], NOW));
     expect(w?.tone).toBe('warn');
-    expect(w?.body).toContain('has not been able to reach the office');
+    expect(w?.body).toContain('No connection since');
   });
 
   it('counts in words a person uses, and gets the singular right', () => {
     const one = stuckWords(assessQueue([item({ status: 'failed' })], NOW));
-    expect(one?.body).toContain('1 thing the office refused');
+    expect(one?.body).toContain('1 refused by Simpro');
     const two = stuckWords(assessQueue([item({ status: 'failed' }), item({ status: 'failed' })], NOW));
-    expect(two?.body).toContain('2 things the office refused');
+    expect(two?.body).toContain('2 refused by Simpro');
   });
 
   it('says when the oldest has been sitting, in Queensland time', () => {

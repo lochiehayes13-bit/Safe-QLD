@@ -44,7 +44,7 @@ export const GEOCODE_SOURCE = 'device';
 export const GEOCODE_BATCH = 200;
 
 /** Names the geocoder in the line the screen shows when it has stopped. */
-export const GEOCODE_PROVIDER = 'The phone’s geocoder';
+export const GEOCODE_PROVIDER = 'Address lookup';
 
 /**
  * What the status line says about the addresses still to place, or null where

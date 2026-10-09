@@ -72,7 +72,7 @@ export default function ContactScreen() {
       <RecordGate
         missing={missing}
         what="contact"
-        why="Contacts come down with a sync once Simpro is connected. This one is not on the phone yet, or the office has removed them."
+        why="It may not have synced yet, or the office removed it. Sync and try again."
         failed={failed}
         onRetry={() => setReloads((n) => n + 1)}
       />
@@ -99,7 +99,7 @@ export default function ContactScreen() {
         </Rowed>
 
         <Card>
-          <Label>Reach them</Label>
+          <Label>Get in touch</Label>
           <View style={{ marginTop: t.space(2), gap: t.space(2) }}>
             {mobile && c.cellPhone ? (
               <Rowed gap={2}>
@@ -143,7 +143,7 @@ export default function ContactScreen() {
                 icon={<MaterialCommunityIcons name="email-outline" size={18} color={t.color.text} />}
               />
             ) : null}
-            {!anyWay ? <Txt size="sm" tone="faint">The office has no number or email for them, only the name.</Txt> : null}
+            {!anyWay ? <Txt size="sm" tone="faint">No phone or email on file.</Txt> : null}
           </View>
         </Card>
 
@@ -162,14 +162,14 @@ export default function ContactScreen() {
                 <MaterialCommunityIcons name="office-building-outline" size={22} color={s.localId ? t.color.accentText : t.color.textFaint} />
                 <View style={{ flex: 1 }}>
                   <Txt weight="600">{s.name || `Site ${s.id}`}</Txt>
-                  {!s.localId ? <Txt size="xs" tone="faint">Not on this phone yet — it comes with the next site sync.</Txt> : null}
+                  {!s.localId ? <Txt size="xs" tone="faint">Not synced yet.</Txt> : null}
                 </View>
                 {s.localId ? <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} /> : null}
               </Rowed>
             </Card>
           ))
         ) : (
-          <Txt size="sm" tone="faint">The office lists no site for them.</Txt>
+          <Txt size="sm" tone="faint">No sites listed.</Txt>
         )}
 
         <H2>Customers</H2>
@@ -180,18 +180,18 @@ export default function ContactScreen() {
                 <MaterialCommunityIcons name="domain" size={22} color={x.localId ? t.color.accentText : t.color.textFaint} />
                 <View style={{ flex: 1 }}>
                   <Txt weight="600">{x.name || `Customer ${x.id}`}</Txt>
-                  {!x.localId ? <Txt size="xs" tone="faint">Not on this phone yet — it comes with the next customer sync.</Txt> : null}
+                  {!x.localId ? <Txt size="xs" tone="faint">Not synced yet.</Txt> : null}
                 </View>
                 {x.localId ? <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} /> : null}
               </Rowed>
             </Card>
           ))
         ) : (
-          <Txt size="sm" tone="faint">The office lists no customer for them.</Txt>
+          <Txt size="sm" tone="faint">No customers listed.</Txt>
         )}
 
         <Txt size="xs" tone="faint" style={{ marginTop: t.space(2) }}>
-          Simpro contact {c.id}.{c.dateModified ? ` Last changed at the office ${formatAuDate(c.dateModified)}.` : ''}
+          Simpro contact {c.id}{c.dateModified ? ` · Updated ${formatAuDate(c.dateModified)}` : ''}
         </Txt>
       </Screen>
     </>

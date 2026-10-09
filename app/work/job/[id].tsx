@@ -12,10 +12,6 @@ import { listVendorOrdersForJob, searchCatalogItems, type CatalogItemRecord, typ
 import { getSite, listDefects } from '@/db/repo';
 import { getSiteByExternalId } from '@/db/searchRepo';
 import { assetCountsBySystem } from '@/db/assetRepo';
-import { listRoutineRuns } from '@/db/routineRunRepo';
-import { JOB_RECORDS_PRIVACY_NOTE, draftJobBrief, type JobBrief } from '@/ai/jobBrief';
-import { draftOfficeNote } from '@/ai/officeNote';
-import { hasKey } from '@/ai/client';
 import type { Defect, Site } from '@/domain/types';
 import type { SimproCostCenter, SimproItem, SimproSection } from '@/simpro/mirrorResources';
 import {
@@ -102,10 +98,6 @@ export default function JobScreen() {
   // queued by the status write, and the person who pressed the button is
   // told so here, once, rather than left to find it on the outbound screen.
   const [noteQueued, setNoteQueued] = useState(false);
-  // The three sentences from the job card, or why there are none. Not in the
-  // draft and not kept across jobs: a brief is read once, on the way in.
-  const [brief, setBrief] = useState<JobBrief | null>(null);
-  const [briefBusy, setBriefBusy] = useState(false);
   const refreshing = useRef(false);
   /** The customer's own phone and email, read from the mirror when the job names one. */
   const [customer, setCustomer] = useState<CustomerRecord | null>(null);
@@ -231,58 +223,7 @@ export default function JobScreen() {
     return () => { cancelled = true; };
   }, [load, refreshFromOffice]));
 
-  useEffect(() => { setShowAllTimeline(false); setNoteQueued(false); setBrief(null); setQueuedWords([]); setQueuedLines([]); setSheet(null); }, [id]);
-
-  /**
-   * Three sentences before walking in, from the job card on this phone.
-   *
-   * The switch is read here and again inside draftJobBrief: here so a
-   * technician who has it off is shown what turning it on would send and
-   * where the switch is, rather than a refusal; there so no screen can send
-   * a job card by passing a flag. Everything handed over is a field of this
-   * screen's own record — nothing is fetched for the purpose.
-   */
-  const briefMe = async (f: JobFull) => {
-    const prefs = await loadPrefs();
-    if (!prefs.aiShareJobRecords) {
-      showAlert('Brief me is off', JOB_RECORDS_PRIVACY_NOTE, [
-        { text: 'Not now', style: 'cancel' },
-        { text: 'Turn on in Settings', onPress: () => router.push('/settings') },
-      ]);
-      return;
-    }
-    setBriefBusy(true);
-    try {
-      const j = f.job;
-      // The last routine run here, where the phone has one. One row, newest
-      // first, so a site with years of them costs the same as one with none.
-      const lastRun = j.siteId ? (await listRoutineRuns(j.siteId, 1))[0] : undefined;
-      const result = await draftJobBrief({
-        jobNumber: j.externalId,
-        title: j.title,
-        jobType: j.jobTypeRaw ?? j.jobType,
-        description: j.descriptionText,
-        officeNotes: j.notesText,
-        notes: f.notes.map((n) => ({ subject: n.subject, note: n.note, createdAt: n.createdAt })),
-        siteNotes: site?.notes,
-        openDefects: defects.map((d) => ({
-          location: d.location,
-          description: d.description,
-          severity: d.severity === 'critical' ? 'critical' : 'non-critical',
-        })),
-        lastServicedAt: lastRun?.completedAt,
-        lastServiceSummary: lastRun
-          ? `${lastRun.routineLabel}: ${lastRun.checksPassed} passed, ${lastRun.checksFailed} failed, ${lastRun.defectsRaised} defect${lastRun.defectsRaised === 1 ? '' : 's'} raised`
-          : undefined,
-        scheduledFor: j.scheduledFor,
-      });
-      setBrief(result);
-    } catch (e) {
-      setBrief({ refusal: describeActionFailure(e, 'draft the brief') });
-    } finally {
-      setBriefBusy(false);
-    }
-  };
+  useEffect(() => { setShowAllTimeline(false); setNoteQueued(false); setQueuedWords([]); setQueuedLines([]); setSheet(null); }, [id]);
 
   /**
    * The phone's own status on the job, then the row read back.
@@ -535,34 +476,6 @@ export default function JobScreen() {
             </Rowed>
           </View>
         </Rowed>
-
-        {/*
-          * The brief. Only for an office job, because that is the card with
-          * a description and notes on it; a job added on the phone has only
-          * what the technician typed, and they have read that.
-          */}
-        {isSimpro ? (
-          <>
-            <Button
-              title="Brief me"
-              variant="secondary"
-              loading={briefBusy}
-              onPress={() => void briefMe(full)}
-              icon={<MaterialCommunityIcons name="text-box-outline" size={18} color={t.color.text} />}
-            />
-            {brief ? (
-              <Card>
-                <Label>{brief.text ? 'Before you walk in' : 'No brief'}</Label>
-                <Txt size="sm" style={{ lineHeight: 20, marginTop: 4 }}>{brief.text ?? brief.refusal ?? 'No brief came back.'}</Txt>
-                {brief.text ? (
-                  <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
-                    Drafted from this job's record; check it. The card below is what the office holds.
-                  </Txt>
-                ) : null}
-              </Card>
-            ) : null}
-          </>
-        ) : null}
 
         <Card>
           <MetaRow label="Job no." value={job.externalId ? `#${job.externalId}` : 'On this phone only'} mono={!!job.externalId} />
@@ -1014,6 +927,16 @@ export default function JobScreen() {
           ) : null}
         </Rowed>
 
+        <Button
+          title="Ask the office"
+          variant="secondary"
+          icon={<MaterialCommunityIcons name="account-question-outline" size={18} color={t.color.text} />}
+          onPress={() => router.push({
+            pathname: '/work/rfi',
+            params: { job: job.externalId ?? '', site: job.siteName ?? '' },
+          })}
+        />
+
         {/*
           * Straight to a Form 72 for this job.
           *
@@ -1190,89 +1113,27 @@ function StatusSheet({ visible, onClose, choices, current, suggested, busy, onPi
   );
 }
 
-/**
- * The note to the office, with the model offered as a tidier.
- *
- * Write it up sends the words in the box and nothing else — no job, no
- * customer, no site — and puts what comes back in the box for the
- * technician to read before it goes. Their own words are kept underneath
- * until they are happy, because the draft is a suggestion and the note is
- * theirs. Without a key the button is not offered and the box works as it
- * always did.
- */
+/** The note to the office. */
 function NoteSheet({ visible, onClose, busy, onSend }: {
   visible: boolean; onClose: () => void; busy: boolean; onSend: (subject: string, note: string) => Promise<boolean>;
 }) {
-  const t = useTheme();
   const [subject, setSubject] = useState('');
   const [note, setNote] = useState('');
-  const [aiOn, setAiOn] = useState(false);
-  const [aiBusy, setAiBusy] = useState(false);
-  const [aiNote, setAiNote] = useState<string | null>(null);
-  const [mine, setMine] = useState<string | null>(null);
-
-  useEffect(() => { void hasKey().then(setAiOn).catch(() => setAiOn(false)); }, []);
-
-  const writeUp = async () => {
-    const rough = note.trim();
-    setAiBusy(true);
-    setAiNote(null);
-    try {
-      const draft = await draftOfficeNote(rough);
-      if (draft.note) {
-        setMine(rough);
-        setNote(draft.note);
-        if (draft.subject && !subject.trim()) setSubject(draft.subject);
-        setAiNote('Written up from your words. Read it before you send it.');
-      } else {
-        setAiNote(draft.refusal ?? 'Nothing came back. Your own words still stand.');
-      }
-    } catch (e) {
-      setAiNote(describeActionFailure(e, 'write the note up'));
-    } finally {
-      setAiBusy(false);
-    }
-  };
 
   const send = async () => {
     if (!note.trim()) { showAlert('Nothing to send', 'Write the note first.'); return; }
     // Cleared only once the queue has it: a write that failed used to take
     // the technician's words with it.
     if (!(await onSend(subject, note))) return;
-    setSubject(''); setNote(''); setMine(null); setAiNote(null);
+    setSubject(''); setNote('');
   };
 
   return (
     <Sheet title="Add note" visible={visible} onClose={onClose}>
       <Field label="Subject" value={subject} onChangeText={setSubject} placeholder="What it is about" autoCapitalize="sentences" />
       <Field label="Note" value={note} onChangeText={setNote} placeholder="What you found, what you did, what is still to do" multiline />
-      {aiOn ? (
-        <Rowed gap={2} align="flex-start">
-          <Txt size="xs" tone="faint" style={{ flex: 1, lineHeight: 17 }}>
-            Write it up tidies your words for the office. It sends what is in the box and nothing else — not the job,
-            the customer or the site — and never adds a number you did not write.
-          </Txt>
-          <Button
-            title="Write it up"
-            variant="secondary"
-            compact
-            disabled={note.trim().split(/\s+/).filter(Boolean).length < 3}
-            loading={aiBusy}
-            onPress={() => void writeUp()}
-            icon={<MaterialCommunityIcons name="auto-fix" size={16} color={t.color.text} />}
-          />
-        </Rowed>
-      ) : null}
-      {aiNote ? <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{aiNote}</Txt> : null}
-      {mine ? (
-        <Card style={{ gap: t.space(1) }}>
-          <Txt size="xs" tone="faint">What you wrote, if you want it back</Txt>
-          <Txt size="sm" style={{ lineHeight: 19 }}>{mine}</Txt>
-          <Chip label="Put mine back" onPress={() => { setNote(mine); setMine(null); setAiNote(null); }} />
-        </Card>
-      ) : null}
       <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-        Goes on the job's notes in Simpro, under your name, with the next send.
+        Goes on the job's notes in Simpro under your name.
       </Txt>
       <Button title="Queue note" loading={busy} onPress={() => { void send(); }} />
     </Sheet>

@@ -475,12 +475,12 @@ export function sendReadiness(entry: ClockEntry): Readiness {
   if (entry.kind === 'work') {
     if (!entry.jobExternalId) return { ready: false, why: 'No job on this entry' };
     if (!entry.jobSectionExternalId || !entry.jobCostCenterExternalId) {
-      return { ready: false, why: 'No cost centre on this job yet' };
+      return { ready: false, why: 'No cost centre on this job' };
     }
     return { ready: true };
   }
   if (!entry.activityExternalId) {
-    return { ready: false, why: `No Simpro activity for ${entry.activityName ?? entry.kind}: sync the activity list first` };
+    return { ready: false, why: `No Simpro activity for ${entry.activityName ?? entry.kind}` };
   }
   return { ready: true };
 }

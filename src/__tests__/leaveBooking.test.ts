@@ -80,7 +80,7 @@ describe('the entry a day of leave is sent as', () => {
 
   it('refuses a phone that is nobody in Simpro, in words', () => {
     const r = buildLeaveEntry({ id: 'e', employeeId: '', date: '2026-09-22', kind: leaveKind('rdo')!, activity: OFFICE[2]! });
-    expect('refused' in r && r.refused).toContain('not signed in');
+    expect('refused' in r && r.refused).toContain('Sign in as yourself in Simpro');
   });
 
   it('refuses a day it cannot read', () => {
@@ -120,9 +120,9 @@ describe('a typed day', () => {
 describe('a day already booked', () => {
   it('is said before the tap, and says where it is', () => {
     expect(alreadyBooked('2026-09-22', [{ date: '2026-09-22', activityName: 'RDO', where: 'office' }]))
-      .toBe('RDO is already on your Simpro schedule for that day.');
+      .toBe('RDO is already in Simpro that day.');
     expect(alreadyBooked('2026-09-22', [{ date: '2026-09-22', activityName: 'Annual Leave', where: 'phone' }]))
-      .toContain('waiting to send');
+      .toContain('Waiting to send');
     expect(alreadyBooked('2026-09-23', [{ date: '2026-09-22', where: 'office' }])).toBeUndefined();
   });
 });

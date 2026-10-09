@@ -89,8 +89,8 @@ describe('the conflict check', () => {
 
   it('refuses a span that is not one, in words', () => {
     expect(spanProblem({ date: '2026-09-08', start: '07:00', end: '15:30' })).toBeUndefined();
-    expect(spanProblem({ date: '8/9/2026', start: '07:00', end: '15:30' })).toBe('The date is yyyy-mm-dd.');
-    expect(spanProblem({ date: '2026-09-08', start: '7am', end: '15:30' })).toMatch(/HH:MM/);
+    expect(spanProblem({ date: '8/9/2026', start: '07:00', end: '15:30' })).toBe('Write the date as dd/mm/yyyy.');
+    expect(spanProblem({ date: '2026-09-08', start: '7am', end: '15:30' })).toMatch(/24-hour time/);
     expect(spanProblem({ date: '2026-09-08', start: '15:30', end: '07:00' })).toBe('The block ends before it starts.');
   });
 
