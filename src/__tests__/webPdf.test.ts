@@ -60,6 +60,11 @@ describe('the choices a finished file is offered with', () => {
   it('offers Print only where there is a document to print', () => {
     expect(readyChoices({ canShare: true, canPrint: false, ...stub }).map((c) => c.label)).toEqual(['Share…', 'Save to this device']);
   });
+
+  it('in the home-screen app, calls the download what it does there: a preview', () => {
+    expect(readyChoices({ canShare: true, canPrint: false, standalone: true, ...stub }).map((c) => c.label))
+      .toEqual(['Share…', 'Open a preview']);
+  });
 });
 
 describe('the sheet', () => {
@@ -100,6 +105,26 @@ describe('the sheet', () => {
 
     outcome = 'ok';
     click(buttons(body)[0]!);
+    await flush();
+    expect(body.children_).toHaveLength(0);
+  });
+
+  it('holds a second tap while a share is still coming up', async () => {
+    // WebKit refuses a second share while its sheet is animating, and that
+    // refusal used to read as the browser failing — a stray download and an
+    // alert over the share sheet.
+    const { doc, body } = fakeDocument();
+    let calls = 0;
+    let finish: () => void = () => undefined;
+    showReadySheet({
+      title: 'x',
+      choices: [{ label: 'Share…', onPress: () => { calls += 1; return new Promise<void>((r) => { finish = r; }); } }],
+    }, doc);
+    click(buttons(body)[0]!);
+    click(buttons(body)[0]!);
+    expect(calls).toBe(1);
+    expect(buttons(body)[0]!.attributes_['aria-disabled']).toBe('true');
+    finish();
     await flush();
     expect(body.children_).toHaveLength(0);
   });

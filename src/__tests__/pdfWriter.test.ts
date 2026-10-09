@@ -6,7 +6,8 @@
  * offset off by one and a viewer either repairs the file silently or refuses
  * it — so the file is parsed back here by its own rules rather than trusted.
  */
-import { DEFAULT_PAGE_BOX, jpegDimensions, pdfFromJpegPages, type JpegPage } from '@/export/pdfWriter';
+import { deflateSync } from 'zlib';
+import { DEFAULT_PAGE_BOX, jpegDimensions, pdfFromJpegPages, type FlatePage, type JpegPage } from '@/export/pdfWriter';
 
 /**
  * The smallest thing that is a JPEG to a parser: SOI, a baseline SOF0 frame
@@ -130,5 +131,34 @@ describe('a page taller than the box', () => {
     const [w, h] = [Number(m[1]), Number(m[2])];
     expect(h).toBeCloseTo(279 * 72 / 25.4, 1);
     expect(w).toBeCloseTo(h / 2, 1);
+  });
+});
+
+describe('a lossless page', () => {
+  /** A 2×2 white page as PDF's FlateDecode with PNG "Up" predictors expects it. */
+  const flatePage = (): FlatePage => {
+    const rows = Buffer.from([2, 255, 255, 255, 255, 255, 255, 2, 0, 0, 0, 0, 0, 0]);
+    return { flate: new Uint8Array(deflateSync(rows)), width: 2, height: 2 };
+  };
+
+  it('is written with the predictor the rows were encoded with', () => {
+    const text = latin1(pdfFromJpegPages([flatePage()]));
+    expect(text).toContain('/Filter /FlateDecode /DecodeParms << /Predictor 15 /Colors 3 /BitsPerComponent 8 /Columns 2 >>');
+    expect(text).not.toContain('DCTDecode');
+  });
+
+  it('carries the stream whole, and mixes with JPEG pages in one file', () => {
+    const page = flatePage();
+    const pdf = pdfFromJpegPages([page, { jpeg: fakeJpeg(10, 20), width: 10, height: 20 }]);
+    const text = latin1(pdf);
+    const head = `/Length ${page.flate.length} >>\nstream\n`;
+    const at = text.indexOf(head) + head.length;
+    expect(Array.from(pdf.slice(at, at + page.flate.length))).toEqual(Array.from(page.flate));
+    expect((text.match(/\/Type \/Page\b/g) ?? []).length).toBe(2);
+  });
+
+  it('refuses bytes that are not a zlib stream', () => {
+    expect(() => pdfFromJpegPages([{ flate: new Uint8Array([1, 2, 3, 4, 5, 6]), width: 2, height: 2 }]))
+      .toThrow(/not a zlib stream/);
   });
 });

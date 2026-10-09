@@ -79,7 +79,12 @@ describe('what the person is told', () => {
     expect(readyHint({ canShare: true, sendTo: 'form72@example.com' })).toContain('send it to form72@example.com');
     expect(readyHint({ canShare: true })).toMatch(/Mail, Files/);
     // A desktop browser with no share sheet is told only what it can do.
-    expect(readyHint({ canShare: false })).toBe('Save keeps a copy on this device.');
+    // No share sheet means a desktop, where the button says Download.
+    expect(readyHint({ canShare: false })).toBe('Download keeps a copy on this device.');
+    // The home-screen app opens a download as a preview, and says so.
+    expect(readyHint({ canShare: true, standalone: true })).toContain('Preview opens it here');
+    // A computer is not called a phone.
+    expect(readyHint({ canShare: true, touch: false })).toContain('any app on this computer');
   });
 });
 

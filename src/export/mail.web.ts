@@ -2,6 +2,7 @@ import { mailtoUrl, recipients, type MailDraft } from '@/domain/mailDraft';
 import type { WrittenFile } from './files';
 import { readyHint } from './webFiles';
 import { showReadySheet, type ReadyChoice } from './readySheet.web';
+import { download as downloadHeld, shareStillOpen } from './files.web';
 
 /**
  * Sending an email, in a browser.
@@ -37,17 +38,14 @@ async function fileFor(file: WrittenFile): Promise<File> {
   return new File([blob], file.name, { type: blob.type || 'application/octet-stream' });
 }
 
-/** The browser's download, for the composer route and the save button. */
+/**
+ * The browser's download, for the composer route and the save button —
+ * the file layer's own, which goes through the held Blob rather than the
+ * multi-megabyte data: URI a link cannot carry.
+ */
 function download(file: WrittenFile): void {
   try {
-    const link = document.createElement('a');
-    link.href = file.uri;
-    link.download = file.name;
-    link.rel = 'noopener';
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+    downloadHeld(file.uri, file.name);
   } catch {
     // A download the browser refused is worth less than the email itself,
     // and the screen already tells the person to attach the file. Carry on
@@ -114,11 +112,15 @@ export async function sendMail(draft: MailDraft, attachments: readonly WrittenFi
       primary: true,
       onPress: async () => {
         try {
-          await n.share!({ files, title: draft.subject, text: draft.body });
+          // Files and a title only: WebKit has refused a payload that puts
+          // text beside files even after canShare said yes. The address is
+          // in the hint under the title.
+          await n.share!({ files, title: draft.subject });
         } catch (e) {
-          // Dismissed is a person changing their mind: the sheet stays up.
-          // Refused is the browser's doing, and the composer route still works.
-          if ((e as { name?: string }).name === 'AbortError') throw e;
+          // Dismissed, or a second tap while the sheet was coming up, is a
+          // person still choosing: the sheet stays up. Refused is the
+          // browser's doing, and the composer route still works.
+          if (shareStillOpen(e)) throw e;
           openComposer(draft, real);
         }
       },

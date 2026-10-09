@@ -1,6 +1,6 @@
 import html2canvas from 'html2canvas';
 import { pageCuts, type Box } from './paginate';
-import { DEFAULT_PAGE_BOX, pdfFromJpegPages, type JpegPage, type PageBox } from './pdfWriter';
+import { DEFAULT_PAGE_BOX, pdfFromJpegPages, type ImagePage, type PageBox } from './pdfWriter';
 
 /**
  * A real PDF out of a browser, for the iPhone in the company.
@@ -24,8 +24,8 @@ import { DEFAULT_PAGE_BOX, pdfFromJpegPages, type JpegPage, type PageBox } from 
  *
  * Page by page rather than the whole document at once, because an iPhone's
  * canvas has a ceiling of about sixteen million pixels and a three-page form
- * at twice resolution is already past it. One page at twice resolution is
- * three million, which is the same picture Chris's screenshot was of.
+ * at print resolution is far past it. One page at three times the CSS pixel
+ * is about seven million, which fits.
  *
  * Browser only: the phone build never loads this file.
  */
@@ -33,11 +33,20 @@ import { DEFAULT_PAGE_BOX, pdfFromJpegPages, type JpegPage, type PageBox } from 
 /** Pixels per CSS millimetre, by definition. */
 const PX_PER_MM = 96 / 25.4;
 
-/** Twice the CSS pixel, which is what a phone screen is and what prints as 192 dpi. */
-export const RASTER_SCALE = 2;
+/**
+ * Three times the CSS pixel, which prints as 288 dpi.
+ *
+ * Twice was a phone screen's density and read well on one, but the form's
+ * smallest type — the privacy notice and the entity line at 6.5px, units at
+ * 7px — is five-point text, and at 192 dpi through a lossy JPEG it was a grey
+ * smudge a reader would call a broken PDF. At three times it is print
+ * resolution. A page is about seven million pixels, under an iPhone's canvas
+ * ceiling, and the cost is a second or so a page and a larger file.
+ */
+export const RASTER_SCALE = 3;
 
-/** Legible on a dense form at about 350 KB a page; a lower figure smudges the 7.5px notes. */
-export const RASTER_JPEG_QUALITY = 0.82;
+/** High enough that fine type keeps its edges; the page is mostly white and compresses well regardless. */
+export const RASTER_JPEG_QUALITY = 0.9;
 
 /** How long the frame is given to lay the document out before the attempt is abandoned. */
 const LAYOUT_TIMEOUT_MS = 20_000;
@@ -122,6 +131,68 @@ export function pageBoxOf(doc: Document): PageBox {
  * measured line by line through a Range so a paragraph can still break between
  * its lines but never through one.
  */
+/**
+ * Every shared table border drawn once.
+ *
+ * In the collapsing border model two neighbouring cells share one line, and
+ * the browser draws it once. html2canvas does not know the model: it paints
+ * each cell's own four borders at the edges of that cell's box, so every line
+ * between two cells came out as two lines a hair apart — a form whose grid
+ * looked hand-ruled twice. So, in the raster frame only, each collapsing
+ * table is switched to separate borders with no spacing and each line is
+ * given to exactly one cell: a cell keeps its top and left (or takes the
+ * line its neighbour above or to the left drew), and keeps its bottom and
+ * right only on the table's outer edge. The layout is the same to the pixel,
+ * because n+1 lines of the same width is what both models draw.
+ */
+export function singleBorders(doc: Document, win: Window): void {
+  const NEAR = 1.5;
+  type Side = { width: string; style: string; color: string };
+  const side = (cs: CSSStyleDeclaration, s: 'Top' | 'Right' | 'Bottom' | 'Left'): Side => ({
+    width: cs.getPropertyValue(`border-${s.toLowerCase()}-width`),
+    style: cs.getPropertyValue(`border-${s.toLowerCase()}-style`),
+    color: cs.getPropertyValue(`border-${s.toLowerCase()}-color`),
+  });
+  const drawn = (x: Side): boolean => x.style !== 'none' && x.style !== 'hidden' && parseFloat(x.width) > 0;
+  const none: Side = { width: '0px', style: 'none', color: 'transparent' };
+
+  for (const table of Array.from(doc.querySelectorAll('table'))) {
+    if (win.getComputedStyle(table).borderCollapse !== 'collapse') continue;
+    const outer = table.getBoundingClientRect();
+    const cells = Array.from(table.rows).flatMap((r) => Array.from(r.cells));
+    const seen = cells.map((cell) => {
+      const cs = win.getComputedStyle(cell);
+      return {
+        cell,
+        rect: cell.getBoundingClientRect(),
+        top: side(cs, 'Top'), right: side(cs, 'Right'), bottom: side(cs, 'Bottom'), left: side(cs, 'Left'),
+      };
+    });
+    const overlapsX = (a: DOMRect, b: DOMRect): boolean => Math.min(a.right, b.right) - Math.max(a.left, b.left) > NEAR;
+    const overlapsY = (a: DOMRect, b: DOMRect): boolean => Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > NEAR;
+    const finals = seen.map((c) => {
+      const above = seen.find((o) => o !== c && Math.abs(o.rect.bottom - c.rect.top) <= NEAR && overlapsX(o.rect, c.rect));
+      const before = seen.find((o) => o !== c && Math.abs(o.rect.right - c.rect.left) <= NEAR && overlapsY(o.rect, c.rect));
+      return {
+        top: drawn(c.top) ? c.top : above && drawn(above.bottom) ? above.bottom : none,
+        left: drawn(c.left) ? c.left : before && drawn(before.right) ? before.right : none,
+        bottom: Math.abs(c.rect.bottom - outer.bottom) <= NEAR ? c.bottom : none,
+        right: Math.abs(c.rect.right - outer.right) <= NEAR ? c.right : none,
+      };
+    });
+    table.style.borderCollapse = 'separate';
+    table.style.borderSpacing = '0';
+    seen.forEach((c, i) => {
+      const f = finals[i]!;
+      for (const [name, v] of [['top', f.top], ['right', f.right], ['bottom', f.bottom], ['left', f.left]] as const) {
+        c.cell.style.setProperty(`border-${name}-width`, v.width, 'important');
+        c.cell.style.setProperty(`border-${name}-style`, v.style, 'important');
+        c.cell.style.setProperty(`border-${name}-color`, v.color, 'important');
+      }
+    });
+  }
+}
+
 export function measureFlow(doc: Document, win: Window): {
   unbreakable: Box[]; keepWithNext: { top: number; nextTop: number }[]; breakBefore: number[];
 } {
@@ -187,6 +258,65 @@ function jpegOf(canvas: HTMLCanvasElement, quality: number): Promise<Uint8Array>
   });
 }
 
+/** Whether this browser can deflate — every current one can; an old iOS cannot, and gets JPEG. */
+function canDeflate(): boolean {
+  return typeof CompressionStream === 'function';
+}
+
+/**
+ * The page's pixels, lossless, as PDF's FlateDecode with PNG predictors.
+ *
+ * Each row is written as PNG's "Up" filter — every byte less the byte above
+ * it — behind a filter byte of 2, which is what /Predictor 15 tells a viewer
+ * to expect. A page of black type on white paper is then almost entirely
+ * zeros, and deflate makes short work of it: smaller than the JPEG, and every
+ * glyph edge exactly as the browser drew it.
+ */
+async function flateOf(canvas: HTMLCanvasElement): Promise<Uint8Array> {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('The browser gave the page no drawing context.');
+  const { width, height } = canvas;
+  const rgba = ctx.getImageData(0, 0, width, height).data;
+  const stride = width * 3;
+  const rows = new Uint8Array((stride + 1) * height);
+  let out = 0;
+  for (let y = 0; y < height; y++) {
+    rows[out++] = 2; // Up
+    const row = y * width * 4;
+    const above = row - width * 4;
+    for (let x = 0; x < width; x++) {
+      const i = row + x * 4;
+      if (y === 0) {
+        rows[out++] = rgba[i]!;
+        rows[out++] = rgba[i + 1]!;
+        rows[out++] = rgba[i + 2]!;
+      } else {
+        const j = above + x * 4;
+        rows[out++] = (rgba[i]! - rgba[j]!) & 0xff;
+        rows[out++] = (rgba[i + 1]! - rgba[j + 1]!) & 0xff;
+        rows[out++] = (rgba[i + 2]! - rgba[j + 2]!) & 0xff;
+      }
+    }
+  }
+  // 'deflate' is the zlib-wrapped stream FlateDecode expects; 'deflate-raw' is not.
+  const stream = new Blob([rows]).stream().pipeThrough(new CompressionStream('deflate'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+/** One page off its canvas, lossless where the browser allows and JPEG where it does not. */
+async function encodePage(canvas: HTMLCanvasElement, quality: number): Promise<ImagePage> {
+  const { width, height } = canvas;
+  if (canDeflate()) {
+    try {
+      return { flate: await flateOf(canvas), width, height };
+    } catch {
+      // A page too big to read back, or a stream the browser refused: the
+      // JPEG route still produces the page.
+    }
+  }
+  return { jpeg: await jpegOf(canvas, quality), width, height };
+}
+
 /**
  * The document as a PDF of page images.
  *
@@ -229,24 +359,33 @@ export async function rasterPdfFromHtml(
     fit.textContent = `html{overflow:hidden !important;width:${contentW}px}body{width:${contentW}px}`;
     doc.head.appendChild(fit);
 
-    // Fonts and images first: a page rasterised before its swoosh decoded
-    // prints a white band where the swoosh was.
+    // Fonts and images first: a page rasterised before its masthead decoded
+    // prints a white band where the masthead was.
     const fonts = (doc as Document & { fonts?: { ready: Promise<unknown> } }).fonts;
     if (fonts?.ready) await fonts.ready.catch(() => undefined);
     await Promise.all(Array.from(doc.images).map((img) => (img.decode ? img.decode().catch(() => undefined) : Promise.resolve())));
+
+    // Before anything is measured, so the cuts are taken off the layout that
+    // is drawn.
+    singleBorders(doc, win);
 
     const docHeight = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight);
     const flow = measureFlow(doc, win);
     const cuts = pageCuts({ docHeight, pageHeight: contentH, ...flow });
     if (!cuts.length) throw new Error('The document laid out to nothing.');
 
-    const pages: JpegPage[] = [];
-    for (const cut of cuts) {
+    const pages: ImagePage[] = [];
+    for (let i = 0; i < cuts.length; i++) {
+      const cut = cuts[i]!;
+      // A pixel shaved off every page but the last: a cut that lands exactly
+      // on the next block's top edge otherwise draws a hairline of it along
+      // the foot of the page.
+      const height = Math.max(1, Math.floor(cut.bottom - cut.top) - (i < cuts.length - 1 ? 1 : 0));
       const canvas = await html2canvas(doc.body, {
         x: 0,
         y: cut.top,
         width: contentW,
-        height: cut.bottom - cut.top,
+        height,
         scale,
         windowWidth: contentW,
         windowHeight: Math.ceil(docHeight),
@@ -256,7 +395,7 @@ export async function rasterPdfFromHtml(
         useCORS: true,
         logging: false,
       });
-      pages.push({ jpeg: await jpegOf(canvas, quality), width: canvas.width, height: canvas.height });
+      pages.push(await encodePage(canvas, quality));
       // Give the bitmap back before the next page takes one.
       canvas.width = 0;
       canvas.height = 0;

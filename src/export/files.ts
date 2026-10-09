@@ -37,6 +37,12 @@ export interface WrittenFile {
    * Declared here so the two builds hand the screens the same shape.
    */
   printed?: boolean;
+  /**
+   * Why the browser could not write the PDF, where `printed` is set: the
+   * error's own message, so a screen can say "could not be built: …" rather
+   * than guess. Never the document itself.
+   */
+  why?: string;
 }
 
 function writeBytes(fileName: string, bytes: Uint8Array): WrittenFile {

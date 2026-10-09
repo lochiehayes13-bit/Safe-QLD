@@ -8,10 +8,17 @@
  * on a Form 72 and got neither a file nor a reason.
  *
  * So the web build rasterises each page of a document and this turns those
- * images into a real PDF: one JPEG per page, each drawn inside the page box the
- * document asked for. That is a scanned-looking document rather than a vector
+ * images into a real PDF: one image per page, each drawn inside the page box
+ * the document asked for. That is a picture of a page rather than a vector
  * one, and it is the honest trade — the only vector route in a browser is the
  * print dialogue, and the print dialogue is the thing that does not work.
+ *
+ * Two image encodings. A Flate page is lossless: the page's pixels, each row
+ * predicted from the one above it the way PNG does, deflated. On a page that
+ * is mostly white paper with black type that is both smaller than a JPEG and
+ * exact — no ringing around a 7px "kPa". A JPEG page is the fallback for a
+ * browser with no deflate of its own, and the right choice for a page of
+ * photographs.
  *
  * Written here rather than pulled in, for the same reason the workbook writer
  * is: a PDF of image pages is a catalogue, a page tree, one page object and one
@@ -45,6 +52,20 @@ export interface JpegPage {
   width: number;
   height: number;
 }
+
+/**
+ * One rasterised page, lossless: a zlib stream of the page's RGB rows, each
+ * row led by a PNG filter byte (PDF's /Predictor 15), and the pixel size.
+ */
+export interface FlatePage {
+  flate: Uint8Array;
+  width: number;
+  height: number;
+}
+
+export type ImagePage = JpegPage | FlatePage;
+
+const isJpeg = (page: ImagePage): page is JpegPage => 'jpeg' in page;
 
 const PT_PER_MM = 72 / 25.4;
 
@@ -104,7 +125,7 @@ const pdfString = (s: string): string => `(${s
  * not produce one, and the writer does not trust that.
  */
 export function pdfFromJpegPages(
-  pages: readonly JpegPage[],
+  pages: readonly ImagePage[],
   box: PageBox = DEFAULT_PAGE_BOX,
   meta: { title?: string; producer?: string } = {},
 ): Uint8Array {
@@ -135,12 +156,18 @@ export function pdfFromJpegPages(
 
   const kids: number[] = [];
   pages.forEach((page, i) => {
-    const size = jpegDimensions(page.jpeg);
-    if (!size) throw new Error(`Page ${i + 1} is not a JPEG.`);
-    // The page's own header is what the viewer believes, so the declared
-    // size has to agree with it or the image is drawn stretched.
-    if (size.width !== page.width || size.height !== page.height) {
-      throw new Error(`Page ${i + 1} says it is ${page.width}×${page.height} but its JPEG is ${size.width}×${size.height}.`);
+    if (isJpeg(page)) {
+      const size = jpegDimensions(page.jpeg);
+      if (!size) throw new Error(`Page ${i + 1} is not a JPEG.`);
+      // The page's own header is what the viewer believes, so the declared
+      // size has to agree with it or the image is drawn stretched.
+      if (size.width !== page.width || size.height !== page.height) {
+        throw new Error(`Page ${i + 1} says it is ${page.width}×${page.height} but its JPEG is ${size.width}×${size.height}.`);
+      }
+    } else {
+      // A zlib stream opens with a header byte whose low nibble is 8 (deflate).
+      if (page.flate.length < 6 || (page.flate[0]! & 0x0f) !== 8) throw new Error(`Page ${i + 1} is not a zlib stream.`);
+      if (!(page.width > 0 && page.height > 0)) throw new Error(`Page ${i + 1} has no size.`);
     }
     const fit = Math.min(contentW / page.width, contentH / page.height);
     const drawW = page.width * fit;
@@ -148,10 +175,14 @@ export function pdfFromJpegPages(
     const x = box.marginLeftMm * PT_PER_MM;
     const y = pageH - box.marginTopMm * PT_PER_MM - drawH;
 
+    const data = isJpeg(page) ? page.jpeg : page.flate;
+    const filter = isJpeg(page)
+      ? '/Filter /DCTDecode'
+      : `/Filter /FlateDecode /DecodeParms << /Predictor 15 /Colors 3 /BitsPerComponent 8 /Columns ${page.width} >>`;
     const image = add([
       `<< /Type /XObject /Subtype /Image /Width ${page.width} /Height ${page.height} /ColorSpace /DeviceRGB `
-      + `/BitsPerComponent 8 /Filter /DCTDecode /Length ${page.jpeg.length} >>\nstream\n`,
-      page.jpeg,
+      + `/BitsPerComponent 8 ${filter} /Length ${data.length} >>\nstream\n`,
+      data,
       '\nendstream',
     ]);
     const draw = `q ${drawW.toFixed(3)} 0 0 ${drawH.toFixed(3)} ${x.toFixed(3)} ${y.toFixed(3)} cm /Im0 Do Q`;

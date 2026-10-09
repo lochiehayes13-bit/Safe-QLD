@@ -38,7 +38,17 @@ export function deliveryFor(fileName: string): WebDelivery {
  * so neither pretends to be one. A share needs no notice: the sheet it opened
  * is the whole screen.
  */
-export function webShareNotice(fileName: string, how: 'download' | 'print' = 'download'): { title: string; body: string } {
+export function webShareNotice(fileName: string, how: 'download' | 'print' | 'preview' = 'download'): { title: string; body: string } {
+  if (how === 'preview') {
+    // The home-screen app opens a download as a preview rather than saving
+    // it. The preview's own share button is the way to Files or Mail.
+    return {
+      title: 'Opened as a preview',
+      body:
+        `${fileName} opens as a preview in this app rather than saving. Use the preview's share button to `
+        + 'put it in Files or on an email, or go back and choose Share here.',
+    };
+  }
   if (how === 'print') {
     return {
       title: 'Sent to print',
@@ -64,13 +74,17 @@ export function webShareNotice(fileName: string, how: 'download' | 'print' = 'do
  * the occupier for their copy — so the person picking Mail off the share sheet
  * is not left to remember the address.
  */
-export function readyHint(input: { canShare: boolean; sendTo?: string }): string {
+export function readyHint(input: { canShare: boolean; sendTo?: string; standalone?: boolean; touch?: boolean }): string {
+  const where = input.touch === false ? 'any app on this computer' : 'any app on this phone';
   const share = input.canShare
     ? (input.sendTo
       ? `Share puts it straight into Mail — send it to ${input.sendTo}. `
-      : 'Share puts it straight into Mail, Files or any app on this phone. ')
+      : `Share puts it straight into Mail, Files or ${where}. `)
     : '';
-  return `${share}Save keeps a copy on this device.`;
+  const save = input.standalone
+    ? 'Preview opens it here; its share button can save it to Files.'
+    : input.canShare ? 'Save keeps a copy on this device.' : 'Download keeps a copy on this device.';
+  return `${share}${save}`;
 }
 
 /**

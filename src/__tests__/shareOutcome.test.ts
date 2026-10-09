@@ -16,14 +16,16 @@ describe('a file written but not shared', () => {
   });
 
   it('says where sharing does live, so the next step is obvious', () => {
-    // "Sharing is not available" is true and useless. The phone build is where
-    // the share sheet, the mail app and the printer are.
-    expect(notSharedNotice('x.pdf', 'report').body).toMatch(/phone/i);
+    // "Sharing is not available" is true and useless. The way out is the same
+    // button, which offers the share sheet, a download and the printer — and
+    // never "the phone", because for an iPhone this build is the phone.
+    expect(notSharedNotice('x.pdf', 'report').body).toMatch(/tap the button again/i);
+    expect(notSharedNotice('x.pdf', 'report').body).not.toMatch(/phone/i);
   });
 
   it('names the kind of thing, so the sentence reads as English', () => {
-    expect(notSharedNotice('x.pdf', 'notice').body).toContain('pass a notice on');
-    expect(notSharedNotice('x.pdf').body).toContain('pass a file on');
+    expect(notSharedNotice('x.pdf', 'notice').body).toContain('hand the notice on');
+    expect(notSharedNotice('x.pdf').body).toContain('hand the file on');
   });
 
   it('is a heading and a body, not one long string', () => {

@@ -55,7 +55,28 @@ export interface WrittenFile {
    * phone never sets it.
    */
   printed?: boolean;
+  /** Why it could not be written, where `printed` is set. The error's message, never the document. */
+  why?: string;
 }
+
+/**
+ * The home-screen app, which iOS runs without Safari's chrome and without
+ * two of Safari's abilities: `window.print()` does nothing there, and a
+ * download opens a preview rather than saving. Both buttons are worded and
+ * offered accordingly, because a button that does nothing when tapped is the
+ * fault this whole file exists to remove.
+ */
+export function standaloneApp(): boolean {
+  return typeof navigator !== 'undefined' && (navigator as { standalone?: boolean }).standalone === true;
+}
+
+/**
+ * The last file made for each name, so one form is not rasterised three
+ * times over. Issue queues the PDF, Produce PDF makes it again, Email makes
+ * it a third time: each a full layout and a page-by-page raster on a phone,
+ * and each result held. The same name and the same document is the same file.
+ */
+const recent = new Map<string, { html: string; file: WrittenFile }>();
 
 function hold(name: string, blob: Blob, html?: string, uri = URL.createObjectURL(blob)): WrittenFile {
   held.set(uri, { blob, name, size: blob.size, html });
@@ -109,15 +130,28 @@ export async function writePdf(baseName: string, html: string): Promise<WrittenF
   const safe = safeFileName(baseName);
   const name = `${safe}.pdf`;
   const document_ = printableDocument(safe, html);
+  const same = recent.get(name);
+  if (same && same.html === document_ && !same.file.printed && held.has(same.file.uri)) return same.file;
   try {
     const { bytes } = await rasterPdfFromHtml(document_, { title: safe });
     // A copy, so the Blob owns its buffer — the same reason writeBytes copies.
     const blob = new Blob([bytes.slice()], { type: 'application/pdf' });
-    return hold(name, blob, document_, await dataUriOf(blob));
-  } catch {
+    const file = hold(name, blob, document_, await dataUriOf(blob));
+    // The earlier copy of this name is released: one form, one file.
+    if (same && same.file.uri !== file.uri) release(same.file.uri);
+    recent.set(name, { html: document_, file });
+    return file;
+  } catch (e) {
     const file = hold(name, new Blob([document_], { type: 'text/html;charset=utf-8' }), document_);
-    return { ...file, printed: true };
+    const why = e instanceof Error && e.message ? e.message : 'the page could not be drawn';
+    return { ...file, printed: true, why };
   }
+}
+
+/** Lets one held file go. */
+function release(uri: string): void {
+  if (!held.delete(uri)) return;
+  if (uri.startsWith('blob:')) URL.revokeObjectURL(uri);
 }
 
 /** The browser's share sheet, where it takes files. */
@@ -137,18 +171,34 @@ function fileSharer(file: File): FileSharer | null {
   }
 }
 
-/** The browser's own download, which is a badge in a corner, so it is said out loud afterwards. */
-function download(uri: string, name: string): void {
+/**
+ * The browser's own download, which is a badge in a corner, so it is said out
+ * loud afterwards.
+ *
+ * Through an object URL for the held Blob, never the data: URI. Chromium caps
+ * a data: URL in a link at about two megabytes and fails the download with
+ * "Network error"; a six-page form is past that. The data: URI is for the
+ * attachment queue, which stores it; the Blob is for the person.
+ *
+ * The notice is deferred a tick so it does not land on top of the browser's
+ * own download sheet, and in the home-screen app it says what that app does
+ * with a download — opens a preview — rather than claiming a file in the
+ * downloads that is not there.
+ */
+export function download(uri: string, name: string): void {
+  const entry = held.get(uri);
   const link = document.createElement('a');
-  link.href = uri;
+  const href = entry ? URL.createObjectURL(entry.blob) : uri;
+  link.href = href;
   link.download = name;
   link.rel = 'noopener';
   link.style.display = 'none';
   document.body.appendChild(link);
   link.click();
   link.remove();
-  const notice = webShareNotice(name, 'download');
-  showAlert(notice.title, notice.body);
+  if (href !== uri) setTimeout(() => URL.revokeObjectURL(href), 60_000);
+  const notice = webShareNotice(name, standaloneApp() ? 'preview' : 'download');
+  setTimeout(() => showAlert(notice.title, notice.body), 0);
 }
 
 /**
@@ -165,17 +215,24 @@ export function offerPdf(file: WrittenFile, options: { title?: string; sendTo?: 
   if (!entry) return false;
   const asFile = new File([entry.blob], entry.name, { type: 'application/pdf' });
   const sharer = fileSharer(asFile);
+  const standalone = standaloneApp();
   const choices = readyChoices({
     canShare: !!sharer,
-    canPrint: !!entry.html,
+    // No printer in the home-screen app: window.print() does nothing there.
+    canPrint: !!entry.html && !standalone,
+    standalone,
     share: async () => {
       try {
-        await sharer!.share!({ files: [asFile], title: options.title ?? entry.name, text: options.text });
+        // Files and a title only. A payload with text beside files has been
+        // refused by WebKit with NotAllowedError even after canShare said
+        // yes; the hint under the title already names where it goes.
+        await sharer!.share!({ files: [asFile], title: options.title ?? entry.name });
       } catch (e) {
-        // Dismissing the sheet is a person changing their mind, and the
-        // offer stays up for them. Anything else is the browser refusing,
-        // and the file goes to the downloads so it is not lost.
-        if ((e as { name?: string }).name === 'AbortError') throw e;
+        // Dismissed, or a share already in flight from a second tap: the
+        // person is still choosing, and the offer stays up. Anything else is
+        // the browser refusing, and the file goes to the downloads so it is
+        // not lost.
+        if (shareStillOpen(e)) throw e;
         download(file.uri, entry.name);
       }
     },
@@ -184,10 +241,20 @@ export function offerPdf(file: WrittenFile, options: { title?: string; sendTo?: 
   });
   showReadySheet({
     title: `${entry.name} is ready`,
-    hint: readyHint({ canShare: !!sharer, sendTo: options.sendTo }),
+    hint: readyHint({ canShare: !!sharer, sendTo: options.sendTo, standalone, touch: typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0 }),
     choices,
   });
   return true;
+}
+
+/**
+ * A share that is still the person's to finish: dismissed (AbortError), or
+ * refused because one is already up (NotAllowedError, which WebKit answers to
+ * a second tap while its sheet is animating). Neither is the browser failing.
+ */
+export function shareStillOpen(e: unknown): boolean {
+  const name = (e as { name?: string } | null)?.name;
+  return name === 'AbortError' || name === 'NotAllowedError';
 }
 
 /**
@@ -203,6 +270,20 @@ export async function shareFile(file: WrittenFile, dialogTitle?: string): Promis
   if (!entry) return false;
 
   if (file.printed && entry.html) {
+    /*
+     * The home-screen app has no print dialogue, so the fallback is said
+     * rather than attempted: the reason the file could not be built, and the
+     * one way out, which is Safari itself.
+     */
+    if (standaloneApp()) {
+      showAlert(
+        'Could not build the PDF',
+        `${file.name} could not be drawn in this app${file.why ? ` (${file.why})` : ''}. Open the app in Safari `
+        + 'rather than from the home screen and use the same button there: Safari can print it, and the '
+        + 'print preview can be saved or shared as a PDF.',
+      );
+      return false;
+    }
     const opened = printHtml(entry.html, document as unknown as PrintDocument);
     if (opened) {
       const notice = webShareNotice(file.name, 'print');

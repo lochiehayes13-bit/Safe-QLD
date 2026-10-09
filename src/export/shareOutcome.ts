@@ -54,10 +54,10 @@ export interface ShareNotice {
  */
 export function notSharedNotice(fileName: string, what = 'file'): ShareNotice {
   return {
-    title: 'Saved, not shared',
+    title: 'Made, not shared',
     body:
-      `${fileName} was written to this device, so nothing has been lost. This device has no way `
-      + `to pass a ${what} on, though — the share sheet, the mail app and the printer are all on `
-      + `the phone build, and a browser has none of them. Open this screen on the phone to send it.`,
+      `${fileName} was made, so nothing has been lost, but this device gave no way to hand the ${what} `
+      + 'on just now. Tap the button again — the share sheet, a download and the printer are all '
+      + 'offered — or try from a different browser.',
   };
 }

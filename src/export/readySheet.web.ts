@@ -40,13 +40,19 @@ export interface ReadySheet {
 export function readyChoices(input: {
   canShare: boolean;
   canPrint: boolean;
+  /** The iOS home-screen app, where a download opens a preview rather than saving. */
+  standalone?: boolean;
   share: () => Promise<void>;
   save: () => void;
   print: () => void;
 }): ReadyChoice[] {
   const out: ReadyChoice[] = [];
   if (input.canShare) out.push({ label: 'Share…', primary: true, onPress: input.share });
-  out.push({ label: input.canShare ? 'Save to this device' : 'Download', primary: !input.canShare, onPress: input.save });
+  out.push({
+    label: input.standalone ? 'Open a preview' : input.canShare ? 'Save to this device' : 'Download',
+    primary: !input.canShare,
+    onPress: input.save,
+  });
   if (input.canPrint) out.push({ label: 'Print', onPress: input.print });
   return out;
 }
@@ -95,6 +101,18 @@ export function showReadySheet(sheet: ReadySheet, doc: SheetDocument = document)
     backdrop.remove();
   };
 
+  /*
+   * One choice at a time. A share sheet takes a moment to animate up, and a
+   * second tap on the same button in that moment asks the browser to share
+   * again — which WebKit refuses with an error that used to read as the
+   * browser failing. The buttons are held while a choice is running.
+   */
+  const buttons: HTMLElement[] = [];
+  const hold = (held: boolean): void => {
+    for (const b of buttons) b.setAttribute('aria-disabled', held ? 'true' : 'false');
+  };
+  let running = false;
+
   for (const choice of sheet.choices) {
     const button = doc.createElement('button');
     button.setAttribute('type', 'button');
@@ -104,14 +122,18 @@ export function showReadySheet(sheet: ReadySheet, doc: SheetDocument = document)
         ? 'background:#E8611C;color:#fff;border:0;'
         : 'background:#fff;color:#111;border:1px solid #C9CED6;');
     button.addEventListener('click', () => {
+      if (running) return;
       // Run inside the tap, not after an await, because a share has to.
       const result = choice.onPress();
       if (result && typeof (result as Promise<void>).then === 'function') {
-        (result as Promise<void>).then(close, () => undefined);
+        running = true;
+        hold(true);
+        (result as Promise<void>).then(close, () => { running = false; hold(false); });
       } else {
         close();
       }
     });
+    buttons.push(button);
     panel.appendChild(button);
   }
 
