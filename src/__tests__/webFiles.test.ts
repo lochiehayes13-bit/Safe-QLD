@@ -7,14 +7,20 @@
  *
  * These are the decisions behind that, kept pure so they can be held to it.
  */
-import { blobTypeFor, deliveryFor, printableDocument, webShareNotice } from '@/export/webFiles';
+import { blobTypeFor, deliveryFor, printableDocument, readyHint, webShareNotice } from '@/export/webFiles';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 
 describe('how a browser delivers a generated file', () => {
-  it('prints a PDF, because a browser has no PDF writer', () => {
-    expect(deliveryFor('Service report Fictional Tower 03-09-2026.pdf')).toBe('print');
-    expect(deliveryFor('SHOUTING.PDF')).toBe('print');
+  it('offers a PDF — share, save or print — now that the browser writes one', () => {
+    /*
+     * A PDF used to go straight to the printer, because a browser had no PDF
+     * writer. On an iPhone added to the home screen the print dialogue never
+     * opens, which is how Chris pressed Produce PDF and got nothing. The web
+     * build writes the file now, and a file is offered, not printed.
+     */
+    expect(deliveryFor('Service report Fictional Tower 03-09-2026.pdf')).toBe('offer');
+    expect(deliveryFor('SHOUTING.PDF')).toBe('offer');
   });
 
   it('downloads anything that is already a file', () => {
@@ -53,17 +59,27 @@ describe('the document the browser prints', () => {
 });
 
 describe('what the person is told', () => {
-  it('says a PDF went to the printer, and how to keep it on an iPhone', () => {
-    const notice = webShareNotice('Service report.pdf');
+  it('says a PDF the browser could not write went to the printer, and how to keep it on an iPhone', () => {
+    // The fallback, for a browser that cannot rasterise. It says why it is
+    // the printer, so nobody wonders where the file went.
+    const notice = webShareNotice('Service report.pdf', 'print');
     expect(notice.title).toBe('Sent to print');
+    expect(notice.body).toMatch(/could not be written as a file/);
     expect(notice.body).toMatch(/Save as PDF/);
     expect(notice.body).toMatch(/iPhone/);
   });
 
-  it('says a spreadsheet is with their downloads, and where that is on an iPhone', () => {
+  it('says a saved file is with their downloads, and where that is on an iPhone', () => {
     const notice = webShareNotice('Timesheet.xlsx');
-    expect(notice.title).toBe('Downloaded');
+    expect(notice.title).toBe('Saved to this device');
     expect(notice.body).toMatch(/Files/);
+  });
+
+  it('tells the person picking Mail off the share sheet where to send the form', () => {
+    expect(readyHint({ canShare: true, sendTo: 'form72@example.com' })).toContain('send it to form72@example.com');
+    expect(readyHint({ canShare: true })).toMatch(/Mail, Files/);
+    // A desktop browser with no share sheet is told only what it can do.
+    expect(readyHint({ canShare: false })).toBe('Save keeps a copy on this device.');
   });
 });
 

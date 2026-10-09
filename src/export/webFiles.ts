@@ -2,28 +2,31 @@
  * What a browser can do with a generated file, decided away from the browser.
  *
  * A page cannot write to a file system, but it can hand the person a file to
- * save and it can put a document in front of the printer — and on an iPhone,
- * "Print" is how a PDF is saved to Files or attached to a mail. So the web
- * build does produce paperwork; it produces it differently, and the difference
- * belongs in one place rather than spread across twenty screens.
+ * save, it can open the operating system's share sheet with the file on it —
+ * which on an iPhone is how a PDF reaches Mail, Files or Simpro in one tap —
+ * and it can put a document in front of the printer. So the web build does
+ * produce paperwork; it produces it differently, and the difference belongs in
+ * one place rather than spread across twenty screens.
  *
  * Pure on purpose: no DOM, no expo, nothing that only exists in one of the two
  * builds. The web file layer asks these functions what to do and then does it.
  */
 
-/** How a browser should deliver a generated file. */
-export type WebDelivery = 'download' | 'print';
-
 /**
- * A PDF is printed rather than downloaded, because a browser has no PDF
- * writer: the app builds the page's HTML, and the browser's own print dialogue
- * is what turns it into a PDF — "Save as PDF" on a desktop, and on an iPhone
- * the share sheet that Print opens, which offers Files, Mail and everything
- * else. Anything already a file — a spreadsheet, a CSV, a share pack — is
- * handed over as it is.
+ * How a browser should deliver a generated file.
+ *
+ * `offer` is the sheet of buttons the file layer draws for a PDF: share, save,
+ * print. A PDF used to go straight to the printer, because a browser had no
+ * PDF writer and the print dialogue was the one way to a file — and on an
+ * iPhone added to the home screen that dialogue never opens at all. The web
+ * build writes PDFs now (see rasterPdf.web.ts), so a PDF is a file like any
+ * other, with one more thing that can be done with it. Anything already a file
+ * — a spreadsheet, a CSV, a share pack — is handed to the downloads as before.
  */
+export type WebDelivery = 'download' | 'offer';
+
 export function deliveryFor(fileName: string): WebDelivery {
-  return /\.pdf$/i.test(fileName) ? 'print' : 'download';
+  return /\.pdf$/i.test(fileName) ? 'offer' : 'download';
 }
 
 /**
@@ -32,24 +35,42 @@ export function deliveryFor(fileName: string): WebDelivery {
  * Written as what happened rather than what was attempted: a download that the
  * browser has taken is in their downloads whatever the page believes, and a
  * print dialogue that has opened is on their screen. Neither is a share sheet,
- * so neither pretends to be one.
+ * so neither pretends to be one. A share needs no notice: the sheet it opened
+ * is the whole screen.
  */
-export function webShareNotice(fileName: string): { title: string; body: string } {
-  if (deliveryFor(fileName) === 'print') {
+export function webShareNotice(fileName: string, how: 'download' | 'print' = 'download'): { title: string; body: string } {
+  if (how === 'print') {
     return {
       title: 'Sent to print',
       body:
-        `${fileName} has been laid out and handed to the browser's print dialogue. Choose `
-        + '"Save as PDF" to keep a copy — on an iPhone, Print then pinch the preview to open the '
-        + 'share sheet, and it can go to Files, Mail or anywhere else.',
+        `${fileName} could not be written as a file in this browser, so it has been handed to the `
+        + 'print dialogue instead. Choose "Save as PDF" to keep a copy — on an iPhone, Print then pinch the '
+        + 'preview to open the share sheet, and it can go to Files, Mail or anywhere else.',
     };
   }
   return {
-    title: 'Downloaded',
+    title: 'Saved to this device',
     body:
       `${fileName} has been handed to the browser, so it is with your downloads. On an iPhone `
       + 'that is Files, under Downloads, and it can be attached to a mail from there.',
   };
+}
+
+/**
+ * The one line under the title of the sheet that offers a PDF.
+ *
+ * Says what each button does in a technician's words, and where the file is
+ * going when there is somewhere it should go — the office inbox for a Form 72,
+ * the occupier for their copy — so the person picking Mail off the share sheet
+ * is not left to remember the address.
+ */
+export function readyHint(input: { canShare: boolean; sendTo?: string }): string {
+  const share = input.canShare
+    ? (input.sendTo
+      ? `Share puts it straight into Mail — send it to ${input.sendTo}. `
+      : 'Share puts it straight into Mail, Files or any app on this phone. ')
+    : '';
+  return `${share}Save keeps a copy on this device.`;
 }
 
 /**

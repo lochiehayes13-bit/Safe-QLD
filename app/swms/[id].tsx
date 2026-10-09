@@ -329,12 +329,14 @@ export default function SwmsRecordScreen() {
       // Remembered on the outcomes where something actually left, and not on
       // the ones where it did not. A phone that says "sent" over a composer
       // somebody closed is worse than one that says nothing.
-      if (outcome === 'sent' || outcome === 'handed-over') {
+      if (outcome === 'sent' || outcome === 'handed-over' || outcome === 'offered') {
         await recordSwmsEmailed(record.id, to).catch(() => undefined);
         setRecord({ ...record, emailedAt: nowIso(), emailedTo: to });
       }
 
-      if (outcome === 'no-mail-app') {
+      if (outcome === 'offered') {
+        // The share sheet is up with the PDF on it and the inbox named.
+      } else if (outcome === 'no-mail-app') {
         showAlert('No mail app set up', `This device has no email account configured. The statement goes to ${to}.`);
       } else if (outcome === 'sent') {
         showAlert('Sent', `It is on its way to ${to}.${attached ? '' : ' The PDF could not be attached — use Share to send it.'}`);

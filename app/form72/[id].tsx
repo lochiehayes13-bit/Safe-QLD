@@ -357,7 +357,18 @@ export default function Form72Screen() {
       const html = renderForm72(target, companyName);
       const file = await writePdf(form72AttachmentName(target).replace(/\.pdf$/i, ''), html);
       if (file.printed) {
-        if (!quiet) showAlert('Printed, not attached', 'On the web the PDF is printed rather than written, so it cannot be queued onto the job from here. Do this from a phone.');
+        /*
+         * The browser could not write the file, so there is nothing to queue.
+         * It used to say "do this from a phone" — to a technician on an
+         * iPhone, which is a phone, and which has no build but this one.
+         */
+        if (!quiet) {
+          showAlert(
+            'Not attached',
+            'This browser could not build the PDF file, so nothing was queued onto the job. Produce PDF still '
+            + 'prints it; attach the saved copy to the job in Simpro, or try again on a different browser.',
+          );
+        }
         return false;
       }
       const filename = form72AttachmentName(target);
@@ -405,11 +416,13 @@ export default function Form72Screen() {
         showAlert('No mail app set up', `This phone has no email account configured. The form goes to ${FORM72_INBOX}; use Produce PDF and send it from wherever you can.`);
       } else if (outcome === 'sent') {
         showAlert('Sent', `On its way to ${FORM72_INBOX}.`);
+      } else if (outcome === 'offered') {
+        // The share sheet is on the screen with the form on it and the inbox
+        // named under the title. Anything said here would sit on top of it.
       } else if (outcome === 'handed-over') {
         /*
-         * A browser prints a PDF rather than writing one, so there is no file
-         * to hand over — the person saves it from the print dialogue. Said
-         * plainly, because a Form 72 that reaches the Commissioner without the
+         * A composer with no attachment, on a browser with no share sheet.
+         * Said plainly, because a Form 72 that reaches the office without the
          * form attached is a notification that did not happen.
          */
         showAlert(
@@ -474,6 +487,10 @@ export default function Form72Screen() {
                 await recordOccupierCopy(form.id, at);
                 setForm({ ...form, copyGivenAt: at });
                 showAlert('Sent, and recorded', `Their copy went to ${to.email}, and the form now says so.`);
+              } else if (outcome === 'offered') {
+                // The share sheet is up with the form on it and the occupier's
+                // address named. The card underneath already asks for "They
+                // have their copy" once it has gone.
               } else if (outcome === 'handed-over') {
                 showAlert(
                   'Draft opened — send it, then record it',

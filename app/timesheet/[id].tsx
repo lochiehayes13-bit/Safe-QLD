@@ -392,6 +392,11 @@ export default function TimesheetScreen() {
         showAlert('Sent', `Your week has gone to ${routeAddresses(route)} and is marked submitted.${pageNote}`);
         return;
       }
+      if (outcome === 'offered') {
+        // The share sheet is up with the workbook on it and payroll's address
+        // named. The sheet stays a draft until Mark submitted, as below.
+        return;
+      }
       if (outcome === 'handed-over') {
         /*
          * A browser cannot attach a file to an email and cannot see whether one

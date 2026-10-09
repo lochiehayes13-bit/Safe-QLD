@@ -76,11 +76,20 @@ export function fitBody(body: string, limit = MAILTO_LIMIT): string {
  * sub-delimiters alone — `!'()*` — and every one of those is legal in a URL
  * query, so they are left as typed rather than escaped into noise.
  */
-export function mailtoUrl(draft: MailDraft, limit = MAILTO_LIMIT): string {
-  const to = (Array.isArray(draft.to) ? draft.to : [draft.to])
+/**
+ * The recipients as one comma-separated string, however the draft held them.
+ * The one spelling of the address list, used by the link and by the hint that
+ * names where a shared file should go.
+ */
+export function recipients(draft: Pick<MailDraft, 'to'>): string {
+  return (Array.isArray(draft.to) ? draft.to : [draft.to])
     .map((a) => String(a).trim())
     .filter(Boolean)
     .join(',');
+}
+
+export function mailtoUrl(draft: MailDraft, limit = MAILTO_LIMIT): string {
+  const to = recipients(draft);
 
   const query = [
     draft.subject.trim() ? `subject=${encodeURIComponent(draft.subject.trim())}` : '',

@@ -123,6 +123,8 @@ export default function QuoteScreen() {
 
       if (outcome === 'no-mail-app') {
         showAlert('No mail app set up', 'This phone has no email account configured. Use the PDF button and attach it yourself.');
+      } else if (outcome === 'offered') {
+        // The share sheet is up with the quote on it.
       } else if (outcome === 'handed-over') {
         showAlert(
           'Draft opened — attach the quote',

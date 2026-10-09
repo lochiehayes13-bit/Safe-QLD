@@ -27,7 +27,13 @@ export type MailOutcome =
    */
   | 'handed-over'
   /** There is no mail app to open. */
-  | 'no-mail-app';
+  | 'no-mail-app'
+  /**
+   * The browser put its share sheet up with the file on it, and Mail is one
+   * tap away on that sheet. It cannot report back either. The browser's
+   * answer, always — never the phone's, which opens the composer itself.
+   */
+  | 'offered';
 
 export async function sendMail(draft: MailDraft, attachments: readonly WrittenFile[] = []): Promise<MailOutcome> {
   if (!(await MailComposer.isAvailableAsync())) return 'no-mail-app';

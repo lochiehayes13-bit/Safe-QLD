@@ -108,9 +108,13 @@ export function JobFileCard({
     try {
       const file = await buildFile();
       if (file.printed) {
+        // The browser could not write the file, so there is nothing to queue.
+        // It used to say "do this from the phone" to a technician on an
+        // iPhone, which has no build but this one.
         showAlert(
-          'Printed, not attached',
-          'On the web the document is printed rather than written to a file, so there is nothing to queue onto the job. Do this from the phone.',
+          'Not attached',
+          `This browser could not build the ${what} as a file, so nothing was queued onto the job. The PDF button `
+          + 'still prints it; attach the saved copy to the job in Simpro, or try again on a different browser.',
         );
         return;
       }
