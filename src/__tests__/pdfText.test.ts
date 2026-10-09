@@ -117,7 +117,7 @@ describe('readPdf — a document built here', () => {
 
   it('refuses a PDF header with nothing behind it', () => {
     const stub = Uint8Array.from('%PDF-1.4\nnothing here at all\n%%EOF', (c) => c.charCodeAt(0));
-    expect(() => readPdf(stub)).toThrow(/truncated|No PDF objects/i);
+    expect(() => readPdf(stub)).toThrow(/damaged or incomplete/i);
   });
 });
 
@@ -129,8 +129,8 @@ describe('readPdf — a scan', () => {
     const doc = readPdf(buildPdf(['a b c'], false));
     expect(doc.text).toBe('');
     expect(doc.pages).toEqual([]);
-    expect(doc.warnings.join(' ')).toContain('scan of a paper original');
-    expect(doc.warnings.join(' ')).toContain('has not been indexed');
+    expect(doc.warnings.join(' ')).toContain('looks like a scan');
+    expect(doc.warnings.join(' ')).toContain('nothing to search');
   });
 });
 
@@ -176,7 +176,7 @@ describeReal('readPdf — against the real standards', () => {
     expect(encrypted.length).toBeGreaterThan(5);
     for (const f of encrypted.slice(0, 5)) {
       expect(() => readPdf(readFileSync(join(REAL_DIR, f))))
-        .toThrow(/encrypted by its publisher/);
+        .toThrow(/locked by its publisher/);
     }
   });
 

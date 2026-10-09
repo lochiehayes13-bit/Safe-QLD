@@ -337,7 +337,7 @@ describe('a day the sheet says is both', () => {
   });
 
   it('offers a way to take the leave off a day that was worked', () => {
-    expect(card()).toContain('I worked this day — take the leave off');
+    expect(card()).toContain("'Remove the day off'");
   });
 
   it('still lets a job be added to a day that is marked off', () => {

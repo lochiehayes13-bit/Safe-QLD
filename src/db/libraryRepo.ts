@@ -69,7 +69,7 @@ export async function importPdf(input: {
   maxPages?: number;
 }): Promise<ImportResult> {
   if (!isPdf(input.bytes)) {
-    return { refused: 'That file is not a PDF. Only PDFs can be read into the library.' };
+    return { refused: 'That file is not a PDF.' };
   }
 
   let parsed;
@@ -81,8 +81,9 @@ export async function importPdf(input: {
 
   if (!parsed.pages.length) {
     return {
-      refused: parsed.warnings[0]
-        ?? 'No readable text in that PDF, so there would be nothing to search.',
+      // The scan warning is the last one added, and the reason nothing came in.
+      refused: parsed.warnings[parsed.warnings.length - 1]
+        ?? 'No readable text in that PDF.',
     };
   }
 
@@ -150,27 +151,28 @@ export async function deleteLibraryDoc(id: string): Promise<void> {
  * module, where it is tested. Where the query has no word long enough to
  * narrow on, every page is scanned rather than none.
  */
-export async function searchLibrary(query: string, limit = 30): Promise<PageHit[]> {
+export async function searchLibrary(query: string, limit = 30, docId?: string): Promise<PageHit[]> {
   const db = await getDb();
   const longest = (query.toLowerCase().match(/[a-z0-9]{4,}/g) ?? [])
     .sort((a, b) => b.length - a.length)[0];
 
-  const rows = longest
-    ? await db.getAllAsync<{ docId: string; title: string; page: number; text: string }>(
-      `SELECT p.docId AS docId, d.title AS title, p.page AS page, p.text AS text
-       FROM library_page p JOIN library_doc d ON d.id = p.docId
-       WHERE p.text LIKE ? COLLATE NOCASE LIMIT 4000`,
-      [`%${longest}%`],
-    )
-    : await db.getAllAsync<{ docId: string; title: string; page: number; text: string }>(
-      `SELECT p.docId AS docId, d.title AS title, p.page AS page, p.text AS text
-       FROM library_page p JOIN library_doc d ON d.id = p.docId LIMIT 4000`,
-    );
+  // One document only, when searching inside an opened document.
+  const where: string[] = [];
+  const params: string[] = [];
+  if (longest) { where.push('p.text LIKE ? COLLATE NOCASE'); params.push(`%${longest}%`); }
+  if (docId) { where.push('p.docId = ?'); params.push(docId); }
+
+  const rows = await db.getAllAsync<{ docId: string; title: string; page: number; text: string }>(
+    `SELECT p.docId AS docId, d.title AS title, p.page AS page, p.text AS text
+     FROM library_page p JOIN library_doc d ON d.id = p.docId
+     ${where.length ? `WHERE ${where.join(' AND ')}` : ''} LIMIT 4000`,
+    params,
+  );
 
   const pages: SearchablePage[] = rows.map((r) => ({
     docId: r.docId, docTitle: r.title, page: r.page, text: r.text,
   }));
-  return searchPages(pages, query, { limit });
+  return searchPages(pages, query, { limit, docId });
 }
 
 export async function libraryPage(docId: string, page: number): Promise<string | undefined> {
@@ -179,4 +181,29 @@ export async function libraryPage(docId: string, page: number): Promise<string |
     'SELECT text FROM library_page WHERE docId = ? AND page = ?', [docId, page],
   );
   return row?.text;
+}
+
+/** What the document picker hands back, as far as reading the file goes. */
+export interface PickedFile {
+  uri: string;
+  /** The browser's own File, which the picker includes on the web build. */
+  file?: { arrayBuffer(): Promise<ArrayBuffer> } | null;
+}
+
+/**
+ * A picked file's bytes on the web build.
+ *
+ * The phone reads the picked file from its cache directory with
+ * expo-file-system, which has no browser half, so on an iPhone the import
+ * failed every time. A browser hands back the File itself, or failing that a
+ * blob: or data: URL that fetch can read.
+ */
+export async function webPickedBytes(
+  asset: PickedFile,
+  fetcher: (uri: string) => Promise<{ ok: boolean; arrayBuffer(): Promise<ArrayBuffer> }> = fetch,
+): Promise<Uint8Array> {
+  if (asset.file) return new Uint8Array(await asset.file.arrayBuffer());
+  const response = await fetcher(asset.uri);
+  if (!response.ok) throw new Error('Could not open that file. Pick it again.');
+  return new Uint8Array(await response.arrayBuffer());
 }

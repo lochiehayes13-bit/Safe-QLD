@@ -18128,20 +18128,19 @@ export const BFSR_CITATION = {
   officialUrl: 'https://www.legislation.qld.gov.au/view/whole/html/inforce/current/sl-2008-0160',
   /** The consolidation the Part 5 sections were verified against. */
   currentAsAt: '20/06/2025',
-  reproductionNote:
-    'Queensland Crown material, published free on the legislation register and reproduced faithfully here. Unlike an Australian Standard it may be quoted in full, and the sections that carry an obligation are.',
+  reproductionNote: 'Key sections quoted in full.',
 } as const;
 
 export type BfsrVerification = 'current-consolidation' | 'reprint-2c-2012';
 
 export const BFSR_VERIFICATION: Record<BfsrVerification, { source: string; asAt: string; confidence: NoteConfidence }> = {
   'current-consolidation': {
-    source: `Checked word for word against the current consolidation at ${BFSR_CITATION.officialUrl}`,
+    source: 'Checked against the current version',
     asAt: BFSR_CITATION.currentAsAt,
     confidence: 'high',
   },
   'reprint-2c-2012': {
-    source: "Read from Safe QLD's copy of Reprint 2C of the Building Fire Safety Regulation 2008, and not re-checked against the current consolidation",
+    source: 'From the 2012 reprint, not yet rechecked',
     asAt: '01/01/2012',
     confidence: 'medium',
   },
@@ -18603,8 +18602,8 @@ export const BFSR_2008: BfsrSection[] = [
 
 /** Sections that once existed and no longer do, with why. */
 export const BFSR_REPEALED: Record<string, string> = {
-  '51': 'Repealed by 2008 SL No. 413. Division 2 of Part 5 runs 50, then 53 — a citation to s.51 cites nothing.',
-  '52': 'Repealed by 2008 SL No. 413. Division 2 of Part 5 runs 50, then 53 — a citation to s.52 cites nothing.',
+  '51': 'Repealed (2008 SL No. 413).',
+  '52': 'Repealed (2008 SL No. 413).',
 };
 
 /**
@@ -18666,8 +18665,7 @@ export const CRITICAL_DEFECT_TEST = {
   limbB:
     'Is the defect reasonably likely to have a significant adverse impact on the safety of occupants of part or all of the building if a fire or hazardous materials emergency happens?',
   bothRequired: true,
-  note:
-    'Both limbs must be satisfied. This is not the AS 1851 critical defect test and the two are kept separate — the statutory notice under section 53 hangs on this one.',
+  note: 'Not the AS 1851 test. The section 53 notice turns on this one.',
 } as const;
 
 /**

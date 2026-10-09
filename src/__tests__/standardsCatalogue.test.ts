@@ -608,7 +608,7 @@ describe('the legislation index cites sections that exist in the regulation', ()
       const source = bfsrSectionSource(section.section);
       expect(source).toBeDefined();
       expect(source?.source.toLowerCase())
-        .toContain(section.verified === 'current-consolidation' ? 'current consolidation' : 'reprint 2c');
+        .toContain(section.verified === 'current-consolidation' ? 'current version' : '2012 reprint');
       expect(['high', 'medium', 'low']).toContain(source?.confidence);
     }
     expect(BFSR_CITATION.officialUrl).toBe(

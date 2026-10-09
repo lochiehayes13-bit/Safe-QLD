@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { Platform, Pressable, ScrollView, View } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
-import { Stack, router, useLocalSearchParams } from 'expo-router';
+import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   type StandardDoc, type StandardScope,
@@ -11,13 +11,11 @@ import { EXPLAINED_CLAUSES, LIBRARY, TOTAL_CLAUSES } from '@/domain/standardsLib
 import { ask, explainQuery, type Answer } from '@/domain/ask';
 import { SYSTEM_LABELS } from '@/seed/assetTypes';
 import {
-  deleteLibraryDoc, importPdf, libraryPage, listLibraryDocs, searchLibrary, type LibraryDoc,
+  importPdf, libraryPage, listLibraryDocs, searchLibrary, webPickedBytes, type LibraryDoc,
 } from '@/db/libraryRepo';
 import type { PageHit } from '@/domain/docSearch';
-import { askGrounded, hasKey } from '@/ai/client';
-import type { GroundedAnswer, Passage } from '@/ai/grounding';
 import { useTheme } from '@/theme';
-import { describeActionFailure } from '@/domain/loadFailure';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { showAlert } from '@/components/alert';
 import {
   Banner, Button, Card, Chip, Field, H2, Rowed, Screen, Txt,
@@ -78,6 +76,21 @@ const EXAMPLES = [
   'what do I write for a critical defect',
 ];
 
+/** The confidence chip on a result, in words rather than a rating. */
+const CONFIDENCE_WORD: Record<Answer['confidence'], string> = {
+  high: 'Checked',
+  medium: 'Likely',
+  low: 'Check source',
+};
+
+/** One of the technician's imported documents, optionally at a page. */
+function openImported(id: string, page?: number) {
+  router.push({
+    pathname: '/library/[id]',
+    params: page ? { id, mine: '1', page: String(page) } : { id, mine: '1' },
+  });
+}
+
 export default function LibraryScreen() {
   const t = useTheme();
   // Opened from the question bar on the home screen, so a technician's question
@@ -94,104 +107,71 @@ export default function LibraryScreen() {
   }, [query]);
   const [system, setSystem] = useState<string | null>(null);
   const [mine, setMine] = useState<LibraryDoc[]>([]);
-  const [pageHits, setPageHits] = useState<PageHit[]>([]);
+  const [mineError, setMineError] = useState<string | null>(null);
+  const [foundPages, setFoundPages] = useState<PageHit[]>([]);
   const [importing, setImporting] = useState(false);
-  const [aiOn, setAiOn] = useState(false);
-  const [answer, setAnswer] = useState<GroundedAnswer | null>(null);
-  const [thinking, setThinking] = useState(false);
 
   const q = debounced.trim();
   const searching = q.length >= 2;
 
   const results = useMemo(() => (searching ? ask(q, 25) : []), [q, searching]);
+  const pageHits = searching ? foundPages : [];
   const reading = useMemo(() => (searching ? explainQuery(q) : null), [q, searching]);
 
-  const load = useCallback(async () => { setMine(await listLibraryDocs()); }, []);
-  useEffect(() => { void load(); void hasKey().then(setAiOn); }, [load]);
-
-  /**
-   * The passages behind an answer are whatever the search already found, and
-   * nothing else — no site, no customer, no asset register.
-   */
-  const passages = useMemo((): Passage[] => [
-    ...pageHits.map((h) => ({
-      citation: `${h.docTitle} page ${h.page}`,
-      text: h.snippet,
-      source: 'Your imported document',
-    })),
-    ...results.filter((r) => r.kind === 'clause').slice(0, 5).map((r) => ({
-      citation: r.title,
-      text: r.body,
-      source: r.source,
-    })),
-  ], [pageHits, results]);
-
-  const askAi = async () => {
-    setThinking(true);
+  const load = useCallback(async () => {
     try {
-      setAnswer(await askGrounded({ question: q, passages }));
+      setMine(await listLibraryDocs());
+      setMineError(null);
     } catch (e) {
-      showAlert('Could not search', describeActionFailure(e, 'search the library'));
-    } finally {
-      setThinking(false);
+      setMineError(describeLoadFailure(e, 'your documents'));
     }
-  };
+  }, []);
+  // Read again on every return to this screen, so a document removed from
+  // its own page is gone from the list.
+  useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   // The imported documents are searched from the database, so this cannot be a
   // memo — it lands a moment after the clause results and that is fine.
   useEffect(() => {
-    // A new search invalidates the last answer: leaving it on screen under a
-    // different question is how a wrong answer gets acted on. It is cleared
-    // here, when a search actually runs, and not on every keystroke.
-    setAnswer(null);
-    if (!searching) { setPageHits([]); return; }
+    if (!searching) return undefined;
     let live = true;
-    void searchLibrary(q, 15).then((h) => { if (live) setPageHits(h); });
+    searchLibrary(q, 15)
+      .then((h) => { if (live) setFoundPages(h); })
+      .catch(() => { if (live) setFoundPages([]); });
     return () => { live = false; };
   }, [q, searching]);
 
   const addDocument = async () => {
-    const picked = await DocumentPicker.getDocumentAsync({
-      type: 'application/pdf', copyToCacheDirectory: true,
-    });
+    let picked: DocumentPicker.DocumentPickerResult;
+    try {
+      picked = await DocumentPicker.getDocumentAsync({
+        type: 'application/pdf', copyToCacheDirectory: true,
+      });
+    } catch (e) {
+      showAlert('Could not open the file picker', describeActionFailure(e, 'choose a file'));
+      return;
+    }
     if (picked.canceled || !picked.assets?.[0]) return;
     const asset = picked.assets[0];
     setImporting(true);
     try {
-      const bytes = await new File(asset.uri).bytes();
+      // expo-file-system has no browser half, so the web build reads the
+      // picked file the browser's own way.
+      const bytes = Platform.OS === 'web'
+        ? await webPickedBytes(asset)
+        : await new File(asset.uri).bytes();
       const result = await importPdf({ bytes, fileName: asset.name ?? 'document.pdf' });
       if (result.refused) {
         showAlert('Not imported', result.refused);
         return;
       }
       await load();
-      showAlert(
-        'Imported',
-        `${result.doc!.title} — ${result.doc!.pageCount} pages, searchable offline. `
-        + 'The file itself stays where it is; the app kept only the text it read.',
-      );
+      showAlert('Imported', `${result.doc!.title}: ${result.doc!.pageCount} pages, now searchable.`);
     } catch (e) {
       showAlert('Could not read that file', e instanceof Error ? e.message : String(e));
     } finally {
       setImporting(false);
     }
-  };
-
-  const forget = (doc: LibraryDoc) => {
-    showAlert(`Remove ${doc.title}?`, 'The original file is not touched — only the text this app read from it.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: () => {
-          // A delete that throws used to leave the document on screen with no
-          // word said, so pressing Remove twice looked like the app ignoring you.
-          void deleteLibraryDoc(doc.id)
-            .then(load)
-            .catch((e: unknown) => showAlert('Not removed', describeActionFailure(e, 'removing the document')));
-        },
-      },
-    ]);
   };
 
   const systems = useMemo(() => {
@@ -219,7 +199,7 @@ export default function LibraryScreen() {
       <Stack.Screen options={{ title: 'Standards' }} />
       <Screen>
         <Field
-          label="Ask it the way you would ask a mate"
+          label="Search standards"
           value={query}
           onChangeText={setQuery}
           placeholder="how far off the wall can a detector go"
@@ -244,55 +224,23 @@ export default function LibraryScreen() {
           </View>
         ) : null}
 
-        {searching && !results.length ? (
+        {searching && !results.length && !pageHits.length ? (
           <Banner
             tone="warn"
-            title="I do not know"
-            body={
-              'Nothing here answers that. It is a search over what this app holds, not a language '
-              + 'model, so it would rather say nothing than hand you the nearest thing lying about. '
-              + 'Try the equipment name, or a clause reference like "AS 2419.1 10.4".'
-            }
+            title="No match"
+            body="Try the equipment name or a clause, e.g. AS 2419.1 10.4."
           />
-        ) : null}
-
-        {searching && aiOn && passages.length ? (
-          <Card>
-            {answer?.text ? (
-              <>
-                <Rowed gap={2} align="center">
-                  <MaterialCommunityIcons name="creation-outline" size={16} color={t.color.accentText} />
-                  <Txt size="xs" tone="accent" style={{ flex: 1 }}>Read from the passages below</Txt>
-                </Rowed>
-                <Txt size="sm" style={{ marginTop: t.space(1.5), lineHeight: 20 }}>{answer.text}</Txt>
-                <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 16 }}>
-                  Every claim above is numbered to a passage below. Anything it could not source it
-                  did not say — check the passage before you act on it.
-                </Txt>
-              </>
-            ) : answer?.refusal ? (
-              <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>{answer.refusal}</Txt>
-            ) : (
-              <Button
-                title="Read these for me"
-                variant="secondary"
-                compact
-                loading={thinking}
-                onPress={askAi}
-              />
-            )}
-          </Card>
         ) : null}
 
         {searching ? (
           <>
             {pageHits.length ? (
               <>
-                <H2>In your own documents</H2>
+                <H2>Your documents</H2>
                 {pageHits.map((h) => (
                   <PageResult key={`${h.docId}-${h.page}`} hit={h} />
                 ))}
-                <H2>In the clause index</H2>
+                {results.length ? <H2>Standards</H2> : null}
               </>
             ) : null}
             {results.map((a, i) => <Result key={`${a.kind}-${a.title}-${i}`} answer={a} />)}
@@ -305,8 +253,7 @@ export default function LibraryScreen() {
                 <View style={{ flex: 1 }}>
                   <Txt weight="700">{LIBRARY.length} documents · {clauseCount} clauses</Txt>
                   <Txt size="xs" tone="faint" style={{ lineHeight: 16 }}>
-                    {writtenUp} written up in plain English. The rest are listed so they can be
-                    found and cited, and say nothing further rather than guessing.
+                    {writtenUp} with plain-English notes.
                   </Txt>
                 </View>
               </Rowed>
@@ -323,10 +270,9 @@ export default function LibraryScreen() {
               <Rowed gap={2} align="center">
                 <MaterialCommunityIcons name="scale-balance" size={22} color={t.color.accentText} />
                 <View style={{ flex: 1 }}>
-                  <Txt weight="700">The regulation</Txt>
+                  <Txt weight="700">Fire safety regulation</Txt>
                   <Txt size="xs" tone="faint" style={{ lineHeight: 16 }}>
-                    Building Fire Safety Regulation 2008, indexed by who has to do what. Every clock
-                    this app counts comes from a section in here.
+                    Building Fire Safety Regulation 2008, by who must act.
                   </Txt>
                 </View>
                 <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
@@ -346,15 +292,10 @@ export default function LibraryScreen() {
             <H2>Your documents</H2>
             <Card>
               <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-                Import a PDF you already own and the app reads its text on this device, so you can
-                search the actual words offline. Nothing is uploaded and the file itself stays where
-                it is.
+                Import a PDF to search its text offline.
               </Txt>
               <Txt size="xs" tone="warn" style={{ marginTop: t.space(2), lineHeight: 17 }}>
-                Australian Standards are published encrypted to stop their text being copied, and
-                this app will not strip that. Those stay in your own licensed viewer — the clause
-                index below is what points you at the right clause. The Queensland codes, the
-                legislation and manufacturer manuals are not locked and read fine.
+                Locked PDFs, like most Australian Standards, can&rsquo;t be imported.
               </Txt>
               <View style={{ height: t.space(3) }} />
               <Button
@@ -365,8 +306,12 @@ export default function LibraryScreen() {
               />
             </Card>
 
+            {mineError ? (
+              <Txt size="sm" tone="warn" style={{ lineHeight: 19 }}>{mineError}</Txt>
+            ) : null}
+
             {mine.map((d) => (
-              <Card key={d.id} onPress={() => forget(d)}>
+              <Card key={d.id} onPress={() => openImported(d.id)}>
                 <Rowed gap={2} align="flex-start">
                   <MaterialCommunityIcons name="file-document-outline" size={18} color={t.color.accentText} />
                   <View style={{ flex: 1 }}>
@@ -380,11 +325,12 @@ export default function LibraryScreen() {
                       </Txt>
                     ) : null}
                   </View>
+                  <MaterialCommunityIcons name="chevron-right" size={20} color={t.color.textFaint} />
                 </Rowed>
               </Card>
             ))}
 
-            <H2>The catalogue</H2>
+            <H2>All documents</H2>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <Rowed gap={2}>
                 <Pressable onPress={() => setSystem(null)}>
@@ -404,9 +350,7 @@ export default function LibraryScreen() {
             {shown.map((d) => <DocCard key={d.id} doc={d} />)}
 
             <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-              Clause numbers and titles were read out of the documents themselves rather than
-              recalled, so they can be cited. The wording of an Australian Standard is licensed per
-              copy and is not held here — open your own copy at the clause this points you to.
+              Clause numbers only. Open your own copy for the wording.
             </Txt>
           </>
         )}
@@ -489,7 +433,7 @@ function PageResult({ hit }: { hit: PageHit }) {
         <>
           <View style={{ height: 1, backgroundColor: t.color.border, marginVertical: t.space(2) }} />
           {loading ? (
-            <Txt size="sm" tone="muted">Reading page {hit.page}…</Txt>
+            <Txt size="sm" tone="muted">Loading page {hit.page}…</Txt>
           ) : page ? (
             <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>{page}</Txt>
           ) : (
@@ -500,14 +444,18 @@ function PageResult({ hit }: { hit: PageHit }) {
              * back.
              */
             <Txt size="sm" tone="warn">
-              The text of this page could not be read back. The document may have been re-imported
-              since this result was found — search again.
+              Couldn&rsquo;t load this page. Search again.
             </Txt>
           )}
           <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5), lineHeight: 16 }}>
-            Page {hit.page} of your own imported copy, as the text was read off it. Layout, tables
-            and figures are not preserved — check the document itself where the layout matters.
+            Text only. Check tables and figures in the PDF itself.
           </Txt>
+          <Pressable onPress={() => openImported(hit.docId, hit.page)} style={{ marginTop: t.space(2) }}>
+            <Rowed gap={2} align="center">
+              <MaterialCommunityIcons name="arrow-right-circle-outline" size={15} color={t.color.accentText} />
+              <Txt size="sm" tone="accent">Open document</Txt>
+            </Rowed>
+          </Pressable>
         </>
       ) : null}
     </Card>
@@ -554,7 +502,7 @@ function Result({ answer }: { answer: Answer }) {
           <Rowed gap={2} align="center" style={{ marginTop: t.space(1.5) }}>
             <Txt size="xs" tone={tone} style={{ flex: 1 }}>{answer.source}</Txt>
             {answer.confidence !== 'high' ? (
-              <Chip label={answer.confidence} tone="warn" />
+              <Chip label={CONFIDENCE_WORD[answer.confidence]} tone="warn" />
             ) : null}
           </Rowed>
         </View>
@@ -580,7 +528,7 @@ function DocCard({ doc }: { doc: StandardDoc }) {
           </Txt>
           <Txt size="xs" tone="faint" style={{ marginTop: t.space(1) }}>
             {doc.clauses.length} clause{doc.clauses.length === 1 ? '' : 's'}
-            {written ? ` · ${written} written up` : ''}
+            {written ? ` · ${written} with notes` : ''}
             {doc.supersededBy ? ` · superseded by ${doc.supersededBy}` : ''}
           </Txt>
         </View>

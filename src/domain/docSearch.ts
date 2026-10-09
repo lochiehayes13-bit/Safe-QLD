@@ -1,4 +1,7 @@
 import { expand, normalise, words } from './tradeVocabulary';
+import { SYSTEM_LABELS } from '@/seed/assetTypes';
+import type { DefectCode } from '@/seed/defectLibrary';
+import type { ServiceRoutine, TestDef } from '@/seed/serviceRoutines';
 
 /**
  * Searching documents a technician imported themselves.
@@ -163,6 +166,84 @@ export function searchPages(
   return hits
     .sort((a, b) => b.score - a.score || a.page - b.page)
     .slice(0, options.limit ?? 30);
+}
+
+/**
+ * Whether every word typed appears somewhere in a piece of text.
+ *
+ * For the short reference lists — defect wording, service routines — where a
+ * search for "detector head missing" should find the entry that says "head
+ * missing from detector". Matching the typed string whole needs the words in
+ * the order the entry happens to print them, which is not how anybody types.
+ *
+ * Each word is matched as a substring, so a half-typed word still narrows the
+ * list as it is typed. An empty search matches everything.
+ */
+export function hasEveryWord(text: string, query: string): boolean {
+  const terms = normalise(query).split(' ').filter(Boolean);
+  if (!terms.length) return true;
+  const hay = normalise(text);
+  return terms.every((t) => hay.includes(t));
+}
+
+/** The items whose text holds every word typed, in their original order. */
+export function filterByWords<T>(items: readonly T[], query: string, text: (item: T) => string): T[] {
+  if (!normalise(query)) return [...items];
+  return items.filter((item) => hasEveryWord(text(item), query));
+}
+
+/** Everything a defect code is searched on, including its system's name. */
+export function defectSearchText(d: DefectCode): string {
+  return [
+    d.code, SYSTEM_LABELS[d.system], d.component, d.defect,
+    d.reportWording, d.clientWording, d.rectification,
+  ].filter(Boolean).join(' ');
+}
+
+/** Everything one routine check is searched on. */
+export function checkSearchText(t: TestDef): string {
+  return [
+    t.section, t.label, t.whatToDo, t.whatToLookFor, t.passCriteria, t.failCriteria, t.defectCode,
+  ].filter(Boolean).join(' ');
+}
+
+/** A routine's name and description, without its checks. */
+export function routineNameText(r: ServiceRoutine): string {
+  return [r.label, SYSTEM_LABELS[r.system], r.description, r.sourceRef].filter(Boolean).join(' ');
+}
+
+/**
+ * The routines a search finds, and which of each one's checks it found.
+ *
+ * A routine whose own name holds every word shows all its checks. One found
+ * only through its checks shows just those, so a search for "battery" opens
+ * onto the battery checks rather than the whole routine.
+ */
+export function findRoutines(
+  routines: readonly ServiceRoutine[],
+  query: string,
+): { routine: ServiceRoutine; checks: TestDef[] }[] {
+  if (!normalise(query)) return routines.map((routine) => ({ routine, checks: routine.tests }));
+  const out: { routine: ServiceRoutine; checks: TestDef[] }[] = [];
+  for (const routine of routines) {
+    if (hasEveryWord(routineNameText(routine), query)) {
+      out.push({ routine, checks: routine.tests });
+      continue;
+    }
+    // Words may be split between the routine's name and one check:
+    // "monthly battery" names the routine and the check together.
+    const name = routineNameText(routine);
+    const checks = routine.tests.filter((t) => hasEveryWord(`${name} ${checkSearchText(t)}`, query));
+    if (checks.length) {
+      out.push({ routine, checks });
+      continue;
+    }
+    // Words spread over several checks still find the routine, whole.
+    if (hasEveryWord(`${name} ${routine.tests.map(checkSearchText).join(' ')}`, query)) {
+      out.push({ routine, checks: routine.tests });
+    }
+  }
+  return out;
 }
 
 /** Where each searched term falls inside a snippet, for highlighting. */

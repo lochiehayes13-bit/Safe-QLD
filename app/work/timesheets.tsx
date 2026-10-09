@@ -4,6 +4,7 @@ import { Stack, router, useFocusEffect } from 'expo-router';
 import { createTimesheet, listTimesheets, saveTimesheet } from '@/db/timesheetRepo';
 import { copyForNextWeek, timesheetTotals, weekStartFor, type Timesheet } from '@/domain/timesheet';
 import { loadPrefs, patchPrefs } from '@/app-prefs';
+import { fillModeFor } from '@/domain/timesheetFromSchedule';
 import { qldIsoDay } from '@/domain/qldTime';
 import { newId, nowIso } from '@/db';
 import { addDays } from '@/domain/clockOn';
@@ -46,7 +47,7 @@ export default function TimesheetsScreen() {
   const load = useCallback(async () => {
     setFailed(null);
     try {
-      setFillPref((await loadPrefs()).timesheetFill);
+      setFillPref(fillModeFor(await loadPrefs()) ?? '');
       setSheets(await listTimesheets());
     } catch (e) {
       setSheets([]);
@@ -195,16 +196,16 @@ export default function TimesheetsScreen() {
               {/* Construction crews fill from their schedule; service types theirs. */}
               <View style={{ gap: t.space(1) }}>
                 <Txt size="xs" tone="muted" weight="700">NEW WEEKS</Txt>
-                <Segmented
+                <Segmented<'' | 'schedule' | 'manual'>
                   options={[
-                    { value: 'schedule' as const, label: 'From my schedule' },
-                    { value: 'manual' as const, label: 'I type mine' },
+                    { value: 'schedule', label: 'From my schedule' },
+                    { value: 'manual', label: 'I type mine' },
                   ]}
-                  value={fillPref === 'schedule' ? 'schedule' : 'manual'}
+                  value={fillPref}
                   onChange={(v) => { setFillPref(v); void patchPrefs({ timesheetFill: v }); }}
                 />
               </View>
-              {failed ? <Banner tone="fail" title="This list could not be read" body={failed} /> : null}
+              {failed ? <Banner tone="fail" title="Couldn't load your timesheets" body={failed} /> : null}
               {sheets.length ? <H2>Your weeks</H2> : null}
             </>
           )}

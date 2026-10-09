@@ -179,6 +179,9 @@ function trimEol(text: string, from: number, to: number): number {
   return end;
 }
 
+/** Shown once on the document, however many streams could not be decoded. */
+const PARTLY_UNREAD = 'Some text could not be read.';
+
 /** Applies the stream's filter. Only the ones that carry text are supported. */
 function decodeStream(obj: RawObject): { bytes?: Uint8Array; warning?: string } {
   if (!obj.stream) return {};
@@ -193,11 +196,11 @@ function decodeStream(obj: RawObject): { bytes?: Uint8Array; warning?: string } 
       // used gives shifted rubbish, so it is refused rather than guessed at.
       if (/\/Predictor\s+(\d+)/.test(obj.head)) {
         const p = Number(/\/Predictor\s+(\d+)/.exec(obj.head)![1]);
-        if (p > 1) return { warning: `object ${obj.num} uses predictor ${p}, which this reader does not undo` };
+        if (p > 1) return { warning: PARTLY_UNREAD };
       }
       return { bytes: out };
     } catch {
-      return { warning: `object ${obj.num} is compressed in a way this reader could not inflate` };
+      return { warning: PARTLY_UNREAD };
     }
   }
 
@@ -208,7 +211,7 @@ function decodeStream(obj: RawObject): { bytes?: Uint8Array; warning?: string } 
     }
   }
   if (filter.includes('ASCIIHexDecode')) return { bytes: fromHex(latin1(obj.stream)) };
-  return { warning: `object ${obj.num} uses ${filter}, which this reader does not decode` };
+  return { warning: PARTLY_UNREAD };
 }
 
 function fromHex(s: string): Uint8Array {
@@ -512,26 +515,21 @@ export function isEncrypted(bytes: Uint8Array): boolean {
 }
 
 export function readPdf(bytes: Uint8Array, options: ReadPdfOptions = {}): PdfDocument {
-  if (!isPdf(bytes)) throw new PdfError('Not a PDF — the file does not start with %PDF-.');
+  if (!isPdf(bytes)) throw new PdfError('That file is not a PDF.');
 
   if (isEncrypted(bytes)) {
     throw new PdfError(
-      'This PDF is encrypted by its publisher to prevent its text being copied. Every Australian '
-      + 'Standard is published this way. Safe QLD will not strip that protection — read it in your '
-      + 'own licensed viewer, and use the clause index in this app to find which clause you want.',
+      'This PDF is locked by its publisher, like most Australian Standards. Open it in your own viewer.',
     );
   }
 
   const objects = scanObjects(bytes);
-  if (!objects.size) throw new PdfError('No PDF objects found. The file is truncated or not a PDF.');
+  if (!objects.size) throw new PdfError('That PDF is damaged or incomplete.');
 
   const warnings = new Set<string>();
   const { pages: pageObjs, ordered } = pageObjects(objects);
   if (!ordered && pageObjs.length) {
-    warnings.add(
-      'The page tree could not be walked, so pages are in object order rather than reading order. '
-      + 'The text is all here; a page number cited from it may not match the printed one.',
-    );
+    warnings.add('Pages may be out of order, so page numbers may not match the print.');
   }
 
   const limit = options.maxPages ?? pageObjs.length;
@@ -577,11 +575,7 @@ export function readPdf(bytes: Uint8Array, options: ReadPdfOptions = {}): PdfDoc
   const words = text.split(/\s+/).filter((w) => w.length > 2 && /[a-z]/i.test(w));
   const perPage = pages.length ? words.length / pages.length : 0;
   if (perPage < WORDS_PER_PAGE_FLOOR || letterRatio(text) < 0.4) {
-    warnings.add(
-      'No readable text. This is almost certainly a scan of a paper original — a picture of the '
-      + 'words rather than the words — and nothing can extract text that is not there. Searching '
-      + 'it will find nothing, so it has not been indexed.',
-    );
+    warnings.add('No readable text. It looks like a scan, so there is nothing to search.');
     return { pages: [], text: '', info: readInfo(objects), warnings: [...warnings] };
   }
 

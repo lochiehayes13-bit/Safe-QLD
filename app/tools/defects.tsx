@@ -1,48 +1,47 @@
 import React, { useMemo, useState } from 'react';
-import { ScrollView, TextInput, View } from 'react-native';
-import { Stack } from 'expo-router';
+import { ScrollView, View } from 'react-native';
+import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
-  DEFECT_LIBRARY, SEVERITY_LABEL, searchDefects, type DefectCode,
+  DEFECT_LIBRARY, SEVERITY_LABEL, type DefectCode,
 } from '@/seed/defectLibrary';
 import { SYSTEM_LABELS } from '@/seed/assetTypes';
+import { defectSearchText, filterByWords } from '@/domain/docSearch';
 import { useTheme } from '@/theme';
-import { Card, Chip, Divider, EmptyState, Label, Rowed, Screen, Txt } from '@/components/ui';
+import { Card, Chip, Divider, EmptyState, Label, Rowed, Screen, SearchBox, Txt } from '@/components/ui';
 
-/** Defect library reference — the wording that goes on a report. */
+/**
+ * Defect library reference — the wording that goes on a report.
+ *
+ * Opened with `?code=` from a search result, the code goes into the search box
+ * so that defect's card is the one on screen; clearing the box shows the rest.
+ */
 export default function DefectLibraryScreen() {
   const t = useTheme();
-  const [search, setSearch] = useState('');
+  const { code } = useLocalSearchParams<{ code?: string }>();
+  const [search, setSearch] = useState(code ?? '');
   const [system, setSystem] = useState<string>();
+
+  // A second search result opening this screen again brings a new code.
+  const [lastCode, setLastCode] = useState(code);
+  if (code !== lastCode) {
+    setLastCode(code);
+    if (code) { setSearch(code); setSystem(undefined); }
+  }
 
   const systems = useMemo(() => [...new Set(DEFECT_LIBRARY.map((d) => d.system))], []);
   const shown = useMemo(() => {
-    let list = search.trim() ? searchDefects(search) : DEFECT_LIBRARY;
+    const exact = DEFECT_LIBRARY.find((d) => d.code.toLowerCase() === search.trim().toLowerCase());
+    let list = exact ? [exact] : filterByWords(DEFECT_LIBRARY, search, defectSearchText);
     if (system) list = list.filter((d) => d.system === system);
     return list;
   }, [search, system]);
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Defect library' }} />
+      <Stack.Screen options={{ title: 'Defect wording' }} />
       <Screen>
-        <View
-          style={{
-            flexDirection: 'row', alignItems: 'center', gap: t.space(2),
-            backgroundColor: t.color.surfaceAlt, borderRadius: t.radius.md,
-            borderWidth: 1, borderColor: t.color.border,
-            paddingHorizontal: t.space(3), minHeight: t.touch,
-          }}
-        >
-          <MaterialCommunityIcons name="magnify" size={20} color={t.color.textFaint} />
-          <TextInput
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search defects and wording"
-            placeholderTextColor={t.color.textFaint}
-            style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md }}
-          />
-        </View>
+        <SearchBox value={search} onChange={setSearch} placeholder="Search defects and wording" />
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.space(2) }}>
           <Chip label={`All ${DEFECT_LIBRARY.length}`} selected={!system} onPress={() => setSystem(undefined)} />
@@ -55,7 +54,10 @@ export default function DefectLibraryScreen() {
 
         {shown.length ? shown.map((d) => <DefectCard key={d.code} defect={d} />) : (
           <EmptyState
-          icon="magnify-close" title="Nothing matched" body="Try a shorter search or clear the system filter." />
+            icon="magnify-close"
+            title="No match"
+            body="Try fewer words or clear the system filter."
+          />
         )}
       </Screen>
     </>

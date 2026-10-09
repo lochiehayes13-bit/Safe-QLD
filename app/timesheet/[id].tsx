@@ -7,11 +7,14 @@ import { getTimesheet, listTimesheets, saveTimesheet } from '@/db/timesheetRepo'
 import { jobCount, jobSummariesByExternalIds, openJobPicks, searchJobPicks, type JobPick } from '@/db/opsRepo';
 import { listScheduleFor } from '@/db/scheduleRepo';
 import { getEmployee } from '@/db/employeeRepo';
-import { whoseSchedule, type ScheduleEntry } from '@/domain/myDay';
-import { entriesFromSchedule, fillFromPosition, fillSummary, fillsOnOpen, type TimesheetFill } from '@/domain/timesheetFromSchedule';
+import { whoseSchedule } from '@/domain/myDay';
+import {
+  blocksFromSchedule, blocksFromTimesheet, entriesFromSchedule, fillFromPosition, fillModeFor, fillSummary, fillsOnOpen,
+  rememberFilled, type TimesheetFill, type WorkBlock,
+} from '@/domain/timesheetFromSchedule';
 import { listSiteSummaries } from '@/db/repo';
 import { deleteEntry, insertClosedEntry, listEntriesBetween } from '@/db/clockRepo';
-import { listSetupActivities } from '@/db/moreRepo';
+import { listSetupActivities, listSimproTimesheets } from '@/db/moreRepo';
 import { queueClockEntry } from '@/simpro/outboundMore';
 import {
   bookableLeaveKind, buildLeaveEntry, isLeaveEntry, leaveActivityFor, leaveKind as leaveKindById,
@@ -105,7 +108,7 @@ export default function TimesheetScreen() {
    * on it, so a construction crew's week fills in one tap. `who` is false
    * where the device does not know whose schedule to read.
    */
-  const [schedule, setSchedule] = useState<{ blocks: ScheduleEntry[]; sites: Map<string, { siteName: string; siteId?: string }> } | null>(null);
+  const [schedule, setSchedule] = useState<{ blocks: WorkBlock[]; sites: Map<string, { siteName: string; siteId?: string }> } | null>(null);
   const [knowsWho, setKnowsWho] = useState(true);
   const [fillPref, setFillPref] = useState<'' | TimesheetFill>('');
   const [suggestedFill, setSuggestedFill] = useState<TimesheetFill | undefined>(undefined);
@@ -146,38 +149,54 @@ export default function TimesheetScreen() {
       const [prefs, synced] = await Promise.all([loadPrefs(), listSetupActivities()]);
       setEmployeeId(prefs.simproEmployeeId.trim());
       setActivities(synced.map((a) => ({ id: a.id, name: a.name })));
-      setFillPref(prefs.timesheetFill);
 
-      // The person's own schedule for the week, read off the last sync.
+      // The person's own blocks for the week, read off the last sync: their
+      // Simpro timesheet where the phone knows who they are, block by block
+      // with its rate, else the office's schedule under their name.
+      const mode = fillModeFor(prefs);
+      setFillPref(mode ?? '');
       const who = whoseSchedule(prefs);
       setKnowsWho(!!who);
       if (who && week.length) {
-        const blocks = await listScheduleFor({
-          staffId: who.by === 'id' ? who.staffId : undefined,
-          staffName: who.by === 'name' ? who.staffName : undefined,
-          from: week[0]!, to: week[week.length - 1]!,
-        });
+        const from = week[0]!;
+        const to = week[week.length - 1]!;
+        const own = who.by === 'id' ? await listSimproTimesheets({ employeeId: who.staffId, from, to }) : [];
+        const blocks = own.length
+          ? blocksFromTimesheet(own, new Map(synced.map((a) => [a.id, a.name])))
+          : blocksFromSchedule(await listScheduleFor({
+            staffId: who.by === 'id' ? who.staffId : undefined,
+            staffName: who.by === 'name' ? who.staffName : undefined,
+            from, to,
+          }));
         const held = await jobSummariesByExternalIds(blocks.map((b) => b.jobId).filter((j): j is string => !!j));
         const sites = new Map(held
           .filter((j) => j.externalId)
           .map((j) => [j.externalId!, { siteName: j.siteName ?? '', siteId: j.siteId ?? undefined }]));
         setSchedule({ blocks, sites });
         /*
-         * A construction crew's new week fills itself. Only a week nobody has
-         * touched — created and never saved since — so clearing a day by hand
-         * is not undone the next time the week opens.
+         * A construction crew's week fills itself as it goes: each time the
+         * week opens, the days up to today that are empty and have never been
+         * filled. A day cleared by hand is remembered as filled, so it stays
+         * cleared, and days still ahead wait until they have happened.
          */
-        if (found && !autoTried.current && fillsOnOpen(found, prefs.timesheetFill)) {
+        if (found && !autoTried.current && fillsOnOpen(found, mode)) {
           autoTried.current = true;
-          const fill = entriesFromSchedule({ week, blocks, sites, existing: [], newId });
+          const today = qldIsoDay(nowIso()) ?? '';
+          const remembered = Array.isArray(prefs.timesheetFilledDays) ? prefs.timesheetFilledDays : [];
+          const fill = entriesFromSchedule({
+            week, blocks, sites, existing: found.entries, newId, upTo: today, skip: new Set(remembered),
+          });
           if (fill.entries.length) {
-            const next = { ...found, entries: fill.entries };
+            const next = { ...found, entries: [...found.entries, ...fill.entries] };
             await saveTimesheet(next);
             setSheet(next);
             setAutoFilled(true);
           }
+          if (fill.filled.length || fill.kept.length) {
+            await patchPrefs({ timesheetFilledDays: rememberFilled(remembered, [...fill.filled, ...fill.kept], today) });
+          }
         }
-        if (!prefs.timesheetFill && prefs.simproEmployeeId.trim()) {
+        if (!mode && prefs.simproEmployeeId.trim()) {
           const me = await getEmployee(prefs.simproEmployeeId.trim()).catch(() => null);
           setSuggestedFill(fillFromPosition(me?.position));
         }
@@ -233,8 +252,8 @@ export default function TimesheetScreen() {
     if (!unbookedLeave.length) return;
     if (!employeeId) {
       showAlert(
-        'Not signed in as yourself',
-        'Booking a day off needs to know whose Simpro schedule it goes on. Sign in from Settings, then try again.',
+        'Pick yourself first',
+        'Choose who you are in Settings, then try again.',
       );
       return;
     }
@@ -286,11 +305,17 @@ export default function TimesheetScreen() {
   /** Fills the days that are still empty from this person's Simpro schedule. */
   const fillFromSchedule = useCallback(() => {
     if (!sheet || !schedule) return;
+    const today = qldIsoDay(nowIso()) ?? '';
     const fill = entriesFromSchedule({
       week: weekDates(sheet.weekStarting), blocks: schedule.blocks, sites: schedule.sites,
-      existing: sheet.entries, newId,
+      existing: sheet.entries, newId, upTo: today,
     });
     if (fill.entries.length) setEntries([...sheet.entries, ...fill.entries]);
+    if (fill.filled.length) {
+      void loadPrefs().then((p) => patchPrefs({
+        timesheetFilledDays: rememberFilled(Array.isArray(p.timesheetFilledDays) ? p.timesheetFilledDays : [], fill.filled, today),
+      }));
+    }
     const said = fillSummary(fill);
     showAlert(said.title, said.body);
   }, [sheet, schedule, setEntries]);
@@ -452,15 +477,15 @@ export default function TimesheetScreen() {
         { to: route.to, subject: timesheetSubject(sheet), body: timesheetBody(sheet) },
         page ? [file, page] : [file],
       );
-      const pageNote = page ? '' : ' The readable copy could not be made on this phone, so only the workbook went.';
+      const pageNote = page ? '' : ' Spreadsheet only attached.';
 
       if (outcome === 'no-mail-app') {
-        showAlert('No mail app set up', 'This phone has no email account configured. Use Export and attach the file yourself.');
+        showAlert('No mail app', 'No mail account on this phone. Use Export.');
         return;
       }
       if (outcome === 'sent') {
         void persist({ status: 'submitted' });
-        showAlert('Sent', `Your week has gone to ${routeAddresses(route)} and is marked submitted.${pageNote}`);
+        showAlert('Sent', `Sent to ${routeAddresses(route)}.${pageNote}`);
         return;
       }
       if (outcome === 'offered') {
@@ -476,12 +501,12 @@ export default function TimesheetScreen() {
          * submitted that nobody sent.
          */
         showAlert(
-          'Draft opened — attach the file',
-          `An email to ${routeAddresses(route)} is open and ${file.name} has downloaded. Drag it onto the email, send it, then tap Mark submitted.`,
+          'Attach the file',
+          `${file.name} has downloaded. Attach it to the email to ${routeAddresses(route)}, send, then tap Mark submitted.`,
         );
         return;
       }
-      showAlert('Not sent', 'The email was not sent, so this sheet is still a draft. Nothing has gone to the office.');
+      showAlert('Not sent', 'Still a draft.');
     } catch (e) {
       showAlert('Could not send', describeActionFailure(e, 'email this timesheet'));
     } finally {
@@ -587,22 +612,26 @@ export default function TimesheetScreen() {
 
   /*
    * The week from the schedule. Offered where the schedule has something for a
-   * day that is still empty; the question of whether to do it every week is
-   * asked once, beside it. Someone who said they type their own (service, whose
-   * day is rarely what was booked) is not asked again here; Timesheets has the
-   * setting.
+   * day up to today that is still empty; whether to do it every week is asked
+   * once, beside it. Someone who types their own (service, whose day is rarely
+   * what was booked) gets the fill as a small chip, not a card.
    */
+  const todayIso = qldIsoDay(nowIso()) ?? '';
   const emptyScheduledDays = schedule
-    ? [...new Set(schedule.blocks.map((b) => b.date))].filter((d) => days.includes(d) && !sheet.entries.some((e) => e.date === d))
+    ? [...new Set(schedule.blocks.map((b) => b.date))]
+      .filter((d) => days.includes(d) && d <= todayIso && !sheet.entries.some((e) => e.date === d))
     : [];
-  const fromSchedule = sheet.status === 'draft' && fillPref !== 'manual'
-    && (emptyScheduledDays.length || autoFilled || (!knowsWho && fillPref === 'schedule')) ? (
+  const fromSchedule = sheet.status !== 'draft' ? null : fillPref === 'manual' ? (emptyScheduledDays.length ? (
+    <Rowed gap={2} wrap>
+      <Chip label="Fill from my schedule" onPress={() => fillFromSchedule()} />
+    </Rowed>
+  ) : null) : (emptyScheduledDays.length || autoFilled || (!knowsWho && fillPref === 'schedule')) ? (
     <Card>
       {autoFilled ? (
         <Txt size="sm" weight="700">Filled from your Simpro schedule. Check the times.</Txt>
       ) : null}
       {!knowsWho ? (
-        <Txt size="sm" tone="muted">Pick yourself in Settings to fill this from your Simpro schedule.</Txt>
+        <Txt size="sm" tone="muted">Pick yourself in Settings first.</Txt>
       ) : null}
       {emptyScheduledDays.length ? (
         <Button
@@ -636,14 +665,13 @@ export default function TimesheetScreen() {
   const notBooked = unbookedLeave.length ? (
     <Card>
       <Txt weight="700">
-        {unbookedLeave.length} day{unbookedLeave.length === 1 ? '' : 's'} off on this sheet the office cannot see
+        {unbookedLeave.length} day{unbookedLeave.length === 1 ? '' : 's'} off not in Simpro
       </Txt>
       <Txt size="sm" tone="muted" style={{ marginTop: t.space(1), lineHeight: 19 }}>
         {unbookedLeave.map((l) => `${dayName(l.date)} ${formatAuDate(l.date)} — ${l.activity.name}`).join('\n')}
       </Txt>
       <Txt size="sm" tone="muted" style={{ marginTop: t.space(2), lineHeight: 19 }}>
-        Marking a day off here puts the hours on your pay. It does not put the day on your Simpro schedule, so
-        the person building next week’s run still has you available.
+        Add them so the office knows you're away.
       </Txt>
       <Button
         title="Put them on my Simpro schedule"
@@ -748,8 +776,7 @@ export default function TimesheetScreen() {
         * the technician is the one who finds out if those differ.
         */}
       <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-        Goes to {routeAddresses(route)} from your own mail app, so they can reply to you. Nothing is
-        marked submitted until the mail app says it sent.
+        Sends to {routeAddresses(route)} from your mail app.
       </Txt>
     </View>
   );
@@ -947,7 +974,7 @@ function DayCard({
       {leave && jobs.length ? (
         <Banner
           tone="warn"
-          title={`This day is marked off and has ${worked} h of work on it`}
+          title={`Day off and ${worked} h of work`}
           body={`Payroll gets both — ${worked} h worked and ${leave.hours} h ${LEAVE_LABEL[leave.kind].toLowerCase()}, `
             + `${Math.round((worked + leave.hours) * 100) / 100} h for the day. Clear whichever is wrong.`}
         />
@@ -971,7 +998,7 @@ function DayCard({
             style={{ minHeight: 44, justifyContent: 'center' }}
           >
             <Txt size="sm" tone="accent" weight="700">
-              {jobs.length ? 'I worked this day — take the leave off' : 'Actually, I worked — clear this'}
+              {jobs.length ? 'Remove the day off' : 'Clear the day off'}
             </Txt>
           </Pressable>
         </View>
@@ -1113,7 +1140,7 @@ function JobEntry({
             value={entry.hoursOverride ?? ''}
             onChange={(v) => onChange({ ...entry, hoursOverride: v })}
             keyboardType="decimal-pad"
-            placeholder="Only if the times do not tell the whole story"
+            placeholder="e.g. 7.5"
             theme={t}
           />
         </View>
@@ -1286,7 +1313,7 @@ function JobPicker({
         <ScrollView contentContainerStyle={{ padding: t.space(4), gap: t.space(2) }}>
           <Pressable onPress={onBlank} style={{ padding: t.space(3.5), borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.color.border, borderStyle: 'dashed' }}>
             <Txt weight="700">Type it myself</Txt>
-            <Txt size="xs" tone="muted">A job that is not in this list yet</Txt>
+            <Txt size="xs" tone="muted">Not in the list</Txt>
           </Pressable>
           {filtered.map((o) => (
             <Pressable

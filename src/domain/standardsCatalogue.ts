@@ -944,7 +944,7 @@ export const STANDARDS: StandardDoc[] = [
     status: "current",
     systems: ["detection", "ews", "hydrant", "hose-reel", "extinguisher", "sprinkler", "pump", "passive", "door", "emergency-lighting"],
     officialUrl: "https://store.standards.org.au/product/as-1851-2012",
-    note: "The maintenance standard this app is built around, and the one QDC MP 6.1 calls up in Queensland. Only the sections Safe QLD has confirmed against its own copy are listed \u2014 the rest are deliberately absent rather than guessed at, because citing the wrong section on a service record is worse than citing none.",
+    note: "The maintenance standard QDC MP 6.1 calls up in Queensland. Only sections checked against our copy are listed.",
     clauses: [
       { ref: "1.16.2", title: "Critical defects",
         covers: "What AS 1851 classes as a critical defect. This is NOT the same test as the Queensland two-limb test in the Building Fire Safety Regulation, and the app keeps them separate for that reason.",
@@ -1438,7 +1438,7 @@ export const STANDARDS: StandardDoc[] = [
     status: "current",
     systems: ["electrical", "detection", "emergency-lighting", "pump"],
     officialUrl: "https://store.standards.org.au/product/as-nzs-3000-2018",
-    note: "The document behind every supply this company installs \u2014 a FIP submain, a booster pump feeder, an emergency lighting subcircuit. Its clause index is not listed here because nobody has read it in against Safe QLD's own copy, and this register only carries clause numbers taken from the documents themselves. The app implements the method the Wiring Rules and AS/NZS 3008 set out rather than quoting either: see Cable sizing, which runs the four checks against capacity figures loaded from the office's own copy.",
+    note: "Covers every supply we install: FIP submains, booster pump feeders, emergency lighting subcircuits. No clause list yet. For sizing, use Cable sizing.",
     clauses: [],
   },
   {
@@ -1449,7 +1449,7 @@ export const STANDARDS: StandardDoc[] = [
     status: "current",
     systems: ["electrical", "detection", "emergency-lighting", "pump"],
     officialUrl: "https://store.standards.org.au/product/as-nzs-3008-1-1-2017",
-    note: "The current-carrying capacity, derating and volt drop tables. They are the licensed part of this document and none of them is reproduced anywhere in this app \u2014 the office loads its own figures once, from its own copy or a manufacturer's catalogue, and every answer prints where the figure was read. The arithmetic around them is computed rather than quoted: resistance at the conductor's operating temperature, the reactive part of a volt drop, and the short-circuit constant derived from the metal's own properties.",
+    note: "Current-carrying capacity, derating and volt drop tables. Not held here: the office loads its own figures into Cable sizing.",
     clauses: [],
   },
   {
@@ -1460,7 +1460,7 @@ export const STANDARDS: StandardDoc[] = [
     status: "current",
     systems: [],
     officialUrl: "https://www.business.qld.gov.au/industries/building-property-development/building-construction/laws-codes-standards/queensland-development-code/current-parts",
-    note: "Queensland Government material, published free. Unlike an Australian Standard this can be reproduced in full, and the app does so where it needs to.",
+    note: "Queensland Government material, free to read and quote in full.",
     clauses: [
       { ref: "Schedule 1", title: "Prescribed fire safety installations",
         covers: "The list of installations the maintenance obligation attaches to. The occupier statement enumerates every one of these, including the ones a building does not have.",

@@ -1,4 +1,9 @@
-import { PAGE_THRESHOLD, markUp, searchPages, type SearchablePage } from '@/domain/docSearch';
+import {
+  PAGE_THRESHOLD, checkSearchText, defectSearchText, filterByWords, findRoutines, hasEveryWord,
+  markUp, searchPages, type SearchablePage,
+} from '@/domain/docSearch';
+import { DEFECT_LIBRARY } from '@/seed/defectLibrary';
+import { SERVICE_ROUTINES } from '@/seed/serviceRoutines';
 
 /**
  * Searching a technician's own imported documents.
@@ -108,5 +113,80 @@ describe('markUp', () => {
 
   it('ignores terms too short to be worth marking', () => {
     expect(markUp('a b c spacing', ['a', 'b'])).toEqual([]);
+  });
+});
+
+describe('hasEveryWord', () => {
+  it('finds the words in any order', () => {
+    expect(hasEveryWord('Detector head missing from base', 'missing detector')).toBe(true);
+    expect(hasEveryWord('Detector head missing from base', 'detector missing')).toBe(true);
+  });
+
+  it('needs every word, not just one', () => {
+    expect(hasEveryWord('Detector head missing from base', 'detector painted')).toBe(false);
+  });
+
+  it('narrows on a half-typed word', () => {
+    expect(hasEveryWord('Contaminated detector', 'contam det')).toBe(true);
+  });
+
+  it('matches everything on an empty search', () => {
+    expect(hasEveryWord('anything at all', '   ')).toBe(true);
+  });
+});
+
+describe('searching the defect wording', () => {
+  it('finds a defect whatever order the words are typed in', () => {
+    const forward = filterByWords(DEFECT_LIBRARY, 'detector missing', defectSearchText).map((d) => d.code);
+    const reversed = filterByWords(DEFECT_LIBRARY, 'missing detector', defectSearchText).map((d) => d.code);
+    expect(forward).toContain('DET-DET-003');
+    expect(reversed).toEqual(forward);
+  });
+
+  it('finds a defect by its code', () => {
+    const found = filterByWords(DEFECT_LIBRARY, 'DET-DET-003', defectSearchText);
+    expect(found.map((d) => d.code)).toEqual(['DET-DET-003']);
+  });
+
+  it('finds a defect by the name of its system', () => {
+    const found = filterByWords(DEFECT_LIBRARY, 'detection contaminated', defectSearchText);
+    expect(found.map((d) => d.code)).toContain('DET-DET-002');
+  });
+
+  it('keeps the library order and returns everything on an empty search', () => {
+    expect(filterByWords(DEFECT_LIBRARY, '', defectSearchText)).toEqual(DEFECT_LIBRARY);
+  });
+});
+
+describe('searching the service routines', () => {
+  it('shows every check of a routine found by its name', () => {
+    const [hit] = findRoutines(SERVICE_ROUTINES, 'detection monthly');
+    expect(hit?.routine.id).toBe('det-monthly');
+    expect(hit?.checks).toEqual(hit?.routine.tests);
+  });
+
+  it('shows only the matching checks of a routine found through them', () => {
+    // "battery" is in one check of the monthly detection routine, not in its name.
+    const hit = findRoutines(SERVICE_ROUTINES, 'detection monthly battery')[0]!;
+    expect(hit.routine.id).toBe('det-monthly');
+    expect(hit.checks.map((c) => c.id)).toEqual(['det-m-04']);
+    expect(hit.checks.length).toBeLessThan(hit.routine.tests.length);
+  });
+
+  it('shows a routine whole when the words are spread over several checks', () => {
+    const routine = SERVICE_ROUTINES.find((r) => r.id === 'det-monthly')!;
+    const hit = findRoutines([routine], 'battery zone chart')[0]!;
+    expect(hit.checks).toEqual(routine.tests);
+    expect(routine.tests.some((c) => hasEveryWord(checkSearchText(c), 'battery zone chart'))).toBe(false);
+  });
+
+  it('finds nothing for words no routine holds', () => {
+    expect(findRoutines(SERVICE_ROUTINES, 'zzqx nonsense')).toEqual([]);
+  });
+
+  it('lists every routine whole on an empty search', () => {
+    const all = findRoutines(SERVICE_ROUTINES, '');
+    expect(all.map((r) => r.routine.id)).toEqual(SERVICE_ROUTINES.map((r) => r.id));
+    for (const r of all) expect(r.checks).toEqual(r.routine.tests);
   });
 });

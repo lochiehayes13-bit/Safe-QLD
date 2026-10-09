@@ -83,20 +83,17 @@ export default function BfsrScreen() {
 
   return (
     <Screen>
-      <Stack.Screen options={{ title: 'The regulation' }} />
+      <Stack.Screen options={{ title: 'Fire safety regulation' }} />
 
       <View>
         <H2>{BFSR_CITATION.title}</H2>
         <Txt size="sm" tone="muted">
           {BFSR_CITATION.instrument} · made under the {BFSR_CITATION.madeUnder}
         </Txt>
+        <Txt size="xs" tone="faint" style={{ marginTop: t.space(1) }}>
+          {BFSR_CITATION.reproductionNote}
+        </Txt>
       </View>
-
-      <Banner
-        tone="info"
-        title="Reproduced, not summarised, where the words decide something"
-        body={BFSR_CITATION.reproductionNote}
-      />
 
       <Field
         label="Search"
@@ -107,7 +104,7 @@ export default function BfsrScreen() {
       />
 
       <Rowed gap={2} wrap>
-        <Chip label="Everything" selected={duty === null} onPress={() => setDuty(null)} />
+        <Chip label="All" selected={duty === null} onPress={() => setDuty(null)} />
         {DUTIES.map((d) => (
           <Chip
             key={d}
@@ -154,9 +151,7 @@ export default function BfsrScreen() {
       {!matches.length ? (
         <Card>
           <Txt tone="muted">
-            Nothing in the indexed sections matches that. This is not the whole regulation — the fee
-            parts and most transitional provisions are left out because nothing in this app touches
-            them. Part 5, which carries the maintenance obligations, is complete.
+            No match. Fee and transitional sections aren&rsquo;t included.
           </Txt>
         </Card>
       ) : null}
@@ -166,8 +161,7 @@ export default function BfsrScreen() {
 
       <Card>
         <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-          The current consolidation is on the Queensland legislation register, free. What is here is
-          an index to it, not a substitute for it.
+          Full current text is on the Queensland legislation site.
         </Txt>
         <Button
           title="Open the regulation"
@@ -250,14 +244,14 @@ function SectionCard({ section }: { section: BfsrSection }) {
           ) : null}
 
           <Txt size="xs" tone={verification.confidence === 'high' ? 'muted' : 'warn'} style={{ lineHeight: 16 }}>
-            {verification.source}, as at {verification.asAt}.
+            {verification.source} · {verification.asAt}
           </Txt>
 
           {section.appFeature ? (
             <Pressable onPress={() => router.push(`/${section.appFeature}` as never)}>
               <Rowed gap={2}>
                 <MaterialCommunityIcons name="arrow-right-circle-outline" size={15} color={t.color.accentText} />
-                <Txt size="sm" tone="accent">Open what this app does about it</Txt>
+                <Txt size="sm" tone="accent">Open in the app</Txt>
               </Rowed>
             </Pressable>
           ) : null}
@@ -289,7 +283,7 @@ function CriticalDefectCard() {
       <Txt size="sm" style={{ lineHeight: 20 }}>b. {CRITICAL_DEFECT_TEST.limbB}</Txt>
       <Banner
         tone="warn"
-        title={CRITICAL_DEFECT_TEST.bothRequired ? 'Both limbs, not either' : 'Either limb'}
+        title={CRITICAL_DEFECT_TEST.bothRequired ? 'Both a and b must apply' : 'Either a or b applies'}
         body={CRITICAL_DEFECT_TEST.note}
       />
       <Divider />
@@ -307,8 +301,7 @@ function CriticalDefectCard() {
         </Rowed>
       ))}
       <Txt size="xs" tone="faint" style={{ lineHeight: 16 }}>
-        The second one is the call that gets made wrong under time pressure: one dead extinguisher
-        out of several in a part of a building is expressly not a critical defect.
+        One dead extinguisher among several is not critical.
       </Txt>
     </Card>
   );
@@ -328,8 +321,7 @@ function RepealedCard() {
     <Card>
       <Txt weight="600" size="sm">Repealed sections</Txt>
       <Txt size="xs" tone="muted" style={{ lineHeight: 17 }}>
-        These turn up in old reports and old advice. Listed so a search for one gives the answer
-        rather than nothing.
+        Still cited in old reports.
       </Txt>
       {entries.map(([section, note]) => (
         <Rowed key={section} gap={2} align="flex-start">

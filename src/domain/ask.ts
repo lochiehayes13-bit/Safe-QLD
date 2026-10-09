@@ -70,7 +70,7 @@ export const COVERAGE = [
   'Device addressing by protocol',
   'Equipment types and their attributes',
   'The calculators and what each one needs',
-  'Which clause of which standard covers a subject, across the whole catalogue',
+  'Which clause of which standard covers a subject',
 ];
 
 interface CalculatorDef {
@@ -89,19 +89,19 @@ interface CalculatorDef {
 export const CALCULATORS: CalculatorDef[] = [
   {
     title: 'Battery sizing',
-    body: 'Sizes a standby battery from measured quiescent and alarm currents to the Australian formula, and shows its working. Standby defaults to 72 hours — the familiar 24 hours applies only where the power-supply-failure signal is continuously monitored.',
+    body: 'Standby battery size from measured quiescent and alarm currents, with the working shown. Standby is 72 hours, or 24 hours where power-supply failure is continuously monitored.',
     route: '/tools/battery',
     terms: ['battery', 'standby', 'ah', 'amp hour', 'capacity', 'quiescent', 'alarm current', '72 hour', '24 hour', 'charger', 'sla', 'vrla'],
   },
   {
     title: 'VESDA and aspirating sizing',
-    body: 'Derives aspirator current from published watts rather than storing pre-rounded milliamps, and refuses an unpublished setting instead of interpolating across a curve that is not linear.',
+    body: 'Aspirator current from the published watts, for published settings only.',
     route: '/tools/vesda',
     terms: ['vesda', 'aspirating', 'asd', 'aspirator', 'laserplus', 'vlf', 'vli', 'sampling'],
   },
   {
     title: 'Cable volt drop',
-    body: 'Volt drop for a run, using copper at 75 °C rather than the 20 °C bench figure, and counting DC and single-phase runs twice for the return path.',
+    body: 'Volt drop for a cable run, with copper at 75 °C. DC and single-phase runs count the return path.',
     route: '/tools/voltdrop',
     terms: ['volt drop', 'voltage drop', 'cable', 'csa', 'copper', 'resistance', 'run length'],
   },
@@ -119,13 +119,13 @@ export const CALCULATORS: CalculatorDef[] = [
   },
   {
     title: 'End-of-line reference',
-    body: 'End-of-line values by panel and circuit. There is deliberately no universal table: several Australian panels sense current or voltage bands rather than resistance.',
+    body: 'End-of-line values by panel and circuit. Some panels sense current or voltage, not resistance.',
     route: '/tools/eol',
     terms: ['eol', 'end of line', 'end-of-line', 'terminating', 'resistor value', 'line monitoring'],
   },
   {
     title: 'Units and conversions',
-    body: 'Conversions a fire technician actually reaches for, each showing the factor used.',
+    body: 'Common fire trade conversions, with the factor shown.',
     route: '/tools/converter',
     terms: ['convert', 'conversion', 'unit', 'kpa', 'psi', 'metre', 'feet', 'litre'],
   },
@@ -376,7 +376,7 @@ export function ask(query: string, limit = 12): Answer[] {
       body: code.rectification || code.reportWording,
       source: `Safe QLD defect library · ${SYSTEM_LABELS[code.system]}`,
       confidence: 'high',
-      route: '/tools/defects',
+      route: `/tools/defects?code=${encodeURIComponent(code.code)}`,
     }, score(q, code.code, hay, implied, consumed));
   }
 
@@ -395,7 +395,7 @@ export function ask(query: string, limit = 12): Answer[] {
         // to come from the standard or the manual, so it is not a high-
         // confidence answer on its own.
         confidence: test.verify ? 'low' : 'high',
-        route: '/tools/routines',
+        route: `/tools/routines?id=${encodeURIComponent(routine.id)}`,
       }, score(q, test.label, hay, implied, consumed));
     }
   }
@@ -506,8 +506,7 @@ export function ask(query: string, limit = 12): Answer[] {
       ].filter(Boolean).join(' ');
 
       const body = clause.covers
-        ?? `${doc.designation} clause ${clause.ref}. Nobody has written up what this clause covers, `
-          + 'so the app is not going to guess — open your own copy of the standard.';
+        ?? `${doc.designation} clause ${clause.ref}. No notes yet. Open your own copy at this clause.`;
 
       /*
        * A clause whose TITLE is about the thing asked beats one that only

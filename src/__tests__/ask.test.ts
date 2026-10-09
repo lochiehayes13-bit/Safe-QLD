@@ -199,7 +199,7 @@ describe('the standards catalogue', () => {
      */
     const bare = ask('AS 2419.1 clause 1.1')[0]!;
     expect(bare.confidence).toBe('low');
-    expect(bare.body).toContain('not going to guess');
+    expect(bare.body).toContain('No notes yet');
   });
 
   it('still refuses a question it cannot answer', () => {
@@ -328,13 +328,14 @@ describe('every answer the ask bar gives has a screen behind it', () => {
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/^\s*\/\/.*$/gm, '');
 
-    const literals = [...source.matchAll(/route:\s*'(\/[^']*)'/g)].map((m) => m[1] ?? '');
+    // A query string picks the card on the screen; the screen is the path before it.
+    const literals = [...source.matchAll(/route:\s*'(\/[^']*)'/g)].map((m) => (m[1] ?? '').replace(/\?.*$/, ''));
     const templated = [...source.matchAll(/route:\s*`(\/[^`]*)`/g)]
-      .map((m) => (m[1] ?? '').replace(/\$\{[^}]*\}/g, 'stand-in'));
+      .map((m) => (m[1] ?? '').replace(/\$\{[^}]*\}/g, 'stand-in').replace(/\?.*$/, ''));
 
     // The matcher has to be seeing something, or this passes over nothing.
-    expect(literals.length).toBeGreaterThanOrEqual(10);
-    expect(templated.length).toBeGreaterThanOrEqual(1);
+    expect(literals.length).toBeGreaterThanOrEqual(8);
+    expect(templated.length).toBeGreaterThanOrEqual(3);
 
     const dead = [...literals, ...templated].filter((r) => !matches(r));
     expect(dead).toEqual([]);

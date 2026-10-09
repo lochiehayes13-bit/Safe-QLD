@@ -173,6 +173,8 @@ export interface Prefs {
    * timesheet asks once.
    */
   timesheetFill: '' | 'schedule' | 'manual';
+  /** Days this phone has filled from the schedule, so a day cleared by hand is not filled again. */
+  timesheetFilledDays: string[];
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -224,6 +226,7 @@ export const DEFAULT_PREFS: Prefs = {
   // The website's look, light on paper. Dark is a choice in Settings.
   theme: 'light',
   timesheetFill: '',
+  timesheetFilledDays: [],
 };
 
 export async function loadPrefs(): Promise<Prefs> {
