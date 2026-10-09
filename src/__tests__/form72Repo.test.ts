@@ -57,6 +57,9 @@ const completable: Partial<Form72> = {
   licenseeName: 'D. McKee',
   licenceNumber: '1310717',
   signature: 'data:image/png;base64,AAA',
+  // A new form starts with the company's two meters on it (seedDevices), and a
+  // meter with no kind ticked blocks. Answered here as the technician would.
+  flowDeviceKinds: ['mechanical'],
 };
 
 describe('the attachment columns v34 added', () => {
@@ -228,7 +231,7 @@ describe('the fields that ride inside the JSON parts', () => {
     expect(back!.devices).toHaveLength(2);
     expect(back!.devices[0]).toMatchObject({
       serialNumber: 'SQF-001',
-      correctionFactor: '+0.35 % (MM Error)',
+      correctionFactor: 'Meter error +0.35 % at certification (reads high); correction −0.35 %',
       calibrationBasis: 'service-life',
       kind: 'flow-meter',
       dateCalibrated: '2026-07-18',

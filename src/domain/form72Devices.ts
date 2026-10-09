@@ -1,4 +1,4 @@
-import type { FlowDeviceKind, TestDevice } from '@/domain/form72';
+import { deviceSlotName, type FlowDeviceKind, type TestDevice } from '@/domain/form72';
 
 /**
  * Safe QLD's own test equipment, so Part C is a tap rather than a typing job.
@@ -82,6 +82,11 @@ export const DEVICE_PRESET_SOURCE = 'Transcribed from the Flowtech Omega Series 
  */
 const FLOWTECH_MODEL = 'Flowtech Omega Series inline meter, DN80';
 
+/** The certificate's issuer, signatory and accuracy claim, as the page prints them. */
+const FLOWTECH_ISSUER = 'Flowtech Water Meters';
+const FLOWTECH_CERTIFIER = 'Lawrence Coomber';
+const FLOWTECH_ACCURACY = 'MMPE ±2 % of full scale, near Class 2 water meter equivalence';
+
 const flowtech = (serial: string, report: string): DevicePreset => ({
   id: `flowtech-${serial.toLowerCase()}`,
   label: `Inline meter ${serial}`,
@@ -131,18 +136,23 @@ const flowtech = (serial: string, report: string): DevicePreset => ({
     dateCalibrated: '2026-07-18',
     calibrationCertificate: report,
     /*
-     * The certificate's own words, not a translation of them.
+     * The certificate's figure, with its sense spelled out.
      *
-     * It states "MM Error: + 0.35 %" — the device's mean measured error. Part C
-     * asks for a correction factor in kPa or a percentage, and that figure is
-     * what a technician would apply, but writing it as a bare "+0.35 %"
-     * silently turns the manufacturer's accuracy statement into our correction
-     * factor. The label travels with the number so a reader can see which claim
-     * is being made and go and check the certificate.
+     * It states "MM Error: + 0.35 %" — the meter's mean measured error, which
+     * by the convention every calibration report uses is indicated minus true:
+     * a positive error is a meter reading high. Part C asks for a correction
+     * factor, and a correction is the error with its sign reversed. Printed
+     * as a bare "+0.35 %" the page handed a reader the error as though it
+     * were the correction, and applying it would move a reading the wrong
+     * way. So both facts print, each named: what the certificate measured,
+     * and what to apply.
      */
-    correctionFactor: '+0.35 % (MM Error)',
+    correctionFactor: 'Meter error +0.35 % at certification (reads high); correction −0.35 %',
     calibrationBasis: 'service-life',
     digitalReader: true,
+    issuedBy: FLOWTECH_ISSUER,
+    certifiedBy: FLOWTECH_CERTIFIER,
+    accuracy: FLOWTECH_ACCURACY,
     /*
      * Face size and increments are deliberately absent. They describe a
      * pressure gauge's dial, and this is a flow meter — there is no 100 mm face
@@ -161,6 +171,61 @@ export const DEVICE_PRESETS: DevicePreset[] = [
 /** A preset by its id, for a screen that stores the choice rather than the device. */
 export function devicePreset(id: string): DevicePreset | undefined {
   return DEVICE_PRESETS.find((p) => p.id === id);
+}
+
+/**
+ * The preset's device as it should go onto a form today: from the certificate
+ * transcribed here, unless this phone has seen the meter recertified since.
+ *
+ * A meter comes back from a repair with a new certificate, and the technician
+ * holding it edits the date and report number on that day's form. Every later
+ * form offered the preset again, with the superseded certificate on it, and
+ * the "used before" list dropped the corrected row because its serial was a
+ * preset's. So a remembered row for a preset's serial with a later calibration
+ * date is the current certificate, and it is what goes on — laid over the
+ * preset, so a field the technician left blank keeps the transcribed value.
+ * `recertified` carries the date, so the chip can say it is not the
+ * certificate in the code.
+ */
+export function currentPresetDevice(
+  preset: DevicePreset,
+  remembered: readonly { device: Omit<TestDevice, 'slot'> }[] = [],
+): { device: Omit<TestDevice, 'slot'>; recertified?: string } {
+  const key = preset.device.serialNumber.trim().toUpperCase();
+  const later = remembered.find((r) => r.device.serialNumber?.trim().toUpperCase() === key
+    && !!r.device.dateCalibrated
+    && !!preset.device.dateCalibrated
+    && r.device.dateCalibrated > preset.device.dateCalibrated);
+  if (!later) return { device: preset.device };
+  const over = Object.fromEntries(
+    Object.entries(later.device).filter(([, v]) => v !== undefined && v !== ''),
+  ) as Partial<Omit<TestDevice, 'slot'>>;
+  return { device: { ...preset.device, ...over }, recertified: later.device.dateCalibrated };
+}
+
+/**
+ * The equipment a new form starts with.
+ *
+ * Part C is the company's two meters on nearly every hydrant form it raises,
+ * and the ask was that the calibration data be on every form without a tap.
+ * So the presets go on at creation, in the department's first columns, with
+ * whatever recertification this phone has seen. A sprinkler-only form gets
+ * them too — the system is not known when the form is made — and takes them
+ * off with one tap each; validateForm72 says so if they are left on.
+ *
+ * The pressure gauge is not seeded. It is never a preset: its certificate is
+ * not transcribed here, and the only person who can say whether last form's
+ * date still holds is the one holding the gauge. It stays one tap away on the
+ * "used before" list.
+ */
+export function seedDevices(
+  remembered: readonly { device: Omit<TestDevice, 'slot'> }[] = [],
+): TestDevice[] {
+  const out: TestDevice[] = [];
+  for (const preset of DEVICE_PRESETS) {
+    out.push({ slot: deviceSlotName(out), ...currentPresetDevice(preset, remembered).device });
+  }
+  return out;
 }
 
 /**

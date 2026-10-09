@@ -191,7 +191,9 @@ describe('Form 72 from the register', () => {
     const blank = emptyForm72({ id: 'f', siteId: 's', siteName: 'Site', now: '2026-07-03T00:00:00.000Z' });
     const patch = applyForm72Prefill(blank, prefill);
     expect(patch.systemLabel).toBe('Combined Hydrant and Sprinkler System');
-    expect(patch.flowTest?.hydrantLocations).toEqual(prefill.hydrantLocations);
+    // The site's hydrants are offered on Part D to pick from, not written in:
+    // which ones the flow test ran on is not something the register knows.
+    expect(patch.flowTest?.hydrantLocations).toEqual([]);
     expect(patch.flowTest?.onSitePumpSet).toBe(true);
     expect(patch.flowTest?.comment).toContain('Roof tank (60000 L)');
     /*

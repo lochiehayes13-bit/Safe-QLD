@@ -195,10 +195,17 @@ export default function NewForm72Screen() {
    */
   useFocusEffect(useCallback(() => {
     if (!params.jobId || autoPicked.current) return;
-    autoPicked.current = true;
     void (async () => {
-      const job = await getJob(params.jobId!);
-      if (job) await describeJob(job);
+      try {
+        const job = await getJob(params.jobId!);
+        // Marked picked only once the read succeeded, so a refocus retries a
+        // read that failed rather than leaving the job unchosen for good.
+        autoPicked.current = true;
+        if (job) await describeJob(job);
+        else showAlert('Job not on this phone', `Job ${params.jobId} is not held on this device yet. Pick the site below, or sync and come back.`);
+      } catch (e) {
+        showAlert('Could not read the job', describeActionFailure(e, 'reading the job'));
+      }
     })();
   }, [params.jobId, describeJob]));
 

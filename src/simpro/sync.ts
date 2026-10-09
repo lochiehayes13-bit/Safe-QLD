@@ -11,13 +11,14 @@ import { flushSoon } from './flushSoon';
 import { keysAlreadyOnJob } from './testResults';
 import { reachabilityFailure, sendFailure } from './sendOutcome';
 import { createSite, getSite, listSites, updateSite } from '@/db/repo';
+import { nowIso } from '@/db';
 import { saveRateCard } from '@/db/rateCardRepo';
 import { replaceEmployees } from '@/db/employeeRepo';
 import { replaceScheduleWindow } from '@/db/scheduleRepo';
 import { addDays, scheduleWindow } from '@/domain/myDay';
 import { qldIsoDay } from '@/domain/qldTime';
 import {
-  upsertJob, getJob, enqueueSync, pendingSync, markSynced, markSyncFailed, markSyncUnknown, abandonSync,
+  upsertJob, getJob, enqueueSync, pendingSync, pendingSyncCount, markSynced, markSyncFailed, markSyncUnknown, abandonSync,
   claimSync, releaseSync, recoverSending, setPurchaseStatus, type JobRecord,
 } from '@/db/opsRepo';
 import {
@@ -1580,8 +1581,25 @@ export async function queuePurchaseOrder(payload: PurchaseOrderPayload): Promise
  * the same photograph of the same defect queues once however many times the
  * send screen is pressed. Returns whether it was already there.
  */
-export async function queueJobAttachment(payload: JobAttachmentPayload): Promise<{ id: string; duplicate: boolean }> {
-  const key = attachmentContentKey({ jobId: payload.jobId, filename: payload.filename, sizeBytes: payload.sizeBytes });
+export async function queueJobAttachment(
+  payload: JobAttachmentPayload,
+  options: {
+    /**
+     * Queue it even where the same file already went. The content key
+     * exists so a double tap cannot send one photograph twice; a person
+     * asking for a file to be sent again, because the office deleted it or
+     * never saw it, is not a double tap. The row the earlier send left in
+     * 'sent' would otherwise answer "duplicate" and nothing would go, while
+     * the screen said the file was on its way. The key is kept distinct with
+     * the moment of the asking, so the resend has a row of its own — which
+     * means the key no longer stops a double tap on this path, and the
+     * screen that asks for a resend has to hold its own second tap.
+     */
+    resend?: boolean;
+  } = {},
+): Promise<{ id: string; duplicate: boolean }> {
+  const base = attachmentContentKey({ jobId: payload.jobId, filename: payload.filename, sizeBytes: payload.sizeBytes });
+  const key = options.resend ? `${base}:resend:${nowIso()}` : base;
   const row = await enqueueSync('attachment', { ...payload, key }, { contentKey: key });
   if (!row.duplicate) flushSoon();
   return row;
@@ -1810,6 +1828,6 @@ export async function flushQueue(config: SimproConfig): Promise<FlushResult> {
     }
   }
 
-  const remaining = (await pendingSync(1000)).length;
+  const remaining = await pendingSyncCount();
   return stopped ? { sent, failed, remaining, stopped } : { sent, failed, remaining };
 }

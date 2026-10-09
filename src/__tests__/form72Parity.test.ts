@@ -332,8 +332,12 @@ describe('what Safe QLD added, and where it is allowed to be', () => {
      * three noes, and the one thing this question must never do is answer
      * itself. So an unanswered question says it is unanswered.
      */
-    expect(BLANK_SECTIONS.C).toContain('Not answered');
+    // A blank form has no flow test and no meter, so the question has no
+    // bearing on it and the page says so rather than asking; a form with a
+    // flow test and nothing ticked says "Not answered" (form72.test.ts).
+    expect(BLANK_SECTIONS.C).toContain('N/A — no flow test on this form');
     expect(FILLED_SECTIONS.C).not.toContain('Not answered');
+    expect(FILLED_SECTIONS.C).not.toContain('no flow test on this form');
   });
 });
 

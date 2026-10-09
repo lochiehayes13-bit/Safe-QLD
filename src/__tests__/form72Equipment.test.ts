@@ -14,8 +14,8 @@
  * precisely what this technician typed last time — not a catalogue somebody
  * has to keep up to date.
  */
-import { createForm72, recentTestDevices, updateForm72 } from '@/db/form72Repo';
-import { DEVICE_PRESETS, offerableDevices } from '@/domain/form72Devices';
+import { createForm72, getForm72, linkForm72Job, recentTestDevices, recordForm72Attached, updateForm72 } from '@/db/form72Repo';
+import { DEVICE_PRESETS, currentPresetDevice, offerableDevices, seedDevices } from '@/domain/form72Devices';
 import type { TestDevice } from '@/domain/form72';
 import { openMigrated, type NodeSqliteDb } from './support/nodeSqlite';
 
@@ -148,5 +148,77 @@ describe('which of them are worth offering on this form', () => {
 
   it('offers everything else', () => {
     expect(offerableDevices(remembered('PG-100', 'PG-200'), []).length).toBe(2);
+  });
+});
+
+describe('the equipment a new form starts with', () => {
+  it('is the company\u2019s two meters, in the department\u2019s first columns, with their certificates', async () => {
+    const made = await createForm72({ siteId: 's1', siteName: 'Fictional Tower' });
+    const back = await getForm72(made.id);
+    expect(back!.devices.map((d) => [d.slot, d.serialNumber])).toEqual([
+      ['Device/gauge 1', 'SQF-001'], ['Device/gauge 2', 'SQF-002'],
+    ]);
+    expect(back!.devices[0]).toMatchObject({
+      kind: 'flow-meter', calibrationBasis: 'service-life', dateCalibrated: '2026-07-18',
+      calibrationCertificate: 'CR-SQF-001-IN-01', issuedBy: 'Flowtech Water Meters',
+    });
+  });
+
+  it('keeps equipment a caller passes, rather than adding the meters to it', async () => {
+    const made = await createForm72({ siteId: 's1', siteName: 'Fictional Tower', parts: { devices: [GAUGE] } });
+    expect((await getForm72(made.id))!.devices.map((d) => d.serialNumber)).toEqual(['PG-442']);
+  });
+
+  it('seeds nothing but the presets: the gauge stays one tap away', () => {
+    expect(seedDevices([{ device: GAUGE }]).map((d) => d.serialNumber)).toEqual(['SQF-001', 'SQF-002']);
+  });
+
+  it('carries a recertification this phone has seen onto the next form', async () => {
+    // SQF-002 came back from a repair with a new certificate, and the
+    // technician corrected that day's form. Every later form offered the
+    // superseded certificate until this.
+    const [, sqf002] = DEVICE_PRESETS;
+    const recertified = {
+      ...sqf002!.device, dateCalibrated: '2027-03-05', calibrationCertificate: 'CR-SQF-002-IN-02',
+      correctionFactor: 'Meter error +0.10 %; correction −0.10 %',
+    };
+    await form('f1', '2027-03-05', [{ slot: 'Device/gauge 1', ...recertified }]);
+
+    const remembered = await recentTestDevices();
+    expect(currentPresetDevice(sqf002!, remembered)).toMatchObject({
+      recertified: '2027-03-05',
+      device: { dateCalibrated: '2027-03-05', calibrationCertificate: 'CR-SQF-002-IN-02', issuedBy: 'Flowtech Water Meters' },
+    });
+    // The other meter is untouched by it.
+    expect(currentPresetDevice(DEVICE_PRESETS[0]!, remembered).recertified).toBeUndefined();
+
+    const next = await createForm72({ siteId: 's1', siteName: 'Fictional Tower' });
+    expect((await getForm72(next.id))!.devices[1]).toMatchObject({ serialNumber: 'SQF-002', calibrationCertificate: 'CR-SQF-002-IN-02' });
+  });
+
+  it('does not carry an older date back over the certificate in the code', async () => {
+    const [sqf001] = DEVICE_PRESETS;
+    await form('f1', '2026-01-01', [{ slot: 'Device/gauge 1', ...sqf001!.device, dateCalibrated: '2025-07-18' }]);
+    expect(currentPresetDevice(sqf001!, await recentTestDevices()).device.dateCalibrated).toBe('2026-07-18');
+  });
+});
+
+describe('the PDF on the job, as the form remembers it', () => {
+  it('forgets the queued copy when the job changes, and keeps it when the job does not', async () => {
+    const made = await createForm72({ siteId: 's1', siteName: 'Fictional Tower', jobExternalId: '9001' });
+    await recordForm72Attached(made.id, '2026-10-02T04:14:00.000Z', 'row-1');
+    expect(await getForm72(made.id)).toMatchObject({ attachedAt: '2026-10-02T04:14:00.000Z', attachmentQueueId: 'row-1' });
+
+    await linkForm72Job(made.id, { externalId: '9001', title: 'Renamed' });
+    expect((await getForm72(made.id))!.attachedAt).toBe('2026-10-02T04:14:00.000Z');
+
+    await linkForm72Job(made.id, { externalId: '9002' });
+    const moved = await getForm72(made.id);
+    expect(moved!.attachedAt).toBeUndefined();
+    expect(moved!.attachmentQueueId).toBeUndefined();
+
+    await recordForm72Attached(made.id, '2026-10-03T04:14:00.000Z', 'row-2');
+    await linkForm72Job(made.id, null);
+    expect((await getForm72(made.id))!.attachedAt).toBeUndefined();
   });
 });

@@ -1410,6 +1410,20 @@ export async function unknownSync(): Promise<SyncEntry[]> {
  * unknown ones so a person can send them again (retrySync) or forget them
  * (forgetSync).
  */
+/**
+ * One queue row by id, or nothing where it has been deleted.
+ *
+ * For a record that remembers which row carries its file — a Form 72 and the
+ * PDF it queued for the job — so the screen can say what became of the upload
+ * rather than the moment it was queued. Absent is a real answer: a failed row
+ * can be deleted from Waiting to send, and the record then knows the file did
+ * not go.
+ */
+export async function syncEntry(id: string): Promise<SyncEntry | null> {
+  const db = await getDb();
+  return (await db.getFirstAsync<SyncEntry>('SELECT * FROM sync_queue WHERE id = ?', id)) ?? null;
+}
+
 export async function failedSync(): Promise<SyncEntry[]> {
   const db = await getDb();
   return db.getAllAsync<SyncEntry>("SELECT * FROM sync_queue WHERE status = 'failed' ORDER BY createdAt");

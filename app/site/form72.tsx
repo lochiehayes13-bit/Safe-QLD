@@ -23,6 +23,7 @@ import {
 } from '@/components/ui';
 import { contextId } from '@/domain/screenContext';
 import { showAlert } from '@/components/alert';
+import { describeLoadFailure } from '@/domain/loadFailure';
 
 /**
  * The Form 72s raised for one site.
@@ -45,18 +46,33 @@ export default function SiteForm72ListScreen() {
   const [site, setSite] = useState<Site | null>(null);
   const [forms, setForms] = useState<StoredForm72[]>([]);
   const [creating, setCreating] = useState(false);
+  /** Why the site could not be read, so the screen says so instead of "no forms yet". */
+  const [failed, setFailed] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(async () => {
     if (!siteId) return;
-    const [s, f] = await Promise.all([getSite(siteId), listForm72(siteId)]);
-    setSite(s);
-    setForms(f);
+    setFailed(null);
+    try {
+      const [s, f] = await Promise.all([getSite(siteId), listForm72(siteId)]);
+      setSite(s);
+      setForms(f);
+    } catch (e) {
+      // The rejection used to go nowhere: the screen drew its empty state
+      // about a read that had not happened, and the Start button did nothing.
+      setFailed(describeLoadFailure(e, 'this site'));
+    } finally {
+      setLoaded(true);
+    }
   }, [siteId]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const onNew = useCallback(async () => {
-    if (!site) return;
+    if (!site) {
+      showAlert('Site not known', failed ?? 'This site could not be read, so a form cannot be started against it. Go back and open it again.');
+      return;
+    }
     setCreating(true);
     try {
       const [prefs, assets] = await Promise.all([
@@ -109,7 +125,7 @@ export default function SiteForm72ListScreen() {
     } finally {
       setCreating(false);
     }
-  }, [site]);
+  }, [site, failed]);
 
   const onDelete = useCallback((form: StoredForm72) => {
     showAlert(
@@ -172,7 +188,11 @@ export default function SiteForm72ListScreen() {
         icon={<MaterialCommunityIcons name="plus" size={18} color={t.color.onAccent} />}
       />
 
-      {!forms.length ? (
+      {failed ? (
+        <Banner tone="fail" title="Could not read this site" body={`${failed} The forms below are whatever was read before it failed.`} />
+      ) : null}
+
+      {loaded && !failed && !forms.length ? (
         <EmptyState
           icon="file-certificate-outline"
           title="No Form 72 for this site yet"

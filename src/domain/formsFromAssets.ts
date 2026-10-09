@@ -329,7 +329,10 @@ export interface Form72Pump {
 export interface Form72Prefill {
   /** The system descriptor for the form's top corner, where the register can say. */
   systemLabel?: string;
-  /** The hydrants, in walk order, for Part D. */
+  /**
+   * The site's hydrants, in walk order — offered on Part D to pick the ones
+   * the flow test ran on, not written into it.
+   */
   hydrantLocations: string[];
   /** Booster assemblies, for Part E. */
   boosterLocations: string[];
@@ -403,7 +406,7 @@ export function form72FromAssets(assets: readonly RegisterAsset[]): Form72Prefil
   else if (hasSprinkler) prefill.systemLabel = 'Automatic Fire Sprinkler System';
 
   const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
-  if (hydrants.length) prefill.filled.push(`${plural(hydrants.length, 'hydrant', 'hydrants')} into Part D`);
+  if (hydrants.length) prefill.filled.push(`${plural(hydrants.length, 'hydrant', 'hydrants')} to pick from on Part D`);
   else prefill.notRecorded.push('Hydrants: none in the register');
   if (boosters.length) prefill.filled.push(`${plural(boosters.length, 'booster assembly', 'booster assemblies')} into Part E`);
   else prefill.notRecorded.push('Booster: none in the register');
@@ -476,12 +479,15 @@ export function applyForm72Prefill(
 
   if (!form.systemLabel?.trim() && prefill.systemLabel) patch.systemLabel = prefill.systemLabel;
 
+  /*
+   * Part D's hydrant locations are not filled. They are the hydrants the
+   * flow test ran on, which the register cannot know: it put every hydrant
+   * on the site into the department's four fields, and a site with eight
+   * printed four of them whether or not they were run. Part D offers the
+   * register's hydrants to pick from instead (toggleTestedHydrant).
+   */
   const flow: FlowTest = { ...form.flowTest };
   let flowChanged = false;
-  if (!flow.hydrantLocations.length && prefill.hydrantLocations.length) {
-    flow.hydrantLocations = [...prefill.hydrantLocations];
-    flowChanged = true;
-  }
   if (flow.onSitePumpSet === undefined && prefill.pumps.length) {
     flow.onSitePumpSet = true;
     flowChanged = true;

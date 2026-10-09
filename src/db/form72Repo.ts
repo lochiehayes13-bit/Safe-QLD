@@ -5,6 +5,7 @@ import {
   type FormDefect, type MaintenanceTest, type PartResult, type SprinklerFlowTest,
   type SprinklerHydrostatic, type TestDevice,
 } from '@/domain/form72';
+import { seedDevices } from '@/domain/form72Devices';
 
 /**
  * Storing Form 72s.
@@ -45,6 +46,13 @@ export interface StoredForm72 extends Form72 {
   jobTitle?: string;
   /** When the PDF was queued onto that job's attachments. */
   attachedAt?: string;
+  /**
+   * The sync-queue row the PDF went onto, where one was queued since v39.
+   * The row's status — pending, sent, failed, unknown — is what the screen
+   * reports; `attachedAt` alone said "on the job" about uploads that never
+   * went.
+   */
+  attachmentQueueId?: string;
 }
 
 interface Form72Row {
@@ -88,6 +96,7 @@ interface Form72Row {
   jobExternalId: string | null;
   jobTitle: string | null;
   attachedAt: string | null;
+  attachmentQueueId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -205,6 +214,7 @@ function toForm(r: Form72Row): StoredForm72 {
     jobExternalId: r.jobExternalId || undefined,
     jobTitle: r.jobTitle || undefined,
     attachedAt: r.attachedAt ?? undefined,
+    attachmentQueueId: r.attachmentQueueId ?? undefined,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
@@ -238,6 +248,28 @@ export async function createForm72(input: {
     contractor: input.contractor,
     now: at,
   });
+  /*
+   * The company's own meters, on the form before anybody types.
+   *
+   * Part C was the same two instruments on nearly every hydrant form the
+   * company raises, and a form started empty and was issued empty more often
+   * than not — four columns of "Not used" under pressures the meters read.
+   * So they go on here, with whatever recertification this phone has seen
+   * (seedDevices). A caller that passes its own devices keeps them.
+   */
+  const parts = input.parts ?? {};
+  let devices = parts.devices;
+  if (!devices?.length) {
+    let remembered: RememberedDevice[] = [];
+    try {
+      remembered = await recentTestDevices();
+    } catch {
+      // The certificates transcribed in code are still right; a phone that
+      // cannot read its own forms gets those.
+      remembered = [];
+    }
+    devices = seedDevices(remembered);
+  }
   const record: StoredForm72 = {
     ...base,
     siteAddress: input.siteAddress,
@@ -248,7 +280,8 @@ export async function createForm72(input: {
     status: 'draft',
     jobExternalId: input.jobExternalId,
     jobTitle: input.jobTitle,
-    ...(input.parts ?? {}),
+    ...parts,
+    devices,
   };
 
   const db = await getDb();
@@ -298,9 +331,17 @@ export async function linkForm72Job(id: string, job: { externalId: string; title
   const form = await getForm72(id);
   if (!form) throw new Error('That Form 72 no longer exists.');
   const db = await getDb();
+  const externalId = job?.externalId.trim() || null;
+  /*
+   * "Queued for the job" is a statement about the job it was queued for.
+   * The screen cleared it in its own state and the row kept it, so a reload
+   * after changing the job showed "On the job" against one that had nothing.
+   */
+  const sameJob = externalId === (form.jobExternalId ?? null);
   await db.runAsync(
-    'UPDATE form_72 SET jobExternalId = ?, jobTitle = ?, updatedAt = ? WHERE id = ?',
-    [job?.externalId.trim() || null, job?.title?.trim() || null, nowIso(), id],
+    `UPDATE form_72 SET jobExternalId = ?, jobTitle = ?, updatedAt = ?${
+      sameJob ? '' : ', attachedAt = NULL, attachmentQueueId = NULL'} WHERE id = ?`,
+    [externalId, job?.title?.trim() || null, nowIso(), id],
   );
 }
 
@@ -346,9 +387,12 @@ export async function recordForm72DefectIds(
 }
 
 /** The PDF has been queued onto the job's attachments. */
-export async function recordForm72Attached(id: string, at: string = nowIso()): Promise<void> {
+export async function recordForm72Attached(id: string, at: string = nowIso(), queueId?: string): Promise<void> {
   const db = await getDb();
-  await db.runAsync('UPDATE form_72 SET attachedAt = ?, updatedAt = ? WHERE id = ?', [at, nowIso(), id]);
+  await db.runAsync(
+    'UPDATE form_72 SET attachedAt = ?, attachmentQueueId = ?, updatedAt = ? WHERE id = ?',
+    [at, queueId ?? null, nowIso(), id],
+  );
 }
 
 export async function getForm72(id: string): Promise<StoredForm72 | null> {

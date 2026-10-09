@@ -255,3 +255,96 @@ export function form72EmailBody(form: Pick<Form72, 'siteName' | 'testDate' | 'li
     'Sent from the Safe QLD app.',
   ].filter((l, i, all) => l !== '' || i === all.length - 2).join('\n');
 }
+
+/**
+ * What the queue says became of the PDF, or what the form knew before the
+ * queue row was remembered.
+ *
+ * `undefined` for the row means nobody has read it (or the form predates
+ * v39 and has none); `null` means the row is gone — a failed row can be
+ * deleted from Waiting to send, and a deleted row is a file that did not go.
+ */
+export type JobCopyRow =
+  | { status: 'pending' | 'sending' | 'sent' | 'failed' | 'unknown'; lastError?: string }
+  | null
+  | undefined;
+
+export interface JobCopyState {
+  /** The sentence under the job on the Simpro card. */
+  line: string;
+  chip: { label: string; tone: 'pass' | 'warn' | 'fail' | 'default' };
+  /** Whether "Queue the PDF again" is the right offer, as against a first "Attach". */
+  again: boolean;
+}
+
+/**
+ * The Simpro card's one sentence about the PDF, decided away from the screen.
+ *
+ * The card used to say "On the job" from the moment the PDF was queued, and
+ * never again looked: an upload abandoned because the file had gone from the
+ * cache, refused by the server, or lost without a reply still read as filed.
+ * The office rang; the technician looked at a green chip. So the sentence is
+ * read off the queue row the form remembers, state by state, and a row that
+ * has vanished is said to have vanished rather than assumed to have gone.
+ */
+export function jobCopyState(input: {
+  jobExternalId?: string;
+  issued: boolean;
+  attachedAt?: string;
+  /** The queued-at moment, already worded for the reader ("2:14 pm"). */
+  queuedAt?: string;
+  /** Whether the form remembers which row it queued (forms since v39 do). */
+  hasRow: boolean;
+  row: JobCopyRow;
+}): JobCopyState {
+  const job = input.jobExternalId?.trim();
+  if (!job) {
+    return {
+      line: 'The office files this form against the job the test was done under. Name it and the PDF '
+        + `goes onto it ${input.issued ? 'straight away' : 'the moment the form is issued'}.`,
+      chip: { label: 'No job', tone: 'warn' },
+      again: false,
+    };
+  }
+  if (!input.attachedAt) {
+    return input.issued
+      ? { line: 'Issued, and not yet on the job. Attach the PDF to put it there.', chip: { label: 'Not on the job', tone: 'warn' }, again: false }
+      : { line: 'The PDF goes onto this job the moment the form is issued.', chip: { label: 'Linked', tone: 'default' }, again: false };
+  }
+  const when = input.queuedAt ? ` ${input.queuedAt}` : '';
+  if (!input.hasRow || input.row === undefined) {
+    // Queued before the form remembered its row, or the row not read yet:
+    // what was always said, which is true as far as it goes.
+    return { line: `PDF queued for the job${when}.`, chip: { label: 'Queued', tone: 'pass' }, again: true };
+  }
+  if (input.row === null) {
+    return {
+      line: `The PDF was queued${when}, but its entry on Waiting to send is gone, so it did not go. Queue it again.`,
+      chip: { label: 'Not sent', tone: 'fail' },
+      again: true,
+    };
+  }
+  // The queue's own reasons end in a full stop; the sentence supplies its own.
+  const why = input.row.lastError?.trim().replace(/\.$/, '');
+  switch (input.row.status) {
+    case 'pending':
+      return { line: `PDF waiting to send to job ${job}, queued${when}. It goes up with the next sync.`, chip: { label: 'Waiting to send', tone: 'warn' }, again: true };
+    case 'sending':
+      return { line: `PDF going up to job ${job} now.`, chip: { label: 'Sending', tone: 'warn' }, again: true };
+    case 'sent':
+      return { line: `PDF on job ${job}'s attachments in Simpro, queued${when}.`, chip: { label: 'On the job', tone: 'pass' }, again: true };
+    case 'failed':
+      return {
+        line: `The PDF did not reach job ${job}${why ? `: ${why}` : ''}. Queue it again.`,
+        chip: { label: 'Not sent', tone: 'fail' },
+        again: true,
+      };
+    default:
+      return {
+        line: `The PDF may or may not have reached job ${job}${why ? ` (${why})` : ''}. Check the job's `
+          + 'attachments in Simpro before queueing it again.',
+        chip: { label: 'Unconfirmed', tone: 'warn' },
+        again: true,
+      };
+  }
+}

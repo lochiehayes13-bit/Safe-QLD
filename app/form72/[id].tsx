@@ -1,30 +1,29 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, View } from 'react-native';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Image, Pressable, View } from 'react-native';
+import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   ISSUED_REFUSAL, getForm72, issueForm72, linkForm72Job, recentTestDevices, recordForm72Attached,
   recordForm72DefectIds, recordOccupierCopy, updateForm72,
   type Form72Patch, type RememberedDevice, type StoredForm72,
 } from '@/db/form72Repo';
-import { listJobPage, type JobPick } from '@/db/opsRepo';
+import { listJobPage, syncEntry, type JobPick, type SyncEntry } from '@/db/opsRepo';
 import { queueJobAttachment } from '@/simpro/sync';
 import {
-  FORM72_INBOX, form72AttachmentName, form72AttachmentSubject, form72EmailBody,
+  FORM72_INBOX, form72AttachmentName, form72AttachmentSubject, form72EmailBody, jobCopyState,
   occupierCopyBody, occupierCopyRecipient, occupierCopySubject, rankJobsForForm,
 } from '@/domain/form72Link';
 import type { Site } from '@/domain/types';
 import { qldClock, qldIsoDay, qldMoment, typedClock, typedDay } from '@/domain/qldTime';
 import { attachmentContentKey } from '@/domain/outboundWork';
-import { describeActionFailure } from '@/domain/loadFailure';
-import { router } from 'expo-router';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import {
   CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, FLOW_DEVICE_LABEL,
   PART_RESULT_LABEL, SYSTEM_TYPE_LABEL, TEST_INTERVAL_LABEL,
   PART_G_PRINTED_TEST_POINTS,
-  deviceCalibration, dutyToCarry, elevationHeadKpa, flowRowDevices, flowRowKey, flowRowLongLabel,
+  defaultFlowRowDevices, deviceCalibration, deviceSlotName, dutyToCarry, elevationHeadKpa, flowRowDevices, flowRowKey, flowRowLongLabel,
   flowKindsAfterAnswer, flowRowRead, flowRowUntouched, form72DefectForRegister,
-  hydrantSlotCount, partDLines, setHydrantLocation,
+  hydrantSlotCount, partDLines, setHydrantLocation, toggleTestedHydrant,
   provedDuty, provedDutyDisagrees,
   intervalsTested, maintenanceTestFromAxes, overloadCheck, overloadRun, resolveFrictionalLoss,
   toggleMaintenanceAxes,
@@ -45,7 +44,7 @@ import {
 import {
   guideSteps, nextGuideStep, outstandingParts, recordAnswered, type GuidePart,
 } from '@/domain/form72Guide';
-import { DEVICE_PRESETS, offerableDevices, unusedDevicePresets } from '@/domain/form72Devices';
+import { DEVICE_PRESETS, currentPresetDevice, offerableDevices, unusedDevicePresets } from '@/domain/form72Devices';
 import {
   deviceKindKey, getDeviceKinds, setDeviceKind, type DeviceKindAnswer,
 } from '@/db/deviceKindRepo';
@@ -64,7 +63,6 @@ import {
   Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Segmented, Txt,
 } from '@/components/ui';
 import { RecordGate } from '@/components/RecordGate';
-import { describeLoadFailure } from '@/domain/loadFailure';
 import { JobPicker } from '@/components/JobPicker';
 import { showAlert } from '@/components/alert';
 
@@ -235,6 +233,73 @@ export default function Form72Screen() {
     [deviceKinds.answers, deviceKinds.failed, remember],
   );
 
+  /*
+   * What became of the PDF queued for the job, read off the queue row the
+   * form remembers. `attachedAt` alone said "on the job" about uploads that
+   * never went; the row's status is the truth, and null is a row somebody
+   * deleted from Waiting to send. Re-read whenever the screen comes back,
+   * because the sync runs while it is away.
+   */
+  const [queueRow, setQueueRow] = useState<SyncEntry | null | undefined>(undefined);
+  const attachingRef = useRef(false);
+  const readQueueRow = useCallback(async (queueId: string | undefined) => {
+    if (!queueId) { setQueueRow(undefined); return; }
+    try {
+      setQueueRow(await syncEntry(queueId));
+    } catch {
+      setQueueRow(undefined);
+    }
+  }, []);
+  const queueId = form?.attachmentQueueId;
+  useFocusEffect(useCallback(() => { void readQueueRow(queueId); }, [queueId, readQueueRow]));
+
+  /*
+   * The meters' remembered kinds, read again when a meter is added.
+   *
+   * The read with the form covers the meters the form had then. A meter
+   * added afterwards — the preset chip, the remembered list, a serial typed
+   * by hand — was never looked up, so a technician who had answered
+   * "Mechanical" for SQF-001 last week was asked again this week, and the
+   * tick appeared only if they closed and reopened the draft: the exact tick
+   * nobody tapped the comment above says must not appear. The same rule as
+   * the first read, applied to the serials it did not see: only on a draft,
+   * only while nothing is ticked, and only ever adding.
+   */
+  const formRef = useRef(form);
+  useEffect(() => { formRef.current = form; }, [form]);
+  const askedKinds = useRef(new Set<string>());
+  const serialKey = form
+    ? [...new Set(form.devices.map((d) => deviceKindKey(d.serialNumber)).filter(Boolean))].sort().join('|')
+    : '';
+  useEffect(() => {
+    if (!serialKey) return;
+    const fresh = serialKey.split('|')
+      .filter((k) => !deviceKinds.answers.has(k) && !askedKinds.current.has(k));
+    if (!fresh.length) return;
+    for (const k of fresh) askedKinds.current.add(k);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const found = await getDeviceKinds(fresh);
+        if (cancelled || !found.size) return;
+        const answers = new Map([...deviceKinds.answers, ...found]);
+        setDeviceKinds({ answers, failed: false });
+        const cur = formRef.current;
+        if (!cur || cur.status === 'issued' || cur.flowDeviceKinds.length) return;
+        const add = unTickedAnsweredKinds(
+          cur.devices, cur.flowDeviceKinds, new Map([...answers].map(([serial, a]) => [serial, a.kind])),
+        );
+        if (!add.length) return;
+        const flowDeviceKinds = [...cur.flowDeviceKinds, ...add];
+        await updateForm72(cur.id, { flowDeviceKinds });
+        setForm((prev) => (prev && prev.id === cur.id ? { ...prev, flowDeviceKinds } : prev));
+      } catch {
+        // The boxes stay the technician's, as they were.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [serialKey, deviceKinds.answers]);
+
   const load = useCallback(async () => {
     if (!id) return;
     setFailed(null);
@@ -350,9 +415,32 @@ export default function Form72Screen() {
    * has it" and "I think I sent it" are different states and only one of
    * them lets a technician stop worrying.
    */
-  const attachToJob = useCallback(async (target: StoredForm72, quiet = false): Promise<boolean> => {
-    if (!target.jobExternalId) return false;
+  const attachToJob = useCallback(async (
+    target: StoredForm72,
+    quiet = false,
+  ): Promise<{ ok: true } | { ok: false; why: string }> => {
+    if (!target.jobExternalId) return { ok: false, why: 'The form is not linked to a job.' };
+    /*
+     * Only the issued document goes onto the job. A draft prints stamped
+     * NOT FOR ISSUE and would sit on the job under the same file name as the
+     * record that follows it, with nothing to tell the office which is which.
+     */
+    if (target.status !== 'issued') {
+      const why = 'The PDF goes onto the job the moment the form is issued. A draft, stamped not for '
+        + 'issue, would sit on the job under the same name as the record.';
+      if (!quiet) showAlert('Not issued yet', why);
+      return { ok: false, why };
+    }
+    /*
+     * One at a time. Building the PDF takes seconds on a phone, and a second
+     * tap in that time used to queue a second copy — two identical PDFs on
+     * the job. A ref rather than the `attaching` state, because the tap's
+     * closure holds the state as it was when the chip was drawn.
+     */
+    if (attachingRef.current) return { ok: false, why: 'Already putting the PDF on the job.' };
+    attachingRef.current = true;
     setAttaching(true);
+    let row: { id: string; duplicate: boolean };
     try {
       const html = renderForm72(target, companyName);
       const file = await writePdf(form72AttachmentName(target).replace(/\.pdf$/i, ''), html);
@@ -362,17 +450,14 @@ export default function Form72Screen() {
          * It used to say "do this from a phone" — to a technician on an
          * iPhone, which is a phone, and which has no build but this one.
          */
-        if (!quiet) {
-          showAlert(
-            'Not attached',
-            'This browser could not build the PDF file, so nothing was queued onto the job. Produce PDF still '
-            + 'prints it; attach the saved copy to the job in Simpro, or try again on a different browser.',
-          );
-        }
-        return false;
+        const why = `This browser could not build the PDF file${file.why ? ` (${file.why})` : ''}, so nothing was `
+          + 'queued onto the job. Try again from Safari rather than the home-screen app, or from a computer; '
+          + 'Produce PDF there can save a copy to attach to the job in Simpro.';
+        if (!quiet) showAlert('Not attached', why);
+        return { ok: false, why };
       }
       const filename = form72AttachmentName(target);
-      const row = await queueJobAttachment({
+      row = await queueJobAttachment({
         jobId: target.jobExternalId,
         localUri: file.uri,
         filename,
@@ -380,24 +465,57 @@ export default function Form72Screen() {
         subject: form72AttachmentSubject(target),
         sizeBytes: file.size,
         key: attachmentContentKey({ jobId: target.jobExternalId, filename, sizeBytes: file.size }),
+      }, {
+        // A person asking for it again, after it already went, is not a
+        // double tap: the queue's duplicate check would otherwise answer
+        // "already queued" about a row sent days ago and nothing would go.
+        resend: !!target.attachedAt && !quiet,
       });
-      const at = nowIso();
-      await recordForm72Attached(target.id, at);
-      setForm((prev) => (prev && prev.id === target.id ? { ...prev, attachedAt: at } : prev));
-      if (!quiet) {
-        showAlert(
-          row.duplicate ? 'Already queued' : 'Queued for the job',
-          `The PDF is on Waiting to send for job ${target.jobExternalId}. It goes up with the next sync and shows on the job's attachments in Simpro.`,
-        );
-      }
-      return true;
     } catch (e) {
-      showAlert('Not attached', describeActionFailure(e, 'attaching the form to the job'));
-      return false;
+      const why = describeActionFailure(e, 'attaching the form to the job');
+      if (!quiet) showAlert('Not attached', why);
+      return { ok: false, why };
     } finally {
+      attachingRef.current = false;
       setAttaching(false);
     }
-  }, [companyName]);
+
+    /*
+     * Queued. The stamp is its own step: the file is on the queue whatever
+     * happens next, so a stamp that fails is reported as that and not as
+     * "Not attached" — which it was, and the next tap then said "Already
+     * queued" about the same row.
+     */
+    const at = nowIso();
+    let stamped = true;
+    try {
+      await recordForm72Attached(target.id, at, row.id);
+    } catch {
+      stamped = false;
+    }
+    setForm((prev) => (prev && prev.id === target.id ? { ...prev, attachedAt: at, attachmentQueueId: row.id } : prev));
+    void readQueueRow(row.id);
+    if (!quiet) {
+      // A duplicate is worded by what became of the earlier copy, which the
+      // queue row knows: "already waiting" about a row that went days ago
+      // told the technician something that was not true.
+      let prior: SyncEntry | null = null;
+      if (row.duplicate) {
+        try { prior = await syncEntry(row.id); } catch { prior = null; }
+      }
+      const [title, body] = row.duplicate
+        ? prior?.status === 'sent'
+          ? ['Already on the job', `The same PDF already went up to job ${target.jobExternalId}. Tap "Queue the PDF again" to send it once more.`]
+          : prior?.status === 'unknown'
+            ? ['Sent, not confirmed', `The same PDF was sent to job ${target.jobExternalId} and no reply came back. Check Waiting to send.`]
+            : ['Already queued', `The same PDF is already waiting to go to job ${target.jobExternalId}.`]
+        : [stamped ? 'Queued for the job' : 'Queued, but the form could not record it',
+          `The PDF is on Waiting to send for job ${target.jobExternalId}. It goes up with the next sync and shows on the job's attachments in Simpro.${
+            stamped ? '' : ' The form could not write that down, so this card may say otherwise after a reload.'}`];
+      showAlert(title, body);
+    }
+    return { ok: true };
+  }, [companyName, readQueueRow]);
 
   const emailForm = useCallback(async () => {
     if (!form) return;
@@ -563,13 +681,35 @@ export default function Form72Screen() {
     if (!form) return;
     try {
       await linkForm72Job(form.id, job);
-      setForm({ ...form, jobExternalId: job?.externalId.trim() || undefined, jobTitle: job?.title || undefined, attachedAt: undefined });
+      const linked: StoredForm72 = {
+        ...form,
+        jobExternalId: job?.externalId.trim() || undefined,
+        jobTitle: job?.title || undefined,
+        attachedAt: undefined,
+        attachmentQueueId: undefined,
+      };
+      setForm(linked);
+      setQueueRow(undefined);
       setPickingJob(false);
       setTypedJob('');
+      /*
+       * An issued form linked after the fact goes onto the job now. The card
+       * promised "the PDF attaches itself", and linking an issued form did
+       * nothing of the kind until somebody found the separate chip.
+       */
+      if (linked.status === 'issued' && linked.jobExternalId) {
+        const went = await attachToJob(linked, true);
+        showAlert(
+          went.ok ? 'Linked and queued for the job' : 'Linked — PDF not yet on the job',
+          went.ok
+            ? `The PDF is on Waiting to send for job ${linked.jobExternalId}.`
+            : `${went.why} Tap "Attach PDF to job" to try again.`,
+        );
+      }
     } catch (e) {
       showAlert('Not linked', describeActionFailure(e, 'linking the job'));
     }
-  }, [form]);
+  }, [form, attachToJob]);
 
   const onIssue = useCallback(() => {
     if (!form) return;
@@ -599,7 +739,14 @@ export default function Form72Screen() {
               // the Simpro card below says so and stays red until it does.
               if (issued.jobExternalId) {
                 const went = await attachToJob(issued, true);
-                if (went) showAlert('Issued and queued for the job', `The PDF is on Waiting to send for job ${issued.jobExternalId}.`);
+                showAlert(
+                  went.ok ? 'Issued and queued for the job' : 'Issued — PDF not yet on the job',
+                  went.ok
+                    ? `The PDF is on Waiting to send for job ${issued.jobExternalId}.`
+                    : `The form is issued. ${went.why} Tap "Attach PDF to job" on the Simpro card to try again.`,
+                );
+              } else {
+                showAlert('Issued', 'Link the job on the Simpro card and the PDF goes onto it.');
               }
             } catch (e) {
               showAlert('Cannot issue', e instanceof Error ? e.message : String(e));
@@ -608,7 +755,7 @@ export default function Form72Screen() {
         },
       ],
     );
-  }, [form, blockers]);
+  }, [form, blockers, attachToJob]);
 
   /*
    * The register's lists, laid onto the form's blanks.
@@ -686,7 +833,16 @@ export default function Form72Screen() {
     );
   }, [form]);
 
-  if (!form) return <RecordGate missing={missing} what="Form 72" failed={failed} onRetry={() => { void load(); }} />;
+  const jobCopy = form ? jobCopyState({
+    jobExternalId: form.jobExternalId,
+    issued: form.status === 'issued',
+    attachedAt: form.attachedAt,
+    queuedAt: form.attachedAt ? qldMoment(form.attachedAt) : undefined,
+    hasRow: !!form.attachmentQueueId,
+    row: queueRow,
+  }) : undefined;
+
+  if (!form || !jobCopy) return <RecordGate missing={missing} what="Form 72" failed={failed} onRetry={() => { void load(); }} />;
 
   return (
     <Screen>
@@ -715,15 +871,9 @@ export default function Form72Screen() {
             ) : (
               <Txt weight="700" tone="warn" style={{ marginTop: 4 }}>Not linked to a job yet</Txt>
             )}
-            <Txt size="sm" tone="muted" style={{ marginTop: 2 }}>
-              {form.attachedAt
-                ? `PDF queued for the job ${qldMoment(form.attachedAt) ?? ''}.`
-                : form.jobExternalId
-                  ? (locked ? 'Issued but not yet on the job.' : 'The PDF goes onto this job the moment the form is issued.')
-                  : 'The office files this form against the job the test was done under. Name it and the PDF attaches itself on issue.'}
-            </Txt>
+            <Txt size="sm" tone="muted" style={{ marginTop: 2 }}>{jobCopy.line}</Txt>
           </View>
-          <Chip label={form.attachedAt ? 'On the job' : form.jobExternalId ? 'Linked' : 'No job'} tone={form.attachedAt ? 'pass' : form.jobExternalId ? 'default' : 'warn'} />
+          <Chip label={jobCopy.chip.label} tone={jobCopy.chip.tone} />
         </Rowed>
 
         {pickingJob ? (
@@ -768,8 +918,8 @@ export default function Form72Screen() {
         ) : (
           <Rowed gap={2} wrap style={{ marginTop: t.space(3) }}>
             <Chip label={form.jobExternalId ? 'Change job' : 'Link to a job'} onPress={() => { void openJobPicker(); }} />
-            {form.jobExternalId ? (
-              <Chip label={form.attachedAt ? 'Queue the PDF again' : 'Attach PDF to job'} onPress={() => { void attachToJob(form); }} />
+            {form.jobExternalId && locked ? (
+              <Chip label={jobCopy.again ? 'Queue the PDF again' : 'Attach PDF to job'} onPress={() => { void attachToJob(form); }} />
             ) : null}
             <Chip label={`Email to ${FORM72_INBOX.split('@')[0]}`} onPress={() => { void emailForm(); }} />
             <Chip label="Open in hydrant flow tool" onPress={() => router.push({ pathname: '/tools/hydrant', params: { form72: form.id } })} />
@@ -1649,32 +1799,6 @@ function TypedField({
 }
 
 /**
- * The column the next device occupies, in the department's own words.
- *
- * Picked as the first of the department's four names nobody is using, not from
- * the count of devices on the form. From the count, removing the first of two
- * left the survivor called "Device/gauge 2" while sitting in the first column,
- * and adding a meter back handed out "Device/gauge 2" a second time — two
- * devices with one name, on a form where Part D cites its devices by that name
- * and flowRowDevices resolves a citation to whichever it finds first.
- *
- * It does not renumber what is already there. A row in Part D citing
- * "Device/gauge 2" means the instrument that was called that when the reading
- * was taken, and renaming a column underneath a reading would quietly
- * reattribute it.
- */
-function deviceSlotName(held: readonly TestDevice[]): string {
-  const taken = new Set(held.map((d) => d.slot.trim()).filter(Boolean));
-  const free = DEPARTMENT_DEVICE_SLOTS.find((name) => !taken.has(name));
-  if (free) return free;
-  // Past the department's four columns. The page lists these under the note
-  // that says to put extra devices in the Notes section.
-  let n = DEPARTMENT_DEVICE_SLOTS.length + 1;
-  while (taken.has(`Device/gauge ${n}`)) n += 1;
-  return `Device/gauge ${n}`;
-}
-
-/**
  * What the screen knows about the meters on this form, and how to add to it.
  *
  * One read, done where the form is read, used both to tick Part C's boxes and
@@ -1885,7 +2009,8 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
         </View>
         {!form.flowDeviceKinds.length ? (
           <Txt size="sm" tone="muted">
-            Nothing ticked yet, and the form prints that as not answered.
+            Nothing ticked yet. A flow meter on the form, or a flow test in Part D, needs one of
+            these before the form can be issued; a meter answered below is ticked for you.
           </Txt>
         ) : null}
 
@@ -1949,7 +2074,8 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
               <Chip
                 label={cal.state === 'out-of-calibration' ? 'Out of calibration'
                   : cal.state === 'no-date' ? 'No calibration date'
-                    : cal.state === 'calibrated-after-test' ? 'Date conflict' : 'Unreadable date'}
+                    : cal.state === 'calibrated-after-test' ? 'Date conflict'
+                      : cal.state === 'in-calibration' ? 'Wrong basis' : 'Unreadable date'}
                 tone={cal.issue.blocking ? 'fail' : 'warn'}
               />
             ) : null}
@@ -2010,7 +2136,8 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
               tone={cal.issue.blocking ? 'fail' : 'warn'}
               title={cal.state === 'out-of-calibration'
                 ? `Calibrated ${formatAuDate(d.dateCalibrated)}, more than ${CALIBRATION_MONTHS} months before this test`
-                : 'This gauge cannot be relied on'}
+                : cal.state === 'in-calibration' ? 'Recorded on a flow meter\u2019s basis'
+                  : 'This gauge cannot be relied on'}
               body={cal.issue.message}
             />
           ) : null}
@@ -2029,8 +2156,15 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
             */}
           <View style={{ gap: 6 }}>
             <Label>Calibration basis</Label>
-            {locked ? (
-              <Chip label={d.calibrationBasis === 'service-life' ? 'Certified for service life' : `${CALIBRATION_MONTHS} month interval`} />
+            {locked || (d.kind ?? 'gauge') !== 'flow-meter' ? (
+              /*
+               * A gauge has one basis. "Service life" offered on every card
+               * let a stale gauge switch off the only blocking check this
+               * part has; the domain now judges a gauge on the interval
+               * whatever its card says, and the card offers nothing else.
+               */
+              <Chip label={d.calibrationBasis === 'service-life' && (d.kind ?? 'gauge') === 'flow-meter'
+                ? 'Certified for service life' : `${CALIBRATION_MONTHS} month interval`} />
             ) : (
               <Segmented
                 options={[
@@ -2041,11 +2175,14 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
                 onChange={(v) => setDevice(i, { calibrationBasis: v })}
               />
             )}
-            {d.calibrationBasis === 'service-life' ? (
+            {!locked && d.calibrationBasis === 'service-life' && (d.kind ?? 'gauge') !== 'flow-meter' ? (
+              <Chip label="Recorded as service life — tap to use the interval" tone="warn" onPress={() => setDevice(i, { calibrationBasis: 'interval' })} />
+            ) : null}
+            {d.calibrationBasis === 'service-life' && (d.kind ?? 'gauge') === 'flow-meter' ? (
               <Txt size="xs" tone="faint">
                 Only for a device whose certificate says so — our inline meters do, absent fault or
-                damage, and unless an authority has stipulated recertification. On a pressure gauge
-                this is wrong, and the form prints which basis each device was accepted on.
+                damage, and unless an authority has stipulated recertification. The form prints which
+                basis each device was accepted on, and how old the certificate was on the day.
               </Txt>
             ) : null}
           </View>
@@ -2157,8 +2294,9 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
         */}
       <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
         {devices.length === 0
-          ? 'The form prints a four-column equipment table. With nothing on it, every row of all '
-            + 'four columns prints as not recorded.'
+          ? 'The form prints a four-column equipment table. With nothing on it, every column prints '
+            + 'as not used — and a form with pressures recorded cannot be issued until the gauge or '
+            + 'meter they were read with is on it.'
           : `${devices.length} of the department's four columns filled. The other ${
             DEPARTMENT_DEVICE_SLOTS.length - devices.length} print${
             DEPARTMENT_DEVICE_SLOTS.length - devices.length === 1 ? 's' : ''} as not used, which is `
@@ -2185,12 +2323,16 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
                 filled in. Check them against the certificate in your hand.
               </Txt>
               <View style={{ gap: 8 }}>
-                {unused.map((preset) => (
+                {unused.map((preset) => {
+                  // The certificate in the code, unless this phone has seen
+                  // the meter recertified since — then that certificate.
+                  const current = currentPresetDevice(preset, remembered);
+                  return (
                   <View key={preset.id} style={{ gap: 2 }}>
                     <Chip
                       label={`+ ${preset.label}`}
                       onPress={() => patch({
-                        devices: [...devices, { slot: deviceSlotName(devices), ...preset.device }],
+                        devices: [...devices, { slot: deviceSlotName(devices), ...current.device }],
                         /*
                          * A measuring element the certificate names goes on with
                          * the device. One it does not name stays the
@@ -2209,9 +2351,15 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
                           : {}),
                       })}
                     />
-                    <Txt size="xs" tone="faint">{preset.detail}</Txt>
+                    <Txt size="xs" tone="faint">
+                      {current.recertified
+                        ? `Recertified ${formatAuDate(current.recertified)}, as recorded on this phone's last form `
+                          + `with it; the certificate transcribed in the app is dated ${formatAuDate(preset.device.dateCalibrated)}.`
+                        : preset.detail}
+                    </Txt>
                   </View>
-                ))}
+                  );
+                })}
               </View>
               {unused.some((p) => p.flowDeviceKindNote) ? (
                 <Txt size="xs" tone="faint">
@@ -2403,14 +2551,52 @@ function PartD({ form, locked, patch }: PartProps) {
   const [slots, setSlots] = useState(() => hydrantSlotCount({ held: f.hydrantLocations.length }));
   const hydrantSlots = hydrantSlotCount({ held: f.hydrantLocations.length, shown: slots });
 
+  /*
+   * The site's hydrants, from the register, to pick the tested ones from.
+   * A read that fails leaves the four boxes to be typed, as before.
+   */
+  const [siteHydrants, setSiteHydrants] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void queryAssets({ siteId: form.siteId, limit: 5000 })
+      .then((assets) => { if (!cancelled) setSiteHydrants(form72FromAssets(assets).hydrantLocations); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [form.siteId]);
+  const tested = new Set(f.hydrantLocations.map((x) => x.trim()).filter(Boolean));
+  /*
+   * A form started before Part D offered a pick holds every hydrant on the
+   * site, because the register used to fill them all in. Said, with the way
+   * to start the pick from clean.
+   */
+  const heldEveryHydrant = siteHydrants.length > PART_D_LOCATION_SLOTS
+    && f.hydrantLocations.length === siteHydrants.length
+    && f.hydrantLocations.every((x, i) => x.trim() === siteHydrants[i]);
+
   const setLine = (
     line: { row: FlowRow; index?: number },
     p: Partial<FlowRow>,
-  ) => set({
-    rows: line.index === undefined
-      ? [...f.rows, { ...line.row, ...p }]
-      : f.rows.map((r, n) => (n === line.index ? { ...r, ...p } : r)),
-  });
+  ) => {
+    const next = { ...line.row, ...p };
+    /*
+     * The device column, filled where the form already knows the answer.
+     *
+     * A reading typed into a row with the column blank used to stay blank,
+     * print red "Not recorded" and, now, block the issue. Where Part C holds
+     * one instrument, or every other row names the same one, there is one
+     * answer and it goes on with the first digit. Two meters and no pattern
+     * is the technician's to answer, and the row says so.
+     */
+    if (!('devices' in p) && !next.devices.trim() && flowRowRead(next)) {
+      const known = defaultFlowRowDevices({ devices: form.devices, flowTest: f });
+      if (known) next.devices = known;
+    }
+    set({
+      rows: line.index === undefined
+        ? [...f.rows, next]
+        : f.rows.map((r, n) => (n === line.index ? next : r)),
+    });
+  };
 
   return (
     <View style={{ gap: 12 }}>
@@ -2453,9 +2639,42 @@ function PartD({ form, locked, patch }: PartProps) {
           */}
         <Label>Hydrants tested</Label>
         <Txt size="sm" tone="muted">
-          Numbered to match the table below: hydrant 1 is the one the single-hydrant readings were
-          taken at. Filled from the register where it holds hydrants — clear any not used today.
+          {siteHydrants.length
+            ? 'Tap the hydrants you flowed, in order. Hydrant 1 is where the single-hydrant readings were taken.'
+            : 'Hydrant 1 is where the single-hydrant readings were taken.'}
         </Txt>
+        {siteHydrants.length && !locked ? (
+          <Rowed gap={2} wrap>
+            {siteHydrants.map((place) => {
+              const n = f.hydrantLocations.findIndex((x) => x.trim() === place) + 1;
+              return (
+                <Chip
+                  key={place}
+                  label={n ? `${n} · ${place}` : place}
+                  selected={tested.has(place)}
+                  tone={tested.has(place) ? 'accent' : 'default'}
+                  onPress={() => {
+                    const next = toggleTestedHydrant(f.hydrantLocations, place);
+                    set({ hydrantLocations: next });
+                    if (next.length > hydrantSlots) setSlots(next.length);
+                  }}
+                />
+              );
+            })}
+          </Rowed>
+        ) : null}
+        {heldEveryHydrant && !locked ? (
+          <>
+            <Banner
+              tone="warn"
+              title={`All ${siteHydrants.length} of the site's hydrants are listed`}
+              body="This form was started when every hydrant went in. Clear them and tap the ones you flowed."
+            />
+            <Rowed gap={2}>
+              <Chip label="Clear the list" onPress={() => set({ hydrantLocations: [] })} />
+            </Rowed>
+          </>
+        ) : null}
         {/*
           * Four slots, and more where the form already holds more. The
           * register prefills every hydrant on the site, which at a large one
@@ -2604,6 +2823,9 @@ function PartD({ form, locked, patch }: PartProps) {
                 */}
               {!untouched && !flowRowRead(r) ? (
                 <Chip label="Prints as not recorded" tone="warn" />
+              ) : null}
+              {flowRowRead(r) && !r.devices.trim() ? (
+                <Chip label="Name the device below" tone="fail" />
               ) : null}
               {!line.printed && !locked && line.index !== undefined ? (
                 <RemoveButton
@@ -3034,6 +3256,20 @@ function PartG({ form, locked, patch }: PartProps) {
           onChange={(v) => set({ runningTestGaugeKpa: v })}
           locked={locked}
         />
+        {/*
+          * The line is for the drain-and-gauge on older control valve sets.
+          * A modern system has none, and the only way to answer it was a
+          * number — so every such form printed the line red. This is the
+          * other answer.
+          */}
+        {g.runningTestGaugeKpa === undefined ? (
+          <Chip
+            label="No running test facility on this system"
+            selected={!!g.noRunningTest}
+            tone={g.noRunningTest ? 'accent' : 'default'}
+            onPress={locked ? undefined : () => set({ noRunningTest: g.noRunningTest ? undefined : true })}
+          />
+        ) : null}
       </Card>
 
       {lines.map((line, slot) => {
@@ -3515,7 +3751,18 @@ function PartI({ form, locked, patch }: PartProps) {
       <Card>
         <Label>Signature</Label>
         {locked ? (
-          <Txt size="sm" tone="muted">Signed and issued {formatAuDate(form.issuedAt)}.</Txt>
+          <View style={{ gap: 6 }}>
+            {/* The signature itself, not an assertion that there is one. */}
+            {form.signature?.startsWith('data:image/') ? (
+              <Image
+                source={{ uri: form.signature }}
+                accessibilityLabel="Licensee signature"
+                resizeMode="contain"
+                style={{ width: '100%', height: 90 }}
+              />
+            ) : null}
+            <Txt size="sm" tone="muted">Issued {formatAuDate(form.issuedAt)}.</Txt>
+          </View>
         ) : (
           <SignaturePad
             label="Sign here"

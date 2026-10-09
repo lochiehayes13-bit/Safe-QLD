@@ -66,6 +66,9 @@ const issuable = (): Form72 => {
   };
   form.booster = { result: 'na' };
   form.systemResult = 'pass';
+  // A flow test with a nozzle, and the declaration signed: both block otherwise.
+  form.flowDeviceKinds = ['orifice'];
+  form.signature = 'data:image/png;base64,iVBORw0KGgo=';
   return form;
 };
 

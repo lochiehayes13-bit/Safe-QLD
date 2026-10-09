@@ -1,11 +1,11 @@
 import {
-  CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, FLOW_DEVICE_LABEL,
+  CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, DEPARTMENT_DEVICE_SLOTS, FLOW_DEVICE_LABEL,
   FLOW_ROW_GROUP_LABEL, FRICTIONAL_LOSS_TOLERANCE_KPA, PART_D_DEVICE_RATES_LPS,
   PART_D_LOCATION_SLOTS, PART_D_ROWS,
-  canIssue, elevationHeadKpa, flowCellState, flowDeviceCalibrationFrom, flowRowGroup,
+  canIssue, deviceCalibration, elevationHeadKpa, flowCellState, flowDeviceCalibrationFrom, flowRowGroup,
   flowRowKey, flowRowLabel,
   flowRowLongLabel, flowRowUntouched, overloadCheck, overloadRun, resolveFrictionalLoss,
-  validateForm72,
+  sprinklerTestPointUntouched, validateForm72,
   type BoosterTest, type FlowRow, type FlowRowColumn, type FlowRowGroup, type FlowTest,
   type Form72, type FormDefect, type FormIssue, type PartResult, type SprinklerTestPoint,
   type TestDevice,
@@ -470,7 +470,15 @@ function esc(s: string | number | undefined | null): string {
  * the level 3 landing valve".
  */
 function comment(text: string | undefined, part: PartResult | 'refer-to-report'): string {
-  if (!text?.trim()) return cell(undefined, part);
+  /*
+   * An empty Comments box is not an omission. Red on this page means a box
+   * the department asks for was left empty by the person who signed; a
+   * free-text box with nothing to report is the ordinary state of a test
+   * that went to plan, and on paper the technician simply leaves it blank.
+   * It still prints a word rather than a gap — a gap nobody notices is the
+   * thing this page exists to remove — but the word is grey.
+   */
+  if (!text?.trim()) return part === 'na' ? '<span class="na">N/A</span>' : '<span class="na">None</span>';
   return esc(text).replace(/\n/g, '<br />');
 }
 
@@ -718,6 +726,23 @@ function partA(form: Form72): string {
   </table>`;
 }
 
+/**
+ * "Loss (if any)", which the department's own label says may be nil.
+ *
+ * Printed red when blank, every clean hydrostatic test — pressure held, no
+ * loss to record — carried an omission in red against a box whose label
+ * says it is answered by leaving it empty. So a blank loss where the end
+ * pressure held is "Nil"; a blank where the pressure fell, or where the end
+ * pressure is itself missing, is still the omission validateForm72 names.
+ */
+function loss(h: Form72['hydrostatic']): string {
+  if (h.lossLpm !== undefined) return reading(h.lossLpm, 'L/min', h.result);
+  if (h.result === 'na') return '<span class="na">N/A</span>';
+  const held = h.endPressureKpa !== undefined && h.testPressureKpa !== undefined
+    && h.endPressureKpa >= h.testPressureKpa;
+  return held ? '<span class="na">Nil</span>' : '<span class="missing">Not recorded</span>';
+}
+
 function partB(form: Form72): string {
   const h = form.hydrostatic;
   const r = h.result;
@@ -729,7 +754,7 @@ function partB(form: Form72): string {
      * together on the second. The app put the loss on a row of its own, which
      * reads as a row the form does not have.
      */''}
-  <table class="grid b">
+  <div class="whole"><table class="grid b">
     <tr>
       <td class="k">Boost pressure</td><td class="v">${reading(h.boostPressureKpa, 'kPa', r)}</td>
       <td class="k" colspan="2">Test pressure</td><td class="v" colspan="2">${reading(h.testPressureKpa, 'kPa', r)}</td>
@@ -737,26 +762,57 @@ function partB(form: Form72): string {
     <tr>
       <td class="k">Duration of test</td><td class="v">${reading(h.durationMinutes, 'mins', r)}</td>
       <td class="k">End of test pressure</td><td class="v">${reading(h.endPressureKpa, 'kPa', r)}</td>
-      <td class="k">Loss (if any):</td><td class="v">${reading(h.lossLpm, 'L/min', r)}</td>
+      <td class="k">Loss (if any):</td><td class="v">${loss(h)}</td>
     </tr>
     <tr><td class="k">Comments:</td><td class="v" colspan="5">${comment(h.comments, r)}</td></tr>
-  </table>`;
+  </table></div>`;
 }
 
-/**
- * The four column heads the department prints across Part C.
- *
- * "Device/gauge 1" through "Device/gauge 4", in those words. The app used to
- * print "Device 1, Device 2, Gauge 1, Gauge 2", which reads as a form with two
- * device columns and two gauge columns — a shape the department's form does not
- * have, and one that tells a technician with three gauges that the third has
- * nowhere to go.
+/*
+ * The four column heads the department prints across Part C live in the
+ * domain beside deviceSlotName, which hands them out; re-exported here so
+ * this module stays the one place the printed form's facts are imported from.
  */
-export const DEPARTMENT_DEVICE_SLOTS = [
-  'Device/gauge 1', 'Device/gauge 2', 'Device/gauge 3', 'Device/gauge 4',
-] as const;
+export { DEPARTMENT_DEVICE_SLOTS };
 
-function partC(form: Form72, issues: FormIssue[]): string {
+/**
+ * The basis a device's calibration was accepted on, with everything the
+ * certificate says about it.
+ *
+ * The department's grid prints a date and a certificate number and leaves the
+ * reader to know the interval and to find the paper. This row carries what the
+ * paper says — who issued it, who signed it, the accuracy it claims — and how
+ * old it was on the day of the test, so a reader comparing the certificate
+ * date with the test date is told the arithmetic rather than left to do it.
+ * The manufacturer's service-life claim prints with the conditions it
+ * carries: unconditionally it would read as a guarantee, and both conditions
+ * are things only the person holding the meter can answer.
+ */
+function basis(d: TestDevice, testDate?: string): string | undefined {
+  if (!d.serialNumber.trim()) return undefined;
+  const cal = deviceCalibration(d, testDate);
+  const age = cal.monthsBefore !== undefined
+    ? ` Certificate ${cal.monthsBefore < 1 ? 'under a month' : `${Math.floor(cal.monthsBefore)} month${Math.floor(cal.monthsBefore) === 1 ? '' : 's'}`} old at this test.`
+    : '';
+  const paper = [
+    d.issuedBy?.trim() ? `Issued by ${esc(d.issuedBy)}` : '',
+    d.certifiedBy?.trim() ? `certified by ${esc(d.certifiedBy)}` : '',
+    d.accuracy?.trim() ? esc(d.accuracy) : '',
+  ].filter(Boolean).join(', ');
+  // The basis is what the device carries, not what the calibration check made
+  // of it: a meter whose date is after the test is still a meter certified
+  // for its service life, with that date's own fault reported beside it.
+  if (d.calibrationBasis === 'service-life' && d.kind === 'flow-meter') {
+    return `Manufacturer certifies for the device's service life, absent fault or damage, unless an `
+      + `authority stipulates recertification.${paper ? ` ${paper}.` : ''}${age}`;
+  }
+  const wrongBasis = d.calibrationBasis === 'service-life'
+    ? ' <span class="extra">recorded as service life, which applies to a flow meter and not to a gauge</span>'
+    : '';
+  return `${CALIBRATION_MONTHS} month interval.${paper ? ` ${paper}.` : ''}${age}${wrongBasis}`;
+}
+
+function partC(form: Form72, issues: FormIssue[], issued: boolean): string {
   // The department's four columns, filled by whatever the form holds. A column
   // nobody used prints as the department's empty column rather than being
   // dropped, and a fifth device the technician really did use is appended — the
@@ -796,7 +852,16 @@ function partC(form: Form72, issues: FormIssue[]): string {
    * judgement deviceCalibration already makes: no serial number means an empty
    * slot on the form rather than a device somebody failed to describe.
    */
-  const unused = (d: TestDevice): boolean => !d.serialNumber.trim();
+  /*
+   * Unused means nothing on it at all. A column with a date, a face size or
+   * "Digital reader: Yes" and no serial number is a column somebody started,
+   * and what they recorded prints — only the serial row is red, because the
+   * serial is what is missing. Softening the whole column to "Not used" on
+   * a blank serial erased a true answer from a signed page.
+   */
+  const unused = (d: TestDevice): boolean => !d.serialNumber.trim()
+    && !d.dateCalibrated && !d.calibrationCertificate && !d.model && !d.correctionFactor
+    && !d.faceSize && d.digitalReader === undefined && d.incrementsKpa === undefined;
 
   const row = (
     label: string,
@@ -817,16 +882,35 @@ function partC(form: Form72, issues: FormIssue[]): string {
 
   const kinds = form.flowDeviceKinds;
   const fromColumns = flowDeviceCalibrationFrom(form);
-  const partCIssues = issues.filter((i) => i.part === 'C');
+  /*
+   * The equipment notes print on a draft only. An issued form passed the gate
+   * on the day, and a rule written since must not grow a box on a reprint
+   * that the occupier's copy does not have — the same reason the stamp and
+   * the "Check before issue" list are suppressed once issued.
+   */
+  const partCIssues = issued ? [] : issues.filter((i) => i.part === 'C');
+  /*
+   * Whether the three boxes have a question to answer on this form. A
+   * hydrostatic-only visit with one gauge and Part D marked N/A ran no flow
+   * through anything, and "Not answered" in red against it was a question
+   * the test never asked. A flow meter in the columns, or a live Part D,
+   * is the question.
+   */
+  const flowDeviceInPlay = form.flowTest.result !== 'na'
+    || held.some((d) => d.kind === 'flow-meter' && d.serialNumber.trim());
 
   return `${band('Part C—Hydrant test equipment/pressure gauges')}
   ${note(PART_C_NOTE)}
-  <table class="grid">
+  <div class="keep"><table class="grid">
     <tr><td class="k">Flow measuring device</td><td class="v" colspan="3">
       ${tick(FLOW_DEVICE_LABEL.orifice, kinds.includes('orifice'))}
       ${tick(FLOW_DEVICE_LABEL.mechanical, kinds.includes('mechanical'))}
       ${tick(FLOW_DEVICE_LABEL.electromagnetic, kinds.includes('electromagnetic'))}
-      ${kinds.length === 0 ? '<span class="missing">Not answered</span>' : ''}
+      ${kinds.length === 0
+    ? flowDeviceInPlay
+      ? '<span class="missing">Not answered</span>'
+      : '<span class="na">N/A — no flow test on this form</span>'
+    : ''}
     </td></tr>
     ${/*
        * The two "Calibrated: __/__/__" fields the department prints on this
@@ -842,17 +926,22 @@ function partC(form: Form72, issues: FormIssue[]): string {
   esc(FLOW_DEVICE_LABEL[kind])} calibrated: ${
   form.flowDeviceCalibrated?.[kind]?.trim()
     ? esc(formatAuDate(form.flowDeviceCalibrated[kind]))
-    : !kinds.includes(kind)
-      ? '<span class="na">Not used</span>'
-      : fromColumns
-        // Read off the equipment list below, which asks for the same date. It
-        // says so: a figure in one of the department's boxes that nobody typed
-        // has to carry where it came from.
-        ? `${esc(formatAuDate(fromColumns.date))} <span class="extra">from ${esc(fromColumns.from)}</span>`
-        : '<span class="missing">Not recorded</span>'
+    : kinds.length === 0 && fromColumns
+      // A meter is in the columns with a date and no kind ticked. "Not used"
+      // against both boxes would contradict the column two rows down, so the
+      // date prints with the one thing that is actually missing named.
+      ? `${esc(formatAuDate(fromColumns.date))} <span class="extra">from ${esc(fromColumns.from)} — kind not ticked</span>`
+      : !kinds.includes(kind)
+        ? '<span class="na">Not used</span>'
+        : fromColumns
+          // Read off the equipment list below, which asks for the same date. It
+          // says so: a figure in one of the department's boxes that nobody typed
+          // has to carry where it came from.
+          ? `${esc(formatAuDate(fromColumns.date))} <span class="extra">from ${esc(fromColumns.from)}</span>`
+          : '<span class="missing">Not recorded</span>'
 }</td>`).join('')}
     </tr>
-  </table>
+  </table></div>
   <table class="grid devices">
     <tr><td class="k"></td>${columns.map((col, i) => `<td class="dh">${esc(col.head)}${
   i >= DEPARTMENT_DEVICE_SLOTS.length ? ' <span class="extra">added</span>' : ''}${
@@ -928,15 +1017,7 @@ function partC(form: Form72, issues: FormIssue[]): string {
        * the meter was a year out. So the basis each device was accepted on
        * prints beside the date that was accepted.
        */
-  row('Calibration basis <span class="extra">added</span>',
-    (d) => (!d.serialNumber.trim() ? undefined
-      : d.calibrationBasis === 'service-life'
-        // The manufacturer's claim, with the conditions it carries. Printed
-        // unconditionally it reads as a guarantee, and both conditions are
-        // things only the person holding the meter can answer.
-        ? "Manufacturer certifies for the device's service life, absent fault or damage, "
-          + 'unless an authority stipulates recertification'
-        : `${CALIBRATION_MONTHS} month interval`), undefined, true)}
+  row('Calibration basis <span class="extra">added</span>', () => undefined, (d) => basis(d, form.testDate), true)}
   </table>
   ${partCIssues.length
     ? `<div class="issues"><b>Test equipment</b><ul>${partCIssues
@@ -977,7 +1058,7 @@ export function hydrantLocationsNeeded(test: FlowTest): number {
   return needed;
 }
 
-function partD(form: Form72): string {
+function partD(form: Form72, issued: boolean): string {
   const d = form.flowTest;
   const r = d.result;
   const needed = hydrantLocationsNeeded(d);
@@ -1035,9 +1116,21 @@ function partD(form: Form72): string {
   });
   const spanAt = new Map(groupSpans.map((sp) => [sp.from, sp]));
 
+  /*
+   * The pressure zone number, where the department prints it: the top-left
+   * cell of the flow table, over the group column. The water utility's zone
+   * is routinely not known on site and the department's own layout leaves it
+   * a half-line beside the heading, so a blank answers in grey rather than as
+   * an omission.
+   */
+  const zone = d.pressureZone?.trim()
+    ? esc(d.pressureZone)
+    : r === 'na' ? '<span class="na">N/A</span>' : '<span class="na">Not stated</span>';
+
   const table = `<table class="grid flow">
     <tr>
-      <td class="dh" colspan="2">Size/flow rate</td><td class="dh">Device/gauge no. (Part C)</td>
+      <td class="dh">Pressure zone number: <span class="dz">${zone}</span></td>
+      <td class="dh">Size/flow rate</td><td class="dh">Device/gauge no. (Part C)</td>
       <td class="dh">Hydrant 1 only</td><td class="dh">Hydrants 1 and 2</td>
       <td class="dh">Hydrants 1, 2 and 3</td><td class="dh">Hydrants 1, 2, 3 and 4</td>
     </tr>
@@ -1104,11 +1197,17 @@ function partD(form: Form72): string {
   ${note(PART_D_NOTE)}
   ${r === 'na'
     // The department's Part D has no N/A box. Leaving all three unticked would
-    // read as an unanswered part, so the reason is written out instead.
-    ? '<div class="stated">Recorded as not applicable. Part D of the department\'s form carries no '
-      + 'N/A box, so none of the three boxes above is ticked; this line says why.</div>'
+    // read as an unanswered part, so the reason is written out instead. On a
+    // draft the wording is honest about where N/A came from: it is the stored
+    // default, and a form nobody has opened Part D on has not "recorded" it.
+    ? `<div class="stated keep">${issued
+      ? 'Recorded as not applicable. Part D of the department\'s form carries no N/A box, so none '
+        + 'of the three boxes above is ticked; this line says why.'
+      : 'Marked not applicable, which is how a new form starts — change it in Part D if a flow test '
+        + 'was run. The department\'s form carries no N/A box for this part, so none of the three '
+        + 'boxes above is ticked.'}</div>`
     : ''}
-  <table class="grid">
+  <div class="whole"><table class="grid">
     ${/*
        * One and three on the first line, two and four on the second.
        *
@@ -1122,15 +1221,12 @@ function partD(form: Form72): string {
     ['System requirements', requirement],
     ['Static pressure', reading(d.staticPressureKpa, 'kPa', r)],
   )}
-    ${pair(
-    ['On-site pump set installed', `${tick('Yes', d.onSitePumpSet === true)}${tick('No', d.onSitePumpSet === false)}${
+    ${wide('On-site pump set installed', `${tick('Yes', d.onSitePumpSet === true)}${tick('No', d.onSitePumpSet === false)}${
       d.onSitePumpSet === undefined
         // An N/A part answers its boxes N/A, like every other box on it; only a
         // live part with the question skipped is an omission.
         ? r === 'na' ? ' <span class="na">N/A</span>' : ' <span class="missing">Not answered</span>'
-        : ''}`],
-    ['Pressure zone number:', cell(d.pressureZone, r)],
-  )}
+        : ''}`)}
     ${/*
        * Ours. Parts B, E, F and G carry a Comments field and Part D does not —
        * the department's Part D ends at the pressure zone number. It is kept
@@ -1139,7 +1235,7 @@ function partD(form: Form72): string {
        */''}
     ${wide('Comment <span class="extra">added</span>', addedComment(d.comment, r))}
   </table>
-  ${table}
+  ${table}</div>
   ${spareLocations.length
     ? `<div class="stated">${spareLocations.length} further hydrant location${
       spareLocations.length === 1 ? ' is' : 's are'} recorded against this test than the `
@@ -1302,10 +1398,10 @@ function partF(form: Form72): string {
   const r = f.result;
   return `${band('Part F—Sprinkler hydrostatic test', resultBoxes(r, RESULT_OPTIONS))}
   ${note(PART_F_NOTE)}
-  <table class="grid">
+  <div class="whole"><table class="grid">
     ${pair(['Pressure', reading(f.pressureKpa, 'kPa', r)], ['Time held', reading(f.timeHeldMinutes, 'mins', r)])}
     ${wide('Comments:', comment(f.comments, r))}
-  </table>`;
+  </table></div>`;
 }
 
 function partG(form: Form72): string {
@@ -1323,9 +1419,7 @@ function partG(form: Form72): string {
   // The department prints two test points and its own note says multiple points
   // may be required — meaning one is often the right answer. An unused second
   // point says so, rather than showing four boxes flagged as missing readings.
-  const unused = (p: SprinklerTestPoint | undefined): boolean => !p || (!p.location.trim()
-    && p.requiredFlowLpm === undefined && p.resultFlowLpm === undefined
-    && p.requiredPressureKpa === undefined && p.resultPressureKpa === undefined);
+  const unused = (p: SprinklerTestPoint | undefined): boolean => !p || sprinklerTestPointUntouched(p);
 
   // Each of the department's two lines carries its own Pass / Fail boxes, and
   // the technician ticks them on site. The app can also work the comparison out
@@ -1337,7 +1431,15 @@ function partG(form: Form72): string {
   const disagreements: string[] = [];
 
   const point = (n: number, p: SprinklerTestPoint | undefined, extraPoint = false): string => {
-    const spare = unused(p);
+    /*
+     * Test point 1 on a live part is never spare. A sprinkler flow test is
+     * its test points, and an empty first one under a ticked PASS is the
+     * omission the rest of this page prints in red — it was printing "Not
+     * used" in grey, which reads as a deliberate answer. Point 2 and beyond
+     * stay grey: the department's note says multiple points may be required,
+     * which means one is often the right number.
+     */
+    const spare = unused(p) && (n > 1 || r === 'na');
     const c = (v: string | number | undefined): string =>
       (spare ? '<span class="na">Not used</span>' : cell(v, r));
     const line = (
@@ -1461,16 +1563,21 @@ function partG(form: Form72): string {
    */
   return `${band('Part G—Sprinkler system flow test', resultBoxes(r, PART_G_RESULT_OPTIONS))}
   ${note(PART_G_NOTE)}
-  <table class="grid">
+  <div class="whole"><table class="grid">
     ${pair(['System specifications (block plan):', cell(g.systemSpec, r)], ['Test results:', achieved])}
     ${rows}
     <tr>
       <td class="k">Running test</td>
       <td class="k" colspan="2">Installation gauge pressure:</td>
-      <td class="v">${reading(g.runningTestGaugeKpa, 'kPa', r)}</td>
+      <td class="v">${g.runningTestGaugeKpa === undefined && g.noRunningTest && r !== 'na'
+    // The department's line is for the drain-and-gauge on older control valve
+    // sets. A system with none has no reading to give, and that is the
+    // answer rather than an omission.
+    ? '<span class="na">No running test on this system</span>'
+    : reading(g.runningTestGaugeKpa, 'kPa', r)}</td>
     </tr>
     ${wide('Comments:', comment(g.comments, r))}
-  </table>
+  </table></div>
   ${disagreements.length
     ? `<div class="stated fail"><b>Ticked result against the figures.</b> ${
       esc(disagreements.join(' '))} The tick is what prints — a reading inside the standard's `
@@ -1483,7 +1590,7 @@ function partG(form: Form72): string {
     : ''}`;
 }
 
-function partH(form: Form72): string {
+function partH(form: Form72, issued: boolean): string {
   const critical = form.criticalDefectsIdentified;
   const repairs = form.repairsRequired;
 
@@ -1496,7 +1603,7 @@ function partH(form: Form72): string {
     + (value === undefined ? '<div class="missing">Not answered</div>' : '');
 
   return `${band('Part H—Compliance')}
-  <table class="grid">
+  <div class="whole"><table class="grid">
     <tr><td class="k">Critical defects identified</td><td class="v" colspan="3">${
   yesNo(critical, 'Give owner/occupier a critical defect notice',
     'No action required in relation to critical defects at this time')}</td></tr>
@@ -1513,15 +1620,18 @@ function partH(form: Form72): string {
        * technician wrote about the result, so it says it is ours.
        */''}
     ${wide('System notes: <span class="extra">added</span>', addedComment(form.systemNotes, form.systemResult))}
-  </table>
+  </table></div>
   ${form.systemResult === 'na'
     // The department's System row carries Pass and Fail and nothing else. An
     // N/A box added here would be Safe QLD's box printed inside the
     // department's part, where a reader has no way to tell the two apart — so
     // neither box is ticked and the reason is written out, as in Part D.
-    ? '<div class="stated">Recorded as not applicable. The department\'s System row carries only '
-      + 'Pass and Fail, so neither is ticked; this line says why, rather than a box being added to '
-      + 'the department\'s form.</div>'
+    ? `<div class="stated">${issued
+      ? 'Recorded as not applicable. The department\'s System row carries only Pass and Fail, so '
+        + 'neither is ticked; this line says why, rather than a box being added to the '
+        + 'department\'s form.'
+      : 'Not yet answered — N/A is how a new form starts, and the system result is given in Part H. '
+        + 'The department\'s System row carries only Pass and Fail, so neither is ticked.'}</div>`
     : ''}`;
 }
 
@@ -1547,13 +1657,13 @@ function signatureCell(signature: string | undefined): string {
 function partI(form: Form72): string {
   return `${band('Part I—Signature')}
   <div class="decl">${esc(DECLARATION)}</div>
-  <table class="grid sig">
+  <div class="whole"><table class="grid sig">
     ${pair(['Licensee name', cell(form.licenseeName, 'pass')], ['Licensee signature', signatureCell(form.signature)])}
     ${pair(['Licence no. (QBCC/PIC)', cell(form.licenceNumber, 'pass')],
     // Not every job has one, so its absence is answered rather than flagged.
     ['Licensee report no.', form.licenseeReportNumber?.trim()
       ? esc(form.licenseeReportNumber) : '<span class="na">None</span>'])}
-  </table>`;
+  </table></div>`;
 }
 
 /**
@@ -1663,7 +1773,14 @@ const CSS = `
   td.dh { background: #D6DCE8; font-weight: 700; font-size: 8.5px; }
   td.sub { background: #D6DCE8; font-weight: 700; }
   table.flow td { width: auto; }
+  td.dh .dz { font-weight: 400; }
+  /* Fixed layout shares the width left after the label column equally among
+     however many device columns print. With four at 26% the table was over
+     committed and the browser squeezed the fourth, so "Device/gauge 4" wrapped
+     where 1 to 3 did not; a fifth device squeezed it further. */
+  table.devices { table-layout: fixed; }
   table.devices td.k { width: 22%; }
+  table.devices td.v, table.devices td.dh { width: auto; }
   .tick { margin-right: 14px; white-space: nowrap; }
   .cb { display: inline-block; width: 11px; height: 11px; border: 1px solid #333; background: #fff;
         text-align: center; line-height: 11px; font-size: 9px; margin-right: 4px; vertical-align: -1px; }
@@ -1674,7 +1791,10 @@ const CSS = `
   .missing { color: #B00020; font-style: italic; }
   .extra { color: #666; font-style: italic; font-size: 7.5px; }
   .mt { border-collapse: collapse; }
-  .mt td { padding: 1px 8px 1px 0; border: none; }
+  /* Nested inside a table.grid cell, so its cells are still "table.grid td"
+     to the cascade and that rule's specificity beat a bare ".mt td": the
+     department's bare tick grid printed boxed into nine bordered cells. */
+  table.grid table.mt td { padding: 1px 8px 1px 0; border: none; background: transparent; }
   .mth { font-weight: 700; }
   .mtl { padding-right: 12px; }
   .stated { border-left: 3px solid #1F3864; background: #F5F6FA; padding: 5px 8px; margin-top: 5px;
@@ -1685,11 +1805,11 @@ const CSS = `
   /* Part I only. Every other part uses a bare table.grid and some of them — Part
      E's flow table on a six-hydrant site — are taller than a page, so they have
      to be allowed to break. The signature grid is the one that must not: the
-     swoosh and the entity line under it take roughly 40mm off the tail of the
-     last sheet now, which is enough to leave the licensee's name on one page and
-     the signature box on the next. A form whose signature is on a sheet of its
-     own is the argument an occupier's solicitor makes in a year's time. */
-  table.grid.sig { page-break-inside: avoid; }
+     closing notes and the entity line take a good part of the tail of the last
+     sheet, which is enough to leave the licensee's name on one page and the
+     signature box on the next. A form whose signature is on a sheet of its own
+     is the argument an occupier's solicitor makes in a year's time. */
+  table.grid.sig { page-break-inside: avoid; break-inside: avoid; }
   /*
    * Where the paper is allowed to end.
    *
@@ -1718,8 +1838,30 @@ const CSS = `
    * fall.
    */
   .band { break-after: avoid; page-break-after: avoid; }
-  .note, .intro { break-after: avoid; page-break-after: avoid; }
+  .note, .intro { break-after: avoid; page-break-after: avoid; break-inside: avoid; page-break-inside: avoid; }
   table.grid tr { break-inside: avoid; page-break-inside: avoid; }
+  /*
+   * Part D's flow table stays on one page, and stays with the grid above it
+   * (both inside one div.whole below). Split, it put pressures on a page with
+   * no column headings; parted from the location grid, it opened a page with
+   * no "Part D" band over it. Eight rows and a header are a third of a page,
+   * so keeping them whole costs at most that much white space at a foot.
+   */
+  .keep { break-after: avoid; page-break-after: avoid; }
+  /*
+   * The short parts print whole. Parts B, C, F, G and H are each well under
+   * half a page, and a band on one sheet with one row of its table under it
+   * and the rest overleaf — Part H's first question on page two and its
+   * second on page three — read as a part with something missing. Part D's
+   * two tables above are the same rule; Part E's six-hydrant table can be
+   * taller than a page and is left to break by the row.
+   */
+  /* Chromium's print engine does not reliably honour break-inside on a table
+     itself — Part D's grid still split after its first row with the rule on
+     the table — so the rule sits on a div around each whole part. Part C is
+     left out: it is tall enough that keeping it whole strands a third of a
+     page, and its rows are unbreakable anyway. */
+  div.whole { break-inside: avoid; page-break-inside: avoid; }
   .stamp, .caution, .issues, .stated, .deptnote, .deptfine {
     break-inside: avoid; page-break-inside: avoid;
   }
@@ -1781,7 +1923,7 @@ export function form72Html(input: Form72DocumentInput): string {
   // The company mark, and why this form gets only half of it.
   //
   // Every other document the app prints wears the full letterhead: the band at
-  // the top, the swoosh and the entity line at the bottom. This one must not.
+  // the top and the entity line at the bottom. This one must not.
   // The `.head` block below is the department's own full-width head, reproduced
   // because MP 6.1 is discharged by the department's form and not by a summary
   // of it, and a Safe QLD band stacked above it gives the reader two mastheads
@@ -1789,12 +1931,12 @@ export function form72Html(input: Form72DocumentInput): string {
   // company has altered a form the regulator prescribes.
   //
   // So `masthead: false`, which is the escape hatch `letterheaded` exists to
-  // offer, and the foot alone. The swoosh lands after DEPARTMENT_NOTE and after
-  // the dashed `.ours` block that already says "Not part of the department's
-  // form", so it reads as the producer's mark on a reproduced form rather than
-  // as part of the form. The entity line that comes with it is the reason to
-  // keep the foot at all: a statutory record leaving this company without its
-  // legal name and ABN on the page is its own problem.
+  // offer, and the foot alone. The entity line lands after DEPARTMENT_NOTE and
+  // after the dashed `.ours` block that already says "Not part of the
+  // department's form", so it reads as the producer's mark on a reproduced form
+  // rather than as part of the form — and it is the reason to keep the foot at
+  // all: a statutory record leaving this company without its legal name and
+  // ABN on the page is its own problem.
   //
   // CSS's own @page at the top of this file stays where it is. `letterheaded`
   // puts its default page box in ahead of the caller's stylesheet, so the
@@ -1888,15 +2030,22 @@ export function form72Html(input: Form72DocumentInput): string {
 
   ${partA(form)}
   ${partB(form)}
-  ${partC(form, issues)}
-  ${partD(form)}
+  ${partC(form, issues, issued)}
+  ${partD(form, issued)}
   ${partE(form, input)}
   ${partF(form)}
   ${partG(form)}
-  ${partH(form)}
+  ${partH(form, issued)}
   ${partI(form)}
-  ${attachment(form)}
 
+  ${/*
+     * The department's own closing matter follows Part I, before anything of
+     * ours. It used to print after the attachment page — under a band saying
+     * "not part of the department's form" — so the privacy notice, the
+     * definitions and the imprint all appeared beneath a heading disclaiming
+     * them, and the sentence explaining the + boxes was two pages from the
+     * boxes.
+     */''}
   <div class="subnote">${esc(ADDED_BOX_NOTE)}</div>
   <div class="deptnote">${esc(DEPARTMENT_NOTE)}</div>
   <div class="deptnote">${esc(DEPARTMENT_DEFINITIONS)}</div>
@@ -1910,6 +2059,8 @@ export function form72Html(input: Form72DocumentInput): string {
      */''}
   <div class="imprint">${esc(FORM_VERSION)}<br />${
   esc(DEPARTMENT_IMPRINT).replace(/\n/g, '<br />')}</div>
+
+  ${attachment(form)}
 
   <div class="ours">
     <b>Not part of the department's form.</b>

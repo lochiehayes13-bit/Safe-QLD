@@ -71,6 +71,8 @@ const issuable = (over: Partial<Form72> = {}): Form72 => ({
   repairsRequired: false,
   licenseeName: 'D. McKee',
   licenceNumber: '1310717',
+  // The declaration is signed or it is nothing: an unsigned form blocks.
+  signature: 'data:image/png;base64,iVBORw0KGgo=',
   ...over,
 });
 
@@ -184,18 +186,34 @@ describe('N/A is a real answer and a blank is not', () => {
   });
 
   it('says why Part D has nothing ticked, because the department prints no N/A box there', () => {
-    const html = form72Html(doc());
+    const html = form72Html(doc({ status: 'issued', issuedAt: '2026-07-06T02:00:00.000Z' }));
     const partD = between(html, 'Part D—Hydrant system flow test', 'Part E—');
     expect(flat(partD)).toContain(
       "Recorded as not applicable. Part D of the department's form carries no N/A box",
     );
   });
 
+  it('on a draft, says N/A is only the default rather than that anybody recorded it', () => {
+    // 'na' is the stored default. A new form printed "Recorded as not
+    // applicable" about a part nobody had opened — a positive statement about
+    // a choice nobody made — while the same default in Part C printed red.
+    const html = form72Html(doc({ status: 'draft' }));
+    const partD = between(html, 'Part D—Hydrant system flow test', 'Part E—');
+    expect(flat(partD)).toContain('Marked not applicable, which is how a new form starts');
+    expect(flat(partD)).not.toContain('Recorded as not applicable');
+    const partH = between(
+      form72Html(doc({ form: issuable({ systemResult: 'na' }), status: 'draft' })), 'Part H—Compliance', 'Part I—',
+    );
+    expect(flat(partH)).toContain('N/A is how a new form starts');
+  });
+
   it('does not add an N/A box to a department part that has none', () => {
     // Part H's System row prints Pass and Fail and nothing else. A third box
     // here would be Safe QLD's, printed inside the department's part, where a
     // reader has no way to tell whose it is.
-    const html = form72Html(doc({ form: issuable({ systemResult: 'na' }) }));
+    const html = form72Html(doc({
+      form: issuable({ systemResult: 'na' }), status: 'issued', issuedAt: '2026-07-06T02:00:00.000Z',
+    }));
     const system = between(html, '<td class="k">System</td>', 'System notes');
     expect(system).toContain('Pass');
     expect(system).toContain('Fail');
@@ -1220,7 +1238,7 @@ describe('deviceCalibration', () => {
   it('agrees with the form-wide validation, which is the point of sharing it', () => {
     const form = { ...emptyForm72({ id: 'f', siteId: 's', siteName: 'Site', now: '2026-07-03T00:00:00.000Z' }),
       testDate: '2026-07-03',
-      devices: [gauge({ dateCalibrated: '2024-01-15' })] };
+      devices: [gauge({ dateCalibrated: '2024-01-15', calibrationCertificate: 'CAL-1' })] };
     const fromForm = validateForm72(form).filter((i) => i.part === 'C');
     expect(fromForm).toHaveLength(1);
     expect(fromForm[0]).toEqual(deviceCalibration(form.devices[0]!, form.testDate).issue);
@@ -1858,11 +1876,15 @@ describe('the company’s own test equipment', () => {
         serialNumber: serial,
         dateCalibrated: '2026-07-18',
         calibrationCertificate: `CR-${serial}-IN-01`,
-        // The certificate's own label travels with the number: it says
-        // "MM Error: + 0.35 %", not "correction factor".
-        correctionFactor: '+0.35 % (MM Error)',
+        // The certificate says "MM Error: + 0.35 %" — the meter's error, which
+        // is not the correction. Both print, each named, with the sense of
+        // the correction spelled out so nobody applies the error as one.
+        correctionFactor: 'Meter error +0.35 % at certification (reads high); correction −0.35 %',
         calibrationBasis: 'service-life',
         digitalReader: true,
+        issuedBy: 'Flowtech Water Meters',
+        certifiedBy: 'Lawrence Coomber',
+        accuracy: expect.stringContaining('±2 %'),
       });
     }
   });
@@ -1909,6 +1931,7 @@ describe('a meter certified for its service life', () => {
     serialNumber: 'SQF-001',
     dateCalibrated: '2026-07-18',
     calibrationBasis: 'service-life',
+    kind: 'flow-meter',
     ...over,
   });
 
@@ -1934,12 +1957,43 @@ describe('a meter certified for its service life', () => {
     expect(gauge.issue!.blocking).toBe(true);
   });
 
+  it('is a flow meter\u2019s basis: a gauge given it is judged on the interval and told so', () => {
+    // "Service life" on a stale gauge used to switch off the one blocking check
+    // Part C has. The basis now applies only to a device recorded as a meter.
+    const stale = deviceCalibration(meter({ kind: 'gauge' }), '2028-03-01');
+    expect(stale.state).toBe('out-of-calibration');
+    expect(stale.issue!.blocking).toBe(true);
+    expect(stale.issue!.message).toContain('applies to a flow meter and not to a gauge');
+
+    const fresh = deviceCalibration(meter({ kind: 'gauge' }), '2026-10-01');
+    expect(fresh.state).toBe('in-calibration');
+    expect(fresh.issue!.blocking).toBe(false);
+    expect(fresh.issue!.message).toContain('Set it to the interval');
+
+    const html = form72Html(doc({ form: issuable({ devices: [meter({ kind: 'gauge' })], testDate: '2026-10-01' }) }));
+    expect(flat(html)).toContain('recorded as service life, which applies to a flow meter and not to a gauge');
+  });
+
   it('does not block the form, which is the whole point', () => {
     const form = issuable({
       testDate: '2028-03-01',
       devices: [meter({ calibrationCertificate: 'CR-SQF-001-IN-01' })],
+      flowDeviceKinds: ['mechanical'],
     });
     expect(validateForm72(form).filter((i) => i.part === 'C')).toEqual([]);
+  });
+
+  it('prints the certificate\u2019s issuer, signatory and accuracy, and how old it was at the test', () => {
+    const html = form72Html(doc({
+      form: issuable({
+        testDate: '2027-01-18',
+        devices: [meter({ issuedBy: 'Flowtech Water Meters', certifiedBy: 'L. Coomber', accuracy: 'MMPE ±2 % of full scale' })],
+        flowDeviceKinds: ['mechanical'],
+      }),
+    }));
+    const row = between(flat(html), 'Calibration basis', '</tr>');
+    expect(row).toContain('Issued by Flowtech Water Meters, certified by L. Coomber, MMPE ±2 % of full scale');
+    expect(row).toContain('Certificate 6 months old at this test');
   });
 
   it('prints which basis each device was accepted on, marked as ours', () => {
@@ -2428,9 +2482,30 @@ describe('the two calibration dates on Part C’s flow device line', () => {
   });
 
   it('says the device type question is unanswered rather than showing three empty boxes', () => {
-    const html = form72Html(doc({ form: issuable({ flowDeviceKinds: [] }) }));
+    const html = form72Html(doc({
+      form: issuable({ flowDeviceKinds: [], flowTest: { result: 'pass', hydrantLocations: [], rows: [] } }),
+    }));
     const row = between(html, 'Flow measuring device', '</tr>');
     expect(row).toContain('Not answered');
+  });
+
+  it('answers N/A where no flow was measured on this form, rather than asking a question the test never asked', () => {
+    // A hydrostatic-only visit: Part D marked N/A, one gauge, no meter.
+    const html = form72Html(doc({ form: issuable({ flowDeviceKinds: [] }) }));
+    const row = between(html, 'Flow measuring device', '</tr>');
+    expect(row).not.toContain('Not answered');
+    expect(row).toContain('N/A — no flow test on this form');
+
+    // A meter in the columns is the question, flow test or not.
+    const withMeter = form72Html(doc({ form: issuable({
+      flowDeviceKinds: [],
+      devices: [{ slot: 'Device/gauge 1', serialNumber: 'SQF-001', kind: 'flow-meter', dateCalibrated: '2026-07-18' }],
+    }) }));
+    expect(between(withMeter, 'Flow measuring device', '</tr>')).toContain('Not answered');
+    // And the calibrated boxes do not say the meter was not used.
+    const line = between(withMeter, 'Part C not required for orifice testing', '</tr>');
+    expect(line).not.toContain('Not used');
+    expect(line).toContain('kind not ticked');
   });
 });
 
@@ -3162,12 +3237,17 @@ describe('an issued form reprints as the document that was issued', () => {
     expect(html).toContain('Check before issue');
   });
 
-  it('still prints every part exactly as it did, because only the two advisory blocks moved', () => {
+  it('still prints every part exactly as it did, because only the advisory blocks moved', () => {
     const form = spoiled();
     const draft = form72Html(doc({ form, status: 'draft' }));
     const after = form72Html(doc({ form, status: 'issued', issuedAt: '2026-10-03T01:00:00.000Z' }));
     const parts = (html: string) => html.slice(html.indexOf('Part A—Test details'), html.indexOf('Part I—Signature'));
-    expect(parts(after)).toBe(parts(draft));
+    // Part C's equipment notes are the third advisory block: built from
+    // today's rules, so a draft only. Everything else is the same document.
+    const withoutNotes = (html: string) => html.replace(/<div class="issues">[\s\S]*?<\/ul><\/div>/g, '');
+    expect(parts(draft)).toContain('<div class="issues">');
+    expect(parts(after)).not.toContain('<div class="issues">');
+    expect(withoutNotes(parts(after)).replace(/\s+/g, ' ')).toBe(withoutNotes(parts(draft)).replace(/\s+/g, ' '));
   });
 });
 

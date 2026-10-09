@@ -81,7 +81,7 @@ describe('a row is not split down the middle of its cells', () => {
   it('keeps the one table that must not break at all', () => {
     // Part I. The licensee's name on one page and the signature box on the
     // next is the argument an occupier's solicitor makes in a year's time.
-    expect(css).toMatch(/table\.grid\.sig \{ page-break-inside: avoid; \}/);
+    expect(css).toMatch(/table\.grid\.sig \{ page-break-inside: avoid; break-inside: avoid; \}/);
   });
 });
 

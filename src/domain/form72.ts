@@ -112,6 +112,19 @@ export interface TestDevice {
    * Free text rather than a number because the unit is part of the answer.
    */
   correctionFactor?: string;
+  /**
+   * Who issued the certificate and who signed it, and the accuracy it claims,
+   * in the certificate's own words.
+   *
+   * The department's grid names a certificate and says nothing about it. A
+   * reader holding the certificate against the page finds the issuer, the
+   * signatory and the "MMPE ±2 % full scale" band on the paper and nothing on
+   * the page, and the owner's ask was that the page carry the calibration
+   * data. Free text, because each certificate words these its own way.
+   */
+  issuedBy?: string;
+  certifiedBy?: string;
+  accuracy?: string;
 }
 
 export type FlowDeviceKind = 'orifice' | 'mechanical' | 'electromagnetic';
@@ -581,6 +594,19 @@ export interface SprinklerFlowTest {
   systemSpec?: string;
   testPoints: SprinklerTestPoint[];
   runningTestGaugeKpa?: number;
+  /**
+   * The system has no running test facility, so the installation gauge
+   * pressure line has no reading to give.
+   *
+   * The department's "Running test — Installation gauge pressure" line is for
+   * the two-inch drain and gauge on older control valve sets. A modern system
+   * has none, and the line used to print red "Not recorded" on every one of
+   * them — the only way to answer it was a number, and there is no number.
+   * True means "no running test on this system", and the page says so in
+   * grey. Absent means nobody has said either way, which on a live part is
+   * still an omission.
+   */
+  noRunningTest?: boolean;
   comments?: string;
 }
 
@@ -782,6 +808,67 @@ export function unTickedAnsweredKinds(
 }
 
 /**
+ * The four column heads the department prints across Part C.
+ *
+ * "Device/gauge 1" through "Device/gauge 4", in those words. The app used to
+ * print "Device 1, Device 2, Gauge 1, Gauge 2", which reads as a form with two
+ * device columns and two gauge columns — a shape the department's form does not
+ * have, and one that tells a technician with three gauges that the third has
+ * nowhere to go.
+ */
+export const DEPARTMENT_DEVICE_SLOTS = [
+  'Device/gauge 1', 'Device/gauge 2', 'Device/gauge 3', 'Device/gauge 4',
+] as const;
+
+/**
+ * The column the next device occupies, in the department's own words.
+ *
+ * Picked as the first of the department's four names nobody is using, not from
+ * the count of devices on the form. From the count, removing the first of two
+ * left the survivor called "Device/gauge 2" while sitting in the first column,
+ * and adding a meter back handed out "Device/gauge 2" a second time — two
+ * devices with one name, on a form where Part D cites its devices by that name
+ * and flowRowDevices resolves a citation to whichever it finds first.
+ *
+ * It does not renumber what is already there. A row in Part D citing
+ * "Device/gauge 2" means the instrument that was called that when the reading
+ * was taken, and renaming a column underneath a reading would quietly
+ * reattribute it.
+ */
+export function deviceSlotName(held: readonly TestDevice[]): string {
+  const taken = new Set(held.map((d) => d.slot.trim()).filter(Boolean));
+  const free = DEPARTMENT_DEVICE_SLOTS.find((name) => !taken.has(name));
+  if (free) return free;
+  // Past the department's four columns. The page lists these under the note
+  // that says to put extra devices in the Notes section.
+  let n = DEPARTMENT_DEVICE_SLOTS.length + 1;
+  while (taken.has(`Device/gauge ${n}`)) n += 1;
+  return `Device/gauge ${n}`;
+}
+
+/**
+ * What to name in a Part D row's device column when the technician has not.
+ *
+ * The column is a cross-reference to Part C, and on most forms it has one
+ * right answer: the one instrument on the form, or the one every other row
+ * already names. Those two cases are filled without a tap. Anything else —
+ * two meters and no pattern yet, rows citing different instruments — is a
+ * question only the technician can answer, and this answers nothing rather
+ * than guess which meter was on the hydrant.
+ */
+export function defaultFlowRowDevices(
+  form: Pick<Form72, 'devices'> & { flowTest: Pick<FlowTest, 'rows'> },
+): string | undefined {
+  const named = form.devices.filter((d) => d.serialNumber.trim());
+  if (named.length === 1) return named[0]!.serialNumber.trim();
+  const cited = new Set(
+    form.flowTest.rows.filter((r) => flowRowRead(r) && r.devices.trim()).map((r) => r.devices.trim()),
+  );
+  if (cited.size === 1) return [...cited][0];
+  return undefined;
+}
+
+/**
  * The four hydrant location fields the department prints in Part D.
  *
  * Here rather than beside the renderer because the rules below are about it:
@@ -808,6 +895,31 @@ export function setHydrantLocation(locations: readonly string[], n: number, valu
   next[n - 1] = value;
   while (next.length && !next[next.length - 1]?.trim()) next.pop();
   return next;
+}
+
+/**
+ * Picks or unpicks one of the site's hydrants as tested.
+ *
+ * The register knows every hydrant on the site and Part D wants the ones the
+ * flow test ran on — usually two, never more than four printed. Filling all of
+ * them in and asking the technician to clear the rest was backwards: at a
+ * site with eight, four were left in the department's four fields whether or
+ * not they were run. So the site's hydrants are offered and the tested ones
+ * are picked, in the order they were run.
+ *
+ * A pick goes into the first empty numbered slot, so the order of the taps is
+ * the numbering the flow table's columns refer to. An unpick clears that slot
+ * and leaves the hole, for the reason setHydrantLocation gives: the readings
+ * under "Hydrants 1 and 2" were taken with whichever hydrant was number 2, and
+ * closing the gap would renumber them.
+ */
+export function toggleTestedHydrant(locations: readonly string[], place: string): string[] {
+  const name = place.trim();
+  if (!name) return [...locations];
+  const at = locations.findIndex((x) => x.trim() === name);
+  if (at >= 0) return setHydrantLocation(locations, at + 1, '');
+  const hole = locations.findIndex((x) => !x.trim());
+  return setHydrantLocation(locations, hole >= 0 ? hole + 1 : locations.length + 1, name);
 }
 
 /**
@@ -1401,7 +1513,20 @@ export function deviceCalibration(
   // unreadable one and one after the test are the same problem whatever the
   // basis — and the age is still reported, so the page can print how old the
   // certificate is alongside the basis it was accepted on.
-  if (device.calibrationBasis === 'service-life') return { state: 'service-life', monthsBefore };
+  //
+  // Only a flow meter can carry that basis. It is the manufacturer's claim
+  // about a meter calibrated in software, and a pressure gauge has no such
+  // claim to make: a gauge is good for twelve months from its certificate
+  // whatever its card says. The screen used to offer "Service life" on every
+  // card, and tapping it on a stale gauge switched off the one blocking check
+  // this part has. So a gauge is judged on the interval regardless, and the
+  // basis it was given is reported as a fault of its own below.
+  const serviceLife = device.calibrationBasis === 'service-life';
+  if (serviceLife && device.kind === 'flow-meter') return { state: 'service-life', monthsBefore };
+  const gaugeOnServiceLife = serviceLife
+    ? ` It is recorded on a service-life basis, which applies to a flow meter and not to a gauge, `
+      + 'so it has been judged on the twelve-month interval.'
+    : '';
 
   if (monthsBefore > CALIBRATION_MONTHS) {
     return {
@@ -1411,8 +1536,23 @@ export function deviceCalibration(
         part: 'C',
         message: `${device.slot} (${device.serialNumber}) was last calibrated `
           + `${Math.floor(monthsBefore)} months before the test. Every pressure recorded on this `
-          + 'form was read with it, and a gauge out of calibration makes all of them unusable.',
+          + `form was read with it, and a gauge out of calibration makes all of them unusable.${
+            gaugeOnServiceLife}`,
         blocking: true,
+      },
+    };
+  }
+
+  if (serviceLife) {
+    return {
+      state: 'in-calibration',
+      monthsBefore,
+      issue: {
+        part: 'C',
+        message: `${device.slot} (${device.serialNumber}) is a pressure gauge recorded on a `
+          + 'service-life basis. That basis is a flow meter\u2019s; a gauge is good for '
+          + `${CALIBRATION_MONTHS} months from its certificate. Set it to the interval.`,
+        blocking: false,
       },
     };
   }
@@ -1458,9 +1598,181 @@ export function validateForm72(form: Form72): FormIssue[] {
     issues.push({ part: 'A', message: 'No maintenance test ticked, so the form does not say what was done.', blocking: true });
   }
 
+  /*
+   * The declaration is signed or it is nothing.
+   *
+   * Part I is "By signing this Form 72, I confirm…", and the form locks on
+   * issue. Nothing checked the signature, so a technician who filled every
+   * box and never drew in the pad could issue, lock and send a statutory
+   * record whose signature box prints "Not signed" in red for ever — the one
+   * omission on the document that cannot be repaired without a new form.
+   */
+  if (!form.signature?.trim()) {
+    issues.push({
+      part: 'I',
+      message: 'Not signed. The form is a declaration by the licensee, and it cannot be issued until '
+        + 'Part I is signed.',
+      blocking: true,
+    });
+  }
+
+  /*
+   * Boxes the department prints that are blank, and that print red for it.
+   *
+   * None of these invalidates the record, so none blocks — but each prints
+   * "Not recorded" in red on the signed page, and the person signing should
+   * be told before rather than find out from the office.
+   */
+  if (!form.siteAddress?.trim()) issues.push({ part: 'A', message: 'No site address. It prints as not recorded.', blocking: false });
+  if (!form.testTime?.trim()) issues.push({ part: 'A', message: 'No test time. It prints as not recorded.', blocking: false });
+
   for (const d of form.devices) {
     const state = deviceCalibration(d, form.testDate);
     if (state.issue) issues.push(state.issue);
+    if (d.serialNumber.trim() && d.dateCalibrated && !d.calibrationCertificate?.trim()) {
+      issues.push({
+        part: 'C',
+        message: `${d.slot} (${d.serialNumber.trim()}) has a calibration date and no certificate reference. `
+          + 'The department asks for both; it prints as not recorded.',
+        blocking: false,
+      });
+    }
+  }
+
+  /*
+   * Part C, against what the rest of the form says was measured.
+   *
+   * Every pressure on a hydrant form was read with something, and Part C is
+   * where the something is named. The part used to be optional in practice:
+   * a form with readings in Parts B, D and E and nothing in Part C issued
+   * cleanly and printed four columns of "Not used" — a positive statement
+   * that no gauge or meter was used for the pressures above it.
+   */
+  const named = form.devices.filter((d) => d.serialNumber.trim());
+  const hydrantReadings: string[] = [];
+  const h = form.hydrostatic;
+  if (h.result !== 'na' && [h.boostPressureKpa, h.testPressureKpa, h.endPressureKpa].some((v) => v !== undefined)) {
+    hydrantReadings.push('B');
+  }
+  if (form.flowTest.result !== 'na'
+    && (form.flowTest.rows.some(flowRowRead) || form.flowTest.staticPressureKpa !== undefined)) {
+    hydrantReadings.push('D');
+  }
+  const b = form.booster;
+  if (b.result !== 'na' && [
+    b.staticPressureKpa, b.pumpInletKpa, b.pumpDischargeKpa, b.boostPressureKpa, b.hydrantResidualKpa,
+  ].some((v) => v !== undefined)) {
+    hydrantReadings.push('E');
+  }
+  if (hydrantReadings.length && !named.length) {
+    issues.push({
+      part: 'C',
+      message: `Part${hydrantReadings.length === 1 ? '' : 's'} ${hydrantReadings.join(', ')} record${
+        hydrantReadings.length === 1 ? 's' : ''} pressures and Part C lists no test equipment. Name the `
+        + 'gauge or meter they were read with.',
+      blocking: true,
+    });
+  }
+
+  /*
+   * A column somebody started and did not identify.
+   *
+   * A device card with no serial number is either a stray "Add a device by
+   * hand" nobody filled in, or an instrument described without the one field
+   * that identifies it. Both print red against the serial row, and a form
+   * cannot be issued carrying either.
+   */
+  form.devices.forEach((d, i) => {
+    if (d.serialNumber.trim()) return;
+    const described = !!(d.dateCalibrated || d.calibrationCertificate || d.model || d.correctionFactor
+      || d.faceSize || d.digitalReader !== undefined || d.incrementsKpa !== undefined);
+    issues.push({
+      part: 'C',
+      message: `${d.slot?.trim() || `Device/gauge ${i + 1}`} ${described
+        ? 'has details recorded but no serial number. The serial number is what identifies the instrument.'
+        : 'is on the form with nothing on it. Fill it in or remove it.'}`,
+      blocking: true,
+    });
+  });
+
+  /*
+   * The flow measuring device line, which is the department's own three boxes.
+   *
+   * A flow meter in the columns with none of Orifice, Mechanical or Electro
+   * magnetic ticked printed red "Not answered" above a column naming the
+   * meter and its certificate — the page saying the company's calibrated
+   * meter was of no kind, in the one part the owner reads first. The answer
+   * is remembered per serial number (deviceKindRepo), so it is asked once for
+   * each meter the company owns and never again.
+   */
+  if (!form.flowDeviceKinds.length) {
+    const meters = named.filter((d) => d.kind === 'flow-meter');
+    if (meters.length) {
+      issues.push({
+        part: 'C',
+        message: `${meters.map((d) => d.serialNumber.trim()).join(' and ')} ${meters.length === 1 ? 'is a flow meter' : 'are flow meters'} `
+          + 'and none of Orifice / Mechanical / Electro magnetic is ticked. Answer which kind '
+          + `${meters.length === 1 ? 'it is' : 'they are'} — once, and every later form with the same serial carries it.`,
+        blocking: true,
+      });
+    } else if (hydrantReadings.includes('D')) {
+      issues.push({
+        part: 'C',
+        message: 'Part D records a flow test and no flow measuring device is ticked in Part C. Tick '
+          + 'Orifice for a nozzle run, or add the meter the flow was read with.',
+        blocking: true,
+      });
+    }
+  }
+
+  /*
+   * A Part D row with pressures on it and no instrument named.
+   *
+   * The table's second column is the department's cross-reference to Part C.
+   * A row with readings and a blank there printed red "Not recorded" in the
+   * column that ties every pressure to its instrument, and nothing on the
+   * screen or in this list said so before the form was signed. The screen
+   * fills it in where the form has only one instrument, or where every other
+   * row names the same one, so on most forms this never has to be answered
+   * by hand.
+   */
+  const unnamedRows = form.flowTest.result !== 'na'
+    ? form.flowTest.rows.filter((row) => flowRowRead(row) && !row.devices.trim())
+    : [];
+  if (unnamedRows.length) {
+    issues.push({
+      part: 'D',
+      message: `${unnamedRows.length === 1 ? 'A row' : `${unnamedRows.length} rows`} of the flow table `
+        + `(${unnamedRows.map(flowRowLabel).join(', ')}) ${unnamedRows.length === 1 ? 'has' : 'have'} `
+        + 'pressures recorded and no Part C device named against them.',
+      blocking: true,
+    });
+  }
+
+  /*
+   * Part G with a result and nothing behind it.
+   *
+   * A sprinkler flow test is its test points. Pass or Fail with none recorded
+   * printed the band ticked and both points as "Not used", which reads as a
+   * deliberate one-point-not-needed answer rather than a test nobody wrote
+   * down.
+   */
+  const g = form.sprinklerFlow;
+  if (g.result !== 'na' && !g.testPoints.some((pt) => !sprinklerTestPointUntouched(pt))) {
+    issues.push({
+      part: 'G',
+      message: `Marked ${PART_RESULT_LABEL[g.result]} with no test point recorded. A sprinkler flow test `
+        + 'is its test points: record at least one, or mark the part not applicable.',
+      blocking: true,
+    });
+  }
+  if (g.result !== 'na' && g.noRunningTest && g.runningTestGaugeKpa !== undefined) {
+    issues.push({
+      part: 'G',
+      message: `The running test is marked as not on this system and ${g.runningTestGaugeKpa} kPa is `
+        + 'recorded against it. One of the two is wrong.',
+      blocking: false,
+    });
   }
 
   if (form.hydrostatic.result !== 'na') {
@@ -1629,6 +1941,27 @@ export function validateForm72(form: Form72): FormIssue[] {
         + 'applicable. One of the two is wrong.',
       blocking: false,
     });
+  }
+
+  /*
+   * Hydrant meters on a form for a test that used none.
+   *
+   * The company's two flow meters go onto every new form so Part C is never
+   * typed. On a sprinkler-only test they were not on the hydrant, and Part C
+   * naming them says they were. A caution: the fix is one tap on each card,
+   * and the form is still a true record once it is taken.
+   */
+  if (sprinklerTested && !hydrantTested) {
+    const meters = named.filter((d) => d.kind === 'flow-meter').map((d) => d.serialNumber.trim());
+    if (meters.length) {
+      issues.push({
+        part: 'C',
+        message: `Part A says this was a sprinkler test, and Part C lists the hydrant flow meter${
+          meters.length === 1 ? '' : 's'} ${meters.join(' and ')}. Remove any equipment that was not used `
+          + 'on this test.',
+        blocking: false,
+      });
+    }
   }
 
   /*

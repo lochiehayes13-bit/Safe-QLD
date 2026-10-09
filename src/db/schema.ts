@@ -37,6 +37,7 @@ import { MIGRATION_V35 } from './schemaV35';
 import { MIGRATION_V36 } from './schemaV36';
 import { MIGRATION_V37 } from './schemaV37';
 import { MIGRATION_V38 } from './schemaV38';
+import { MIGRATION_V39 } from './schemaV39';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -404,6 +405,10 @@ export const MIGRATIONS: string[] = [
   // v38 — whether the office has archived the building, because an archived
   // site never comes down with Simpro's site list and nothing said so
   MIGRATION_V38,
+
+  // v39 — which queue row carries a Form 72's PDF to the job, so the form
+  // reports what became of the upload rather than the moment it was queued
+  MIGRATION_V39,
 ];
 
 /**
