@@ -1,6 +1,5 @@
 import React from 'react';
-import { View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme } from '@/theme';
@@ -8,13 +7,12 @@ import { Bounce } from './motion';
 import { Txt } from './ui';
 
 /**
- * The tab bar, floating.
+ * The tab bar, docked across the foot.
  *
- * A bar that sits flush to the bottom edge is furniture; one that floats a
- * little above it, with the page scrolling underneath, reads as a control.
- * The active tab is a flame pill rather than a coloured icon, because a
- * coloured icon is the one thing in the row that does not look pressable and
- * the pill is the one thing that does.
+ * Plain, as the website's header is: a bar with a hairline, the active tab
+ * marked in crimson with a short rule over it. It used to float as a pill
+ * with a filled gradient tab, which read as an app template rather than as
+ * the company.
  */
 
 type Icon = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
@@ -44,19 +42,22 @@ export function TabBar({ state, descriptors, navigation }: TabBarProps) {
   return (
     <View
       pointerEvents="box-none"
-      style={{
-        position: 'absolute', left: t.space(3), right: t.space(3), bottom: Math.max(insets.bottom, t.space(2)) + t.space(1),
-      }}
+      style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}
     >
+      {/*
+        * Docked across the foot, as the website's header is across the top:
+        * a plain bar with a hairline, the active tab in crimson with a short
+        * rule over it. The floating pill with a filled, gradient tab read as
+        * an app template rather than the company.
+        */}
       <View
         style={{
           flexDirection: 'row',
           backgroundColor: t.color.bgElevated,
-          borderRadius: t.radius.xl,
-          borderWidth: 1,
-          borderColor: t.color.border,
-          padding: t.space(1.5),
-          ...t.shadow.float,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: t.color.borderStrong,
+          paddingHorizontal: t.space(1),
+          paddingBottom: Math.max(insets.bottom, t.space(1.5)),
         }}
       >
         {state.routes.map((route, i) => {
@@ -78,22 +79,20 @@ export function TabBar({ state, descriptors, navigation }: TabBarProps) {
               accessibilityLabel={label}
               style={{ flex: 1 }}
             >
-              {active ? (
-                <LinearGradient
-                  colors={t.gradient.flame}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={{ borderRadius: t.radius.lg, minHeight: 52, alignItems: 'center', justifyContent: 'center', gap: 2 }}
-                >
-                  <MaterialCommunityIcons name={icon.on} size={22} color={t.color.onAccent} />
-                  <Txt size="xs" weight="800" numberOfLines={1} style={{ color: t.color.onAccent, letterSpacing: 0.3 }}>{label}</Txt>
-                </LinearGradient>
-              ) : (
-                <View style={{ minHeight: 52, alignItems: 'center', justifyContent: 'center', gap: 2 }}>
-                  <MaterialCommunityIcons name={icon.off} size={22} color={t.color.textFaint} />
-                  <Txt size="xs" weight="700" tone="faint" numberOfLines={1}>{label}</Txt>
-                </View>
-              )}
+              <View style={{ minHeight: 56, alignItems: 'center', justifyContent: 'center', gap: 2 }}>
+                <View
+                  style={{
+                    position: 'absolute', top: 0, height: 3, width: 28, borderRadius: 2,
+                    backgroundColor: active ? t.color.accent : 'transparent',
+                  }}
+                />
+                <MaterialCommunityIcons
+                  name={active ? icon.on : icon.off}
+                  size={22}
+                  color={active ? t.color.accentText : t.color.textFaint}
+                />
+                <Txt size="xs" weight={active ? '800' : '600'} tone={active ? 'accent' : 'faint'} numberOfLines={1}>{label}</Txt>
+              </View>
             </Bounce>
           );
         })}

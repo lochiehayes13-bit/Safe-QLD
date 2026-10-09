@@ -16,10 +16,13 @@ describe('the face for a weight', () => {
     expect(familyFor('700')).toBeUndefined();
   });
 
-  it('maps every weight to a loaded Manrope face once they have', () => {
+  it('maps every weight to a loaded face once they have: Inter for body, Archivo for headings', () => {
     setFontsReady(true);
-    for (const w of ['400', '500', '600', '700', '800', '900', 'normal', 'bold'] as const) {
-      expect({ w, family: familyFor(w) }).toEqual({ w, family: expect.stringMatching(/^Manrope_\d{3}[A-Za-z]+$/) });
+    for (const w of ['400', '500', '600', 'normal'] as const) {
+      expect({ w, family: familyFor(w) }).toEqual({ w, family: expect.stringMatching(/^Inter_\d{3}[A-Za-z]+$/) });
+    }
+    for (const w of ['700', '800', '900', 'bold'] as const) {
+      expect({ w, family: familyFor(w) }).toEqual({ w, family: expect.stringMatching(/^Archivo_\d{3}[A-Za-z]+$/) });
     }
     expect(familyFor('bold')).toBe(FONT_FAMILIES['700']);
     expect(familyFor('normal')).toBe(FONT_FAMILIES['400']);
@@ -28,7 +31,7 @@ describe('the face for a weight', () => {
   it('names only faces the root layout loads', () => {
     // The four files useFonts is handed. A fifth name here would render as
     // the system font with no error anywhere.
-    const loaded = new Set(['Manrope_500Medium', 'Manrope_600SemiBold', 'Manrope_700Bold', 'Manrope_800ExtraBold']);
+    const loaded = new Set(['Inter_400Regular', 'Inter_500Medium', 'Inter_600SemiBold', 'Archivo_700Bold', 'Archivo_800ExtraBold']);
     for (const family of Object.values(FONT_FAMILIES)) expect(loaded.has(family)).toBe(true);
   });
 });
@@ -43,7 +46,7 @@ describe('the ramps and the shadows', () => {
     }
   });
 
-  it('keeps the glow the brand colour, so a glow always means the flame', () => {
+  it('keeps the glow the brand colour, so a glow always means the brand', () => {
     expect(darkTheme.shadow.glow.shadowColor).toBe(darkTheme.color.accent);
     expect(lightTheme.shadow.glow.shadowColor).toBe(lightTheme.color.accent);
   });

@@ -14,7 +14,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTheme, type FontWeight, type Theme } from '@/theme';
 import { BOARD_MAX, READING_MAX, pageLayout } from '@/domain/layout';
@@ -193,6 +192,9 @@ export function typeFor(t: Theme, weight: TextStyle['fontWeight'] = '400', mono?
   return family ? { fontFamily: family } : { fontWeight: weight };
 }
 
+/** The website's eyebrow rule, the one place its orange appears in the app. */
+const EYEBROW = '#E8833A';
+
 export function H1({ children }: { children: React.ReactNode }) {
   // Tighter tracking as the size goes up: at display sizes the default spacing
   // reads as gappy rather than confident.
@@ -212,15 +214,16 @@ export function H2({ children }: { children: React.ReactNode }) {
   const t = useTheme();
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.space(2.5), marginTop: t.space(4) }}>
+      {/* The website's eyebrow rule: a short orange bar. */}
       <View
         style={{
-          width: 4,
-          height: t.font.size.lg,
+          width: 3,
+          height: t.font.size.md,
           borderRadius: 2,
-          backgroundColor: t.color.accent,
+          backgroundColor: EYEBROW,
         }}
       />
-      <Txt size="lg" weight="800" style={{ letterSpacing: -0.2 }}>{children}</Txt>
+      <Txt size="lg" weight="800" style={{ letterSpacing: -0.3 }}>{children}</Txt>
     </View>
   );
 }
@@ -255,15 +258,17 @@ export function Button({
   compact?: boolean;
 }) {
   const t = useTheme();
+  // The website's buttons: crimson with a white label for the one that
+  // matters; white with a line and a crimson label for the rest.
   const bg: Record<ButtonVariant, string> = {
     primary: t.color.accent,
-    secondary: t.color.surfaceAlt,
+    secondary: t.color.surface,
     ghost: 'transparent',
     danger: t.color.failBg,
   };
   const fg: Record<ButtonVariant, string> = {
     primary: t.color.onAccent,
-    secondary: t.color.text,
+    secondary: t.color.accentText,
     ghost: t.color.accentText,
     danger: t.color.fail,
   };
@@ -276,9 +281,6 @@ export function Button({
         style={[
           {
             color: fg[variant],
-            // Tracking opens the label up at these weights; without it a bold
-            // short word on a saturated fill reads as a solid block.
-            letterSpacing: 0.3,
             fontSize: compact ? t.font.size.sm : t.font.size.md,
           },
           typeFor(t, '800'),
@@ -303,33 +305,23 @@ export function Button({
 
   return (
     <Bounce onPress={onPress} disabled={isDisabled} haptic="light" scaleTo={0.96} style={[{ opacity: isDisabled ? 0.45 : 1 }, style]}>
-      {variant === 'primary' ? (
-        // The primary action is the flame ramp, and it throws a little of its
-        // own colour onto the surface under it, so the one button that
-        // matters is findable in peripheral vision without reading anything.
-        // The glow goes while disabled, so it always means "this is live".
-        <LinearGradient
-          colors={t.gradient.flame}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[shape, !isDisabled ? t.shadow.glow : null]}
-        >
-          {inner}
-        </LinearGradient>
-      ) : (
-        <View
-          style={[
-            shape,
-            {
-              backgroundColor: bg[variant],
-              borderWidth: variant === 'ghost' ? StyleSheet.hairlineWidth : 0,
-              borderColor: t.color.border,
-            },
-          ]}
-        >
-          {inner}
-        </View>
-      )}
+      <View
+        style={[
+          shape,
+          {
+            backgroundColor: bg[variant],
+            // A secondary button is outlined, as the site's are; a ghost is a
+            // crimson word and nothing else.
+            borderWidth: variant === 'secondary' ? 1.5 : 0,
+            borderColor: t.color.border,
+          },
+          // A soft crimson shadow under the one button that matters, gone
+          // while it is disabled so it always means "this is live".
+          variant === 'primary' && !isDisabled ? t.shadow.glow : null,
+        ]}
+      >
+        {inner}
+      </View>
     </Bounce>
   );
 }
@@ -495,7 +487,7 @@ export function Chip({
     pass: t.color.passBg,
     fail: t.color.failBg,
     warn: t.color.warnBg,
-    accent: t.color.infoBg,
+    accent: t.color.accentBg,
   };
   const body = (
     <View
@@ -503,7 +495,7 @@ export function Chip({
         paddingHorizontal: t.space(2.5),
         paddingVertical: t.space(1.5),
         borderRadius: t.radius.pill,
-        backgroundColor: selected ? t.color.accent : (bgFor[tone] ?? t.color.surfaceAlt),
+        backgroundColor: selected ? t.color.accent : (bgFor[tone] ?? t.color.surface),
         borderWidth: StyleSheet.hairlineWidth,
         borderColor: selected ? t.color.accent : t.color.border,
       }}
@@ -718,15 +710,12 @@ export function IconPlate({
       </View>
     );
   }
+  // A quiet plate: the crimson glyph on a crimson wash, as the website's
+  // icons sit. A solid filled tile on every row read as an app template.
   return (
-    <LinearGradient
-      colors={t.gradient.flame}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={{ width: size, height: size, borderRadius: radius, alignItems: 'center', justifyContent: 'center' }}
-    >
-      <MaterialCommunityIcons name={icon} size={glyph} color={t.color.onAccent} />
-    </LinearGradient>
+    <View style={{ width: size, height: size, borderRadius: radius, backgroundColor: t.color.accentBg, alignItems: 'center', justifyContent: 'center' }}>
+      <MaterialCommunityIcons name={icon} size={glyph} color={t.color.accentText} />
+    </View>
   );
 }
 
@@ -737,8 +726,8 @@ export function SectionHeader({
   const t = useTheme();
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.space(2.5), marginTop: t.space(3) }}>
-      <View style={{ width: 4, height: t.font.size.lg, borderRadius: 2, backgroundColor: t.color.accent }} />
-      <Txt size="lg" weight="800" style={{ letterSpacing: -0.2, flex: 1 }}>{title}</Txt>
+      <View style={{ width: 3, height: t.font.size.md, borderRadius: 2, backgroundColor: EYEBROW }} />
+      <Txt size="lg" weight="800" style={{ letterSpacing: -0.3, flex: 1 }}>{title}</Txt>
       {action && onAction ? (
         <Button
           title={action}

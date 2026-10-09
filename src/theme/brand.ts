@@ -18,6 +18,12 @@ export const brand = {
   charcoal: '#231F20',
   /** The letterhead stock. Not pure white. */
   paper: '#FAFAFA',
+  /**
+   * The website's primary (safeqldfire.com.au), which the app's buttons,
+   * links and active tab use. Not sampled from the letterhead: taken from the
+   * site's own stylesheet, so the app and the site match.
+   */
+  crimson: '#9B2335',
 } as const;
 
 /**

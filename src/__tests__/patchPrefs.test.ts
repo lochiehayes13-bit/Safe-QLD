@@ -65,7 +65,7 @@ describe('changing one setting', () => {
     // And the proof that the old shape was the problem: writing the snapshot
     // back is what loses it.
     await savePrefs({ ...stale, technicianName: 'Alex' });
-    expect((await loadPrefs()).theme).toBe('system');
+    expect((await loadPrefs()).theme).toBe(DEFAULT_PREFS.theme);
   });
 
   it('returns what is now stored, so a caller can put it on screen', async () => {

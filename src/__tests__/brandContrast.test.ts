@@ -90,11 +90,11 @@ describe.each([
   });
 
   it.each(['fail', 'warn', 'pass'] as const)('keeps the accent perceptibly apart from %s', (status) => {
-    // The brand is orange and a defect is red: adjacent hues, and the app is
-    // read in a dark riser cupboard and in full sun. Measured today at 17.5
-    // (light) and 27.4 (dark) against `fail`, which is the tightest pair; the
-    // floor sits below that so a deliberate tweak has room, but collapsing the
-    // two into the same colour fails here rather than in the field.
+    // The brand is crimson and a defect is red: adjacent hues, and the app is
+    // read in a dark riser cupboard and in full sun. Measured at 28.3 (light)
+    // and 17.7 (dark) against `fail`, which is the tightest pair; the floor
+    // sits below that so a deliberate tweak has room, but collapsing the two
+    // into the same colour fails here rather than in the field.
     const measured = deltaE(theme.color.accentText, theme.color[status]);
     expect({ status, accentText: theme.color.accentText, against: theme.color[status], measured, distinct: measured >= 15 })
       .toEqual({ status, accentText: theme.color.accentText, against: theme.color[status], measured, distinct: true });
@@ -139,6 +139,8 @@ describe('brand constants', () => {
       orange: '#F1592A',
       charcoal: '#231F20',
       paper: '#FAFAFA',
+      // The website's primary, which the app now wears.
+      crimson: '#9B2335',
     });
   });
 
@@ -162,18 +164,17 @@ describe('brand constants', () => {
   it.each([
     ['dark', darkTheme],
     ['light', lightTheme],
-  ])('keeps the %s accent in the brand\'s own hue family', (_name, theme: Theme) => {
-    // Not pinned to the sampled orange itself: the accent is deliberately a
-    // brighter flame than the letterhead's. What must hold is that it is the
-    // same colour turned up, not a different colour — so compare hue angle,
-    // which is what "is this still their orange" actually means. Measured at
-    // 44.6° for the brand and 44-53° across the flame ramp.
+  ])('keeps the %s accent in the website\'s crimson family', (_name, theme: Theme) => {
+    // The accent is the website's crimson, and on the dark theme a lighter
+    // crimson for text that crimson itself would not carry. What must hold is
+    // that both are the same colour, lighter or darker — so compare hue angle,
+    // which is what "is this still their crimson" actually means.
     const hue = (hex: string): number => {
       const [, a, b] = lab(hex);
       return ((Math.atan2(b, a) * 180) / Math.PI + 360) % 360;
     };
     for (const colour of [theme.color.accent, theme.color.accentText]) {
-      const drift = Math.abs(hue(colour) - hue(brand.orange));
+      const drift = Math.abs(hue(colour) - hue(brand.crimson));
       expect({ colour, drift: Math.round(drift), sameFamily: drift <= 15 })
         .toEqual({ colour, drift: Math.round(drift), sameFamily: true });
     }
@@ -182,14 +183,11 @@ describe('brand constants', () => {
   it.each([
     ['dark', darkTheme],
     ['light', lightTheme],
-  ])('%s: puts a dark label on the flame, not a white one', (_name, theme: Theme) => {
-    // This is the whole reason the accent can be as bright as it is. White on
-    // flame orange is 2.85:1 and fails, which is what forced the previous,
-    // muted accent. Turning the label over reaches 6.92:1 — so if someone
-    // "fixes" onAccent back to white, the fill has to be darkened again and
-    // the app loses its brightness. Fail here instead.
-    expect(relativeLuminance(theme.color.onAccent))
-      .toBeLessThan(relativeLuminance(theme.color.accent));
-    expect(theme.color.onAccent.toUpperCase()).not.toBe('#FFFFFF');
+  ])('%s: puts a white label on crimson, as the website does', (_name, theme: Theme) => {
+    // White on the site's crimson is 7.8:1. The orange the app used to wear
+    // needed a dark label to pass; crimson does not, and a dark label on it
+    // would fail.
+    expect(theme.color.onAccent.toUpperCase()).toBe('#FFFFFF');
+    expect(relativeLuminance(theme.color.onAccent)).toBeGreaterThan(relativeLuminance(theme.color.accent));
   });
 });

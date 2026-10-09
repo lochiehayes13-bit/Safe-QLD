@@ -26,9 +26,9 @@ describe('reading the stored choice', () => {
     }
   });
 
-  it('starts by following the phone, because most people never think about it', () => {
-    expect(DEFAULT_PREFS.theme).toBe('system');
-    expect(readThemeChoice(DEFAULT_PREFS.theme)).toBe('system');
+  it('starts light, the website\u2019s look; dark and following the phone are choices', () => {
+    expect(DEFAULT_PREFS.theme).toBe('light');
+    expect(readThemeChoice(DEFAULT_PREFS.theme)).toBe('light');
   });
 
   it('has a label for every choice, in words rather than jargon', () => {
@@ -66,10 +66,10 @@ describe('the splash screen', () => {
  * own near-black.
  */
 describe('the frame before the choice is known', () => {
-  it('is dark, whatever the phone is set to', () => {
-    expect(resolveMode(undefined, 'light')).toBe('dark');
-    expect(resolveMode(undefined, 'dark')).toBe('dark');
-    expect(resolveMode(undefined, null)).toBe('dark');
+  it('is light, the default look, whatever the phone is set to', () => {
+    expect(resolveMode(undefined, 'light')).toBe('light');
+    expect(resolveMode(undefined, 'dark')).toBe('light');
+    expect(resolveMode(undefined, null)).toBe('light');
   });
 
   it('follows the phone once the choice is known to be system', () => {

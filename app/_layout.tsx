@@ -6,9 +6,14 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as SplashScreen from 'expo-splash-screen';
 import * as WebBrowser from 'expo-web-browser';
-import {
-  Manrope_500Medium, Manrope_600SemiBold, Manrope_700Bold, Manrope_800ExtraBold, useFonts,
-} from '@expo-google-fonts/manrope';
+import { useFonts } from 'expo-font';
+// One file per weight, imported by weight so only these five are bundled:
+// the website's faces, Inter for body text and Archivo for headings.
+import { Inter_400Regular } from '@expo-google-fonts/inter/400Regular';
+import { Inter_500Medium } from '@expo-google-fonts/inter/500Medium';
+import { Inter_600SemiBold } from '@expo-google-fonts/inter/600SemiBold';
+import { Archivo_700Bold } from '@expo-google-fonts/archivo/700Bold';
+import { Archivo_800ExtraBold } from '@expo-google-fonts/archivo/800ExtraBold';
 import { getDb } from '@/db';
 import { seedReferenceData } from '@/db/assetRepo';
 import { startCatalogueSeed } from '@/seed/catalogueSeed';
@@ -75,7 +80,7 @@ function RootShell() {
    */
   const [waitedMs, setWaitedMs] = useState(0);
   const [fontsLoaded, fontError] = useFonts({
-    Manrope_500Medium, Manrope_600SemiBold, Manrope_700Bold, Manrope_800ExtraBold,
+    Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Archivo_700Bold, Archivo_800ExtraBold,
   });
   // A face that fails to load is not a reason to hold the app: text falls
   // back to the system font and everything still works.

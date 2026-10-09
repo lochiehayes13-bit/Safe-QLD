@@ -217,7 +217,8 @@ export const DEFAULT_PREFS: Prefs = {
   attendanceNormalMinutes: 120,
   attendanceAfterHoursCents: 0,
   attendanceAfterHoursMinutes: 180,
-  theme: 'system',
+  // The website's look, light on paper. Dark is a choice in Settings.
+  theme: 'light',
 };
 
 export async function loadPrefs(): Promise<Prefs> {

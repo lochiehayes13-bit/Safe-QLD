@@ -44,7 +44,8 @@ export function resolveMode(
   /* Anything the platform might hand back, including its 'unspecified'. */
   scheme: string | null | undefined,
 ): 'dark' | 'light' {
-  if (choice === undefined) return 'dark';
+  // Before preferences are read: the default look, so there is no dark flash.
+  if (choice === undefined) return 'light';
   if (choice === 'system') return scheme === 'light' ? 'light' : 'dark';
   return choice;
 }
