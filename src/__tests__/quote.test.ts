@@ -4,6 +4,7 @@ import {
   lineAmountCents, pricingSources, qldDate, quoteTotals, scopeLinesFor, unpriceableDefects,
   unpriceableReason, weakestConfidence, type PriceSource, type Quote, type QuoteLine,
   orderQuotes, QUOTE_URGENCY, QUOTE_STATUS_LABEL, type QuoteStatus,
+  catalogueMaterialPrices, catalogueSource, scopeForReprint, usableSellCents,
 } from '@/domain/quote';
 import { uncoveredDefects } from '@/domain/partsNeeded';
 import { quoteDocumentHtml } from '@/export/quoteDocument';
@@ -193,7 +194,7 @@ describe('building lines from defects', () => {
       defects: [defect(FAILED_DETECTOR)],
       labourRate: labourRate(),
     });
-    expect(built.warnings.join(' ')).toMatch(/nothing saying where it came from/i);
+    expect(built.warnings.join(' ')).toMatch(/has no source/i);
   });
 
   it('refuses a material price that is not a whole number of cents rather than printing it', () => {
@@ -204,7 +205,7 @@ describe('building lines from defects', () => {
       materialPrices: [{ description: 'Replacement detector head', unitCents: 8_950.5, source: OFFICE }],
     });
     expect(built.lines.find((l) => /detector head/i.test(l.description))!.unitCents).toBeUndefined();
-    expect(built.warnings.join(' ')).toMatch(/not a whole number of cents/i);
+    expect(built.warnings.join(' ')).toMatch(/to the cent/i);
   });
 
   it('refuses a material price of nothing rather than supplying the part free', () => {
@@ -215,7 +216,7 @@ describe('building lines from defects', () => {
       materialPrices: [{ description: 'Replacement detector head', unitCents: 0, source: OFFICE }],
     });
     expect(built.lines.find((l) => /detector head/i.test(l.description))!.unitCents).toBeUndefined();
-    expect(built.warnings.join(' ')).toMatch(/above nought/i);
+    expect(built.warnings.join(' ')).toMatch(/above \$0/i);
   });
 
   it('gives a line the same id whichever defects are ticked on', () => {
@@ -245,7 +246,7 @@ describe('defects that cannot be priced at all', () => {
     // the library updating, and a single "could not price" hides which.
     const found = unpriceableDefects([defect(undefined), defect('ZZZ-ZZZ-999')]);
     expect(found.map((u) => u.reason)).toEqual(['no-code', 'unknown-code']);
-    expect(UNPRICEABLE_REASON['unknown-code']).toMatch(/does not know/i);
+    expect(UNPRICEABLE_REASON['unknown-code']).toMatch(/not in the defect library/i);
   });
 
   it("counts a labour-only defect as priced, unlike the parts order does", () => {
@@ -268,7 +269,7 @@ describe('defects that cannot be priced at all', () => {
     // reason can still be asked to print one. "undefined" on a client's copy
     // is worse than saying plainly that nobody wrote the reason down.
     expect(unpriceableReason('no-quote-lines')).toBe(UNPRICEABLE_REASON['no-quote-lines']);
-    expect(unpriceableReason('something-a-later-build-invented')).toMatch(/reason was not recorded/i);
+    expect(unpriceableReason('something-a-later-build-invented')).toMatch(/reason not recorded/i);
   });
 
   it('warns on the total for every defect it could not price', () => {
@@ -280,7 +281,7 @@ describe('defects that cannot be priced at all', () => {
     });
     const totals = quoteTotals(quote({ lines: built.lines, unpriceable: built.unpriceable }));
     expect(totals.incomplete).toBe(true);
-    expect(totals.warnings.join(' ')).toMatch(/priced at nothing/i);
+    expect(totals.warnings.join(' ')).toMatch(/is not priced/i);
     expect(totals.warnings.join(' ')).toMatch(/Stock stacked under detector/);
   });
 });
@@ -372,7 +373,7 @@ describe('holding the money', () => {
   it('warns rather than presenting an empty quote as free work', () => {
     const totals = quoteTotals(quote({ lines: [] }));
     expect(totals.totalCents).toBe(0);
-    expect(totals.warnings.join(' ')).toMatch(/reads to a client as free work/);
+    expect(totals.warnings.join(' ')).toMatch(/No lines on this quote/);
   });
 });
 
@@ -511,7 +512,7 @@ describe('whether a quote still holds good', () => {
     const check = lapseStatus(issued, '2026-10-02T23:00:00.000Z');
     expect(check.lapsed).toBe(true);
     expect(check.daysRemaining).toBe(-1);
-    expect(check.note).toMatch(/Prices move/);
+    expect(check.note).toMatch(/Requote at current rates/);
   });
 
   it("says it does not know rather than answering false for a quote never issued", () => {
@@ -629,8 +630,8 @@ describe('the state machine', () => {
     expect(canEdit(draft)).toBe(true);
     expect(editRefusal(draft)).toBeUndefined();
     expect(canEdit(issued)).toBe(false);
-    expect(editRefusal(issued)).toMatch(/an issued quote that changes is a different quote/i);
-    expect(editRefusal(quote({ status: 'accepted' }))).toMatch(/accepted/);
+    expect(editRefusal(issued)).toMatch(/locked\. Raise a new quote/i);
+    expect(editRefusal(quote({ status: 'accepted' }))).toMatch(/^Accepted quotes are locked/);
   });
 });
 
@@ -767,7 +768,7 @@ describe('the document a client receives', () => {
 
   it('names a defect it could not price rather than leaving it off quietly', () => {
     expect(html).toContain('Pallets stacked under detector');
-    expect(html).toMatch(/NOT covered by it/);
+    expect(html).toMatch(/not covered by this quotation/);
   });
 
   it('prints an unpriced line as not priced and never as $0.00', () => {
@@ -780,6 +781,8 @@ describe('the document a client receives', () => {
     const row = out.match(/<tr>\s*<td>Replacement sounder[\s\S]*?<\/tr>/)![0];
     expect(row).toContain('Not priced');
     expect(row).not.toContain('$0.00');
+    // And the note under the table names it as outside the total.
+    expect(out).toMatch(/not included in the total: Replacement sounder\./);
   });
 
   it('carries an acceptance block with somewhere to sign', () => {
@@ -802,8 +805,38 @@ describe('the document a client receives', () => {
     expect(html).toMatch(/Goods and Services Tax\) Act 1999/);
   });
 
-  it('says where the prices came from', () => {
-    expect(html).toMatch(/Basis of pricing: Rate card pulled from the office system/);
+  it('keeps where the prices came from off the client copy', () => {
+    // The rate card, the catalogue and a price typed on site are the
+    // company's business. "Price entered on this quote by <technician>" on the
+    // client's copy invited the client to argue with the technician.
+    const typed = quoteDocumentHtml({
+      quote: quote({
+        lines: [line({ id: 'm1', section: 'materials', unitCents: HEAD_CENTS, source: TYPED })],
+      }),
+    });
+    for (const out of [html, typed]) {
+      expect(out).not.toMatch(/Basis of pricing/i);
+      expect(out).not.toMatch(/No rate source/i);
+      expect(out).not.toContain(OFFICE.label);
+      expect(out).not.toContain(TYPED.label);
+    }
+  });
+
+  it('prints the scope stored with the quote when none is handed to it', () => {
+    // The quote list's reprint passed an empty scope, so a re-sent quote
+    // printed "No scope items were recorded" over a page of priced work.
+    const stored = quoteDocumentHtml({
+      quote: quote({ ...issued, scope: [{ location: 'Plant room', text: 'Replace the failed detector head.' }] }),
+    });
+    expect(stored).toContain('Replace the failed detector head.');
+    expect(stored).toContain('Plant room');
+    expect(stored).not.toMatch(/No scope items were recorded/);
+  });
+
+  it('rebuilds the scope from the codes on a quote saved before the scope was stored', () => {
+    const legacy = quoteDocumentHtml({ quote: quote({ ...issued, scope: undefined }) });
+    expect(legacy).toContain(defectByCode(FAILED_DETECTOR)!.clientWording!);
+    expect(legacy).not.toMatch(/No scope items were recorded/);
   });
 
   it('marks a draft as a draft on its face', () => {
@@ -903,5 +936,87 @@ describe('the order a list of quotes is read in', () => {
     for (const status of Object.keys(QUOTE_STATUS_LABEL) as QuoteStatus[]) {
       expect(typeof QUOTE_URGENCY[status]).toBe('number');
     }
+  });
+});
+
+describe('the scope a reprint carries', () => {
+  it('is the scope stored with the quote', () => {
+    const scope = [{ location: 'Level 2', text: 'Replace the failed detector head.' }];
+    expect(scopeForReprint({ scope, lines: [] })).toEqual(scope);
+  });
+
+  it('drops a stored entry with no words rather than printing an empty bullet', () => {
+    expect(scopeForReprint({ scope: [{ location: 'Level 2', text: '  ' }], lines: [] })).toEqual([]);
+  });
+
+  it("is rebuilt from the lines' codes, once each, for a quote saved before scope was stored", () => {
+    const built = buildQuoteLines({ defects: [defect(FAILED_DETECTOR), defect(FAILED_DETECTOR), defect(PANEL_FAULT)] });
+    const scope = scopeForReprint({ lines: built.lines });
+    expect(scope.map((s) => s.text)).toEqual([
+      defectByCode(FAILED_DETECTOR)!.clientWording,
+      expect.stringMatching(/Fire indicator panel/i),
+    ]);
+    // The locations were never kept on those quotes, so none is made up.
+    expect(scope.every((s) => s.location === '')).toBe(true);
+  });
+});
+
+describe('prices from the office catalogue', () => {
+  const HEAD = 'Replacement detector head';
+
+  it('prices a material the catalogue sells under the same name, at its sell price', () => {
+    const prices = catalogueMaterialPrices([HEAD], [
+      { name: 'replacement detector head ', partNo: 'RDH-1', sellExTaxCents: 9_120 },
+    ]);
+    expect(prices).toEqual([{ description: HEAD, unitCents: 9_120, source: catalogueSource({ partNo: 'RDH-1' }) }]);
+    expect(prices[0]!.source).toMatchObject({ kind: 'catalogue', label: 'Office catalogue (RDH-1)' });
+  });
+
+  it('matches on the part number as well as the name', () => {
+    expect(catalogueMaterialPrices(['RDH-1'], [{ name: 'Photo head', partNo: 'rdh-1', sellExTaxCents: 9_120 }]))
+      .toHaveLength(1);
+  });
+
+  it('never matches nearly', () => {
+    // Head and base are one word apart and cost different money.
+    expect(catalogueMaterialPrices([HEAD], [{ name: 'Replacement detector base', sellExTaxCents: 2_000 }]))
+      .toEqual([]);
+  });
+
+  it('leaves a line alone where the catalogue has no sell price, or has archived the item', () => {
+    expect(catalogueMaterialPrices([HEAD], [
+      { name: HEAD },
+      { name: HEAD, sellExTaxCents: 0 },
+      { name: HEAD, sellExTaxCents: 9_120, archived: true },
+    ])).toEqual([]);
+  });
+
+  it('leaves the line for the technician where two items share the name at different prices', () => {
+    expect(catalogueMaterialPrices([HEAD], [
+      { name: HEAD, partNo: 'A', sellExTaxCents: 9_120 },
+      { name: HEAD, partNo: 'B', sellExTaxCents: 11_000 },
+    ])).toEqual([]);
+    // Two rows at the same price are one answer, not a guess.
+    expect(catalogueMaterialPrices([HEAD], [
+      { name: HEAD, partNo: 'A', sellExTaxCents: 9_120 },
+      { name: HEAD, partNo: 'B', sellExTaxCents: 9_120 },
+    ])).toHaveLength(1);
+  });
+
+  it('takes only a whole-cent sell price above nothing', () => {
+    expect(usableSellCents({ sellExTaxCents: 9_120 })).toBe(9_120);
+    expect(usableSellCents({ sellExTaxCents: 91.5 })).toBeUndefined();
+    expect(usableSellCents({ sellExTaxCents: -1 })).toBeUndefined();
+    expect(usableSellCents({})).toBeUndefined();
+  });
+
+  it('puts the catalogue price on the quote line with its source', () => {
+    const built = buildQuoteLines({
+      defects: [defect(FAILED_DETECTOR)],
+      materialPrices: catalogueMaterialPrices([HEAD], [{ name: HEAD, partNo: 'RDH-1', sellExTaxCents: 9_120 }]),
+    });
+    const head = built.lines.find((l) => l.description === HEAD)!;
+    expect(head.unitCents).toBe(9_120);
+    expect(head.source?.kind).toBe('catalogue');
   });
 });

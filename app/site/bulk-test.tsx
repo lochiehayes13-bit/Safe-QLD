@@ -17,9 +17,7 @@ import {
   levelKey, levelsOf, selectAll, selectSystem, serviceNoteSubject, summarise, systemOf, systemsOf, toggleSelected,
   withoutWritten, type Batch, type BulkSelection, type FailDetail, type RecordOutcome, type Verdict,
 } from '@/domain/bulkTest';
-import { draftDefectWording, MAX_CANDIDATES } from '@/ai/defectWording';
-import { hasKey } from '@/ai/client';
-import { SEVERITY_LABEL, defectByCode, type Severity } from '@/seed/defectLibrary';
+import { SEVERITY_LABEL, type Severity } from '@/seed/defectLibrary';
 import { SYSTEM_LABELS, assetTypeById, type SystemKind } from '@/seed/assetTypes';
 import type { Defect, Site } from '@/domain/types';
 import { loadPrefs } from '@/app-prefs';
@@ -55,10 +53,8 @@ import { showAlert } from '@/components/alert';
  *
  * A failure is written up properly without typing a paragraph on a ladder.
  * The observation is a few words (the keyboard's microphone will take them),
- * the library offers the codes that fit, and with a key set the model turns
- * the observation into the record's register — picking from those codes
- * only, and checked before it is shown. With no key the library wording and
- * the technician's own words are the record, as they always were.
+ * the library offers the codes that fit, and the library wording and the
+ * technician's own words are the record.
  */
 
 /** What the draft holds: the assets in hand, every verdict so far, the job the note goes to, and a half-written failure. */
@@ -129,9 +125,6 @@ export default function BulkTestScreen() {
   const [level, setLevel] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [sheet, setSheet] = useState<'fail' | 'not-tested' | null>(null);
-  const [aiOn, setAiOn] = useState(false);
-  const [aiBusy, setAiBusy] = useState(false);
-  const [aiNote, setAiNote] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [outcome, setOutcome] = useState<RecordOutcome | null>(null);
   const [defectNotes, setDefectNotes] = useState<DefectNoteOutcome | null>(null);
@@ -174,7 +167,7 @@ export default function BulkTestScreen() {
     }
   }, [siteId]);
 
-  useEffect(() => { void load(); void hasKey().then(setAiOn); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   const systems = useMemo(() => systemsOf(assets), [assets]);
   const levels = useMemo(() => levelsOf(assets), [assets]);
@@ -202,9 +195,8 @@ export default function BulkTestScreen() {
     for (const a of selectedAssets) counts.set(a.assetTypeId, (counts.get(a.assetTypeId) ?? 0) + 1);
     return [...counts.entries()].sort((x, y) => y[1] - x[1])[0]?.[0];
   }, [selectedAssets]);
-  const sheetSystem = sheetType ? assetTypeById(sheetType)?.system : undefined;
   const candidates = useMemo(
-    () => (sheetType ? candidateDefects(sheetType, d.fail.observation, MAX_CANDIDATES) : []),
+    () => (sheetType ? candidateDefects(sheetType, d.fail.observation) : []),
     [sheetType, d.fail.observation],
   );
 
@@ -222,46 +214,6 @@ export default function BulkTestScreen() {
       fail: verdict.kind === 'fail' ? BLANK_FAIL : p.fail,
     }));
     setSheet(null);
-    setAiNote(null);
-  };
-
-  const writeUp = async () => {
-    if (!sheetType || !sheetSystem) return;
-    setAiBusy(true);
-    setAiNote(null);
-    try {
-      // The technician's own pick goes first so the model keeps it, and the
-      // ranking fills the rest of the list. A pick is theirs: the model may
-      // word it, and may say a neighbour fits better, but it does not move
-      // the code or the severity off what was chosen on the ladder.
-      const picked = d.fail.defectCode ? defectByCode(d.fail.defectCode) : undefined;
-      const offered = [picked, ...candidates.filter((c) => c.code !== picked?.code)]
-        .filter((c): c is NonNullable<typeof c> => Boolean(c))
-        .slice(0, MAX_CANDIDATES);
-      const result = await draftDefectWording({
-        assetTypeLabel: assetTypeById(sheetType)?.label ?? 'Asset',
-        system: sheetSystem,
-        observation: d.fail.observation,
-        candidates: offered,
-      });
-      if (result.wording) {
-        if (picked) {
-          setFail({ wording: result.wording });
-          setAiNote(result.code && result.code !== picked.code
-            ? `Drafted, but under ${result.code} rather than ${picked.code}. Read it before you apply it; the code stays as you picked it.`
-            : `Drafted under ${picked.code}. Read it before you apply it — it is your record.`);
-        } else {
-          setFail({ wording: result.wording, defectCode: result.code, severity: result.severity ?? d.fail.severity });
-          setAiNote(`Drafted under ${result.code}. Read it before you apply it — it is your record.`);
-        }
-      } else {
-        setAiNote(result.refusal ?? 'No wording came back.');
-      }
-    } catch (e) {
-      setAiNote(describeActionFailure(e, 'draft the wording'));
-    } finally {
-      setAiBusy(false);
-    }
   };
 
   const addPhoto = async (fromCamera: boolean) => {
@@ -771,38 +723,13 @@ export default function BulkTestScreen() {
               <Txt size="sm" tone="faint">No library code covers this type. The observation goes on the record as written.</Txt>
             )}
 
-            <Card>
-              <Rowed gap={2} align="flex-start">
-                <View style={{ flex: 1 }}>
-                  <Label>AI write it up</Label>
-                  <Txt size="xs" tone="faint" style={{ marginTop: 4, lineHeight: 17 }}>
-                    {!aiOn
-                      ? 'No API key is set, so the library wording and your words are the record. A key goes in Settings.'
-                      : !sheetSystem
-                        ? 'This asset type belongs to no system the library covers, so there is nothing for it to choose from.'
-                        : 'Sends only the asset type, the system, what you wrote and the codes above. Never the site, the customer, a serial or a job number. Checked before it is shown.'}
-                  </Txt>
-                </View>
-                <Button
-                  title="Write it up"
-                  variant="secondary"
-                  compact
-                  disabled={!aiOn || !sheetSystem || d.fail.observation.trim().length < 4}
-                  loading={aiBusy}
-                  onPress={() => void writeUp()}
-                  icon={<MaterialCommunityIcons name="auto-fix" size={16} color={t.color.text} />}
-                />
-              </Rowed>
-              {aiNote ? <Txt size="sm" tone="muted" style={{ marginTop: t.space(2), lineHeight: 19 }}>{aiNote}</Txt> : null}
-            </Card>
-
             <Field
               label="Wording on the record"
               value={d.fail.wording ?? ''}
               onChangeText={(v) => setFail({ wording: v })}
               multiline
               placeholder={finalWording(d.fail)}
-              hint={d.fail.wording?.trim() ? undefined : 'Left blank, the record reads as the placeholder above.'}
+              hint={d.fail.wording?.trim() ? undefined : 'Leave blank to use the standard wording.'}
             />
 
             <Label>Severity</Label>

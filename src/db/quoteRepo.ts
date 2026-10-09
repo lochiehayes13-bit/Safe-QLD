@@ -1,8 +1,9 @@
 import { getDb, inTransaction, newId, nowIso } from '@/db';
 import {
-  DEFAULT_EXCLUSIONS, DEFAULT_VALIDITY_DAYS, canTransition, editRefusal, expiryFor, qldDate,
-  type Confidence, type PriceSource, type Quote, type QuoteLine, type QuoteSection,
-  type QuoteStatus, type UnpriceableDefect,
+  DEFAULT_EXCLUSIONS, DEFAULT_VALIDITY_DAYS, canTransition, catalogueMaterialPrices, editRefusal,
+  expiryFor, qldDate,
+  type Confidence, type MaterialPrice, type PriceSource, type Quote, type QuoteLine, type QuoteSection,
+  type QuoteStatus, type ScopeLine, type UnpriceableDefect,
 } from '@/domain/quote';
 import { GST } from '@/domain/rates';
 import { escapeLike, siteSearchClause } from '@/domain/siteSearch';
@@ -40,6 +41,8 @@ interface QuoteRow {
   discountCents: number;
   discountReason: string;
   unpriceable: string;
+  /** JSON, added in v40. A row read through an older SELECT may not carry it. */
+  scope?: string | null;
   scopeNote: string;
   exclusions: string;
   notes: string;
@@ -137,6 +140,22 @@ function readUnpriceable(raw: string): UnpriceableDefect[] {
   return out;
 }
 
+/**
+ * The stored scope of works.
+ *
+ * Read the same way as the unpriced list: an entry with no text would print as
+ * an empty bullet on the client's copy, so only entries with words survive.
+ */
+function readScope(raw: string | null | undefined): ScopeLine[] {
+  const rows = readJsonArray<Partial<ScopeLine>>(raw ?? '[]', 'scope of works');
+  const out: ScopeLine[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object' || typeof row.text !== 'string' || !row.text.trim()) continue;
+    out.push({ location: typeof row.location === 'string' ? row.location : '', text: row.text });
+  }
+  return out;
+}
+
 function toLine(r: QuoteLineRow): QuoteLine {
   // A stored line with a source kind but no label would be a figure with no
   // traceable origin, which is the one thing a quote line may not be.
@@ -185,6 +204,7 @@ function toQuote(r: QuoteRow, lines: QuoteLine[]): Quote {
     discountReason: r.discountReason || undefined,
     lines,
     unpriceable: readUnpriceable(r.unpriceable),
+    scope: readScope(r.scope),
     scopeNote: r.scopeNote || undefined,
     exclusions: readJsonArray<string>(r.exclusions, 'exclusions'),
     notes: r.notes || undefined,
@@ -220,6 +240,7 @@ export async function createQuote(input: NewQuote): Promise<Quote> {
     discountCents: 0,
     lines: [],
     unpriceable: [],
+    scope: [],
     exclusions: [...DEFAULT_EXCLUSIONS],
     taxRate: GST,
     createdAt: at,
@@ -232,16 +253,16 @@ export async function createQuote(input: NewQuote): Promise<Quote> {
       `INSERT INTO quote
          (id, siteId, reference, jobReference, clientName, siteName, siteAddress, contactName,
           preparedBy, status, validityDays, issuedAt, expiresAt, acceptedAt, acceptedBy, declinedAt,
-          discountCents, discountReason, unpriceable, scopeNote, exclusions, notes, taxRate,
+          discountCents, discountReason, unpriceable, scope, scopeNote, exclusions, notes, taxRate,
           createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         record.id, record.siteId, record.reference, record.jobReference ?? '', record.clientName,
         record.siteName, record.siteAddress ?? '', record.contactName ?? '', record.preparedBy,
         record.status, record.validityDays, record.issuedAt ?? null, record.expiresAt ?? null,
         record.acceptedAt ?? null, record.acceptedBy ?? null, record.declinedAt ?? null,
         Math.round(record.discountCents), record.discountReason ?? '',
-        JSON.stringify(record.unpriceable), record.scopeNote ?? '',
+        JSON.stringify(record.unpriceable), JSON.stringify(record.scope ?? []), record.scopeNote ?? '',
         JSON.stringify(record.exclusions), record.notes ?? '', record.taxRate,
         record.createdAt, record.updatedAt,
       ],
@@ -493,6 +514,7 @@ export async function updateQuote(id: string, patch: QuotePatch): Promise<void> 
   if (patch.discountCents !== undefined) put('discountCents', Math.round(patch.discountCents));
   if (patch.discountReason !== undefined) put('discountReason', patch.discountReason ?? '');
   if (patch.unpriceable !== undefined) put('unpriceable', JSON.stringify(patch.unpriceable));
+  if (patch.scope !== undefined) put('scope', JSON.stringify(patch.scope));
   if (patch.scopeNote !== undefined) put('scopeNote', patch.scopeNote ?? '');
   if (patch.exclusions !== undefined) put('exclusions', JSON.stringify(patch.exclusions));
   if (patch.notes !== undefined) put('notes', patch.notes ?? '');
@@ -567,6 +589,33 @@ export async function setQuoteStatus(
   const db = await getDb();
   await db.runAsync(`UPDATE quote SET ${fields.join(', ')} WHERE id = ?`, [...values, id]);
   return (await getQuote(id))!;
+}
+
+/**
+ * Sell prices from the office catalogue for the material lines named.
+ *
+ * Reads the synced Simpro catalogue (catalog_item), current items with a sell
+ * price only, matched exactly on name or part number; the matching rule is
+ * catalogueMaterialPrices'. Only the name, part number and sell price are
+ * selected. The mirror holds no cost or markup, and nothing here would read
+ * one if it did.
+ */
+export async function officeCataloguePrices(descriptions: readonly string[]): Promise<MaterialPrice[]> {
+  const wanted = [...new Set(descriptions.map((d) => d.trim().toLowerCase()).filter(Boolean))];
+  if (!wanted.length) return [];
+  const db = await getDb();
+  const marks = wanted.map(() => '?').join(',');
+  const rows = await db.getAllAsync<{ name: string; partNo: string | null; sellExTaxCents: number | null }>(
+    `SELECT name, partNo, sellExTaxCents FROM catalog_item
+     WHERE archived = 0 AND sellExTaxCents > 0
+       AND (LOWER(TRIM(name)) IN (${marks}) OR LOWER(TRIM(COALESCE(partNo, ''))) IN (${marks}))`,
+    ...wanted, ...wanted,
+  );
+  return catalogueMaterialPrices(descriptions, rows.map((r) => ({
+    name: r.name,
+    partNo: r.partNo ?? undefined,
+    sellExTaxCents: r.sellExTaxCents ?? undefined,
+  })));
 }
 
 /**

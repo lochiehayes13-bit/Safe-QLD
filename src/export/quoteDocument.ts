@@ -1,6 +1,6 @@
 import {
-  GST_RATE_SOURCE, GST_ROUNDING_SOURCE, QUOTE_STATUS_LABEL, lineAmountCents, pricingSources,
-  quoteTotals, unpriceableReason, type Quote, type QuoteLine, type QuoteSection, type QuoteTotals,
+  GST_RATE_SOURCE, GST_ROUNDING_SOURCE, QUOTE_STATUS_LABEL, lineAmountCents, quoteTotals,
+  scopeForReprint, type Quote, type QuoteLine, type QuoteSection, type QuoteTotals, type ScopeLine,
 } from '@/domain/quote';
 import { formatCents } from '@/domain/rates';
 import { letterheaded } from './letterhead';
@@ -24,6 +24,12 @@ import { formatAuDate } from './sheets';
  *    day, and the technician is the one standing there having it.
  *  - The acceptance block asks for a name, a position, a signature and a date.
  *    An emailed "yes please" is not something anyone can point to later.
+ *
+ * What it leaves off is where each figure came from. The rate card, the
+ * catalogue and a price typed on site are the company's business, and a line
+ * like "Price entered on this quote by <technician>" on the client's copy
+ * invites the client to argue with the technician rather than the quote. The
+ * sources stay on the stored lines for the office.
  */
 
 function esc(s: string | number | undefined | null): string {
@@ -69,8 +75,11 @@ export interface QuoteDocumentInput {
   companyAbn?: string;
   companyPhone?: string;
   companyEmail?: string;
-  /** The work in plain English, from scopeLinesFor. */
-  scopeItems?: { location: string; text: string }[];
+  /**
+   * The work in plain English, from scopeLinesFor. Left out, the scope stored
+   * with the quote is printed (scopeForReprint), which is what a reprint wants.
+   */
+  scopeItems?: ScopeLine[];
   /** Payment and access terms, one per line. Defaults below. */
   terms?: string[];
   /** The date the document is produced, for the lapse warning. */
@@ -253,18 +262,14 @@ function notPricedNote(totals: QuoteTotals, quote: Quote): string {
   const bits: string[] = [];
   if (totals.unpricedLines.length) {
     bits.push(
-      `${totals.unpricedLines.length} item${totals.unpricedLines.length === 1 ? ' is' : 's are'} `
-      + 'shown above without a price and '
-      + `${totals.unpricedLines.length === 1 ? 'is' : 'are'} NOT included in the total: `
+      'Shown above without a price and not included in the total: '
       + `${totals.unpricedLines.map((l) => l.description).join('; ')}. `
-      + 'They are priced separately before any work on them is carried out.',
+      + 'We will price these before any work on them is carried out.',
     );
   }
   if (quote.unpriceable.length) {
     bits.push(
-      `${quote.unpriceable.length} recorded defect${quote.unpriceable.length === 1 ? '' : 's'} at `
-      + 'this site produced no priced work on this quotation and '
-      + `${quote.unpriceable.length === 1 ? 'is' : 'are'} therefore NOT covered by it: `
+      'Recorded at this site but not covered by this quotation: '
       + `${quote.unpriceable.map((u) => `${u.location ? `${u.location} — ` : ''}${u.description || u.defectCode || 'unspecified defect'}`).join('; ')}. `
       + 'Please contact us to have these scoped.',
     );
@@ -277,8 +282,7 @@ export function quoteDocumentHtml(input: QuoteDocumentInput): string {
   const q = input.quote;
   const totals = quoteTotals(q, input.asAt);
   const terms = (input.terms ?? DEFAULT_TERMS).filter((t) => t.trim());
-  const scope = (input.scopeItems ?? []).filter((s) => s.text.trim());
-  const sources = pricingSources(q.lines);
+  const scope = (input.scopeItems ?? scopeForReprint(q)).filter((s) => s.text.trim());
 
   return letterheaded({
     title: `Quotation ${q.reference} — ${q.siteName}`,
@@ -312,8 +316,8 @@ export function quoteDocumentHtml(input: QuoteDocumentInput): string {
     <h2>3. Quotation Total</h2>
     ${totalsTable(q, totals)}
     ${totals.incomplete
-    ? '<p class="foot">This total covers the priced items above only. It is not a price for the '
-      + 'whole of the work recorded at this site — see the note above for what is outside it.</p>'
+    ? '<p class="foot">This total covers the priced items above only. The note above lists what '
+      + 'it does not include.</p>'
     : ''}
 
     <h2>4. What Is and Is Not Included</h2>
@@ -348,13 +352,6 @@ export function quoteDocumentHtml(input: QuoteDocumentInput): string {
       each line added together.
       This document is a quotation and is not a tax invoice.
       A tax invoice is issued on completion of the work.</p>
-    ${sources.length
-    ? `<p class="foot">Basis of pricing: ${esc(sources.map((s) => s.label).join('; '))}.</p>`
-    : '<p class="foot">No rate source is recorded against the figures on this quotation.</p>'}
-    ${q.unpriceable.length
-    ? `<p class="foot">Defects listed as not covered are excluded for the following reasons: ${
-      esc([...new Set(q.unpriceable.map((u) => unpriceableReason(u.reason)))].join('; '))}.</p>`
-    : ''}
 `,
   });
 }

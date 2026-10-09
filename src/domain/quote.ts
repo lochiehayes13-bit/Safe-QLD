@@ -141,9 +141,9 @@ export interface UnpriceableDefect {
 }
 
 export const UNPRICEABLE_REASON: Record<UnpriceableDefect['reason'], string> = {
-  'no-code': 'Raised as free text, so there is no coded work behind it to price',
-  'unknown-code': 'Carries a defect code this build does not know',
-  'no-quote-lines': 'The library entry describes the rectification but supplies no priced work',
+  'no-code': 'Free-text defect with no code',
+  'unknown-code': 'Code not in the defect library',
+  'no-quote-lines': 'No priced work in the library for this code',
 };
 
 /**
@@ -156,7 +156,7 @@ export const UNPRICEABLE_REASON: Record<UnpriceableDefect['reason'], string> = {
  */
 export function unpriceableReason(reason: string): string {
   return UNPRICEABLE_REASON[reason as UnpriceableDefect['reason']]
-    ?? 'It produced no priced work and the reason was not recorded';
+    ?? 'No priced work, reason not recorded';
 }
 
 /**
@@ -268,10 +268,7 @@ export function buildQuoteLines(input: QuoteBuildInput): QuoteBuild {
     // "$89.5.5" on the document; nought or less means the material is being
     // given away. Neither is used, and neither is quietly corrected.
     if (!Number.isInteger(p.unitCents) || p.unitCents <= 0) {
-      warnings.push(
-        `The price offered for "${p.description.trim()}" is not a whole number of cents above `
-        + 'nought, so it has not been used and the line is unpriced.',
-      );
+      warnings.push(`Price for "${p.description.trim()}" not used. It must be above $0, to the cent.`);
       continue;
     }
     prices.set(p.description.trim().toLowerCase(), p);
@@ -300,17 +297,10 @@ export function buildQuoteLines(input: QuoteBuildInput): QuoteBuild {
   // there is never a figure without one.
   const rate = input.labourRate && input.labourRateSource ? input.labourRate : undefined;
   if (input.labourRate && !input.labourRateSource) {
-    warnings.push(
-      `The labour rate "${input.labourRate.name}" arrived with nothing saying where it came from, `
-      + 'so it has not been used. The hours are on the quote unpriced until a rate with a stated '
-      + 'source is available.',
-    );
+    warnings.push(`Labour rate "${input.labourRate.name}" has no source. Hours are unpriced.`);
   }
   if (rate && (!Number.isInteger(rate.sellCentsPerHour) || rate.sellCentsPerHour <= 0)) {
-    warnings.push(
-      `The labour rate "${rate.name}" is not a whole number of cents above nought an hour, so it `
-      + 'has not been used and the hours are unpriced.',
-    );
+    warnings.push(`Labour rate "${rate.name}" is not a valid amount. Hours are unpriced.`);
   }
   const hourlyCents = rate && Number.isInteger(rate.sellCentsPerHour) && rate.sellCentsPerHour > 0
     ? rate.sellCentsPerHour
@@ -333,9 +323,15 @@ export function buildQuoteLines(input: QuoteBuildInput): QuoteBuild {
   return { lines, unpriceable: unpriceableDefects(input.defects), warnings };
 }
 
+/** One line of the scope of works, as the client reads it. */
+export interface ScopeLine {
+  location: string;
+  text: string;
+}
+
 /** The plain-English scope, in the wording the library keeps for clients. */
-export function scopeLinesFor(defects: Defect[]): { location: string; text: string }[] {
-  const out: { location: string; text: string }[] = [];
+export function scopeLinesFor(defects: Defect[]): ScopeLine[] {
+  const out: ScopeLine[] = [];
   for (const defect of defects) {
     const code = defect.defectCode ? defectByCode(defect.defectCode) : undefined;
     // The client wording where the library has one, then the technician's own
@@ -349,6 +345,97 @@ export function scopeLinesFor(defects: Defect[]): { location: string; text: stri
     const named = code ? `${code.component} — ${code.defect.toLowerCase()}` : '';
     const text = code?.clientWording?.trim() || defect.description.trim() || named;
     if (text) out.push({ location: defect.location, text });
+  }
+  return out;
+}
+
+/** The library's client wording for a code, or its own component and defect words. */
+function codeScopeText(code: string): string {
+  const entry = defectByCode(code);
+  if (!entry) return '';
+  return entry.clientWording?.trim() || `${entry.component} — ${entry.defect.toLowerCase()}`;
+}
+
+/**
+ * The scope a saved quote prints with.
+ *
+ * The scope is stored with the quote when it is saved, so a reprint carries
+ * the same lines the client was first sent. A quote saved before the scope was
+ * stored has none, and printing "no scope items" over priced work is a document
+ * charging for work it does not describe. For those the scope is rebuilt from
+ * the defect codes on its lines, in the library's client wording: the locations
+ * were never kept, so they are left blank rather than guessed.
+ */
+export function scopeForReprint(quote: Pick<Quote, 'scope' | 'lines'>): ScopeLine[] {
+  const stored = (quote.scope ?? []).filter((s) => s.text.trim());
+  if (stored.length) return stored;
+  const codes: string[] = [];
+  for (const line of quote.lines) {
+    for (const code of line.fromCodes) if (!codes.includes(code)) codes.push(code);
+  }
+  return codes
+    .map((code) => ({ location: '', text: codeScopeText(code) }))
+    .filter((s) => s.text);
+}
+
+// ---------------------------------------------------------------------------
+// Prices from the office catalogue
+// ---------------------------------------------------------------------------
+
+/**
+ * A row of the office catalogue, as far as a quote needs it.
+ *
+ * The sell price and nothing else about money. The catalogue mirror holds no
+ * cost, and this type has no field for one so nothing can hand it over.
+ */
+export interface CatalogueSellItem {
+  name: string;
+  partNo?: string;
+  /** Whole cents excluding GST, or undefined where the office has no sell price. */
+  sellExTaxCents?: number;
+  archived?: boolean;
+}
+
+/** Where a catalogue price came from, in the form a quote line stores it. */
+export function catalogueSource(item: Pick<CatalogueSellItem, 'partNo'>): PriceSource {
+  return {
+    kind: 'catalogue',
+    label: `Office catalogue${item.partNo?.trim() ? ` (${item.partNo.trim()})` : ''}`,
+    confidence: 'high',
+  };
+}
+
+/** A sell price a quote line can use: whole cents above nothing. */
+export function usableSellCents(item: Pick<CatalogueSellItem, 'sellExTaxCents' | 'archived'>): number | undefined {
+  const cents = item.sellExTaxCents;
+  if (item.archived || cents === undefined || !Number.isInteger(cents) || cents <= 0) return undefined;
+  return cents;
+}
+
+/**
+ * Prices for material lines that the office catalogue sells by the same name.
+ *
+ * Matched exactly on the item's name or part number, lowercased and trimmed,
+ * the same rule as a typed price: "Replacement detector head" and
+ * "Replacement detector base" are one word apart and cost different money.
+ * Where two current items share the wording at different prices the line is
+ * left for the technician to price, because picking either is a guess.
+ */
+export function catalogueMaterialPrices(
+  descriptions: readonly string[],
+  items: readonly CatalogueSellItem[],
+): MaterialPrice[] {
+  const key = (s: string | undefined) => (s ?? '').trim().toLowerCase();
+  const out: MaterialPrice[] = [];
+  for (const description of descriptions) {
+    const wanted = key(description);
+    if (!wanted) continue;
+    const hits = items.filter((i) => usableSellCents(i) !== undefined
+      && (key(i.name) === wanted || key(i.partNo) === wanted));
+    const prices = new Set(hits.map((i) => i.sellExTaxCents));
+    if (!hits.length || prices.size !== 1) continue;
+    const item = hits[0]!;
+    out.push({ description, unitCents: item.sellExTaxCents!, source: catalogueSource(item) });
   }
   return out;
 }
@@ -399,6 +486,12 @@ export interface Quote {
   lines: QuoteLine[];
   /** Recorded at build time so an issued quote can still say what it excluded. */
   unpriceable: UnpriceableDefect[];
+  /**
+   * The scope of works as it was printed when the quote was saved, so a
+   * reprint matches the client's copy. Absent on quotes saved before it was
+   * stored; see scopeForReprint.
+   */
+  scope?: ScopeLine[];
   scopeNote?: string;
   /** What the price does not cover. Printed, because an unstated exclusion is a dispute. */
   exclusions: string[];
@@ -497,28 +590,27 @@ export function lapseStatus(
   asAt: string,
 ): LapseCheck {
   if (!quote.expiresAt) {
-    return { note: 'Not issued yet, so there is no expiry to run down.' };
+    return { note: 'Not issued yet.' };
   }
   const expires = qldDate(quote.expiresAt);
   const today = qldDate(asAt);
   if (!expires || !today) {
-    return { note: 'The dates on this quote cannot be read, so whether it has lapsed is unknown.' };
+    return { note: 'Expiry date unreadable, so lapse unknown.' };
   }
   const daysRemaining = daysBetween(today, expires);
   if (daysRemaining < 0) {
     return {
       lapsed: true,
       daysRemaining,
-      note: `Lapsed ${-daysRemaining} day${daysRemaining === -1 ? '' : 's'} ago. Prices move — `
-        + 'raise a new quote at current rates rather than letting this one be accepted.',
+      note: `Lapsed ${-daysRemaining} day${daysRemaining === -1 ? '' : 's'} ago. Requote at current rates.`,
     };
   }
   return {
     lapsed: false,
     daysRemaining,
     note: daysRemaining === 0
-      ? 'Today is the last day this quote holds good.'
-      : `Holds good for another ${daysRemaining} day${daysRemaining === 1 ? '' : 's'}.`,
+      ? 'Today is the last day.'
+      : `${daysRemaining} day${daysRemaining === 1 ? '' : 's'} left.`,
   };
 }
 
@@ -609,21 +701,19 @@ export function canTransition(
     if (to === 'draft') {
       return {
         allowed: false,
-        reason: 'An issued quote cannot go back to draft. The client is holding this number — '
-          + 'raise a new quote for the change so the two documents cannot disagree.',
+        reason: 'An issued quote cannot go back to draft. Raise a new quote for the change.',
       };
     }
     if (from === 'accepted') {
       return {
         allowed: false,
-        reason: 'This quote has been accepted. Acceptance closed it, and a date passing does not '
-          + 'undo an agreement.',
+        reason: 'This quote has been accepted and is closed.',
       };
     }
     if (from === 'declined' || from === 'expired') {
       return {
         allowed: false,
-        reason: `A ${QUOTE_STATUS_LABEL[from].toLowerCase()} quote is finished with. `
+        reason: `A ${QUOTE_STATUS_LABEL[from].toLowerCase()} quote is closed. `
           + 'Raise a new one at current rates.',
       };
     }
@@ -641,7 +731,7 @@ export function canTransition(
     if (!asAt) {
       return {
         allowed: false,
-        reason: 'Accepting a quote needs a date to check it against, and none was given.',
+        reason: 'Accepting needs a date to check it against.',
       };
     }
     const lapse = lapseStatus(quote, asAt);
@@ -649,8 +739,8 @@ export function canTransition(
       const days = -(lapse.daysRemaining ?? 0);
       return {
         allowed: false,
-        reason: `This quote lapsed ${days} day${days === 1 ? '' : 's'} ago and cannot be accepted `
-          + 'at these prices. Raise a new quote at current rates.',
+        reason: `This quote lapsed ${days} day${days === 1 ? '' : 's'} ago. `
+          + 'Raise a new quote at current rates.',
       };
     }
   }
@@ -659,15 +749,14 @@ export function canTransition(
     if (!asAt) {
       return {
         allowed: false,
-        reason: 'Marking a quote expired needs a date to check it against.',
+        reason: 'Expiring needs a date to check it against.',
       };
     }
     const lapse = lapseStatus(quote, asAt);
     if (lapse.lapsed !== true) {
       return {
         allowed: false,
-        reason: 'This quote has not lapsed yet. If the client has said no, mark it declined — '
-          + 'that is a different answer from running out of time.',
+        reason: 'Not lapsed yet. If the client said no, mark it declined.',
       };
     }
   }
@@ -678,8 +767,7 @@ export function canTransition(
 /** Only a draft can be edited; anything else is refused with the reason. */
 export function editRefusal(quote: Pick<Quote, 'status'>): string | undefined {
   if (quote.status === 'draft') return undefined;
-  return `This quote is ${QUOTE_STATUS_LABEL[quote.status].toLowerCase()} and cannot be changed. `
-    + 'Raise a new quote — an issued quote that changes is a different quote.';
+  return `${QUOTE_STATUS_LABEL[quote.status]} quotes are locked. Raise a new quote to change it.`;
 }
 
 export function canEdit(quote: Pick<Quote, 'status'>): boolean {
@@ -747,10 +835,7 @@ export function quoteTotals(quote: QuoteForTotals, asAt?: string): QuoteTotals {
   if (Number.isInteger(rawDiscount)) {
     discountCents = rawDiscount;
   } else {
-    warnings.push(
-      'The discount is not a whole number of cents, so it has been left off. Enter a discount as '
-      + 'an amount rather than a percentage.',
-    );
+    warnings.push('Discount left off: not a whole number of cents. Enter a dollar amount.');
   }
 
   const subtotalCents = workCents - discountCents;
@@ -759,36 +844,26 @@ export function quoteTotals(quote: QuoteForTotals, asAt?: string): QuoteTotals {
   const totalCents = subtotalCents + gstCents;
 
   for (const line of unpricedLines) {
-    warnings.push(
-      `"${line.description}" is on this quote with no price, so it is not in the total. `
-      + 'Price it or take it off — it will otherwise be done for nothing.',
-    );
+    warnings.push(`"${line.description}" has no price and is not in the total.`);
   }
 
   if (!quote.lines.length) {
-    warnings.push('This quote has no lines on it. A total of $0.00 reads to a client as free work.');
+    warnings.push('No lines on this quote.');
   } else if (unpricedLines.length === quote.lines.length) {
     warnings.push('Nothing on this quote is priced, so the total is not a price.');
   }
 
   for (const u of quote.unpriceable ?? []) {
     warnings.push(
-      `${u.location ? `${u.location}: ` : ''}${u.description || u.defectCode || 'A defect'} is on `
-      + `this job and priced at nothing — ${unpriceableReason(u.reason).toLowerCase()}. `
-      + 'Add a line for it or say in the scope that it is excluded.',
+      `${u.location ? `${u.location}: ` : ''}${u.description || u.defectCode || 'A defect'} is not priced. `
+      + `${unpriceableReason(u.reason)}.`,
     );
   }
 
   if (discountCents < 0) {
-    warnings.push(
-      'The discount is negative, which adds to the price rather than taking off it. If that is a '
-      + 'surcharge it belongs on a line of its own where the client can see it.',
-    );
+    warnings.push('The discount is negative, so it adds to the price.');
   } else if (discountCents > workCents) {
-    warnings.push(
-      'The discount is larger than the work on this quote, so the total is negative. '
-      + 'Nothing has been clamped — check the figure.',
-    );
+    warnings.push('The discount is larger than the work. Check the figure.');
   }
 
   if (asAt && quote.status === 'issued') {

@@ -621,9 +621,8 @@ export const DESTINATIONS: readonly Destination[] = [
     blurb: 'Price the rectification work from the defects.',
     terms: ['quote', 'price', 'rectification', 'sell', 'estimate'],
     hiddenBecause:
-      'A quote carries cost and margin, and a number given on the spot commits the company to '
-      + 'something nobody has checked. Raise the defect — the quote lines come off it — and let '
-      + 'the office price it.',
+      'A price given on the spot commits the company to a number nobody has checked. Raise the '
+      + 'defect; the quote lines come off it, and the office prices it.',
   },
   {
     route: '/report/[id]', file: 'app/report/[id].tsx', tab: 'sites', section: 'Paperwork',
@@ -727,7 +726,7 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/tools/fault-loop', file: 'app/tools/fault-loop.tsx', tab: 'tools', section: 'Calculators',
-    label: 'Fault loop and earthing', modes: BOTH,
+    label: 'Fault loop', modes: BOTH,
     streams: ['construction'],
     streamBecause:
       'Fault loop impedance and earthing are proved when a circuit is installed, not when a '
@@ -747,7 +746,7 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/tools/ohms', file: 'app/tools/ohms.tsx', tab: 'tools', section: 'Calculators',
-    label: 'Electrical', modes: BOTH, openedFrom: ['/tools'],
+    label: "Ohm's law", modes: BOTH, openedFrom: ['/tools'],
     blurb: "Ohm's law, power and battery runtime.",
     terms: ['ohms law', 'volts', 'amps', 'watts', 'runtime', 'power'],
   },
@@ -759,7 +758,7 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/tools/resistor', file: 'app/tools/resistor.tsx', tab: 'tools', section: 'Calculators',
-    label: 'Resistor decoder', modes: BOTH, openedFrom: ['/tools'],
+    label: 'Resistor values', modes: BOTH, openedFrom: ['/tools'],
     blurb: 'Colour bands to ohms and back.',
     terms: ['resistor', 'bands', 'colour code', 'ohms', '4k7'],
   },
@@ -924,12 +923,11 @@ export const DESTINATIONS: readonly Destination[] = [
     // The office's quotes carry a switch to these, and it works in Technician
     // mode too — hiding the row must not turn that switch into a dead end.
     stillOpenedFrom: '/quotes/simpro',
-    blurb: 'Out with clients, and about to lapse.',
+    blurb: 'Your quotes and when they lapse.',
     terms: ['quotes', 'quotations', 'price', 'accepted', 'expired', 'lapsed', 'out with clients'],
     hiddenBecause:
-      'A quote carries cost and margin, and the answer to "what did we quote for this?" given on '
-      + 'the spot commits the company to a number nobody has checked. The quote itself is raised '
-      + 'from the site and priced by the office, and this is the same half of the work.',
+      'The answer to "what did we quote for this?" given on the spot commits the company to a '
+      + 'number nobody has checked. Quotes are raised from the site and priced by the office.',
   },
   {
     route: '/quotes/simpro', file: 'app/quotes/simpro.tsx', tab: 'work', section: 'Records',

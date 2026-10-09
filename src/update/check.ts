@@ -28,7 +28,7 @@ const STORAGE_KEY = 'safeqld.update';
  * Only needed while the releases sit on the private repository. A
  * fine-grained token with read-only access to that one repository is enough,
  * and it is still a credential on a technician's phone, so it goes where the
- * Simpro secret and the Anthropic key go rather than into preferences.
+ * Simpro secret goes rather than into preferences.
  */
 const TOKEN_SLOT = 'safeqld.github.token';
 

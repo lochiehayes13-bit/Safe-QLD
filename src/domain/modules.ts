@@ -205,7 +205,7 @@ export const MODULES: AppModule[] = [
     blurb: 'Commissioning readings for the system.',
     keywords: ['commissioning', 'baseline'] },
   { href: '/quotes', label: 'Quotes', icon: 'currency-usd', group: 'Forms and records',
-    blurb: 'Out with clients, and about to lapse.',
+    blurb: 'Your quotes and when they lapse.',
     keywords: ['quote', 'pricing'] },
 
   // -- Jobs and planning ---------------------------------------------------

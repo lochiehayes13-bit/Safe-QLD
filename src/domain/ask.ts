@@ -106,7 +106,7 @@ export const CALCULATORS: CalculatorDef[] = [
     terms: ['volt drop', 'voltage drop', 'cable', 'csa', 'copper', 'resistance', 'run length'],
   },
   {
-    title: 'Resistor decoder',
+    title: 'Resistor values',
     body: 'Decodes 3 to 6 band resistors and finds the nearest preferred value in E6 through E192.',
     route: '/tools/resistor',
     terms: ['resistor', 'colour code', 'color code', 'band', 'ohm', 'e12', 'e24', 'e96', 'e192', 'tolerance'],
@@ -118,13 +118,13 @@ export const CALCULATORS: CalculatorDef[] = [
     terms: ['address', 'dip', 'dipswitch', 'xpert', 'rotary', 'loop address', 'addressing'],
   },
   {
-    title: 'End-of-line reference',
+    title: 'End of line',
     body: 'End-of-line values by panel and circuit. Some panels sense current or voltage, not resistance.',
     route: '/tools/eol',
     terms: ['eol', 'end of line', 'end-of-line', 'terminating', 'resistor value', 'line monitoring'],
   },
   {
-    title: 'Units and conversions',
+    title: 'Unit converter',
     body: 'Common fire trade conversions, with the factor shown.',
     route: '/tools/converter',
     terms: ['convert', 'conversion', 'unit', 'kpa', 'psi', 'metre', 'feet', 'litre'],

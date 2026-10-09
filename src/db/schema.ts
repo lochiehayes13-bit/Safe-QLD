@@ -38,6 +38,7 @@ import { MIGRATION_V36 } from './schemaV36';
 import { MIGRATION_V37 } from './schemaV37';
 import { MIGRATION_V38 } from './schemaV38';
 import { MIGRATION_V39 } from './schemaV39';
+import { MIGRATION_V40 } from './schemaV40';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -409,6 +410,10 @@ export const MIGRATIONS: string[] = [
   // v39 — which queue row carries a Form 72's PDF to the job, so the form
   // reports what became of the upload rather than the moment it was queued
   MIGRATION_V39,
+
+  // v40 — the scope of works on a quote, so a reprint prints what the client
+  // was first sent
+  MIGRATION_V40,
 ];
 
 /**

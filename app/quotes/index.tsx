@@ -10,11 +10,12 @@ import { formatCents } from '@/domain/rates';
 import { siteFallbackWords } from '@/domain/siteMiss';
 import { formatAuDate } from '@/export/sheets';
 import { nowIso } from '@/db';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { useTheme } from '@/theme';
 import { showAlert } from '@/components/alert';
 import { SiteMissCards, useSiteMisses } from '@/components/SiteMisses';
 import {
-  Banner, Button, Card, Chip, EmptyState, Rowed, Screen, SearchBox, Segmented, StatTile, Txt,
+  Banner, Button, Card, Chip, EmptyState, Label, Rowed, Screen, SearchBox, Segmented, StatTile, Txt,
 } from '@/components/ui';
 
 /**
@@ -102,6 +103,9 @@ export default function QuotesScreen() {
   const [expired, setExpired] = useState(0);
   const [typed, setTyped] = useState('');
   const [query, setQuery] = useState('');
+  // A read that threw, in words. Without it a failed read left the list
+  // empty and the empty state said no quotes had ever been raised.
+  const [failed, setFailed] = useState<string | null>(null);
 
   // The search is a query now, so it waits for the typing to stop. The same
   // 200ms the job list and the Simpro quote list use, because a search that
@@ -114,14 +118,19 @@ export default function QuotesScreen() {
 
   const load = useCallback(async () => {
     const asAt = nowIso();
-    const [found, issued] = await Promise.all([
-      listQuotes({ query }),
-      listQuotes({ status: 'issued', limit: OUT_COUNTED }),
-    ]);
-    setPage({ total: found.total, matching: found.matching, capped: found.capped });
-    setRows(found.rows.map((quote) => asRow(quote, asAt)));
-    setOut(issued.rows.map((quote) => asRow(quote, asAt)));
-    setOutCapped(issued.capped);
+    try {
+      const [found, issued] = await Promise.all([
+        listQuotes({ query }),
+        listQuotes({ status: 'issued', limit: OUT_COUNTED }),
+      ]);
+      setFailed(null);
+      setPage({ total: found.total, matching: found.matching, capped: found.capped });
+      setRows(found.rows.map((quote) => asRow(quote, asAt)));
+      setOut(issued.rows.map((quote) => asRow(quote, asAt)));
+      setOutCapped(issued.capped);
+    } catch (e) {
+      setFailed(describeLoadFailure(e, 'the quotes on this phone'));
+    }
   }, [query]);
 
   /*
@@ -194,7 +203,7 @@ export default function QuotesScreen() {
       await setQuoteStatus(row.quote.id, to, { asAt: nowIso() });
       await load();
     } catch (e) {
-      showAlert('Could not change this quote', e instanceof Error ? e.message : String(e));
+      showAlert('Could not change this quote', describeActionFailure(e, 'change this quote'));
     }
   };
 
@@ -212,12 +221,11 @@ export default function QuotesScreen() {
       <Segmented
         value="ours"
         onChange={(v) => { if (v === 'simpro') router.replace('/quotes/simpro'); }}
-        options={[{ value: 'ours', label: 'Ours on this phone' }, { value: 'simpro', label: 'Simpro' }]}
+        options={[{ value: 'ours', label: 'This phone' }, { value: 'simpro', label: 'Simpro' }]}
       />
 
       <Txt tone="muted" size="sm" style={{ lineHeight: 20 }}>
-        Every quote raised on this device. A quote is raised from a site, off its own defect list
-        and the rate card.
+        Quotes raised on this phone. Start one from a site.
       </Txt>
 
       <SearchBox value={typed} onChange={setTyped} placeholder="Quote number, site, suburb, client or address" />
@@ -232,34 +240,44 @@ export default function QuotesScreen() {
         </Txt>
       ) : null}
 
+      {failed ? (
+        <Banner tone="fail" title="Could not read the quotes" body={failed} />
+      ) : null}
+      {failed ? <Button title="Try again" variant="secondary" onPress={() => { void load(); }} /> : null}
+
       {expired ? (
         <Banner
           tone="warn"
-          title={`${expired} quote${expired === 1 ? '' : 's'} lapsed since this was last opened`}
-          body={'Prices move, so a quote holds good only for its validity period. These are marked '
-            + 'expired rather than left reading as live — raise a new one at current rates if the '
-            + 'client still wants the work.'}
+          title={`${expired} quote${expired === 1 ? '' : 's'} lapsed`}
+          body="Marked expired. Requote at current rates."
         />
       ) : null}
 
-      <Rowed gap={2} wrap>
-        <View style={{ flex: 1, minWidth: 100 }}>
-          <StatTile label="Out with clients" value={out.length} tone={out.length ? 'warn' : 'muted'} />
-        </View>
-        <View style={{ flex: 1, minWidth: 100 }}>
-          <StatTile label="Closing this week" value={closing} tone={closing ? 'fail' : 'muted'} />
-        </View>
-        <View style={{ flex: 1, minWidth: 120 }}>
-          <StatTile label="Value out" value={formatCents(outValue)} tone="muted" />
-        </View>
-      </Rowed>
+      {/* Only once a read has landed: zeros over a read that failed would say
+          nothing is out when nobody knows. */}
+      {page ? (
+        <>
+          <Label>Issued from this phone</Label>
+          <Rowed gap={2} wrap>
+            <View style={{ flex: 1, minWidth: 100 }}>
+              <StatTile label="Out with clients" value={out.length} tone={out.length ? 'warn' : 'muted'} />
+            </View>
+            <View style={{ flex: 1, minWidth: 100 }}>
+              <StatTile label="Closing this week" value={closing} tone={closing ? 'fail' : 'muted'} />
+            </View>
+            <View style={{ flex: 1, minWidth: 120 }}>
+              <StatTile label="Value out" value={formatCents(outValue)} tone="muted" />
+            </View>
+          </Rowed>
+        </>
+      ) : null}
       {/* These three are about the book, not about what was typed, so they are
           read separately and the search leaves them alone. Where there are
           somehow more issued quotes than one read covers, the number is a
           floor and says so. */}
       {outCapped ? (
         <Txt size="xs" tone="faint">
-          Counted over the first {OUT_COUNTED.toLocaleString()} issued quotes, so these are at least this much.
+          First {OUT_COUNTED.toLocaleString()} issued quotes only. The real figures are higher.
         </Txt>
       ) : null}
 
@@ -271,21 +289,20 @@ export default function QuotesScreen() {
         * quotes who mistyped a suburb. What is true depends on whether
         * anything was typed and whether the building is on this phone at all.
         */}
-      {page && !rows.length ? (
+      {page && !rows.length && !failed ? (
         <>
           <EmptyState
             icon="file-document-edit-outline"
             {...(!page.total
               ? {
-                title: 'No quotes raised yet',
-                body: 'A quote comes off a site’s open defects — open the site and choose Quote. The '
-                  + 'lines come from the defect codes and the hours from the rate card.',
+                title: 'No quotes yet',
+                body: 'Open a site and choose Rectification quote.',
               }
               : siteHits.length
                 ? siteFallbackWords(siteHits.length, 'quotes')
                 : {
                   title: 'Nothing matches',
-                  body: 'Try the quote number on its own, or part of the site, the suburb or the client.',
+                  body: 'Try the quote number, site, suburb or client.',
                 })}
           />
           <SiteMissCards sites={siteHits} />
@@ -312,9 +329,7 @@ export default function QuotesScreen() {
           </Rowed>
 
           {row.incomplete ? (
-            <Txt size="sm" tone="warn">
-              Something on this quote has no price, so the total is not the whole job.
-            </Txt>
+            <Txt size="sm" tone="warn">Some work is unpriced.</Txt>
           ) : null}
 
           {row.quote.status === 'issued' ? (
@@ -359,12 +374,6 @@ export default function QuotesScreen() {
         </Card>
       ))}
 
-      {rows.length ? (
-        <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-          A quote holds good for its validity period only, counted in Queensland dates from the day
-          it was issued. Lapsed quotes are marked expired when this screen is opened.
-        </Txt>
-      ) : null}
       <View style={{ height: t.space(4) }} />
     </Screen>
   );

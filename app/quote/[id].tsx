@@ -4,7 +4,7 @@ import { Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { getQuote, listQuoteLines, setQuoteStatus, updateQuote } from '@/db/quoteRepo';
 import {
   QUOTE_STATUS_LABEL, canTransition, editRefusal, lapseStatus, lineAmountCents, qldDate, quoteTotals,
-  scopeLinesFor, type Quote,
+  scopeForReprint, type Quote,
 } from '@/domain/quote';
 import { formatCents } from '@/domain/rates';
 import { quoteDocumentHtml } from '@/export/quoteDocument';
@@ -72,13 +72,17 @@ export default function QuoteScreen() {
   const totals = useMemo(() => (quote ? quoteTotals(quote, nowIso()) : null), [quote]);
   const lapse = useMemo(() => (quote ? lapseStatus(quote, nowIso()) : undefined), [quote]);
   const locked = quote ? editRefusal(quote) : undefined;
+  // The scope the PDF prints: the one saved with the quote, or for an older
+  // quote the one rebuilt from its defect codes.
+  const scope = useMemo(() => (quote ? scopeForReprint(quote) : []), [quote]);
 
   const pdf = useCallback(async () => {
     if (!quote) throw new Error('The quote is not loaded.');
+    // No scope passed: the document prints the scope stored with the quote, so
+    // a reprint matches the copy the client was first sent.
     const html = quoteDocumentHtml({
       quote,
       companyName: companyName || undefined,
-      scopeItems: scopeLinesFor([]),
       asAt: nowIso(),
     });
     const day = qldDate(nowIso()) ?? '';
@@ -95,7 +99,7 @@ export default function QuoteScreen() {
         showAlert(notice.title, notice.body);
       }
     } catch (e) {
-      showAlert('Could not produce the quote', describeActionFailure(e, 'producing the quote'));
+      showAlert('Could not make the PDF', describeActionFailure(e, 'make the quote PDF'));
     } finally {
       setBusy(false);
     }
@@ -115,26 +119,26 @@ export default function QuoteScreen() {
           `${quote.clientName || 'Hello'},`,
           '',
           `Our quotation ${quote.reference} for ${quote.siteName} is attached.`,
-          quote.expiresAt ? `It holds good until ${formatAuDate(quote.expiresAt)}.` : '',
+          quote.expiresAt ? `It is valid until ${formatAuDate(quote.expiresAt)}.` : '',
           '',
           companyName || 'Safe QLD Fire Protection',
         ].filter(Boolean).join('\n'),
       }, [file]);
 
       if (outcome === 'no-mail-app') {
-        showAlert('No mail app set up', 'This phone has no email account configured. Use the PDF button and attach it yourself.');
+        showAlert('No mail app set up', 'No email account on this phone. Tap PDF and attach it yourself.');
       } else if (outcome === 'offered') {
         // The share sheet is up with the quote on it.
       } else if (outcome === 'handed-over') {
         showAlert(
-          'Draft opened — attach the quote',
+          'Attach the quote',
           file.printed
-            ? 'An email is open. Use the PDF button, save it from the print dialogue, and attach it before sending.'
-            : `An email is open and ${file.name} has downloaded. Attach it and fill in the client's address before sending.`,
+            ? 'Email is open. Tap PDF, save it, then attach it.'
+            : `Email is open and ${file.name} has downloaded. Attach it and add the client's address.`,
         );
       }
     } catch (e) {
-      showAlert('Could not email it', describeActionFailure(e, 'emailing the quote'));
+      showAlert('Could not email it', describeActionFailure(e, 'email the quote'));
     } finally {
       setBusy(false);
     }
@@ -144,7 +148,7 @@ export default function QuoteScreen() {
     if (!quote) return;
     const allowed = canTransition(quote, to, nowIso());
     if (!allowed.allowed) {
-      showAlert('Not from here', allowed.reason ?? 'That change is not allowed.');
+      showAlert('Cannot change status', allowed.reason ?? 'That change is not allowed.');
       return;
     }
     try {
@@ -154,7 +158,7 @@ export default function QuoteScreen() {
       });
       await load();
     } catch (e) {
-      showAlert('Not changed', describeActionFailure(e, 'changing the quote'));
+      showAlert('Not changed', describeActionFailure(e, 'change the quote'));
     }
   };
 
@@ -165,7 +169,7 @@ export default function QuoteScreen() {
         <RecordGate
           missing={missing}
           what="quote"
-          why="It may have been deleted, or the link came from another device."
+          why="It may have been deleted, or raised on another phone."
           failed={failed}
           onRetry={() => { void load(); }}
         />
@@ -187,7 +191,7 @@ export default function QuoteScreen() {
               {quote.issuedAt ? (
                 <Txt size="xs" tone="faint" style={{ marginTop: t.space(1) }}>
                   Issued {formatAuDate(qldDate(quote.issuedAt) ?? quote.issuedAt)}
-                  {quote.expiresAt ? ` · holds good to ${formatAuDate(quote.expiresAt)}` : ''}
+                  {quote.expiresAt ? ` · valid to ${formatAuDate(quote.expiresAt)}` : ''}
                 </Txt>
               ) : null}
             </View>
@@ -202,7 +206,19 @@ export default function QuoteScreen() {
         </Card>
 
         {lapse?.lapsed || (lapse?.daysRemaining !== undefined && lapse.daysRemaining <= 7) ? (
-          <Banner tone={lapse.lapsed ? 'fail' : 'warn'} title={lapse.lapsed ? 'It has lapsed' : 'About to lapse'} body={lapse.note} />
+          <Banner tone={lapse.lapsed ? 'fail' : 'warn'} title={lapse.lapsed ? 'Lapsed' : 'About to lapse'} body={lapse.note} />
+        ) : null}
+
+        {scope.length ? (
+          <Card>
+            <Label>Scope of works</Label>
+            {scope.map((s, i) => (
+              <Txt key={i} size="sm" style={{ marginTop: t.space(1.5), lineHeight: 19 }}>
+                {s.location ? <Txt size="sm" weight="700">{s.location}: </Txt> : null}
+                {s.text}
+              </Txt>
+            ))}
+          </Card>
         ) : null}
 
         <H2>What was quoted</H2>
@@ -257,10 +273,10 @@ export default function QuoteScreen() {
           </Card>
         ) : null}
 
-        <H2>Send it again</H2>
+        <H2>Send</H2>
         <Rowed gap={2}>
           <Button title="PDF" style={{ flex: 1 }} loading={busy} onPress={() => { void share(); }} />
-          <Button title="Email it" variant="secondary" style={{ flex: 1 }} loading={busy} onPress={() => { void email(); }} />
+          <Button title="Email" variant="secondary" style={{ flex: 1 }} loading={busy} onPress={() => { void email(); }} />
         </Rowed>
 
         <JobFileCard
@@ -272,11 +288,11 @@ export default function QuoteScreen() {
           buildFile={pdf}
           onPickJob={(job) => updateQuote(quote.id, { jobReference: job?.externalId })
             .then(() => load())
-            .catch((e: unknown) => showAlert('Not linked', describeActionFailure(e, 'linking the job')))}
+            .catch((e: unknown) => showAlert('Not linked', describeActionFailure(e, 'link the job')))}
           onAttached={() => { /* The quote has no attachedAt column; the queue is the record. */ }}
         />
 
-        <H2>Where it stands</H2>
+        <H2>Status</H2>
         {quote.status === 'accepted' ? (
           <Banner
             tone="pass"
@@ -289,7 +305,7 @@ export default function QuoteScreen() {
             label="Who accepted it"
             value={acceptedBy}
             onChangeText={setAcceptedBy}
-            hint="The name they gave, for the record"
+            hint="Their name, for the record"
           />
         ) : null}
         <Rowed gap={2} wrap>

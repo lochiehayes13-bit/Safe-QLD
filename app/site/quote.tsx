@@ -2,14 +2,16 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { getSite, listDefects } from '@/db/repo';
-import { createQuote, nextQuoteSeq, setQuoteStatus } from '@/db/quoteRepo';
+import { createQuote, nextQuoteSeq, officeCataloguePrices, setQuoteStatus } from '@/db/quoteRepo';
+import { searchCatalogItems, type CatalogItemRecord } from '@/db/moreRepo';
 import { loadRateCard, type StoredRateCard } from '@/db/rateCardRepo';
 import {
-  DEFAULT_EXCLUSIONS, DEFAULT_VALIDITY_DAYS, UNPRICEABLE_REASON, buildQuoteLines,
+  DEFAULT_EXCLUSIONS, DEFAULT_VALIDITY_DAYS, UNPRICEABLE_REASON, buildQuoteLines, catalogueSource,
   expiryFor, formatQuoteReference, lineAmountCents, qldDate, quoteTotals, scopeLinesFor,
-  weakestConfidence,
+  usableSellCents,
   type MaterialPrice, type PriceSource, type Quote, type QuoteLine,
 } from '@/domain/quote';
+import { partsNeededFor } from '@/domain/partsNeeded';
 import { effectiveRateCard, formatCents, parseCents, selectRate } from '@/domain/rates';
 import { quoteDocumentHtml } from '@/export/quoteDocument';
 import { formatAuDate } from '@/export/sheets';
@@ -19,11 +21,11 @@ import { DEFAULT_PREFS, loadPrefs, type Prefs } from '@/app-prefs';
 import type { Defect, Site } from '@/domain/types';
 import { useTheme } from '@/theme';
 import {
-  Banner, Button, Card, Chip, Divider, EmptyState, Field, H2, Label, Rowed, Screen, Segmented,
-  StatTile, Txt,
+  Banner, Button, Card, Chip, Divider, EmptyState, Field, H2, Label, Rowed, Screen, SearchBox,
+  Segmented, StatTile, Txt,
 } from '@/components/ui';
 import { ContextGate } from '@/components/ContextGate';
-import { describeLoadFailure } from '@/domain/loadFailure';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
 import { contextId } from '@/domain/screenContext';
 import { showAlert } from '@/components/alert';
 
@@ -34,14 +36,27 @@ import { showAlert } from '@/components/alert';
  * carry their own coded quote lines, the rate card carries the hours, and the
  * priced version was being typed into an email on the drive home and lost.
  *
- * The screen is deliberately blunt about what it does not know. Nothing in the
- * app is told what a detector head sells for, so a material line stays unpriced
- * until someone types the figure, and an unpriced line is shown in red and
+ * The screen is deliberately blunt about what it does not know. A material
+ * line is priced from the office catalogue's sell price where the catalogue
+ * sells it by that name or the technician picks the item, or from a figure
+ * typed here; with none of those it stays unpriced, is shown in red and is
  * stated to be outside the total rather than quietly counted as nothing. The
  * same goes for a defect the library cannot price at all: it is listed under
  * the total so the client can be asked about it before the quote goes out,
  * instead of being discovered as free work on the day.
  */
+
+/**
+ * A price typed here is marked low confidence on purpose.
+ *
+ * Nothing has checked it against a supplier price list, and the stored line
+ * should be able to say that rather than presenting it like a catalogue price.
+ * It is never printed on the client's copy.
+ */
+const ENTERED: PriceSource = { kind: 'entered', label: 'Typed on this quote', confidence: 'low' };
+
+const priceKey = (description: string) => description.trim().toLowerCase();
+
 export default function SiteQuoteScreen() {
   const t = useTheme();
   // `contextId` rather than the raw parameter: several screens push
@@ -57,6 +72,11 @@ export default function SiteQuoteScreen() {
 
   const [excluded, setExcluded] = useState<Record<string, true>>({});
   const [priceText, setPriceText] = useState<Record<string, string>>({});
+  /** Sell prices the office catalogue holds under a material line's own name. */
+  const [catalogue, setCatalogue] = useState<MaterialPrice[]>([]);
+  /** Catalogue items the technician picked for a line, by the line's description. */
+  const [picked, setPicked] = useState<Record<string, { cents: number; source: PriceSource }>>({});
+  const [pickingFor, setPickingFor] = useState<string | null>(null);
   const [discountText, setDiscountText] = useState('');
   const [discountReason, setDiscountReason] = useState('');
   const [validityText, setValidityText] = useState(String(DEFAULT_VALIDITY_DAYS));
@@ -82,6 +102,8 @@ export default function SiteQuoteScreen() {
   const load = useCallback(async () => {
     if (!siteId) { setLoading(false); return; }
     setLoading(true);
+    setFailed(null);
+    let open: Defect[] = [];
     try {
       const [s, d, p, c] = await Promise.all([
         getSite(siteId), listDefects(siteId, 'open'), loadPrefs(), loadRateCard(),
@@ -90,6 +112,7 @@ export default function SiteQuoteScreen() {
       setDefects(d);
       setPrefs(p);
       setCard(c);
+      open = d;
     } catch (e) {
       // Without this the screen priced a quote off an empty defect list and
       // said the site had nothing outstanding, which is a document going to a
@@ -98,6 +121,14 @@ export default function SiteQuoteScreen() {
       setFailed(describeLoadFailure(e, "this site's open defects"));
     } finally {
       setLoading(false);
+    }
+    // The catalogue's sell prices for the materials these defects call for,
+    // read on their own: a catalogue that has never synced leaves the lines to
+    // be priced by hand, and is no reason to stop the quote being built.
+    try {
+      setCatalogue(open.length ? await officeCataloguePrices(partsNeededFor(open).map((x) => x.description)) : []);
+    } catch {
+      setCatalogue([]);
     }
   }, [siteId]);
 
@@ -119,46 +150,55 @@ export default function SiteQuoteScreen() {
       kind: 'labour',
       customerName: site?.clientName,
     });
-    if (!rate) return { rate: undefined, source: undefined, note: eff.note };
+    if (!rate) {
+      // A card with rates on it but none for these hours is a different fix
+      // from no card at all, so the two are told apart.
+      const band = hoursBand === 'after-hours' ? 'after-hours' : 'normal hours';
+      return {
+        rate: undefined,
+        source: undefined,
+        missing: eff.rates.length
+          ? `No ${band} labour rate on the rate card.`
+          : 'No labour rate set. Add one in Settings.',
+      };
+    }
     const source: PriceSource = eff.rateSource === 'office'
       ? {
         kind: 'office',
-        label: `Safe QLD rate card, pulled from the office system${
-          card.pulledAt ? ` on ${formatAuDate(card.pulledAt)}` : ''}`,
+        label: `Office rate card${card.pulledAt ? `, synced ${formatAuDate(card.pulledAt)}` : ''}`,
         confidence: 'high',
       }
-      : {
-        kind: 'settings',
-        label: 'Charge-out rate held in this app’s Settings',
-        confidence: 'medium',
-      };
-    return { rate, source, note: eff.note };
+      : { kind: 'settings', label: 'Charge-out rate in Settings', confidence: 'medium' };
+    return { rate, source, missing: undefined };
   }, [card, prefs, hoursBand, site?.clientName]);
 
   /**
-   * A price typed here is marked low confidence on purpose.
+   * What each material line is priced at.
    *
-   * Nothing has checked it against a supplier price list — it is what the
-   * technician remembered or looked up on a phone, and the quote should be able
-   * to say that rather than presenting it like a rate off the card.
+   * A figure in the price box wins: it is either one the technician typed or
+   * the sell price of the catalogue item they picked, and the source says
+   * which. A blank box takes the catalogue's own price where it sells the item
+   * under the line's name. Text the box cannot read leaves the line unpriced
+   * rather than falling back, so a typo is never quietly replaced.
    */
-  const enteredSource: PriceSource = useMemo(() => ({
-    kind: 'entered',
-    label: `Price entered on this quote${prefs.technicianName ? ` by ${prefs.technicianName}` : ''}`,
-    confidence: 'low',
-  }), [prefs.technicianName]);
-
   const materialPrices = useMemo<MaterialPrice[]>(() => {
     const out: MaterialPrice[] = [];
+    const typed = new Set<string>();
     for (const [description, raw] of Object.entries(priceText)) {
+      if (!raw.trim()) continue;
+      typed.add(priceKey(description));
       const cents = parseCents(raw);
       // parseCents refuses what it cannot read rather than returning zero, and
       // an unreadable figure leaves the line unpriced rather than free.
       if (cents === undefined || cents <= 0) continue;
-      out.push({ description, unitCents: cents, source: enteredSource });
+      const pick = picked[description];
+      out.push({ description, unitCents: cents, source: pick && pick.cents === cents ? pick.source : ENTERED });
+    }
+    for (const price of catalogue) {
+      if (!typed.has(priceKey(price.description))) out.push(price);
     }
     return out;
-  }, [priceText, enteredSource]);
+  }, [priceText, picked, catalogue]);
 
   const built = useMemo(() => buildQuoteLines({
     defects: chosen,
@@ -179,6 +219,10 @@ export default function SiteQuoteScreen() {
     return Number.isInteger(n) && n >= 1 ? n : undefined;
   }, [validityText]);
 
+  // The scope is part of the quote, so it is saved with it and a reprint
+  // prints the same lines the client was sent.
+  const scope = useMemo(() => scopeLinesFor(chosen), [chosen]);
+
   const draft = useMemo<Quote>(() => ({
     id: 'preview',
     siteId: siteId ?? '',
@@ -195,20 +239,21 @@ export default function SiteQuoteScreen() {
     discountReason: discountReason.trim() || undefined,
     lines: built.lines,
     unpriceable: built.unpriceable,
+    scope,
     scopeNote: scopeNote.trim() || undefined,
     exclusions: [...DEFAULT_EXCLUSIONS],
     taxRate: 0.1,
     createdAt: '',
     updatedAt: '',
   }), [siteId, site, contactName, prefs.technicianName, validityDays, discountCents, discountReason,
-    built.lines, built.unpriceable, scopeNote]);
+    built.lines, built.unpriceable, scope, scopeNote]);
 
   const totals = useMemo(() => quoteTotals(draft), [draft]);
-  const confidence = weakestConfidence(built.lines);
 
   const signature = useMemo(() => JSON.stringify({
     lines: draft.lines,
     unpriceable: draft.unpriceable,
+    scope: draft.scope,
     discountCents: draft.discountCents,
     discountReason: draft.discountReason,
     validityDays: draft.validityDays,
@@ -222,16 +267,16 @@ export default function SiteQuoteScreen() {
     // not used looks identical to one nobody supplied unless it says so.
     const out = [...built.warnings, ...totals.warnings];
     if (!labour.rate && built.lines.some((l) => l.section === 'labour')) {
-      out.push(`${labour.note} The hours are on the quote but not priced.`);
+      out.push(`${labour.missing ?? 'No labour rate.'} The hours are unpriced.`);
     }
     if (discountUnreadable) {
-      out.push('The discount could not be read, so nothing has been taken off. Enter it like 250 or $250.00.');
+      out.push('Discount not read, so nothing is taken off. Enter it like 250 or 250.00.');
     }
     if (validityDays === undefined) {
-      out.push('The validity has to be a whole number of days of at least one, so this quote cannot be issued yet.');
+      out.push('Enter the validity in whole days before issuing.');
     }
     if (!site?.clientName) {
-      out.push('This site has no client name against it, so the quote has nobody to be addressed to.');
+      out.push('No client name on this site.');
     }
     return out;
   }, [totals.warnings, built.warnings, labour, built.lines, discountUnreadable, validityDays,
@@ -242,15 +287,15 @@ export default function SiteQuoteScreen() {
     if (!site) {
       // Silently doing nothing on a press reads as a broken button, and the
       // technician presses it again on the way out of the plant room.
-      showAlert('Site not loaded', 'This site could not be read, so there is nothing to quote against.');
+      showAlert('Site not loaded', 'Go back and open the site again.');
       return;
     }
     if (!built.lines.length) {
-      showAlert('Nothing to quote', 'Tick at least one defect that carries priced work.');
+      showAlert('Nothing to quote', 'Tick at least one defect with priced work.');
       return;
     }
     if (issue && validityDays === undefined) {
-      showAlert('Validity', 'Set the validity to a whole number of days before issuing.');
+      showAlert('Validity', 'Enter the validity in whole days before issuing.');
       return;
     }
 
@@ -274,15 +319,14 @@ export default function SiteQuoteScreen() {
       showAlert(
         issue ? 'Quote issued' : 'Draft saved',
         [
-          quote.reference ? `Number ${quote.reference}.` : 'No number could be built — the office will assign one.',
+          quote.reference ? `Number ${quote.reference}.` : 'No number yet. The office will assign one.',
           `${formatCents(totals.totalCents)} including GST.`,
-          quote.expiresAt ? `Holds good until ${formatAuDate(quote.expiresAt)}.` : null,
-          totals.incomplete ? 'Some work on this site is not covered by it — see the warnings.' : null,
-          'The PDF now prints this saved quote, with its number on the acceptance block.',
+          quote.expiresAt ? `Valid until ${formatAuDate(quote.expiresAt)}.` : null,
+          totals.incomplete ? 'Some work is unpriced. See the warnings.' : null,
         ].filter(Boolean).join('\n\n'),
       );
     } catch (e) {
-      showAlert('Could not save the quote', e instanceof Error ? e.message : String(e));
+      showAlert('Could not save the quote', describeActionFailure(e, 'save the quote'));
     } finally {
       setBusy(false);
     }
@@ -290,15 +334,16 @@ export default function SiteQuoteScreen() {
 
   const makePdf = async () => {
     if (!site) {
-      showAlert('Site not loaded', 'This site could not be read, so there is nothing to quote against.');
+      showAlert('Site not loaded', 'Go back and open the site again.');
       return;
     }
     setBusy(true);
     try {
+      // The scope rides on the quote itself, so the saved quote and the
+      // preview print the same lines without being handed them here.
       const html = quoteDocumentHtml({
         quote: printable,
         companyName: prefs.companyName,
-        scopeItems: scopeLinesFor(chosen),
         asAt: new Date().toISOString(),
       });
       // The Queensland date in the file name, not the UTC one: a quote made at
@@ -311,17 +356,39 @@ export default function SiteQuoteScreen() {
         showAlert(notice.title, notice.body);
       }
     } catch (e) {
-      showAlert('Could not produce the quote', e instanceof Error ? e.message : String(e));
+      showAlert('Could not make the PDF', describeActionFailure(e, 'make the quote PDF'));
     } finally {
       setBusy(false);
     }
   };
 
+  /** Takes a catalogue item's sell price for a line, and says so on the line. */
+  const pick = (description: string, item: CatalogItemRecord) => {
+    const cents = usableSellCents(item);
+    if (cents === undefined) return;
+    setPicked((prev) => ({ ...prev, [description]: { cents, source: catalogueSource(item) } }));
+    setPriceText((prev) => ({ ...prev, [description]: (cents / 100).toFixed(2) }));
+    setPickingFor(null);
+  };
+
   const materials = built.lines.filter((l) => l.section === 'materials');
   const labourLines = built.lines.filter((l) => l.section === 'labour');
 
+  /** The line under a material's price box: its price and source, or what to do. */
+  const materialNote = (l: QuoteLine): { text: string; tone: 'fail' | 'faint' } => {
+    const raw = (priceText[l.description] ?? '').trim();
+    if (l.unitCents === undefined) {
+      return raw
+        ? { text: 'Price not read. Enter it like 89.50.', tone: 'fail' }
+        : { text: 'Enter a price or it stays off the total.', tone: 'fail' };
+    }
+    const from = l.source?.kind === 'catalogue' ? l.source.label : 'Typed price';
+    return { text: `${formatCents(l.unitCents)} each · ${from}`, tone: 'faint' };
+  };
+
   const priceRow = (l: QuoteLine) => {
     const amount = lineAmountCents(l);
+    const note = l.section === 'materials' ? materialNote(l) : undefined;
     return (
       <View key={l.id} style={{ gap: t.space(1.5) }}>
         <Rowed align="flex-start" gap={2}>
@@ -336,28 +403,30 @@ export default function SiteQuoteScreen() {
             {amount === undefined ? 'Not priced' : formatCents(amount)}
           </Txt>
         </Rowed>
-        {l.section === 'materials' ? (
-          <Rowed gap={2} align="flex-end">
-            <View style={{ width: 130 }}>
-              <Field
-                label="Unit price ex GST"
-                value={priceText[l.description] ?? ''}
-                onChangeText={(v) => setPriceText((prev) => ({ ...prev, [l.description]: v }))}
-                placeholder="$0.00"
-                keyboardType="numeric"
+        {note ? (
+          <>
+            <Rowed gap={2} align="flex-end">
+              <View style={{ width: 130 }}>
+                <Field
+                  label="Unit price ex GST"
+                  value={priceText[l.description] ?? ''}
+                  onChangeText={(v) => setPriceText((prev) => ({ ...prev, [l.description]: v }))}
+                  placeholder="0.00"
+                  keyboardType="decimal-pad"
+                />
+              </View>
+              <Button
+                title={pickingFor === l.description ? 'Close' : 'Catalogue'}
+                variant="secondary"
+                compact
+                onPress={() => setPickingFor(pickingFor === l.description ? null : l.description)}
               />
-            </View>
-            {l.unitCents === undefined ? (
-              <Txt size="xs" tone="fail" style={{ flex: 1, lineHeight: 16 }}>
-                Nothing in the app knows what this sells for. Left blank it stays off the total —
-                it is never quoted at nothing.
-              </Txt>
-            ) : (
-              <Txt size="xs" tone="faint" style={{ flex: 1, lineHeight: 16 }}>
-                {formatCents(l.unitCents)} each · typed on this quote, not from the rate card.
-              </Txt>
-            )}
-          </Rowed>
+            </Rowed>
+            <Txt size="xs" tone={note.tone} style={{ lineHeight: 16 }}>{note.text}</Txt>
+            {pickingFor === l.description ? (
+              <CataloguePicker onPick={(item) => pick(l.description, item)} />
+            ) : null}
+          </>
         ) : null}
       </View>
     );
@@ -372,24 +441,22 @@ export default function SiteQuoteScreen() {
       <Stack.Screen options={{ title: 'Client quote' }} />
       <Screen>
         <Txt tone="muted" size="sm" style={{ lineHeight: 20 }}>
-          Priced from the open defects at {site?.name ?? 'this site'}. Materials and labour are quoted
-          separately, GST is worked once on the subtotal, and anything nobody has priced is shown as
-          unpriced rather than free.
+          Priced from the open defects at {site?.name ?? 'this site'}.
         </Txt>
 
         {failed ? (
-          <Banner tone="fail" title="The defects could not be read" body={failed} />
+          <Banner tone="fail" title="Could not read the defects" body={failed} />
         ) : loading ? null : !defects.length ? (
           <EmptyState
-          icon="alert-circle-check-outline"
+            icon="alert-circle-check-outline"
             title="No open defects"
-            body="There is nothing outstanding at this site to quote for."
+            body="Nothing to quote at this site."
           />
         ) : null}
 
         {defects.length ? (
           <>
-            <H2>What goes on the quote</H2>
+            <H2>Defects to quote</H2>
             {defects.map((d) => {
               const on = !excluded[d.id];
               return (
@@ -431,9 +498,9 @@ export default function SiteQuoteScreen() {
                 ]}
               />
               <Txt size="xs" tone={labour.rate ? 'faint' : 'warn'} style={{ marginTop: t.space(2), lineHeight: 16 }}>
-                {labour.rate
-                  ? `${labour.rate.name} at ${formatCents(labour.rate.sellCentsPerHour)} an hour. ${labour.note}`
-                  : `${labour.note} The hours below are not priced.`}
+                {labour.rate && labour.source
+                  ? `${labour.rate.name}, ${formatCents(labour.rate.sellCentsPerHour)}/hr. ${labour.source.label}.`
+                  : labour.missing}
               </Txt>
             </Card>
           </>
@@ -464,8 +531,7 @@ export default function SiteQuoteScreen() {
                 </View>
               ))}
               <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 16 }}>
-                Hours come from the defect library, not from time recorded on site. They are an
-                estimate for quoting and are not a timesheet.
+                Estimated hours from the defect library.
               </Txt>
             </Card>
           </>
@@ -473,7 +539,7 @@ export default function SiteQuoteScreen() {
 
         {built.lines.length ? (
           <>
-            <H2>The money</H2>
+            <H2>Totals</H2>
             <Card>
               <Rowed gap={2}>
                 <StatTile label="Materials" value={formatCents(totals.materialsCents)} />
@@ -494,13 +560,6 @@ export default function SiteQuoteScreen() {
                   {formatCents(totals.totalCents)}
                 </Txt>
               </Rowed>
-              {confidence ? (
-                <Txt size="xs" tone={confidence === 'high' ? 'faint' : 'warn'} style={{ marginTop: t.space(2), lineHeight: 16 }}>
-                  {confidence === 'high'
-                    ? 'Every figure here came off the office rate card.'
-                    : 'Some figures here were typed on this quote rather than taken from the rate card.'}
-                </Txt>
-              ) : null}
             </Card>
 
             <Card>
@@ -510,8 +569,8 @@ export default function SiteQuoteScreen() {
                     label="Discount ex GST"
                     value={discountText}
                     onChangeText={setDiscountText}
-                    placeholder="$0.00"
-                    keyboardType="numeric"
+                    placeholder="0.00"
+                    keyboardType="decimal-pad"
                   />
                 </View>
                 <View style={{ flex: 1 }}>
@@ -533,19 +592,19 @@ export default function SiteQuoteScreen() {
                 label="Attention"
                 value={contactName}
                 onChangeText={setContactName}
-                placeholder="Who at the client this goes to"
+                placeholder="Client contact"
               />
               <Field
                 label="Note on the scope"
                 value={scopeNote}
                 onChangeText={setScopeNote}
-                placeholder="Anything the client should read before the price"
+                placeholder="Printed under the scope"
                 multiline
               />
               <Label>
                 {validityDays !== undefined
-                  ? `Issued today it holds good until ${formatAuDate(expiryFor(new Date().toISOString(), validityDays))}.`
-                  : 'Set a whole number of days before issuing.'}
+                  ? `Issued today, valid until ${formatAuDate(expiryFor(new Date().toISOString(), validityDays))}.`
+                  : 'Enter the validity in whole days.'}
               </Label>
             </Card>
           </>
@@ -553,17 +612,17 @@ export default function SiteQuoteScreen() {
 
         {built.unpriceable.length ? (
           <>
-            <H2>Not covered by this quote</H2>
+            <H2>Not on this quote</H2>
             <Banner
               tone="warn"
-              title={`${built.unpriceable.length} defect${built.unpriceable.length === 1 ? '' : 's'} priced at nothing`}
-              body="Listed on the document too, so the quote cannot be mistaken for the whole job."
+              title={`${built.unpriceable.length} defect${built.unpriceable.length === 1 ? '' : 's'} not priced`}
+              body="Listed on the PDF as not included."
             />
             {built.unpriceable.map((u) => (
               <Rowed key={u.defectId} gap={2} align="flex-start">
                 <Chip label={u.defectCode ?? 'free text'} tone="warn" />
                 <View style={{ flex: 1 }}>
-                  <Txt size="sm">{u.location ? `${u.location} — ` : ''}{u.description}</Txt>
+                  <Txt size="sm">{u.location ? `${u.location}: ` : ''}{u.description}</Txt>
                   <Txt size="xs" tone="muted" style={{ lineHeight: 16 }}>{UNPRICEABLE_REASON[u.reason]}</Txt>
                 </View>
               </Rowed>
@@ -573,7 +632,7 @@ export default function SiteQuoteScreen() {
 
         {warnings.length ? (
           <>
-            <H2>Before this goes out</H2>
+            <H2>Check before sending</H2>
             {warnings.map((w, i) => (
               <Banner key={i} tone="warn" title="Check this" body={w} />
             ))}
@@ -583,23 +642,88 @@ export default function SiteQuoteScreen() {
         {built.lines.length ? (
           <>
             <H2>Issue it</H2>
-            <Button title="Produce the PDF" onPress={makePdf} loading={busy} />
-            <Button title="Save as a draft" variant="secondary" onPress={() => void save(false)} loading={busy} />
+            <Button title="PDF" onPress={makePdf} loading={busy} />
+            <Button title="Save draft" variant="secondary" onPress={() => void save(false)} loading={busy} />
             <Button title="Save and issue" variant="secondary" onPress={() => void save(true)} loading={busy} />
             <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
               {printable === draft
-                ? 'The PDF prints what is on this screen, marked as a draft and without a number, '
-                  + 'until the quote is saved.'
-                : `The PDF prints the saved quote ${printable.reference || 'you issued'}, not the `
-                  + 'screen. Change anything above and it goes back to printing a draft.'}
-            </Txt>
-            <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-              Issuing starts the clock on the price and locks the quote. Anything that changes after
-              that is a new quote with its own number — the client is holding this one.
+                ? 'PDF prints a draft. Save to number it. Issuing locks it.'
+                : `PDF prints ${printable.reference || 'the saved quote'}. Any change prints a draft.`}
             </Txt>
           </>
         ) : null}
       </Screen>
     </>
+  );
+}
+
+/**
+ * Finding the office catalogue item a material line is quoted at.
+ *
+ * The library names the work ("Replacement detector head") rather than the
+ * part, because the right head depends on the panel. The technician knows
+ * which one; this finds it in the synced Simpro catalogue and the line takes
+ * its sell price. An item the office has no sell price for is listed but
+ * cannot be picked, so it is never quoted at nothing.
+ */
+function CataloguePicker({ onPick }: { onPick: (item: CatalogItemRecord) => void }) {
+  const t = useTheme();
+  const [typed, setTyped] = useState('');
+  // What came back, kept with the words it answers, so "not in the catalogue"
+  // is never shown under a search that has not finished yet.
+  const [found, setFound] = useState<{ term: string; rows: CatalogItemRecord[]; failed: string | null } | null>(null);
+  const term = typed.trim();
+
+  useEffect(() => {
+    if (term.length < 2) return undefined;
+    let cancelled = false;
+    // The same 200ms the quote list waits, so a search is not run per keystroke.
+    const h = setTimeout(() => {
+      searchCatalogItems(term, { limit: 8 })
+        .then((rows) => { if (!cancelled) setFound({ term, rows, failed: null }); })
+        .catch((e: unknown) => {
+          if (!cancelled) setFound({ term, rows: [], failed: describeLoadFailure(e, 'the office catalogue') });
+        });
+    }, 200);
+    return () => { cancelled = true; clearTimeout(h); };
+  }, [term]);
+
+  const shown = term.length >= 2 ? found : null;
+  const results = shown?.rows ?? [];
+  const failed = shown?.failed ?? null;
+  const searched = shown !== null && shown.term === term;
+
+  return (
+    <View style={{ gap: t.space(1.5) }}>
+      <SearchBox value={typed} onChange={setTyped} placeholder="Part number or name" />
+      {failed ? <Txt size="xs" tone="fail">{failed}</Txt> : null}
+      {searched && !results.length && !failed ? (
+        <Txt size="xs" tone="muted">Not in the office catalogue.</Txt>
+      ) : null}
+      {results.map((item) => {
+        const cents = usableSellCents(item);
+        return (
+          <Pressable
+            key={item.id}
+            disabled={cents === undefined}
+            onPress={() => onPick(item)}
+            style={{
+              padding: t.space(2.5), borderRadius: t.radius.md, borderWidth: 1,
+              borderColor: t.color.border, backgroundColor: t.color.surface,
+            }}
+          >
+            <Rowed gap={2} align="flex-start">
+              <View style={{ flex: 1 }}>
+                <Txt size="sm" weight="600">{item.name}</Txt>
+                {item.partNo ? <Txt size="xs" tone="faint">{item.partNo}</Txt> : null}
+              </View>
+              <Txt size="sm" weight="700" tone={cents === undefined ? 'faint' : 'default'}>
+                {cents === undefined ? 'No sell price' : formatCents(cents)}
+              </Txt>
+            </Rowed>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
