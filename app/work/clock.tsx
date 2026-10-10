@@ -1,0 +1,706 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View } from 'react-native';
+import { Stack, router, useFocusEffect } from 'expo-router';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { loadPrefs, type Prefs } from '@/app-prefs';
+import { nowIso } from '@/db';
+import { jobSummariesByExternalIds, type JobPick } from '@/db/opsRepo';
+import { listScheduleFor } from '@/db/scheduleRepo';
+import { localJobId } from '@/db/mirrorRepo';
+import {
+  costCentresForJob, deleteEntry, listEntriesBetween, queueStatesFor, reattachWaitingEntries, setEntryCostCentre, startEntry,
+  stopOpenEntry, unsentEntries, updateEntryTimes, weekWindow, type CostCentreChoice, type QueueState,
+} from '@/db/clockRepo';
+import { listSetupActivities } from '@/db/moreRepo';
+import {
+  dayTotals, entrySpan, formatMinutes, missingSimproIds, openEntryOf, qldClock, qldInstant, sendReadiness, weekStartOf, weekTotals,
+  type ClockEntry, type ClockKind, type ClockStart,
+} from '@/domain/clockOn';
+import { cannotSend, entrySendState, waitingFor } from '@/domain/clockSendState';
+import { qldIsoDay } from '@/domain/qldTime';
+import { formatAuDate } from '@/export/sheets';
+import { whoseSchedule } from '@/domain/myDay';
+import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
+import { simproConfigFromPrefs } from '@/simpro/config';
+import { syncJobDetail } from '@/simpro/sync';
+import { queueClockEntry } from '@/simpro/outboundMore';
+import { showAlert } from '@/components/alert';
+import { useTheme } from '@/theme';
+import {
+  Banner, Button, Card, Chip, Divider, Field, H2, Rowed, Screen, StatTile, Txt,
+} from '@/components/ui';
+import { JobPicker } from '@/components/JobPicker';
+
+/**
+ * Clock on.
+ *
+ * On when you start a job, Off when you finish, and the hours go to the
+ * Simpro job the way Simpro Mobile's timesheet sends them: as a schedule
+ * block on the job's cost centre, under this person's employee id. The
+ * weekly timesheet (/work/timesheets) is the payroll sheet and stays as it
+ * is; this is the live clock the office reads job hours from.
+ *
+ * Everything is written to the phone first and queued for the office; the
+ * state of each send is on the entry, in the server's own words where it
+ * refused one. An entry is queued the moment it closes, whichever button
+ * closed it — Off, Switch job, an activity chip, Break — and a piece dated
+ * yesterday after a midnight split is queued beside the one dated today.
+ * What did not go stays on screen under "Not yet sent" until it does, so a
+ * block from Tuesday that the office refused is not lost behind Wednesday.
+ * Nothing here needs signal except the one case where a job has never had
+ * its cost centres read, and that is said on screen when it cannot be done.
+ *
+ * The person is the Simpro employee in Settings. Without one there is no
+ * Staff to put on the block, so On is off until they sign in or pick
+ * themselves.
+ */
+
+/** An activity the chips offer: the office's own where synced, a plain name otherwise. */
+interface ActivityChoice { name: string; kind: ClockKind; activityExternalId?: string }
+
+/**
+ * The activities offered while the office's own list is not on the phone.
+ *
+ * Until a sync has read Simpro's setup/activities these carry a name and no
+ * Simpro id; the entry is kept and shown, and sending it waits for the id.
+ * The words are the ones the crew already uses.
+ */
+const FALLBACK_ACTIVITIES: ActivityChoice[] = [
+  { name: 'Travel', kind: 'travel' },
+  { name: 'Meeting', kind: 'activity' },
+  { name: 'Workshop', kind: 'activity' },
+];
+
+/**
+ * The office's activities as chips, travel first.
+ *
+ * Travel is its own kind on the phone so the day can be totalled as work,
+ * travel and the rest; in Simpro it is just one activity among the
+ * thirteen, so it is found by name. Empty means nothing synced yet.
+ */
+function activityChoices(synced: readonly { id: string; name: string }[]): ActivityChoice[] {
+  if (!synced.length) return FALLBACK_ACTIVITIES;
+  const isTravel = (name: string) => /travel/i.test(name);
+  return [...synced]
+    .sort((a, b) => Number(isTravel(b.name)) - Number(isTravel(a.name)) || a.name.localeCompare(b.name))
+    .map((a) => ({ name: a.name, kind: isTravel(a.name) ? 'travel' : 'activity', activityExternalId: a.id }));
+}
+
+/**
+ * A job with its cost centres decided, or the reason they could not be.
+ *
+ * With `entryId`, the choice is for hours already clocked on that job,
+ * waiting for a cost centre, rather than for clocking on.
+ */
+interface CostCentreStep {
+  job: Pick<JobPick, 'externalId' | 'siteName' | 'title'>;
+  options: CostCentreChoice[];
+  why?: string;
+  /** What happens to hours clocked on anyway. */
+  hint?: string;
+  entryId?: string;
+}
+
+/** Job reads the clock asks for at most per visit, for hours waiting on a cost centre. */
+const JOB_READS_PER_VISIT = 3;
+
+/**
+ * Reads again the jobs hours are waiting on, in case the office has added a
+ * cost centre, and fills it in where one came. Skipped by syncJobDetail for
+ * a job read in the last quarter hour. True when a job was read.
+ */
+async function readWaitingJobs(p: Prefs, jobs: readonly string[]): Promise<boolean> {
+  let fresh = false;
+  for (const job of jobs) {
+    const outcome = await syncJobDetail(simproConfigFromPrefs(p), localJobId(job)).catch(() => null);
+    if (outcome?.status === 'synced') fresh = true;
+  }
+  if (fresh) await reattachWaitingEntries();
+  return fresh;
+}
+
+function entryTitle(e: ClockEntry): string {
+  if (e.kind === 'work') return [e.jobExternalId ? `Job ${e.jobExternalId}` : 'Job', e.siteName].filter(Boolean).join(' · ');
+  if (e.kind === 'break') return 'Break';
+  return e.activityName ?? (e.kind === 'travel' ? 'Travel' : 'Activity');
+}
+
+export default function ClockScreen() {
+  const t = useTheme();
+  const [prefs, setPrefs] = useState<Prefs | null>(null);
+  const [entries, setEntries] = useState<ClockEntry[]>([]);
+  /** Closed, unsent, and not today's: today's are in the day's list already. */
+  const [unsent, setUnsent] = useState<ClockEntry[]>([]);
+  const [queue, setQueue] = useState<Map<string, QueueState>>(new Map());
+  const [scheduled, setScheduled] = useState<JobPick[]>([]);
+  const [activities, setActivities] = useState<ActivityChoice[]>(FALLBACK_ACTIVITIES);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [now, setNow] = useState(nowIso());
+  const [picking, setPicking] = useState(false);
+  const [step, setStep] = useState<CostCentreStep | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<{ id: string; start: string; end: string; why?: string } | null>(null);
+
+  // `now` is always an instant this screen wrote, so the day always reads;
+  // the fallback is a Monday so the week arithmetic never sees an empty day.
+  const today = qldIsoDay(now) ?? '1970-01-05';
+  const open = useMemo(() => openEntryOf(entries), [entries]);
+  const employeeId = prefs?.simproEmployeeId.trim() ?? '';
+  /** Jobs read again this visit for hours waiting on a cost centre, so a reload does not read them twice. */
+  const jobsRead = useRef(new Set<string>());
+  const loadRef = useRef<() => Promise<void>>(async () => {});
+
+  const load = useCallback(async () => {
+    setFailed(null);
+    try {
+      const p = await loadPrefs();
+      setPrefs(p);
+      // Hours clocked before the office's activities or the job's cost
+      // centre reached the phone pick them up here and queue, as they do at
+      // the end of every sync. Its own try: it is no reason to fail the clock.
+      let short: string[] = [];
+      try {
+        short = (await reattachWaitingEntries()).jobsWithoutCostCentres;
+      } catch {
+        short = [];
+      }
+      const at = nowIso();
+      setNow(at);
+      const day = qldIsoDay(at);
+      if (!day) throw new Error(`Cannot read the day out of "${at}".`);
+      const window = weekWindow(weekStartOf(day));
+      const rows = await listEntriesBetween(window.from, window.to);
+      setEntries(rows);
+      const owed = (await unsentEntries()).filter((e) => e.date !== day);
+      setUnsent(owed);
+      setQueue(await queueStatesFor([...rows, ...owed].map((r) => r.id)));
+      setActivities(activityChoices(await listSetupActivities()));
+      // The jobs the office booked this person onto today, so the picker
+      // starts with them rather than a search box.
+      const who = whoseSchedule(p);
+      if (who) {
+        const blocks = await listScheduleFor({
+          staffId: who.by === 'id' ? who.staffId : undefined,
+          staffName: who.by === 'name' ? who.staffName : undefined,
+          from: day, to: day,
+        });
+        const jobs = await jobSummariesByExternalIds(blocks.map((b) => b.jobId).filter((id): id is string => !!id));
+        setScheduled(jobs.map((j) => ({ externalId: j.externalId, siteName: j.siteName, siteId: j.siteId, status: j.status, customerName: j.customerName, title: j.title })));
+      } else {
+        setScheduled([]);
+      }
+      // A job the hours are waiting on may have a cost centre in Simpro by
+      // now: read it again, after the screen has drawn, and reload if it came.
+      const unread = short.filter((j) => !jobsRead.current.has(j)).slice(0, JOB_READS_PER_VISIT);
+      if (unread.length) {
+        for (const j of unread) jobsRead.current.add(j);
+        // Caught: this runs after the screen has drawn, and a failed match
+        // here is retried on the next visit rather than left unhandled.
+        void readWaitingJobs(p, unread)
+          .then((fresh) => { if (fresh) void loadRef.current(); })
+          .catch(() => undefined);
+      }
+    } catch (e) {
+      setFailed(describeLoadFailure(e, 'the clock'));
+    }
+  }, []);
+
+  useEffect(() => { loadRef.current = load; }, [load]);
+  useFocusEffect(useCallback(() => { void load(); }, [load]));
+
+  // The running entry's clock, once a second while one is running.
+  useEffect(() => {
+    if (!open) return undefined;
+    const timer = setInterval(() => setNow(nowIso()), 1000);
+    return () => clearInterval(timer);
+  }, [open]);
+
+  const dayT = useMemo(() => dayTotals(entries, today, now), [entries, today, now]);
+  const weekT = useMemo(() => weekTotals(entries, today, now), [entries, today, now]);
+  const todays = useMemo(() => entries.filter((e) => e.date === today), [entries, today]);
+
+  /**
+   * Straight to the office, where it can go: the moment an entry closes is
+   * the moment the block is whole, and the one a technician expects it to
+   * leave on. Every closed piece, because a split at midnight makes two
+   * and the one dated yesterday is owed just the same. A piece that cannot
+   * go is left with its reason on it, under Not yet sent.
+   */
+  const queueClosed = async (closed: ClockEntry[]) => {
+    for (const e of closed) {
+      if (sendReadiness(e).ready) await queueClockEntry(e);
+    }
+  };
+
+  const clockOn = async (input: Omit<ClockStart, 'employeeExternalId'>) => {
+    setNotice(null);
+    setBusy(true);
+    try {
+      const { closed } = await startEntry({ ...input, employeeExternalId: employeeId });
+      setPicking(false);
+      setStep(null);
+      await load();
+      // Switch job, a chip or Break is the only Off the old entry gets.
+      if (closed.length) {
+        await queueClosed(closed);
+        await load();
+      }
+    } catch (e) {
+      setNotice(describeActionFailure(e, 'clock on'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clockOff = async () => {
+    setNotice(null);
+    setBusy(true);
+    try {
+      const closed = await stopOpenEntry();
+      await load();
+      if (closed.length) {
+        await queueClosed(closed);
+        await load();
+      }
+    } catch (e) {
+      setNotice(describeActionFailure(e, 'clock off'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * A job picked: which cost centre do the hours go on?
+   *
+   * One cost centre needs no question. None known means the job's children
+   * have never been read, so they are read now; a job that still has none
+   * after that can be clocked onto anyway, and the send waits until the
+   * office gives it one.
+   */
+  const chooseJob = async (job: JobPick) => {
+    if (!job.externalId) return;
+    setNotice(null);
+    setBusy(true);
+    try {
+      let options = await costCentresForJob(job.externalId);
+      let why: string | undefined;
+      let hint: string | undefined;
+      if (!options.length) {
+        if (!prefs) throw new Error("Settings haven't loaded yet.");
+        const outcome = await syncJobDetail(simproConfigFromPrefs(prefs), localJobId(job.externalId), { force: true });
+        options = await costCentresForJob(job.externalId);
+        if (!options.length) {
+          const notInSimpro = outcome.status === 'missing' || outcome.status === 'not-simpro';
+          why = outcome.status === 'failed'
+            ? `Couldn't read the job's cost centres (${outcome.error}). Try again with signal.`
+            : notInSimpro
+              ? "This job isn't in Simpro."
+              : 'This job has no cost centre in Simpro. Ask the office to add one.';
+          // Filled in after a sync once the job has one; a job Simpro does not
+          // have never will.
+          hint = notInSimpro
+            ? 'Clock on anyway and tell the office the hours.'
+            : 'Hours clocked on anyway send once the job has a cost centre.';
+        }
+      }
+      if (options.length === 1 && !why) {
+        const only = options[0]!;
+        await clockOn({
+          kind: 'work', jobExternalId: job.externalId, jobSectionExternalId: only.sectionExternalId,
+          jobCostCenterExternalId: only.costCenterExternalId, jobTitle: job.title, siteName: job.siteName,
+        });
+        return;
+      }
+      setStep({ job, options, why, hint });
+    } catch (e) {
+      setNotice(describeActionFailure(e, 'read the job'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Hours clocked on a job with no cost centre then, and several now: the person picks. */
+  const pickCostCentre = async (e: ClockEntry) => {
+    if (!e.jobExternalId) return;
+    setNotice(null);
+    setBusy(true);
+    try {
+      const options = await costCentresForJob(e.jobExternalId);
+      if (!options.length) {
+        setNotice(`No cost centre on job ${e.jobExternalId} yet. Ask the office.`);
+        return;
+      }
+      setPicking(false);
+      setStep({ job: { externalId: e.jobExternalId, siteName: e.siteName ?? '', title: e.jobTitle }, options, entryId: e.id });
+    } catch (err) {
+      setNotice(describeActionFailure(err, 'read the cost centres'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const assignCostCentre = async (entryId: string, c: CostCentreChoice) => {
+    setNotice(null);
+    setBusy(true);
+    try {
+      const r = await setEntryCostCentre(entryId, c);
+      if (!r.ok) { setNotice(r.why); return; }
+      setStep(null);
+      if (r.entry.endedAt && sendReadiness(r.entry).ready) await queueClockEntry(r.entry);
+      await load();
+    } catch (err) {
+      setNotice(describeActionFailure(err, 'save the cost centre'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const send = async (e: ClockEntry) => {
+    setNotice(null);
+    setBusy(true);
+    try {
+      const r = await queueClockEntry(e);
+      if (r.status === 'not-ready') setNotice(`Not sent: ${r.why}.`);
+      // The queue holds one row per entry while one is pending or in doubt,
+      // so a second press has nothing to add and says so rather than nothing.
+      if (r.status === 'duplicate') {
+        setNotice(queue.get(e.id)?.status === 'unknown' ? 'Already on Waiting to send. Check it there.' : 'Already queued.');
+      }
+      await load();
+    } catch (err) {
+      setNotice(describeActionFailure(err, 'queue the hours'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendToday = async () => {
+    setNotice(null);
+    setBusy(true);
+    try {
+      let queued = 0;
+      let held = 0;
+      for (const e of todays) {
+        const q = queue.get(e.id)?.status;
+        if (q === 'pending' || q === 'sending' || q === 'unknown') continue;
+        if (!sendReadiness(e).ready) continue;
+        const r = await queueClockEntry(e);
+        if (r.status === 'queued') queued++;
+        else if (r.status === 'not-ready') held++;
+      }
+      setNotice(queued ? `${queued} queued to send.${held ? ` ${held} not ready, see each entry.` : ''}` : 'Nothing to send today.');
+      await load();
+    } catch (err) {
+      setNotice(describeActionFailure(err, 'queue the hours'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveEdit = async () => {
+    if (!editing) return;
+    // The entry may be one of today's or one owed from an earlier day.
+    const entry = entries.find((e) => e.id === editing.id) ?? unsent.find((e) => e.id === editing.id);
+    if (!entry) { setEditing(null); return; }
+    const startedAt = qldInstant(entry.date, editing.start);
+    const endedAt = editing.end.trim() ? qldInstant(entry.date, editing.end) : undefined;
+    if (!startedAt || (editing.end.trim() && !endedAt)) {
+      setEditing({ ...editing, why: 'Use 24-hour time, like 07:30.' });
+      return;
+    }
+    // A running entry keeps running: only its start can move.
+    setBusy(true);
+    try {
+      const r = await updateEntryTimes(entry.id, startedAt, entry.endedAt ? endedAt : undefined);
+      if (!r.ok) { setEditing({ ...editing, why: r.why }); return; }
+      setEditing(null);
+      await load();
+    } catch (e) {
+      setEditing({ ...editing, why: describeActionFailure(e, 'save the times') });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = (e: ClockEntry) => {
+    showAlert('Delete this entry?', `${entryTitle(e)}, ${qldClock(e.startedAt)}–${e.endedAt ? qldClock(e.endedAt) : 'now'}. It hasn't been sent.`, [
+      { text: 'Keep', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            setBusy(true);
+            try {
+              const r = await deleteEntry(e.id);
+              if (!r.ok) setNotice(r.why);
+              await load();
+            } catch (err) {
+              setNotice(describeActionFailure(err, 'delete the entry'));
+            } finally {
+              setBusy(false);
+            }
+          })();
+        },
+      },
+    ]);
+  };
+
+  /** One entry's card: the block, its send state, and what can still be done to it. */
+  const renderEntry = (e: ClockEntry) => {
+    const state = entrySendState(e, queue.get(e.id));
+    const span = entrySpan(e, now);
+    const isEditing = editing?.id === e.id;
+    return (
+      <Card key={e.id}>
+        <Rowed gap={2} align="flex-start">
+          <View style={{ flex: 1, gap: 2 }}>
+            <Txt weight="600" numberOfLines={2}>{entryTitle(e)}</Txt>
+            {e.jobTitle ? <Txt size="sm" tone="muted" numberOfLines={1}>{e.jobTitle}</Txt> : null}
+            <Txt size="sm" tone="muted">
+              {qldClock(e.startedAt)}–{e.endedAt ? qldClock(e.endedAt) : 'now'} · {span.refused ?? formatMinutes(span.minutes)}
+            </Txt>
+          </View>
+          <Chip label={state.label} tone={state.tone} />
+        </Rowed>
+        {state.words ? <Txt size="sm" tone={state.tone === 'fail' ? 'fail' : 'muted'} style={{ marginTop: t.space(1.5) }}>{state.words}</Txt> : null}
+        {e.simproUid ? <Txt size="xs" tone="faint" style={{ marginTop: 2 }}>Simpro schedule {e.simproUid}</Txt> : null}
+        {step?.entryId === e.id ? (
+          <View style={{ gap: t.space(2), marginTop: t.space(2) }}>
+            <Txt size="sm" tone="muted">Which cost centre?</Txt>
+            {step.options.map((c) => (
+              <Card key={`${c.sectionExternalId}-${c.costCenterExternalId}`} onPress={() => { void assignCostCentre(e.id, c); }}>
+                <Txt weight="600">{c.name}</Txt>
+                <Txt size="sm" tone="muted">{c.sectionName}</Txt>
+              </Card>
+            ))}
+            <Rowed gap={2}>
+              <Button title="Cancel" variant="ghost" compact onPress={() => setStep(null)} />
+            </Rowed>
+          </View>
+        ) : null}
+        {isEditing && editing ? (
+          <View style={{ gap: t.space(2), marginTop: t.space(2) }}>
+            <Rowed gap={2} align="flex-start">
+              <View style={{ flex: 1 }}>
+                <Field label="Start" value={editing.start} onChangeText={(v) => setEditing({ ...editing, start: v, why: undefined })} placeholder="07:30" keyboardType="numeric" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Field label="End" value={editing.end} onChangeText={(v) => setEditing({ ...editing, end: v, why: undefined })} placeholder={e.endedAt ? '16:00' : 'running'} keyboardType="numeric" editable={!!e.endedAt} />
+              </View>
+            </Rowed>
+            {editing.why ? <Txt size="sm" tone="fail">{editing.why}</Txt> : null}
+            <Rowed gap={2}>
+              <Button title="Save" compact disabled={busy} onPress={() => { void saveEdit(); }} />
+              <Button title="Cancel" variant="ghost" compact onPress={() => setEditing(null)} />
+            </Rowed>
+          </View>
+        ) : e.sentAt ? null : queue.get(e.id)?.status === 'unknown' ? (
+          // Neither edit nor delete while nobody can say whether the block
+          // went: an edit here and a Send again there would post the block
+          // twice with different times. Waiting to send decides it first.
+          <Txt size="xs" tone="faint" style={{ marginTop: t.space(2) }}>Check Waiting to send first.</Txt>
+        ) : (
+          <Rowed gap={2} wrap style={{ marginTop: t.space(2) }}>
+            <Button title="Edit" variant="ghost" compact disabled={busy} onPress={() => setEditing({ id: e.id, start: qldClock(e.startedAt) ?? '', end: e.endedAt ? qldClock(e.endedAt) ?? '' : '' })} />
+            <Button title="Delete" variant="ghost" compact disabled={busy} onPress={() => remove(e)} />
+            {e.kind === 'work' && e.jobExternalId && missingSimproIds(e) && step?.entryId !== e.id ? (
+              <Button title="Pick cost centre" variant="secondary" compact disabled={busy} onPress={() => { void pickCostCentre(e); }} />
+            ) : null}
+            {/* Not while it is queued, and not while nobody can say whether it went: that one is decided on Waiting to send. */}
+            {e.endedAt && sendReadiness(e).ready && !['pending', 'sending', 'unknown'].includes(queue.get(e.id)?.status ?? '') ? (
+              <Button title={queue.get(e.id) ? 'Send again' : 'Send'} variant="secondary" compact disabled={busy} onPress={() => { void send(e); }} />
+            ) : null}
+          </Rowed>
+        )}
+      </Card>
+    );
+  };
+
+  const runningMinutes = open ? entrySpan(open, now) : undefined;
+  const openHold = open ? cannotSend(open) ?? waitingFor(open) : undefined;
+
+  return (
+    <>
+      <Stack.Screen options={{ title: 'Clock on' }} />
+      <Screen>
+        {failed ? <Banner tone="fail" title="Couldn't load the clock" body={failed} /> : null}
+        {notice ? <Banner tone={/could not|Not sent/.test(notice) ? 'warn' : 'info'} title={notice} /> : null}
+
+        {prefs && !employeeId ? (
+          <Card>
+            <Banner
+              tone="warn"
+              title="Who are you in Simpro?"
+              body="Pick yourself from the staff list before clocking on."
+            />
+            <Rowed gap={2} style={{ marginTop: t.space(3) }}>
+              <Button title="Pick who I am" onPress={() => router.push('/whoami')} />
+            </Rowed>
+          </Card>
+        ) : null}
+
+        {/* The control. */}
+        <Card variant="raised">
+          {open ? (
+            <View style={{ gap: t.space(2) }}>
+              <Rowed gap={2}>
+                <Chip label="On" tone="pass" />
+                <Txt weight="700" style={{ flex: 1 }} numberOfLines={2}>{entryTitle(open)}</Txt>
+              </Rowed>
+              {open.jobTitle ? <Txt size="sm" tone="muted" numberOfLines={2}>{open.jobTitle}</Txt> : null}
+              <Txt size="display" weight="800" mono style={{ letterSpacing: -1 }}>
+                {runningMinutes?.refused ? '--:--' : formatMinutes(runningMinutes?.minutes ?? 0)}
+              </Txt>
+              <Txt size="sm" tone="muted">Since {qldClock(open.startedAt)}{runningMinutes?.refused ? ` · ${runningMinutes.refused}` : ''}</Txt>
+              {openHold ? <Txt size="sm" tone="warn">{openHold}</Txt> : null}
+              <Rowed gap={2} wrap>
+                <Button title="Off" variant="danger" disabled={busy} onPress={() => { void clockOff(); }}
+                  icon={<MaterialCommunityIcons name="timer-off-outline" size={18} color={t.color.onAccent} />} />
+                <Button title="Switch job" variant="secondary" disabled={busy || !employeeId} onPress={() => { setPicking(true); setStep(null); }} />
+              </Rowed>
+            </View>
+          ) : (
+            <View style={{ gap: t.space(2) }}>
+              <Rowed gap={2}>
+                <Chip label="Off" tone="muted" />
+                <Txt tone="muted" style={{ flex: 1 }}>Nothing running</Txt>
+              </Rowed>
+              <Button
+                title="On"
+                disabled={busy || !employeeId}
+                onPress={() => { setPicking(true); setStep(null); }}
+                icon={<MaterialCommunityIcons name="timer-play-outline" size={18} color={t.color.onAccent} />}
+              />
+            </View>
+          )}
+          <Rowed gap={2} wrap style={{ marginTop: t.space(3) }}>
+            {activities.map((a) => (
+              <Chip
+                key={a.activityExternalId ?? a.name}
+                label={a.name}
+                selected={open?.kind === a.kind && open?.activityName === a.name}
+                onPress={busy || !employeeId ? undefined : () => { void clockOn({ kind: a.kind, activityName: a.name, activityExternalId: a.activityExternalId }); }}
+              />
+            ))}
+            <Chip
+              label="Break"
+              selected={open?.kind === 'break'}
+              onPress={busy || !employeeId ? undefined : () => { void clockOn({ kind: 'break' }); }}
+            />
+          </Rowed>
+        </Card>
+
+        {picking ? (
+          <JobPicker
+            suggested={scheduled}
+            suggestedLabel="Booked to you today"
+            emptyWhenNoneSuggested="Nothing booked to you today. Search for the job."
+            emptyWhenNothingOnDevice="No jobs on this phone yet. Run a sync in Settings first."
+            busy={busy}
+            onPick={(job) => { void chooseJob(job); }}
+            onClose={() => { setPicking(false); setStep(null); }}
+          />
+        ) : null}
+
+        {step && !step.entryId ? (
+          <Card>
+            <Txt weight="700">Job {step.job.externalId}{step.job.siteName ? ` · ${step.job.siteName}` : ''}</Txt>
+            {step.why ? (
+              <View style={{ gap: t.space(2), marginTop: t.space(2) }}>
+                <Banner tone="warn" title="No cost centre for these hours" body={step.why} />
+                {step.hint ? <Txt size="sm" tone="muted">{step.hint}</Txt> : null}
+                <Button
+                  title="Clock on anyway"
+                  variant="secondary"
+                  disabled={busy}
+                  onPress={() => { void clockOn({ kind: 'work', jobExternalId: step.job.externalId ?? undefined, jobTitle: step.job.title, siteName: step.job.siteName }); }}
+                />
+              </View>
+            ) : (
+              <View style={{ gap: t.space(2), marginTop: t.space(2) }}>
+                <Txt size="sm" tone="muted">Which cost centre?</Txt>
+                {step.options.map((c) => (
+                  <Card
+                    key={`${c.sectionExternalId}-${c.costCenterExternalId}`}
+                    onPress={() => {
+                      void clockOn({
+                        kind: 'work', jobExternalId: step.job.externalId ?? undefined, jobSectionExternalId: c.sectionExternalId,
+                        jobCostCenterExternalId: c.costCenterExternalId, jobTitle: step.job.title, siteName: step.job.siteName,
+                      });
+                    }}
+                  >
+                    <Txt weight="600">{c.name}</Txt>
+                    <Txt size="sm" tone="muted">{c.sectionName}</Txt>
+                  </Card>
+                ))}
+              </View>
+            )}
+          </Card>
+        ) : null}
+
+        {/* Today. */}
+        <Rowed gap={2} style={{ justifyContent: 'space-between', marginTop: t.space(4) }}>
+          <Txt size="lg" weight="800" style={{ letterSpacing: -0.3 }}>Today</Txt>
+          <Button title="Send today to Simpro" variant="ghost" compact disabled={busy || !todays.length} onPress={() => { void sendToday(); }} />
+        </Rowed>
+        <Rowed gap={2} wrap>
+          <StatTile label="On the tools" value={formatMinutes(dayT.workMinutes)} />
+          <StatTile label="Travel" value={formatMinutes(dayT.travelMinutes)} />
+          <StatTile label="Breaks" value={formatMinutes(dayT.breakMinutes)} />
+        </Rowed>
+        {dayT.refused.length ? (
+          <Txt size="sm" tone="warn">{dayT.refused.length} left out of the total: {dayT.refused.map((r) => r.why).join('; ')}.</Txt>
+        ) : null}
+
+        {!todays.length ? (
+          <Card><Txt tone="muted">Nothing clocked today. Tap On when you start.</Txt></Card>
+        ) : todays.map(renderEntry)}
+
+        {/* Owed from earlier days. */}
+        {unsent.length ? (
+          <>
+            <H2>Not yet sent</H2>
+            <Txt size="sm" tone="muted">Earlier days not in Simpro yet.</Txt>
+            {unsent.map(renderEntry)}
+          </>
+        ) : null}
+
+        {/* The week. */}
+        <H2>This week</H2>
+        <Txt size="sm" tone="muted">Monday {formatAuDate(weekT.weekStart)} to Sunday {formatAuDate(weekT.weekEnd)}</Txt>
+        <Rowed gap={2} wrap>
+          <StatTile label="On the tools" value={formatMinutes(weekT.workMinutes)} />
+          <StatTile label="Travel" value={formatMinutes(weekT.travelMinutes)} />
+          <StatTile label="Other" value={formatMinutes(weekT.activityMinutes)} />
+        </Rowed>
+        {weekT.byJob.length ? (
+          <Card>
+            {weekT.byJob.map((j, i) => (
+              <View key={j.jobExternalId}>
+                {i ? <Divider /> : null}
+                <Rowed gap={2} style={{ paddingVertical: t.space(1.5) }}>
+                  <View style={{ flex: 1 }}>
+                    <Txt weight="600">Job {j.jobExternalId}{j.siteName ? ` · ${j.siteName}` : ''}</Txt>
+                    {j.jobTitle ? <Txt size="sm" tone="muted" numberOfLines={1}>{j.jobTitle}</Txt> : null}
+                  </View>
+                  <Txt weight="700" mono>{formatMinutes(j.minutes)}</Txt>
+                </Rowed>
+              </View>
+            ))}
+          </Card>
+        ) : null}
+        <Txt size="sm" tone="faint">Hours go to the job’s cost centre in Simpro. Breaks stay on the phone.</Txt>
+      </Screen>
+    </>
+  );
+}
+
+/**
+ * Which job.
+ *
+ * Today's booked jobs first, because that is what a technician is usually
+ * clocking onto, then a search over every job the phone holds — the same
+ * search the timesheet uses, by number, site, customer or title.
+ */
