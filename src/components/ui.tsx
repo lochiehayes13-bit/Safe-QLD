@@ -369,6 +369,10 @@ export function Field({
           onBlur={onBlur}
           style={{
             flex: 1,
+            // A browser input is as wide as twenty characters unless told it
+            // may shrink, which in a half-width column pushed the unit (V, A,
+            // m) out of the box on the web build.
+            minWidth: 0,
             color: t.color.text,
             fontSize: t.font.size.md,
             fontFamily: t.font.family('400'),
