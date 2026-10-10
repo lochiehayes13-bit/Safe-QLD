@@ -604,13 +604,15 @@ export function withstandTimeS(areaMm2: number, k: number, faultA: number): numb
 /**
  * How far past its rating a protective device has to be pushed to trip at once.
  *
- * These are the IEC 60898 tripping curves — the letter printed on the front of
- * the breaker, and the reason a Type C on a long run will sit there during an
- * earth fault that a Type B would have cleared. Product data, on every
- * datasheet, and the multiplier is an editable input anyway because a fuse or
- * a motor-rated device is neither.
+ * The mean tripping currents AS/NZS 3000:2018 Paragraph B4.5 uses for Table
+ * 8.1: 4, 7.5 and 12.5 times the rating for Type B, C and D. Table 8.1's own
+ * figures are 230 V divided by these (Type C 20 A: 230 ÷ 150 = 1.53 Ω, printed
+ * 1.5), so the calculator and the bundled table now agree. The IEC 60898
+ * upper limits (5, 10, 20) were used before; they are stricter and failed
+ * circuits that comply. The multiplier stays editable for a fuse or a
+ * motor-rated device.
  */
-export const CURVE_MULTIPLIER: Record<'B' | 'C' | 'D', number> = { B: 5, C: 10, D: 20 };
+export const CURVE_MULTIPLIER: Record<'B' | 'C' | 'D', number> = { B: 4, C: 7.5, D: 12.5 };
 
 export interface LoopInput {
   /**

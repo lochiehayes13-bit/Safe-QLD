@@ -69,11 +69,19 @@ describe('the loop itself', () => {
 
 describe('whether the device trips at once', () => {
   it('needs its curve multiple of its rating', () => {
-    // A Type C at 20 A wants 200 A before the magnetic element moves.
+    // A Type C at 20 A wants 150 A (7.5 × 20) before the magnetic element moves.
     const r = disconnects({ faultCurrentA: 300, deviceRatingA: 20, multiplier: CURVE_MULTIPLIER.C, phaseVolts: 230 })!;
-    expect(r.tripCurrentA).toBe(200);
+    expect(r.tripCurrentA).toBe(150);
     expect(r.ok).toBe(true);
-    expect(r.marginPercent).toBe(50);
+    expect(r.marginPercent).toBe(100);
+  });
+
+  it('agrees with AS/NZS 3000 Table 8.1 as bundled', () => {
+    // Table 8.1 at 20 A: Type B 2.9 Ω, Type C 1.5 Ω, Type D 0.9 Ω, to one place.
+    const zs = (m: number) => disconnects({ faultCurrentA: 1000, deviceRatingA: 20, multiplier: m, phaseVolts: 230 })!.maxLoopOhms;
+    expect(Math.round(zs(CURVE_MULTIPLIER.B) * 10) / 10).toBe(2.9);
+    expect(Math.round(zs(CURVE_MULTIPLIER.C) * 10) / 10).toBe(1.5);
+    expect(Math.round(zs(CURVE_MULTIPLIER.D) * 10) / 10).toBe(0.9);
   });
 
   it('gives the largest loop that still delivers it', () => {
@@ -91,7 +99,7 @@ describe('whether the device trips at once', () => {
   });
 
   it('is harder to satisfy the further up the curve the device is', () => {
-    const at = (m: number) => disconnects({ faultCurrentA: 150, deviceRatingA: 20, multiplier: m, phaseVolts: 230 })!;
+    const at = (m: number) => disconnects({ faultCurrentA: 120, deviceRatingA: 20, multiplier: m, phaseVolts: 230 })!;
     expect(at(CURVE_MULTIPLIER.B).ok).toBe(true);
     expect(at(CURVE_MULTIPLIER.C).ok).toBe(false);
     expect(CURVE_MULTIPLIER.D).toBeGreaterThan(CURVE_MULTIPLIER.C);

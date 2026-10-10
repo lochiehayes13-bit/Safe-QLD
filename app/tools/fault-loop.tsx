@@ -252,7 +252,7 @@ export default function FaultLoopScreen() {
           </Txt>
           <Divider />
           <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-            B 5, C 10 and D 20 are the IEC 60898 upper limits. AS/NZS 3000 Table 8.1 uses 4, 7.5 and 12.5.
+            B 4, C 7.5 and D 12.5 times the rating, as AS/NZS 3000 Table 8.1 (Paragraph B4.5).
           </Txt>
           <View style={{ height: t.space(3) }} />
           <Button title="Cable sizing" variant="secondary" onPress={() => router.push('/tools/cable')} />
