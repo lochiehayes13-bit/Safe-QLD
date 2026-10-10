@@ -225,7 +225,7 @@ function AskBar() {
         onChangeText={setQ}
         onSubmitEditing={() => go(q)}
         returnKeyType="search"
-        placeholder="Search standards, defects, EOL values"
+        placeholder="Search standards and defects"
         placeholderTextColor={t.color.textFaint}
         style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md, fontFamily: t.font.family('400'), minHeight: t.touch }}
       />

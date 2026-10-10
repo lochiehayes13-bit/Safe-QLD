@@ -228,7 +228,7 @@ export default function QuotesScreen() {
         Quotes raised on this phone. Start one from a site.
       </Txt>
 
-      <SearchBox value={typed} onChange={setTyped} placeholder="Quote number, site, suburb, client or address" />
+      <SearchBox value={typed} onChange={setTyped} placeholder="Number, site, suburb or client" />
       {page && page.total ? (
         <Txt size="xs" tone="faint">
           {page.matching.toLocaleString()} of {page.total.toLocaleString()} quote{page.total === 1 ? '' : 's'}
