@@ -99,7 +99,7 @@ export default function BfsrScreen() {
         label="Search"
         value={query}
         onChangeText={setQuery}
-        placeholder="critical defect, occupier statement, 24 hours"
+        placeholder="critical defect, occupier statement"
         autoCapitalize="none"
       />
 

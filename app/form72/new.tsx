@@ -304,7 +304,7 @@ export default function NewForm72Screen() {
 
       {loadError ? <Banner tone="warn" title="Jobs not loaded" body={loadError} /> : null}
 
-      <SearchBox value={typed} onChange={setTyped} placeholder="Job number, site, suburb, client or customer" />
+      <SearchBox value={typed} onChange={setTyped} placeholder="Job, site, suburb or client" />
       <Segmented
         value={mode}
         onChange={setMode}
@@ -433,7 +433,7 @@ export default function NewForm72Screen() {
           )}
 
           {/* The inline picker, not a trip out to the Sites tab and back. */}
-          <Card>
+          <Card style={{ gap: t.space(3) }}>
             <Txt size="sm" tone="muted">No job? The register still fills the lists.</Txt>
             <Button
               title="Pick a site instead"

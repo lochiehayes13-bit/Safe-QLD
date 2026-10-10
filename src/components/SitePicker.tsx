@@ -93,7 +93,7 @@ export function SitePicker({
         </Rowed>
       ) : null}
 
-      <SearchBox value={query} onChange={setQuery} placeholder="Name, suburb, client or the office's reference" />
+      <SearchBox value={query} onChange={setQuery} placeholder="Name, suburb, client or site number" />
 
       {matches.length === 0 ? (
         <Txt size="sm" tone="muted">

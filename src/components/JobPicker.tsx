@@ -114,7 +114,7 @@ export function JobPicker({
         <Button title="Close" variant="ghost" compact onPress={onClose} />
       </Rowed>
       <View style={{ marginTop: t.space(2), gap: t.space(2) }}>
-        <SearchBox value={q} onChange={setQ} placeholder="Job number, site, suburb, client or customer" />
+        <SearchBox value={q} onChange={setQ} placeholder="Job, site, suburb or client" />
         {searching ? <Txt size="sm" tone="muted">Looking…</Txt> : null}
         {searchFailed ? <Banner tone="fail" title="The search could not run" body={searchFailed} /> : null}
         {!found && suggested.length ? <Txt size="sm" tone="muted">{suggestedLabel}</Txt> : null}

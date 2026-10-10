@@ -97,7 +97,7 @@ export default function SimproQuotesScreen() {
               options={[{ value: 'ours', label: 'This phone' }, { value: 'simpro', label: 'Simpro' }]}
             />
           ) : null}
-          <SearchBox value={typed} onChange={setTyped} placeholder="Quote or job no., site, suburb or customer" />
+          <SearchBox value={typed} onChange={setTyped} placeholder="Quote, job, site, suburb or customer" />
           <Segmented
             value={filter}
             onChange={setFilter}
