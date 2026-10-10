@@ -15,8 +15,8 @@ export type SuggestionKind = 'idea' | 'problem' | 'information';
 
 export const SUGGESTION_KINDS: readonly { value: SuggestionKind; label: string }[] = [
   { value: 'idea', label: 'Idea' },
-  { value: 'problem', label: 'Something wrong' },
-  { value: 'information', label: 'Add information' },
+  { value: 'problem', label: 'Problem' },
+  { value: 'information', label: 'Missing info' },
 ];
 
 export interface Suggestion {

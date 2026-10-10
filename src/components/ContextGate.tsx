@@ -67,7 +67,7 @@ export function ContextGate({
       <Stack.Screen options={{ title }} />
       <Screen>
         <EmptyState
-          icon="map-marker-question-outline"
+          icon={kind === 'site' ? 'map-marker-question-outline' : 'file-question-outline'}
           title={missing.title}
           body={missing.body}
           action={pickHere ? undefined : (
@@ -80,7 +80,7 @@ export function ContextGate({
           ) : (
             <SitePicker
               sites={sites}
-              label="Pick the site"
+              label="Site"
               onChange={(siteId) => router.replace({ pathname: backTo!, params: { siteId } } as never)}
             />
           )

@@ -406,7 +406,6 @@ export default function NewForm72Screen() {
             <EmptyState
               icon="clipboard-text-off-outline"
               title={typed ? 'No job matches that' : 'No job on this filter'}
-              body="No job yet? Pick the site below."
             />
           ) : (
             shown.map((j) => {

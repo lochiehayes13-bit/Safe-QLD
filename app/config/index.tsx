@@ -126,7 +126,6 @@ export default function ConfigExplorerScreen() {
           icon="file-cog-outline"
           title="No configs yet"
           body={`${nativeBrands} site files, share packs or device CSVs.`}
-          action={<Button title="Open a config" onPress={pick} loading={opening} />}
         />
       ) : null}
 

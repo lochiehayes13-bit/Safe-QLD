@@ -209,7 +209,7 @@ export default function BookLeaveScreen() {
         {prefs && !employeeId ? (
           <Card onPress={() => router.push('/whoami')}>
             <Txt weight="700">Pick yourself first</Txt>
-            <Txt size="sm" tone="muted">Leave goes on your own Simpro schedule.</Txt>
+            <Txt size="sm" tone="muted">Tap to pick from the staff list.</Txt>
           </Card>
         ) : null}
 
@@ -220,7 +220,7 @@ export default function BookLeaveScreen() {
             return (
               <Chip
                 key={k.id}
-                label={has ? k.label : `${k.label} · not in Simpro`}
+                label={has || !activities.length ? k.label : `${k.label} · not in Simpro`}
                 selected={kindId === k.id}
                 onPress={() => setKindId(k.id)}
               />

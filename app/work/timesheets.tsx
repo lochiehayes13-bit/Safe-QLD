@@ -14,7 +14,7 @@ import { formatAuDate } from '@/export/sheets';
 import { useTheme } from '@/theme';
 import { showAlert } from '@/components/alert';
 import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
-import { Banner, Button, Card, Chip, EmptyState, H2, Rowed, Screen, Segmented, Txt } from '@/components/ui';
+import { Banner, Button, Card, Chip, EmptyState, H2, Label, Rowed, Screen, Segmented, Txt } from '@/components/ui';
 
 /**
  * Weekly timesheets, newest first.
@@ -198,7 +198,7 @@ export default function TimesheetsScreen() {
               ) : null}
               {/* Construction crews fill from their schedule; service types theirs. */}
               <View style={{ gap: t.space(1) }}>
-                <Txt size="xs" tone="muted" weight="700">NEW WEEKS</Txt>
+                <Label>Fill new weeks</Label>
                 <Segmented<'' | 'schedule' | 'manual'>
                   options={[
                     { value: 'schedule', label: 'From my schedule' },

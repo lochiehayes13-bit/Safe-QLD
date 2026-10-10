@@ -108,7 +108,11 @@ export default function DipswitchScreen() {
               placeholder={`${protocol.minAddress} to ${protocol.maxAddress}`}
             />
           </View>
-          {programmer ? null : <Chip label="Apply" onPress={applyTarget} selected={typed?.ok === true} />}
+          {programmer ? null : (
+            <View style={{ height: t.touch, justifyContent: 'center' }}>
+              <Chip label="Apply" onPress={applyTarget} selected={typed?.ok === true} />
+            </View>
+          )}
         </Rowed>
         {typed && !typed.ok ? <Banner tone="fail" title={typed.message} /> : null}
 

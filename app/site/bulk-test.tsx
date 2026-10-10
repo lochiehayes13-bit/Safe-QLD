@@ -453,7 +453,7 @@ export default function BulkTestScreen() {
    * site this screen would list nobody's assets and record nothing, so it
    * says which site it needs instead.
    */
-  if (!siteId) return <ContextGate kind="site" what="its assets to test" title="Bulk test" backTo="/site/bulk-test" />;
+  if (!siteId) return <ContextGate kind="site" what="what to test" title="Bulk test" backTo="/site/bulk-test" />;
 
   if (outcome) {
     const refusals = Object.entries(outcome.refused) as [AssetTestRefusal, number][];

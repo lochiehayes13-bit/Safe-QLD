@@ -220,8 +220,8 @@ export default function OccupierIndexScreen() {
       <Stack.Screen options={{ title: 'Occupier statements' }} />
 
       <Txt tone="muted" size="sm" style={{ lineHeight: 20 }}>
-        We prepare each statement; the occupier signs it. The Commissioner&rsquo;s copy is due{' '}
-        {COMMISSIONER_COPY_BUSINESS_DAYS} business days after the period end.
+        The occupier signs. The Commissioner&rsquo;s copy is due{' '}
+        {COMMISSIONER_COPY_BUSINESS_DAYS} business days after the period ends.
       </Txt>
 
       <Button title="New statement" onPress={() => { void start(); }} loading={starting} />

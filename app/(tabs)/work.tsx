@@ -39,9 +39,9 @@ export default function WorkScreen() {
     {
       title: 'On the tools',
       rows: [
-        { label: 'Clock on', sub: 'Clock on and off jobs. Hours go to Simpro.', icon: 'timer-play-outline', href: '/work/clock' },
+        { label: 'Clock on', sub: 'Hours go to Simpro', icon: 'timer-play-outline', href: '/work/clock' },
         { label: 'Jobs', sub: 'Scheduled and open jobs', icon: 'clipboard-list-outline', href: '/work/jobs', badge: counts.jobsOpen },
-        { label: 'Schedule', sub: "Your day and the team's. Book yourself on.", icon: 'calendar-multiselect-outline', href: '/work/schedule' },
+        { label: 'Schedule', sub: "Your day and the team's", icon: 'calendar-multiselect-outline', href: '/work/schedule' },
         { label: 'Plan work', sub: 'Build a day and book it in Simpro', icon: 'calendar-month-outline', href: '/work/plan' },
         { label: "Today's run", sub: 'Jobs in order of distance', icon: 'map-marker-path', href: '/work/route' },
         { label: 'Impairments', sub: 'Systems out of service', icon: 'alert-octagon-outline', href: '/work/impairments', badge: counts.impairmentsOpen, tone: counts.impairmentsOpen ? 'fail' : undefined },

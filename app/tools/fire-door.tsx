@@ -161,7 +161,7 @@ function FrlView() {
 
   return (
     <>
-      <Txt size="sm" tone="muted">Read the tag on the hinge stile.</Txt>
+      <Txt size="sm" tone="muted">Copy the tag on the hinge stile exactly.</Txt>
 
       <Field
         label="FRL on the tag"
@@ -171,9 +171,7 @@ function FrlView() {
         autoCapitalize="characters"
       />
 
-      {!entered ? (
-        <EmptyState icon="keyboard-outline" title="Type what the tag says" body="Type the FRL exactly as stamped." />
-      ) : result.ok ? (
+      {!entered ? null : result.ok ? (
         <>
           <ResultBlock label="Fire resistance level" value={result.normalised} tone="accent" />
 

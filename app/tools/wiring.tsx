@@ -105,7 +105,7 @@ export default function WiringTablesScreen() {
 /** The title without the shouted preamble the standard prints above every table. */
 function shortTitle(table: WiringTable): string {
   const t = table.title.replace(/^TABLE\s+[0-9A-Z.()]+\s*/i, '');
-  return t.length > 150 ? `${t.slice(0, 150)}…` : t;
+  return t.length > 280 ? `${t.slice(0, 280)}…` : t;
 }
 
 function TableView({ table }: { table: WiringTable }) {

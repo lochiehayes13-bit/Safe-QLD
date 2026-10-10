@@ -139,7 +139,7 @@ export default function FaultLoopScreen() {
             <Field label="Run, one way" value={length} onChangeText={setLength} keyboardType="decimal-pad" suffix="m" />
           </View>
           <View style={{ flex: 1 }}>
-            <Field label="Conductor runs at" value={operatingC} onChangeText={setOperatingC} keyboardType="decimal-pad" suffix="°C" hint="Operating temperature, not 20 °C" />
+            <Field label="Conductor runs at" value={operatingC} onChangeText={setOperatingC} keyboardType="decimal-pad" suffix="°C" hint="Operating, not 20\u00a0°C" />
           </View>
         </Rowed>
 

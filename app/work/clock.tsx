@@ -641,8 +641,8 @@ export default function ClockScreen() {
         ) : null}
 
         {/* Today. */}
-        <Rowed gap={2} align="flex-start" style={{ justifyContent: 'space-between' }}>
-          <H2>Today</H2>
+        <Rowed gap={2} style={{ justifyContent: 'space-between', marginTop: t.space(4) }}>
+          <Txt size="lg" weight="800" style={{ letterSpacing: -0.3 }}>Today</Txt>
           <Button title="Send today to Simpro" variant="ghost" compact disabled={busy || !todays.length} onPress={() => { void sendToday(); }} />
         </Rowed>
         <Rowed gap={2} wrap>

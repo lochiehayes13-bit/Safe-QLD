@@ -58,7 +58,7 @@ export default function ConfigVerifyScreen() {
   const parsed = opened?.parsed;
   const result = useMemo(() => (parsed ? verifyConfig(parsed) : undefined), [parsed]);
 
-  if (!id) return <ContextGate kind="configuration" what="what is wrong with it" title="Check it" />;
+  if (!id) return <ContextGate kind="configuration" what="what is wrong with it" title="Check config" />;
   if (!opened) {
     return (
       <RecordGate
@@ -77,7 +77,7 @@ export default function ConfigVerifyScreen() {
 
   return (
     <Screen>
-      <Stack.Screen options={{ title: 'Check it' }} />
+      <Stack.Screen options={{ title: 'Check config' }} />
 
       {!result ? (
         <Banner

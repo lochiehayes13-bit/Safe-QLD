@@ -490,7 +490,7 @@ export interface OutboundPlan {
 /** What is deliberately never pushed, and why. Held as data so a screen can show it. */
 export const WITHHELD_FROM_SIMPRO: { what: string; why: string }[] = [
   {
-    what: 'Any money — rates, prices, hours, totals, invoice values',
+    what: 'Money: rates, prices, totals, invoice values',
     why: 'The office system is the record for what a job costs. A figure in a note is a second, '
       + 'unreconciled number that nobody updates when the quote changes.',
   },

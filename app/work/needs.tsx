@@ -466,12 +466,12 @@ export default function NeedsScreen() {
               title={detail ? 'Hide' : 'Add site or note'}
               variant="ghost"
               compact
-              style={{ flex: 1 }}
+              
               onPress={() => setDetail(!detail)}
             />
             <Button
               title="Add to list"
-              style={{ flex: 2 }}
+              style={{ flex: 1 }}
               disabled={!(siteName ? parsed.what : parsed.whatWithWhere).trim()}
               onPress={() => void add()}
             />
@@ -486,7 +486,7 @@ export default function NeedsScreen() {
             loading={sending}
             disabled={!lines.length}
             onPress={() => void sendList()}
-            icon={<MaterialCommunityIcons name="share-variant-outline" size={16} color={t.color.text} />}
+            icon={<MaterialCommunityIcons name="share-variant-outline" size={16} color={t.color.accentText} />}
           />
           <Button
             title={nowNeeded.length ? `Order ${nowNeeded.length} with the office` : 'Order with the office'}
@@ -495,7 +495,7 @@ export default function NeedsScreen() {
             loading={ordering}
             disabled={!nowNeeded.length}
             onPress={() => void emailOrder()}
-            icon={<MaterialCommunityIcons name="cart-outline" size={16} color={t.color.text} />}
+            icon={<MaterialCommunityIcons name="cart-outline" size={16} color={t.color.accentText} />}
           />
         </Rowed>
 

@@ -136,11 +136,11 @@ export default function ScanScreen() {
           </Card>
         )}
 
-        {found ? <Result found={found} onAgain={reset} /> : (
+        {found ? <Result found={found} onAgain={reset} /> : permission?.granted ? (
           <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
             Point at the tag, label or barcode.
           </Txt>
-        )}
+        ) : null}
 
         <Card>
           <Field

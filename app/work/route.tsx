@@ -226,8 +226,8 @@ export default function RouteScreen() {
 
         {scope === 'today' && everyones && !failed ? (
           <>
-            <Banner tone="warn" title="Everyone's jobs" body="Pick yourself in Who you are to see only yours." />
-            <Button title="Pick who you are" variant="secondary" compact onPress={() => router.push('/whoami')} />
+            <Banner tone="warn" title="Everyone's jobs" body="Pick yourself to see only yours." />
+            <Button title="Pick who I am" variant="secondary" compact onPress={() => router.push('/whoami')} />
           </>
         ) : null}
         {scope === 'today' && mine ? (

@@ -113,7 +113,7 @@ export default function SuggestScreen() {
         </Card>
 
         <Card>
-          <Field label="Where in the app" value={screen} onChangeText={setScreen} placeholder="Timesheet, resistor values, the home screen…" autoCapitalize="sentences" />
+          <Field label="Where in the app" value={screen} onChangeText={setScreen} placeholder="Timesheet, resistor values…" autoCapitalize="sentences" />
           <View style={{ height: t.space(2.5) }} />
           <Field
             label={kind === 'problem' ? 'What went wrong?' : kind === 'information' ? "What's missing?" : 'Your idea'}

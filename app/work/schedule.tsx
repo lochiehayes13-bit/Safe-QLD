@@ -677,7 +677,7 @@ export default function ScheduleScreen() {
               ))}
             </ScrollView>
           ) : (
-            <Card><Txt tone="muted">{held ? 'No staff list yet. Run a sync in Settings.' : 'Nothing synced yet. Run a sync in Settings.'}</Txt></Card>
+            <Card><Txt tone="muted">{held ? 'No staff list yet. Run a sync in Settings.' : 'Run a sync in Settings.'}</Txt></Card>
           )
         ) : (
           week.days.map((d) => {

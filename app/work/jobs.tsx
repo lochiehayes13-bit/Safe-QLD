@@ -155,7 +155,7 @@ export default function JobsScreen() {
               { value: 'all', label: 'All' },
             ]}
           />
-          {page ? (
+          {page?.total ? (
             <Txt size="xs" tone="faint">
               {page.matching.toLocaleString()} of {page.total.toLocaleString()} job{page.total === 1 ? '' : 's'}
               {/* Said out loud where the list is cut, because a number over a

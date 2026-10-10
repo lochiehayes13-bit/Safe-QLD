@@ -1,4 +1,4 @@
-import { describeActionFailure, describeLoadFailure, messageOf } from '@/domain/loadFailure';
+import { describeActionFailure, describeLoadFailure, messageOf, isConnectionFailure } from '@/domain/loadFailure';
 
 /**
  * The words a screen shows instead of a spinner that will never stop.
@@ -80,5 +80,19 @@ describe('an action that failed', () => {
   it('says so plainly when nothing came back with the failure', () => {
     expect(describeActionFailure(null, 'produce the zone chart'))
       .toBe("Couldn't produce the zone chart.");
+  });
+});
+
+describe('a failure that was only the connection', () => {
+  it('is recognised in the words the browser, the phone and the Simpro client use', () => {
+    expect(isConnectionFailure(new Error('Could not reach Simpro to get a token: Failed to fetch. Nothing was sent.'))).toBe(true);
+    expect(isConnectionFailure(new Error('Network request failed'))).toBe(true);
+    expect(isConnectionFailure(new Error('The request timed out.'))).toBe(true);
+  });
+
+  it('is not claimed for a storage fault or a refusal', () => {
+    expect(isConnectionFailure(new Error('database is locked'))).toBe(false);
+    expect(isConnectionFailure(new Error('401 Unauthorized'))).toBe(false);
+    expect(isConnectionFailure(undefined)).toBe(false);
   });
 });

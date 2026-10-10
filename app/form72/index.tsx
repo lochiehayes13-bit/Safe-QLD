@@ -88,7 +88,7 @@ export default function Form72ListScreen() {
           <EmptyState
             icon="file-certificate-outline"
             title="No Form 72s yet"
-            body="Start one from a job or a site."
+            body="Tap New Form 72 to start one."
           />
         )
       ) : (

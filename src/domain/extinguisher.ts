@@ -408,10 +408,10 @@ const CLASS_C_CONDITIONAL: Omit<ClassSuitability, 'sourceIds'> = {
   fireClass: 'C',
   suitability: 'conditional',
   consequence:
-    'Isolate the gas first. Put out with gas still flowing, it fills the space with an explosive mix; isolate, then '
-    + 'deal with what is alight. This is about the valve, not a rating: check the label.',
+    'Shut the gas valve first. Put out while gas still flows, it builds an explosive mix. '
+    + 'This is about being able to isolate the gas, not a rating.',
   confidence: 'medium',
-  dispute: 'Trade sources differ on whether ABE carries a Class C rating. Either way, isolate the gas.',
+  dispute: 'ABE may or may not carry a Class C rating. Either way, shut the gas.',
 };
 
 /**
@@ -644,7 +644,7 @@ export const PROFILES: Record<ExtinguisherType, ExtinguisherProfile> = {
         suitability: 'rated',
         confidence: 'medium',
         sourceIds: ['alexon-types'],
-        dispute: 'Trade sources differ on a Class A rating. Go by the label.',
+        dispute: 'It may or may not carry a Class A rating. Go by the label.',
       },
       {
         fireClass: 'B',

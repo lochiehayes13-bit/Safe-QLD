@@ -179,9 +179,7 @@ function DischargeView({
         <Banner tone="info" title="Check isolation" body="Check the circuit was actually isolated." />
       )}
 
-      {!entered ? (
-        <EmptyState icon="pencil-outline" title="Enter the result" body="Minutes lit and how it ended." />
-      ) : (
+      {!entered ? null : (
         <>
           <ResultBlock
             label="Verdict"

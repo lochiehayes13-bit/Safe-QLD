@@ -313,7 +313,7 @@ export const SEARCH_HINTS: readonly { example: string; finds: string }[] = [
   { example: 'DET-OPT-1', finds: 'Part number' },
   { example: '0400 000 000', finds: 'Phone number' },
   { example: 'name@example.com', finds: 'Email address' },
-  { example: 'Fictional Tower', finds: 'Site, customer or lead' },
+  { example: 'Riverside Plaza', finds: 'Site, customer or lead' },
 ];
 
 /** What a search with nothing to show should say, given what was typed. */

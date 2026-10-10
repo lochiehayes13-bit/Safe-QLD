@@ -276,7 +276,7 @@ function CriticalDefectCard() {
       <Rowed>
         <MaterialCommunityIcons name="alert-octagon-outline" size={20} color={t.color.fail} />
         <Txt weight="700" style={{ flex: 1 }}>
-          Critical defect — section {CRITICAL_DEFECT_TEST.section}
+          Critical defect (s {CRITICAL_DEFECT_TEST.section})
         </Txt>
       </Rowed>
       <Txt size="sm" style={{ lineHeight: 20 }}>a. {CRITICAL_DEFECT_TEST.limbA}</Txt>

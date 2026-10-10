@@ -8,7 +8,7 @@ import { loadPrefs } from '@/app-prefs';
 import { useTheme } from '@/theme';
 import { describeActionFailure } from '@/domain/loadFailure';
 import { readRestoreTime } from '@/domain/restoreTime';
-import { Banner, Button, Chip, Field, H2, Screen } from '@/components/ui';
+import { Banner, Button, Chip, Field, Label, Screen } from '@/components/ui';
 import { showAlert } from '@/components/alert';
 import { SitePicker } from '@/components/SitePicker';
 import { RestoreTimeFields } from '@/components/RestoreTimeFields';
@@ -123,7 +123,7 @@ export default function NewImpairmentScreen() {
           <SitePicker sites={sites} value={siteId} onChange={setSiteId} />
         )}
 
-        <H2>System</H2>
+        <Label>System</Label>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.space(2) }}>
           {activeSystems().filter((s) => s !== 'structure').map((s) => (
             <Chip key={s} label={SYSTEM_LABELS[s]} selected={system === s} onPress={() => setSystem(s)} />

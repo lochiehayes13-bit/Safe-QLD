@@ -230,7 +230,7 @@ export default function CableSizingScreen() {
               {insulationOptions.map((i) => (
                 <Chip
                   key={i}
-                  label={i.length > 40 ? `${i.slice(0, 40)}…` : i}
+                  label={shortInsulation(i)}
                   selected={activeInsulation === i}
                   onPress={() => { setInsulation(i); setColumnId(''); }}
                 />
@@ -450,4 +450,11 @@ function SizeRow({ sized }: { sized: SizedCandidate }) {
       ) : null}
     </Card>
   );
+}
+
+/** A long insulation list cut at a whole name, so no type is shown half spelt. */
+function shortInsulation(names: string): string {
+  if (names.length <= 40) return names;
+  const cut = names.lastIndexOf(',', 40);
+  return cut > 0 ? `${names.slice(0, cut)}, …` : `${names.slice(0, 40)}…`;
 }

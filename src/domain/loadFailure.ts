@@ -65,10 +65,23 @@ function adviceFor(lower: string): string | undefined {
   if (/enoent|no such file|could not be found on disk/.test(lower)) {
     return 'A file is no longer on this device. Make it again.';
   }
-  if (/network|timed out|timeout|fetch failed|econnrefused|enotfound/.test(lower)) {
+  if (CONNECTION.test(lower)) {
     return 'No connection to the office. Your work is saved on this phone.';
   }
   return undefined;
+}
+
+/** What the phone, the browser and the Simpro client say when there is no signal. */
+const CONNECTION = /network|timed out|timeout|fetch failed|failed to fetch|could not reach|econnrefused|enotfound/;
+
+/**
+ * Whether a failure was only the connection.
+ *
+ * A screen that reads straight from Simpro can then say so in one line instead
+ * of relaying the chain of messages each layer added on the way up.
+ */
+export function isConnectionFailure(error: unknown): boolean {
+  return CONNECTION.test(messageOf(error).toLowerCase());
 }
 
 /**

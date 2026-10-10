@@ -596,8 +596,10 @@ export function StatTile({ label, value, tone = 'default' }: { label: string; va
     <View
       style={{
         flex: 1,
-        // Level with its neighbours when its label runs to two lines.
+        // Level with its neighbours when its label runs to two lines, with
+        // the figure at the foot so the figures line up across the row.
         alignSelf: 'stretch',
+        justifyContent: 'space-between',
         backgroundColor: t.color.surface,
         borderRadius: t.radius.md,
         borderWidth: StyleSheet.hairlineWidth,

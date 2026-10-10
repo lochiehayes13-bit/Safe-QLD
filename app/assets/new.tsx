@@ -316,7 +316,7 @@ export default function NewAssetScreen() {
             <Button title="Save asset" onPress={save} loading={saving} />
           </>
         ) : (
-          <Txt tone="muted" size="sm">Pick a system and type.</Txt>
+          <Txt tone="muted" size="sm">Pick a type.</Txt>
         )}
 
         <DevicePicker visible={picking} onClose={() => setPicking(false)} onPick={applyCatalogue} />

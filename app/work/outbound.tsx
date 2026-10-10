@@ -401,7 +401,7 @@ export default function OutboundScreen() {
       ) : null}
 
       {unknown.length || failed.length || waiting.length ? <Divider /> : null}
-      <H2>Finished services</H2>
+      {nothingAtAll ? null : <H2>Finished services</H2>}
 
       {unlinked ? (
         <Banner
@@ -487,14 +487,14 @@ export default function OutboundScreen() {
 
       <Divider />
       <H2>What’s sent</H2>
-      <Card>
+      <Card style={{ gap: t.space(2) }}>
         {PUSHED_TO_SIMPRO.map((p) => (
           <Txt key={p.what} size="sm" style={{ lineHeight: 20 }}>{p.what}</Txt>
         ))}
       </Card>
 
       <H2>Never sent</H2>
-      <Card>
+      <Card style={{ gap: t.space(2) }}>
         {WITHHELD_FROM_SIMPRO.map((w) => (
           <Txt key={w.what} size="sm" tone="muted" style={{ lineHeight: 20 }}>{w.what}</Txt>
         ))}

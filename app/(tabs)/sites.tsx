@@ -145,8 +145,8 @@ export default function SitesScreen() {
             <View
               style={{
                 flexDirection: 'row', alignItems: 'center', gap: t.space(2),
-                backgroundColor: t.color.surfaceAlt, borderRadius: t.radius.md,
-                borderWidth: 1, borderColor: t.color.border,
+                backgroundColor: t.color.surface, borderRadius: t.radius.md,
+                borderWidth: 1, borderColor: t.color.borderInput,
                 paddingHorizontal: t.space(3), minHeight: t.touch,
               }}
             >
@@ -216,12 +216,9 @@ export default function SitesScreen() {
               icon="office-building-marker-outline"
               title={empty.title}
               body={empty.body}
-              action={(
-                <Rowed gap={2} wrap>
-                  {empty.action ? <Button title={empty.action.label} onPress={() => router.push(empty.action!.route)} /> : null}
-                  <Button title="Add a site" variant="ghost" onPress={() => router.push('/site/new')} />
-                </Rowed>
-              )}
+              action={empty.action
+                ? <Button title={empty.action.label} onPress={() => router.push(empty.action!.route)} />
+                : undefined}
             />
           )
         }

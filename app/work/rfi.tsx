@@ -209,7 +209,7 @@ export default function RequestInformationScreen() {
             <Button
               title={jobNumber.trim() ? 'Change job' : 'Pick a job'}
               variant="secondary"
-              icon={<MaterialCommunityIcons name="clipboard-list-outline" size={18} color={t.color.text} />}
+              icon={<MaterialCommunityIcons name="clipboard-list-outline" size={18} color={t.color.accentText} />}
               onPress={() => { void openPicker(); }}
             />
           )}

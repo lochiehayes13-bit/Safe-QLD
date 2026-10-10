@@ -133,14 +133,14 @@ export default function MaxDemandScreen() {
         ) : null}
 
         <H2>Add a load</H2>
-        <Card>
+        <Card style={{ gap: t.space(3) }}>
           <Field label="Load" value={label} onChangeText={setLabel} placeholder="e.g. Lighting, range, 10 A outlets" />
           <Rowed gap={2} align="flex-start">
             <View style={{ flex: 1 }}>
               <Field label="Connected" value={connected} onChangeText={setConnected} keyboardType="decimal-pad" suffix="A" editable={!watts.trim()} />
             </View>
             <View style={{ flex: 1 }}>
-              <Field label="Or load" value={watts} onChangeText={setWatts} keyboardType="decimal-pad" suffix="W" />
+              <Field label="Or watts" value={watts} onChangeText={setWatts} keyboardType="decimal-pad" suffix="W" />
             </View>
             <View style={{ flex: 1 }}>
               <Field label={phase === 'all' ? 'Line volts' : 'Volts'} value={volts} onChangeText={setVolts} keyboardType="decimal-pad" suffix="V" />
@@ -183,7 +183,6 @@ export default function MaxDemandScreen() {
             placeholder="e.g. AS/NZS 3000 Table C1"
           />
 
-          <View style={{ height: t.space(3) }} />
           <Button title="Add load" disabled={!draft.row} onPress={add} />
         </Card>
 

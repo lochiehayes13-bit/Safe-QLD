@@ -457,9 +457,6 @@ export default function SettingsScreen() {
           variant="secondary"
           onPress={() => router.push('/whoami')}
         />
-        <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
-          My day uses the name picked here.
-        </Txt>
         {session ? (
           <>
             <View style={{ height: t.space(2.5) }} />

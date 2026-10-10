@@ -456,7 +456,7 @@ export default function NewDefectScreen() {
               label="Search the defect library"
               value={search}
               onChangeText={setSearch}
-              placeholder="e.g. failed discharge, contaminated, wedged open"
+              placeholder="e.g. failed discharge, wedged open"
               autoCapitalize="none"
             />
 

@@ -224,10 +224,6 @@ export default function QuotesScreen() {
         options={[{ value: 'ours', label: 'This phone' }, { value: 'simpro', label: 'Simpro' }]}
       />
 
-      <Txt tone="muted" size="sm" style={{ lineHeight: 20 }}>
-        Quotes raised on this phone. Start one from a site.
-      </Txt>
-
       <SearchBox value={typed} onChange={setTyped} placeholder="Number, site, suburb or client" />
       {page && page.total ? (
         <Txt size="xs" tone="faint">
@@ -258,7 +254,7 @@ export default function QuotesScreen() {
       {page ? (
         <>
           <Label>Issued from this phone</Label>
-          <Rowed gap={2} wrap>
+          <Rowed gap={2} wrap align="stretch">
             <View style={{ flex: 1, minWidth: 100 }}>
               <StatTile label="Out with clients" value={out.length} tone={out.length ? 'warn' : 'muted'} />
             </View>

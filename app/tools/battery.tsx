@@ -239,7 +239,7 @@ export default function BatteryCalculatorScreen() {
               <Radio on={!monitored} />
               <View style={{ flex: 1 }}>
                 <Txt weight="600">Not monitored: 72 h</Txt>
-                <Txt size="sm" tone="muted">About three times the battery.</Txt>
+                <Txt size="sm" tone="muted">Needs about three times the capacity.</Txt>
               </View>
             </Rowed>
           </Pressable>
@@ -582,6 +582,8 @@ function MiniStat({ label, value }: { label: string; value: string }) {
     <View
       style={{
         flex: 1,
+        alignSelf: 'stretch',
+        justifyContent: 'space-between',
         backgroundColor: t.color.surface,
         borderRadius: t.radius.md,
         borderWidth: 1,

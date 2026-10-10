@@ -52,7 +52,7 @@ export interface AppModule {
 export const MODULES: AppModule[] = [
   // -- Every day -----------------------------------------------------------
   { href: '/search', label: 'Find anything', icon: 'text-box-search-outline', group: 'Every day',
-    blurb: 'Jobs, sites, customers, invoices, orders and parts.',
+    blurb: 'Jobs, sites, customers, invoices and parts.',
     keywords: ['search', 'find', 'lookup', 'job number', 'invoice number', 'purchase order', 'po', 'part number', 'phone', 'who'] },
   { href: '/contacts', label: 'Contacts', icon: 'account-group-outline', group: 'Every day',
     blurb: 'Ring, text or email anyone the office has.',

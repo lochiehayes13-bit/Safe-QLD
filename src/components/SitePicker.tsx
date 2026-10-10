@@ -97,7 +97,7 @@ export function SitePicker({
 
       {matches.length === 0 ? (
         <Txt size="sm" tone="muted">
-          {sites.length ? 'Nothing matched. Try fewer letters, or the suburb.' : 'No sites on this phone yet — sync first.'}
+          {sites.length ? 'Nothing matched. Try fewer letters, or the suburb.' : 'No sites on this phone yet. Sync first.'}
         </Txt>
       ) : null}
 

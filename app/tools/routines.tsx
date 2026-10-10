@@ -3,7 +3,7 @@ import { Pressable, ScrollView, View } from 'react-native';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import {
-  FREQUENCY_LABEL, SERVICE_ROUTINES, SOURCE_LABEL, type ServiceRoutine, type TestDef,
+  SERVICE_ROUTINES, SOURCE_LABEL, type ServiceRoutine, type TestDef,
 } from '@/seed/serviceRoutines';
 import { SYSTEM_LABELS } from '@/seed/assetTypes';
 import { findRoutines } from '@/domain/docSearch';
@@ -97,7 +97,6 @@ function RoutineCard({
             <Txt weight="700">{routine.label}</Txt>
             <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{routine.description}</Txt>
             <Rowed gap={2} wrap style={{ marginTop: t.space(1.5) }}>
-              <Chip label={FREQUENCY_LABEL[routine.frequency]} />
               <Chip
                 label={narrowed
                   ? `${checks.length} of ${routine.tests.length} checks match`

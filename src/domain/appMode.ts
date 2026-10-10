@@ -345,7 +345,7 @@ export const DESTINATIONS: readonly Destination[] = [
     label: 'Find anything', modes: BOTH, openedFrom: ['/', '/shortcuts'],
     // Its results open record screens by the routes held in the domain
     // module it maps over, the same arrangement as the module picker.
-    blurb: 'Jobs, sites, customers, invoices, orders and parts.',
+    blurb: 'Jobs, sites, customers, invoices and parts.',
     terms: ['find', 'search', 'lookup', 'number', 'job number', 'invoice number', 'po', 'part number', 'phone', 'anything'],
   },
   {

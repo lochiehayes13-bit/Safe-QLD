@@ -215,12 +215,12 @@ function Hints({ onPick }: { onPick: (example: string) => void }) {
       <Card style={{ gap: t.space(1) }}>
         <Txt weight="800">Type one thing you know</Txt>
         <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-          Put inv, po, quote, job or cust in front to narrow it.
+          Start with inv, po, quote, job or cust to narrow it.
         </Txt>
         <View style={{ marginTop: t.space(1.5), gap: 2 }}>
           {SEARCH_HINTS.map((h) => (
             <Bounce key={h.example} onPress={() => onPick(h.example)} haptic="selection" scaleTo={0.99}>
-              <Rowed gap={3} style={{ minHeight: 44 }}>
+              <Rowed gap={3} align="baseline" style={{ minHeight: 44, paddingVertical: 12 }}>
                 <Txt mono size="sm" weight="700" tone="accent" style={{ minWidth: 140 }}>{h.example}</Txt>
                 <Txt size="sm" tone="muted" style={{ flex: 1 }}>{h.finds}</Txt>
               </Rowed>

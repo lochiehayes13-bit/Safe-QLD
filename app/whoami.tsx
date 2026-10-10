@@ -4,7 +4,7 @@ import { Stack, router, useFocusEffect } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { loadPrefs, patchPrefs, type Prefs } from '@/app-prefs';
 import type { EmployeeRecord } from '@/db/employeeRepo';
-import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure';
+import { describeActionFailure, describeLoadFailure, isConnectionFailure } from '@/domain/loadFailure';
 import { simproConfigFromPrefs } from '@/simpro/config';
 import { prefsForEmployee, prefsForNobody, repairPick, searchEmployees } from '@/simpro/identity';
 import { loadStaffList, markSignInSkipped } from '@/simpro/signInFlow';
@@ -51,7 +51,9 @@ export default function WhoAmIScreen() {
       const repair = repairPick(held, list.people);
       if (repair) setPrefs(await patchPrefs(repair));
     } catch (e) {
-      setFailed(describeLoadFailure(e, 'the staff list'));
+      setFailed(isConnectionFailure(e)
+        ? 'No connection to Simpro. Check your signal and try again.'
+        : describeLoadFailure(e, 'the staff list'));
     } finally {
       setLoading(false);
     }
