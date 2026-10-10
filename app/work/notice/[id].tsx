@@ -46,7 +46,8 @@ export default function NoticeScreen() {
   const [busy, setBusy] = useState(false);
   /** What happened the last time this screen tried to tell the office something. */
   const [report, setReport] = useState<DefectReportNotice | null>(null);
-  const [, tick] = useState(0);
+  // The countdown's clock, moved on once a second while the notice is due.
+  const [clock, setClock] = useState(() => Date.now());
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -80,7 +81,7 @@ export default function NoticeScreen() {
 
   useEffect(() => {
     if (defect?.noticeIssuedAt) return;
-    const h = setInterval(() => tick((n) => n + 1), 1000);
+    const h = setInterval(() => setClock(Date.now()), 1000);
     return () => clearInterval(h);
   }, [defect?.noticeIssuedAt]);
 
@@ -96,7 +97,7 @@ export default function NoticeScreen() {
 
   const isCritical = isQldCriticalDefect(!!defect.qldLimbInoperable, !!defect.qldLimbAdverseImpact);
   const dueAt = criticalNoticeDueAt(defect.raisedAt);
-  const remainingMs = dueAt ? Date.parse(dueAt) - Date.now() : 0;
+  const remainingMs = dueAt ? Date.parse(dueAt) - clock : 0;
   const overdue = remainingMs < 0;
   const hours = Math.floor(Math.abs(remainingMs) / 3_600_000);
   const minutes = Math.floor((Math.abs(remainingMs) % 3_600_000) / 60_000);
@@ -145,8 +146,8 @@ export default function NoticeScreen() {
     } catch (e) {
       setReport({
         tone: 'warn',
-        title: 'The office has not been told',
-        body: describeActionFailure(e, 'queueing the note for the office'),
+        title: 'Office not told',
+        body: describeActionFailure(e, 'queue the note for the office'),
       });
     }
   };
@@ -183,7 +184,7 @@ export default function NoticeScreen() {
         const notice = notSharedNotice(file.name, 'notice');
         showAlert(
           notice.title,
-          `${notice.body}\n\nNothing has been recorded as issued, because nobody has been given it yet.`,
+          `${notice.body}\n\nNot recorded as issued.`,
         );
         return;
       }
@@ -206,7 +207,7 @@ export default function NoticeScreen() {
       });
       await reportToOffice();
     } catch (e) {
-      showAlert('Could not create the notice', e instanceof Error ? e.message : String(e));
+      showAlert('Notice not created', describeActionFailure(e, 'create the notice'));
     } finally {
       setBusy(false);
     }
@@ -220,7 +221,8 @@ export default function NoticeScreen() {
           <Banner
             tone="pass"
             title="Notice issued"
-            body={`Given ${formatAuDate(defect.noticeIssuedAt)}${defect.noticeRecipient ? ` to ${defect.noticeRecipient}` : ''}. Rectification due ${formatAuDate(defect.rectificationDueAt)}.`}
+            body={`Given ${formatAuDate(defect.noticeIssuedAt)}${defect.noticeRecipient ? ` to ${defect.noticeRecipient}` : ''}.${
+              defect.rectificationDueAt ? ` Rectify by ${formatAuDate(defect.rectificationDueAt)}.` : ''}`}
           />
         ) : (
           <View
@@ -236,7 +238,7 @@ export default function NoticeScreen() {
             <Rowed gap={2}>
               <MaterialCommunityIcons name="clock-alert-outline" size={18} color={overdue ? t.color.fail : t.color.warn} />
               <Txt weight="700" tone={overdue ? 'fail' : 'warn'}>
-                {overdue ? 'NOTICE OVERDUE' : 'NOTICE DUE'}
+                {overdue ? 'Notice overdue' : 'Notice due in'}
               </Txt>
             </Rowed>
             <Txt size="xxl" weight="700" mono tone={overdue ? 'fail' : 'warn'}>
@@ -244,8 +246,8 @@ export default function NoticeScreen() {
             </Txt>
             <Txt size="sm" tone="muted">
               {overdue
-                ? 'The 24 hour period has passed. Issue the notice now and record why it was late.'
-                : 'The occupier must be given a written notice within 24 hours of the maintenance.'}
+                ? 'Past 24 hours. Issue it now and note why it was late.'
+                : 'Written notice to the occupier within 24 hours.'}
             </Txt>
           </View>
         )}
@@ -255,13 +257,12 @@ export default function NoticeScreen() {
           <Txt weight="700" style={{ marginTop: 4 }}>{defect.location}</Txt>
           <Txt size="sm" tone="muted" style={{ lineHeight: 20, marginTop: 4 }}>{defect.description}</Txt>
           <Divider />
-          <Txt size="xs" tone="faint">Identified {formatAuDate(defect.raisedAt)}</Txt>
+          <Txt size="xs" tone="faint">Found {formatAuDate(defect.raisedAt)}</Txt>
         </Card>
 
-        <H2>How AS 1851 classifies it</H2>
+        <H2>AS 1851 class</H2>
         <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-          The technical classification, which carries its own notification and rectification
-          expectations. It is not the Queensland test below, and the two can disagree.
+          Separate from the Queensland test below.
         </Txt>
         <Card>
           <Segmented
@@ -285,9 +286,9 @@ export default function NoticeScreen() {
           </Rowed>
         </Card>
 
-        <H2>Is this a critical defect in Queensland?</H2>
+        <H2>Queensland test</H2>
         <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-          Both limbs must be true. This is a different test from the AS 1851 classification, so answer it on its own terms.
+          Critical only if both are yes.
         </Txt>
 
         <Card>
@@ -316,37 +317,37 @@ export default function NoticeScreen() {
         {isCritical ? (
           <Banner
             tone="fail"
-            title="Both limbs are met — a notice is required"
-            body="The occupier must be given a written notice within 24 hours, and has one month from the maintenance to rectify."
+            title="Notice required"
+            body="Written notice within 24 hours. Rectify within one month of the maintenance."
           />
         ) : (
           <Banner
             tone="info"
             title="Not a Queensland critical defect"
-            body="Only one limb is met, so the statutory notice does not apply. It still has to be reported and rectified — record it in the service record and the yearly condition report."
+            body="No statutory notice. Still report it and get it rectified."
           />
         )}
 
-        <H2>Details for the notice</H2>
+        <H2>Notice details</H2>
         <Field
           label="Extent of impairment"
           value={defect.extentOfImpairment ?? ''}
           onChangeText={(v) => update({ extentOfImpairment: v })}
           multiline
-          placeholder="Which zones, floors or devices are affected"
+          placeholder="Zones, floors or devices affected"
         />
         <Field
           label="Interim measures"
           value={defect.interimMeasures ?? ''}
           onChangeText={(v) => update({ interimMeasures: v })}
           multiline
-          placeholder="e.g. Hourly fire watch by site security until rectified"
+          placeholder="e.g. Hourly fire watch until rectified"
         />
         <Field label="Occupier or responsible person" value={occupier} onChangeText={setOccupier} autoCapitalize="words" />
 
-        <H2>Verbal notification</H2>
+        <H2>Told on site</H2>
         <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-          A critical defect should be raised verbally before leaving site, ahead of the written notice.
+          Tell them before you leave site.
         </Txt>
         <Field
           label="Told to"
@@ -355,7 +356,7 @@ export default function NoticeScreen() {
           autoCapitalize="words"
         />
         {defect.verbalNotifiedAt ? (
-          <Txt size="xs" tone="pass">Recorded {formatAuDate(defect.verbalNotifiedAt)}</Txt>
+          <Txt size="xs" tone="pass">Told {formatAuDate(defect.verbalNotifiedAt)}</Txt>
         ) : null}
 
         {/*
@@ -366,16 +367,19 @@ export default function NoticeScreen() {
         {isCritical && !site ? (
           <Banner
             tone="fail"
-            title={failed ? 'The site could not be read' : 'This defect has no site on this phone'}
-            body={'A critical defect notice prints the building it is about — its name and its address — so it '
-              + 'cannot be made without one. '
-              + (failed
-                ? 'Nothing is wrong with your sites; this phone could not read them just now. Pull down to try again.'
-                : 'Sync, or open the defect from the site it belongs to.')}
+            title={failed ? 'Site not loaded' : 'Site not on this phone'}
+            body={failed
+              ? 'The notice needs the site name and address.'
+              : 'The notice needs the site name and address. Sync, then try again.'}
           />
         ) : null}
+        {/* Both cases: the screen reads the site only on open, so after a
+            sync this is the only way to read it again without leaving. */}
+        {isCritical && !site ? (
+          <Button title="Try again" variant="secondary" onPress={() => { void load(); }} />
+        ) : null}
         <Button
-          title={defect.noticeIssuedAt ? 'Reissue notice' : 'Create and hand over notice'}
+          title={defect.noticeIssuedAt ? 'Reissue notice' : 'Create and share notice'}
           onPress={issue}
           loading={busy}
           disabled={!isCritical || !site}
@@ -383,9 +387,8 @@ export default function NoticeScreen() {
         {report ? <Banner tone={report.tone} title={report.title} body={report.body} /> : null}
 
         <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-          This carries the same information as the regulator's approved form so it can be handed over on site
-          immediately. It is not itself the approved form — obtain that from the Queensland Fire Department and lodge it
-          as required, and attach both to the annual occupier statement with evidence of rectification.
+          Not the QFD approved form. Lodge that as well.{'\n'}
+          Attach both, with proof of rectification, to the occupier statement.
         </Txt>
       </Screen>
     </>

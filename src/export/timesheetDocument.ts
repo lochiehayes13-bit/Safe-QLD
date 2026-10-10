@@ -1,6 +1,6 @@
 import {
   allowanceTally,
-  LEAVE_LABEL, entryHours, groupByDate, leaveOf, timesheetTotals, weekSummary,
+  LEAVE_LABEL, entryHours, groupByDate, isUnpaidBreakLine, leaveOf, timesheetTotals, unpaidBreakTotal, weekSummary,
   type Timesheet, type TimesheetEntry,
 } from '@/domain/timesheet';
 import { letterheaded } from './letterhead';
@@ -87,6 +87,9 @@ const CSS = `
   .job .note { color: #333; font-size: 9.5pt; margin-top: 2px; }
   .kind { font-size: 8.5pt; font-weight: 700; color: #8a4b00; }
   .leave { font-size: 9.5pt; font-weight: 700; color: #8a4b00; padding-left: 10px; }
+  .brk { display: flex; gap: 8px; margin-top: 5px; padding-left: 12px; color: #555; font-size: 9.5pt; }
+  .brk span { flex: 1; }
+  .brk b { font-variant-numeric: tabular-nums; }
   .nothing { color: #999; font-size: 9.5pt; padding-left: 10px; font-style: italic; }
 
   .sign { margin-top: 16px; padding-top: 10px; border-top: 1px solid #d8d8d8;
@@ -145,7 +148,8 @@ function dayBlock(
   summary: ReturnType<typeof weekSummary>[number],
   entries: TimesheetEntry[],
 ): string {
-  const jobs = entries.filter((e) => !leaveOf(e));
+  const jobs = entries.filter((e) => !leaveOf(e) && !isUnpaidBreakLine(e));
+  const breaks = entries.filter(isUnpaidBreakLine);
   const leave = summary.leave;
   return `<div class="day${summary.weekend ? ' weekend' : ''}">
     <div class="dayhead">
@@ -155,6 +159,7 @@ function dayBlock(
     </div>
     ${leave ? `<div class="leave">${esc(LEAVE_LABEL[leave.kind])} — ${hrs(leave.hours)} h</div>` : ''}
     ${jobs.map(jobLine).join('')}
+    ${breaks.map((b) => `<div class="brk"><span>${esc(b.siteName)}</span><b>${hrs(entryHours(b))} h</b></div>`).join('')}
     ${!jobs.length && !leave
     ? `<div class="nothing">${summary.weekend ? 'Not worked.' : 'Nothing recorded.'}</div>`
     : ''}
@@ -185,12 +190,13 @@ function totalsBlock(sheet: Timesheet): string {
    * one. Counted by the same domain function the workbook uses.
    */
   const extras = allowanceTally(sheet);
+  const breaks = unpaidBreakTotal(sheet);
   return `<div class="totals">
     <div class="grand">${hrs(t.grand)} hours for the week</div>
     <ul>${parts
     .filter(([, v]) => v > 0)
     .map(([label, v]) => `<li><span>${esc(label)}</span> <b>${hrs(v)}</b></li>`)
-    .join('')}</ul>
+    .join('')}${breaks ? `<li><span>Unpaid breaks taken off</span> <b>${hrs(breaks)}</b></li>` : ''}</ul>
     ${extras.length ? `<ul class="extras">${extras
     .map(([label, days]) => `<li><span>${esc(label)}</span> <b>${days} ${days === 1 ? 'day' : 'days'}</b></li>`)
     .join('')}</ul>` : ''}

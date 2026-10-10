@@ -27,7 +27,7 @@ function record(over: Partial<SwmsRecord> = {}): SwmsRecord {
     title: 'Coring the slab at Fictional Tower',
     siteId: 's1',
     siteName: 'Fictional Tower',
-    jobExternalId: '42823',
+    jobExternalId: '9001',
     jobTitle: 'Detection annual',
     date: '2026-09-16',
     supervisor: 'Sam Supervisor',
@@ -79,7 +79,7 @@ describe('the two inboxes', () => {
 describe('the subject', () => {
   it('leads with the job number, which is what the office files by', () => {
     const s = swmsSubject(record());
-    expect(s).toContain('job 42823');
+    expect(s).toContain('job 9001');
     expect(s).toContain('Fictional Tower');
     expect(s).toContain('16/09/2026');
   });
@@ -102,7 +102,7 @@ describe('the subject', () => {
 describe('the body', () => {
   it('names the job, the site and the supervisor', () => {
     const b = swmsBody(record(), merged());
-    expect(b).toContain('42823');
+    expect(b).toContain('9001');
     expect(b).toContain('Fictional Tower');
     expect(b).toContain('Sam Supervisor');
   });
@@ -162,25 +162,31 @@ describe('the body', () => {
     expect(swmsBody(record(), merged())).toContain('The full statement is attached');
   });
 
-  it('names any statement no reviewer has cleared', () => {
+  it('names any statement awaiting company approval, without the review notes', () => {
     const uncleared: SwmsTemplate = {
       ...SWMS_TEMPLATES[0]!,
-      review: { cleared: false, reason: 'A reviewer would not sign it.', findings: ['A hazard with no control'] },
+      review: {
+        cleared: false,
+        reason: 'Corrected against 4 fatal and 6 serious findings.',
+        findings: [],
+        correctedAgainst: { findings: 10, note: 'Waiting on a cold read by somebody who did not write it.' },
+      },
     };
-    const b = swmsBody(record(), mergeSwms([uncleared]));
-    expect(b).toContain('no reviewer has cleared');
-    expect(b).toContain('A reviewer would not sign it.');
+    const b = swmsBody(record({ status: 'draft' }), mergeSwms([uncleared]));
+    expect(b).toContain('Awaiting company approval');
+    expect(b).toContain(uncleared.title);
+    expect(b).not.toMatch(/fatal|serious|minor|cold read|reviewer/i);
   });
 });
 
 describe('refusing to send', () => {
   it('refuses a statement with no method statement on it', () => {
-    expect(swmsNotReady(record({ templateIds: [] }), mergeSwms([]))).toMatch(/nothing to send/);
+    expect(swmsNotReady(record({ templateIds: [] }), mergeSwms([]))).toMatch(/Nothing to send/);
   });
 
   it('refuses one the office cannot file against anything', () => {
     const r = record({ jobExternalId: undefined, siteName: undefined });
-    expect(swmsNotReady(r, merged())).toMatch(/no job and no site/);
+    expect(swmsNotReady(r, merged())).toMatch(/No job and no site/);
   });
 
   it('allows one with a site but no job, which is an ordinary day', () => {

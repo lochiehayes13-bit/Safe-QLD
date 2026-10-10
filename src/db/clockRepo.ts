@@ -1,8 +1,12 @@
 import { getDb, inTransaction, newId, nowIso } from './index';
+import { enqueueSync } from './opsRepo';
+import { listSetupActivities } from './moreRepo';
 import {
   addDays, startEntry as modelStart, stopEntry as modelStop, validateTimes,
-  clockContentKey, type ClockEntry, type ClockStart,
+  CLOCK_QUEUE_KIND, clockContentKey, clockPayload, missingSimproIds, reattachEntry, sendReadiness,
+  type ClockEntry, type ClockStart, type CostCentreRef,
 } from '@/domain/clockOn';
+import { flushSoon } from '@/simpro/flushSoon';
 
 /**
  * The clock entries on this phone.
@@ -318,6 +322,120 @@ export async function costCentresForJob(jobExternalId: string): Promise<CostCent
      ORDER BY s.displayOrder, c.displayOrder, c.externalId`,
     jobExternalId,
   );
+}
+
+/**
+ * Puts a work entry's hours on the cost centre the person picked.
+ *
+ * For an entry clocked before the job had a cost centre, once it has
+ * several and the sync cannot choose. Only a cost centre the phone holds
+ * for that job is taken, and the old send error goes with the gap.
+ */
+export async function setEntryCostCentre(
+  id: string,
+  choice: CostCentreRef,
+): Promise<{ ok: true; entry: ClockEntry } | { ok: false; why: string }> {
+  const entry = await getEntry(id);
+  if (!entry) return { ok: false, why: 'That entry is no longer here' };
+  if (entry.sentAt) return { ok: false, why: 'Already sent to Simpro; change it there' };
+  if (entry.kind !== 'work' || !entry.jobExternalId) return { ok: false, why: 'Not hours on a job' };
+  const known = await costCentresForJob(entry.jobExternalId);
+  const hit = known.find((c) => c.sectionExternalId === choice.sectionExternalId && c.costCenterExternalId === choice.costCenterExternalId);
+  if (!hit) return { ok: false, why: `That cost centre isn't on job ${entry.jobExternalId}` };
+  const db = await getDb();
+  await db.runAsync(
+    `UPDATE clock_entry SET jobSectionExternalId = ?, jobCostCenterExternalId = ?, sendError = NULL, updatedAt = ?
+     WHERE id = ? AND sentAt IS NULL`,
+    hit.sectionExternalId, hit.costCenterExternalId, nowIso(), id,
+  );
+  return { ok: true, entry: (await getEntry(id))! };
+}
+
+// ---------------------------------------------------------------------------
+// Filling in what an entry was made without
+// ---------------------------------------------------------------------------
+
+export interface ReattachOutcome {
+  /** Entries given a missing Simpro id by this run, as now stored. */
+  attached: ClockEntry[];
+  /** Of those, the ones queued to send by this run. */
+  queued: ClockEntry[];
+  /** Entries still missing an id, and why. */
+  waiting: { entry: ClockEntry; why: string }[];
+  /** Jobs with hours waiting whose cost centres the phone has never held: worth reading the job again. */
+  jobsWithoutCostCentres: string[];
+}
+
+/**
+ * Fills in the Simpro ids waiting entries were made without, and queues the
+ * ones that can now go.
+ *
+ * Run whenever the clock opens and at the end of every sync: an activity
+ * chip used before the office's activity list had synced, and a job clocked
+ * before it had a cost centre, both become sendable the moment the phone
+ * holds the missing piece. The matching is the domain's (reattachEntry);
+ * this reads what the last sync stored, writes what it found, clears the
+ * old send error so the entry queues, and keeps the reason on any entry
+ * still short. A running entry is given its ids but not queued: it goes
+ * when it stops, like any other.
+ */
+export async function reattachWaitingEntries(at: string = nowIso()): Promise<ReattachOutcome> {
+  const out: ReattachOutcome = { attached: [], queued: [], waiting: [], jobsWithoutCostCentres: [] };
+  const db = await getDb();
+  const rows = await db.getAllAsync<ClockRow>(
+    `SELECT ${COLUMNS} FROM clock_entry
+     WHERE sentAt IS NULL AND kind <> 'break'
+       AND ((kind = 'work' AND (jobSectionExternalId IS NULL OR jobCostCenterExternalId IS NULL))
+         OR (kind <> 'work' AND activityExternalId IS NULL))
+     ORDER BY date, startedAt, id`,
+  );
+  const entries = rows.map(hydrate).filter(missingSimproIds);
+  if (!entries.length) return out;
+
+  const activities = entries.some((e) => e.kind !== 'work') ? await listSetupActivities() : [];
+  const costCentres = new Map<string, CostCentreRef[]>();
+  for (const e of entries) {
+    if (e.kind === 'work' && e.jobExternalId && !costCentres.has(e.jobExternalId)) {
+      costCentres.set(e.jobExternalId, await costCentresForJob(e.jobExternalId));
+    }
+  }
+
+  let queuedAny = false;
+  for (const e of entries) {
+    const r = reattachEntry(e, { activities, costCentres });
+    if (r.attached) {
+      const ready = sendReadiness(r.entry);
+      // Cleared so it queues; a closed entry that still cannot go (a time
+      // problem, say) keeps the reason the send would give.
+      const sendError = r.entry.endedAt && !ready.ready ? ready.why : null;
+      await db.runAsync(
+        `UPDATE clock_entry SET jobSectionExternalId = ?, jobCostCenterExternalId = ?, activityExternalId = ?,
+           activityName = ?, sendError = ?, updatedAt = ?
+         WHERE id = ? AND sentAt IS NULL`,
+        r.entry.jobSectionExternalId ?? null, r.entry.jobCostCenterExternalId ?? null, r.entry.activityExternalId ?? null,
+        r.entry.activityName ?? null, sendError, at, e.id,
+      );
+      const saved = await getEntry(e.id);
+      if (!saved) continue;
+      out.attached.push(saved);
+      if (ready.ready) {
+        const row = await enqueueSync(CLOCK_QUEUE_KIND, clockPayload(saved), { contentKey: clockContentKey(saved.id) });
+        if (!row.duplicate) {
+          out.queued.push(saved);
+          queuedAny = true;
+        }
+      }
+    } else if (r.why) {
+      if (e.sendError !== r.why) {
+        await db.runAsync('UPDATE clock_entry SET sendError = ?, updatedAt = ? WHERE id = ? AND sentAt IS NULL', r.why, at, e.id);
+      }
+      out.waiting.push({ entry: { ...e, sendError: r.why }, why: r.why });
+      const job = e.kind === 'work' ? e.jobExternalId : undefined;
+      if (job && !costCentres.get(job)?.length && !out.jobsWithoutCostCentres.includes(job)) out.jobsWithoutCostCentres.push(job);
+    }
+  }
+  if (queuedAny) flushSoon();
+  return out;
 }
 
 /** The days of the week around `day`, for the week's read. */

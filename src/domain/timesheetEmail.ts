@@ -135,7 +135,7 @@ export function timesheetBody(sheet: Timesheet): string {
     for (const e of sheet.entries) {
       const worked = entryHours(e);
       const bits: string[] = [];
-      if (worked > 0) {
+      if (worked !== 0) {
         const kind = e.hourKind === 'ord' ? '' : e.hourKind === 'ot' ? ' O/T' : ' D/T';
         const span = e.startTime && e.finishTime ? ` ${e.startTime}–${e.finishTime}` : '';
         bits.push(`${hours(worked)}h${kind}${span}`);

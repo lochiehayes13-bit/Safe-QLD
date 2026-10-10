@@ -1,7 +1,7 @@
 import { SWMS_TEMPLATES } from '@/seed/swms';
 import {
-  builderDraft, builderNotReady, builderTitle, initialSelection, matchSummary, matchesFor, worksFromJob,
-  type BuilderJob,
+  builderDraft, builderNotReady, builderTitle, initialSelection, matchSummary, matchesFor, swmsStartFromRoute,
+  withJobRow, worksFromJob, type BuilderJob,
 } from '@/domain/swmsBuilder';
 
 /**
@@ -15,7 +15,7 @@ import {
  */
 
 const JOB: BuilderJob = {
-  externalId: '42823',
+  externalId: '9001',
   siteName: 'Fictional Tower',
   siteId: 's1',
   customerName: 'A Customer',
@@ -80,26 +80,26 @@ describe('which statements come up', () => {
 
 describe('what the screen says above the checkboxes', () => {
   it('asks for the work before anything is typed', () => {
-    expect(matchSummary([], '')).toMatch(/Say what the work is/);
+    expect(matchSummary([], '')).toBe('Describe the work to bring up its statements.');
   });
 
   it('says so plainly when nothing in the library matches', () => {
     // "Nothing matched" and "we matched four" are different problems, and the
     // second is not a problem.
     expect(matchSummary([], 'quarterly inspection of the fire doors'))
-      .toMatch(/Nothing in the library matches/);
+      .toBe('No match. Pick from the full list below.');
   });
 
   it('counts what it ticked and what it is offering', () => {
     const works = 'core drilling the slab in a shopping centre';
     const line = matchSummary(matchesFor(SWMS_TEMPLATES, { job: null, works }), works);
-    expect(line).toMatch(/ticked for this work/);
-    expect(line).toMatch(/Take off anything that does not apply/);
+    expect(line).toMatch(/^\d+ ticked/);
+    expect(line).toMatch(/Untick any that don’t apply\.$/);
   });
 
   it('says none is ticked rather than pretending, where nothing was decisive', () => {
     const matches = [{ templateId: 'x', score: 1.2, verdict: 'offer' as const, because: ['panel'] }];
-    expect(matchSummary(matches, 'annual service of the panel')).toMatch(/None of them is a clear match/);
+    expect(matchSummary(matches, 'annual service of the panel')).toBe('1 might fit. Tick the ones that apply.');
   });
 });
 
@@ -125,7 +125,7 @@ describe('the record the builder creates', () => {
   });
 
   it('links the Simpro job, so the signed PDF has somewhere to go', () => {
-    expect(draft().jobExternalId).toBe('42823');
+    expect(draft().jobExternalId).toBe('9001');
     expect(draft().jobTitle).toBe('Detection annual');
   });
 
@@ -153,7 +153,7 @@ describe('the record the builder creates', () => {
 describe('what the statement is called six weeks later', () => {
   it('leads with the job number, which is what somebody searching has in their hand', () => {
     const title = builderTitle(JOB, SWMS_TEMPLATES.filter((t) => t.id === 'live-testing'));
-    expect(title).toMatch(/^Job 42823 — /);
+    expect(title).toMatch(/^Job 9001 · /);
   });
 
   it('still names the work with no job number', () => {
@@ -173,7 +173,7 @@ describe('what stops it being started', () => {
      * this work happens before anything is booked.
      */
     expect(builderNotReady({ job: null, templateIds: ['live-testing'] }))
-      .toMatch(/Pick the job this is for, or the site/);
+      .toMatch(/Pick the job, or the site/);
   });
 
   it('is satisfied by a site with no job', () => {
@@ -201,14 +201,14 @@ describe('a statement for a site with no job', () => {
     const draft = builderDraft({
       job: null,
       siteId: 's1',
-      siteName: 'Kingaroy Fire Station',
+      siteName: 'Main St Depot',
       works: 'Core drilling the slab',
       templateIds: ['live-testing'],
       templates: SWMS_TEMPLATES,
       date: '2026-10-02',
     });
     expect(draft.siteId).toBe('s1');
-    expect(draft.siteName).toBe('Kingaroy Fire Station');
+    expect(draft.siteName).toBe('Main St Depot');
     expect(draft.jobExternalId).toBeUndefined();
   });
 
@@ -230,13 +230,55 @@ describe('a statement for a site with no job', () => {
     const draft = builderDraft({
       job: { ...JOB, siteId: undefined, siteName: '' },
       siteId: 's1',
-      siteName: 'Kingaroy Fire Station',
+      siteName: 'Main St Depot',
       works: '',
       templateIds: ['live-testing'],
       templates: SWMS_TEMPLATES,
       date: '2026-10-02',
     });
     expect(draft.siteId).toBe('s1');
-    expect(draft.siteName).toBe('Kingaroy Fire Station');
+    expect(draft.siteName).toBe('Main St Depot');
+  });
+});
+
+describe('opening the builder from a job', () => {
+  it('starts from the job number and site the job screen passes', () => {
+    const start = swmsStartFromRoute({ job: '9001', siteId: 's1', site: 'Fictional Tower' });
+    expect(start.job).toEqual({ externalId: '9001', siteId: 's1', siteName: 'Fictional Tower' });
+    expect(start.site).toBeNull();
+  });
+
+  it('treats an empty or repeated parameter the way the router hands them back', () => {
+    expect(swmsStartFromRoute({ job: ['9001', '9002'], siteId: '', site: '' }).job)
+      .toEqual({ externalId: '9001', siteId: undefined, siteName: undefined });
+  });
+
+  it('starts from the site alone when the job has no Simpro number', () => {
+    const start = swmsStartFromRoute({ job: '', siteId: 's1', site: 'Fictional Tower' });
+    expect(start.job).toBeNull();
+    expect(start.site).toEqual({ id: 's1', name: 'Fictional Tower' });
+    expect(builderNotReady({ job: start.job, siteId: start.site?.id, templateIds: ['heights'] })).toBeNull();
+  });
+
+  it('asks as usual when nothing came in on the route', () => {
+    expect(swmsStartFromRoute({})).toEqual({ job: null, site: null });
+  });
+
+  it('fills the rest in from the job row, keeping the site the job screen resolved', () => {
+    const picked = swmsStartFromRoute({ job: '9001', siteId: 's1', site: '' }).job!;
+    const full = withJobRow(picked, {
+      siteName: 'Fictional Tower', siteId: undefined, customerName: 'Example Pty Ltd',
+      title: 'Detection annual', descriptionText: 'Replace three heads on Main St level 2',
+    });
+    expect(full).toEqual({
+      externalId: '9001', siteId: 's1', siteName: 'Fictional Tower', customerName: 'Example Pty Ltd',
+      title: 'Detection annual', descriptionText: 'Replace three heads on Main St level 2',
+    });
+    expect(worksFromJob(full)).toContain('Replace three heads');
+  });
+
+  it('keeps what was picked when the phone has no row for the job', () => {
+    const picked: BuilderJob = { externalId: '9001', siteName: 'Fictional Tower' };
+    expect(withJobRow(picked, undefined)).toBe(picked);
   });
 });

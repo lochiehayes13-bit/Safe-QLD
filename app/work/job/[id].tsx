@@ -884,6 +884,16 @@ export default function JobScreen() {
         </Rowed>
 
         <Button
+          title="SWMS"
+          variant="secondary"
+          icon={<MaterialCommunityIcons name="shield-check-outline" size={18} color={t.color.text} />}
+          onPress={() => router.push({
+            pathname: '/swms/new',
+            params: { job: job.externalId ?? '', siteId: resolvedSiteId ?? '', site: job.siteName ?? '' },
+          })}
+        />
+
+        <Button
           title="Ask the office"
           variant="secondary"
           icon={<MaterialCommunityIcons name="account-question-outline" size={18} color={t.color.text} />}

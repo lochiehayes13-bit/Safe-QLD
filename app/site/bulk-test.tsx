@@ -222,7 +222,7 @@ export default function BulkTestScreen() {
         ? await ImagePicker.requestCameraPermissionsAsync()
         : await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        showAlert('Permission needed', 'Safe QLD needs access to attach a photo to this defect.');
+        showAlert('Access needed', fromCamera ? 'Allow camera access in Settings.' : 'Allow photo access in Settings.');
         return;
       }
       const result = fromCamera
@@ -243,7 +243,7 @@ export default function BulkTestScreen() {
       });
       draft.setValue((p) => ({ ...p, fail: { ...p.fail, photos: [...p.fail.photos, kept.path] } }));
     } catch (e) {
-      showAlert('Could not keep that photo', describeActionFailure(e, 'save the photo to this device'));
+      showAlert('Photo not saved', describeActionFailure(e, 'save the photo to this device'));
     }
   };
 
@@ -437,9 +437,11 @@ export default function BulkTestScreen() {
       draft.setValue((p) => ({ ...p, batch: withoutWritten(p.batch, written) }));
       const remaining = decidedCount(left);
       showAlert(
-        'Could not record',
-        `${describeActionFailure(e, 'record these results')} ${written.length} of ${attempted} result${attempted === 1 ? '' : 's'} `
-        + `written; ${remaining} ${remaining === 1 ? 'is' : 'are'} still here to record again.`,
+        'Not recorded',
+        // Nothing left means everything was written and something after it
+        // threw, so there is nothing to record again.
+        `${describeActionFailure(e, 'record these results')}\n\n${written.length} of ${attempted} saved.`
+        + (remaining ? ` Record again for the other ${remaining}.` : ''),
       );
     } finally {
       setSaving(false);
@@ -451,7 +453,7 @@ export default function BulkTestScreen() {
    * site this screen would list nobody's assets and record nothing, so it
    * says which site it needs instead.
    */
-  if (!siteId) return <ContextGate kind="site" what="a site's assets tested in bulk" title="Bulk test" backTo="/site/bulk-test" />;
+  if (!siteId) return <ContextGate kind="site" what="its assets to test" title="Bulk test" backTo="/site/bulk-test" />;
 
   if (outcome) {
     const refusals = Object.entries(outcome.refused) as [AssetTestRefusal, number][];
@@ -481,34 +483,26 @@ export default function BulkTestScreen() {
               */}
             {defectNotes && (defectNotes.queued || defectNotes.already || defectNotes.failed || defectNotes.noJob) ? (
               <View style={{ marginTop: t.space(3), gap: 6 }}>
-                <Label>Defects to the office</Label>
+                <Label>Defect notes</Label>
                 {defectNotes.queued ? (
                   <Txt size="sm" tone="pass" style={{ lineHeight: 19 }}>
-                    {defectNotes.queued} defect note{defectNotes.queued === 1 ? '' : 's'} queued on job{' '}
-                    {defectNotes.jobId} — what failed, where it is, and what its class requires. They go up with the
-                    next send.
+                    {defectNotes.queued} queued for job {defectNotes.jobId}.{' '}
+                    {defectNotes.queued === 1 ? 'It goes' : 'They go'} with the next send.
                   </Txt>
                 ) : null}
                 {defectNotes.already ? (
                   <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-                    {defectNotes.already} {defectNotes.already === 1 ? 'was' : 'were'} already on job{' '}
-                    {defectNotes.jobId} word for word, so {defectNotes.already === 1 ? 'it was' : 'they were'} not
-                    sent twice.
+                    {defectNotes.already} already queued or on job {defectNotes.jobId}.
                   </Txt>
                 ) : null}
                 {defectNotes.failed ? (
                   <Txt size="sm" tone="fail" style={{ lineHeight: 19 }}>
-                    {defectNotes.failed} defect note{defectNotes.failed === 1 ? '' : 's'} could not be queued, so the
-                    office has not been told about {defectNotes.failed === 1 ? 'it' : 'them'}. The defects themselves
-                    are recorded. {defectNotes.failure}
+                    {defectNotes.failed} not queued. The defects are saved. {defectNotes.failure}
                   </Txt>
                 ) : null}
                 {defectNotes.noJob ? (
                   <Txt size="sm" tone="warn" style={{ lineHeight: 19 }}>
-                    {defectNotes.noJob} defect{defectNotes.noJob === 1 ? '' : 's'} raised with no job picked, so the
-                    office has not been told about {defectNotes.noJob === 1 ? 'it' : 'them'}.{' '}
-                    {defectNotes.noJob === 1 ? 'It is' : 'They are'} on this site&apos;s defect list. Ring the office,
-                    or pick the job before you record the next lot.
+                    {defectNotes.noJob} not sent: no job picked. Ring the office, or set the job on each defect.
                   </Txt>
                 ) : null}
               </View>
@@ -516,7 +510,7 @@ export default function BulkTestScreen() {
           </Card>
           <Rowed gap={2}>
             <Button
-              title="Test more here"
+              title="Test more"
               variant="secondary"
               style={{ flex: 1 }}
               onPress={() => { setOutcome(null); setDefectNotes(null); void load(); }}
@@ -535,7 +529,7 @@ export default function BulkTestScreen() {
           <View style={{ flex: 1 }}>
             <Txt weight="700">{site?.name ?? 'Site'}</Txt>
             <Txt size="sm" tone="muted">
-              {loading ? 'Reading the register' : `${assets.length} asset${assets.length === 1 ? '' : 's'} · ${decided} decided`}
+              {loading ? 'Loading assets' : `${assets.length} asset${assets.length === 1 ? '' : 's'} · ${decided} done`}
             </Txt>
           </View>
           <Chip
@@ -546,9 +540,10 @@ export default function BulkTestScreen() {
         <Txt size="xs" tone="faint" style={{ marginTop: 4 }}>passed · failed · not tested</Txt>
       </Card>
 
-      {failed ? <Banner tone="fail" title="The register could not be read" body={failed} /> : null}
+      {failed ? <Banner tone="fail" title="Assets not loaded" body={failed} /> : null}
+      {failed ? <Button title="Try again" variant="secondary" onPress={() => { void load(); }} /> : null}
       {draft.recovered ? (
-        <Banner tone="info" title="Picked up where you left off" body="Verdicts from your last session were still here." />
+        <Banner tone="info" title="Draft restored" body="Your last results are still here." />
       ) : null}
 
       {/*
@@ -561,21 +556,17 @@ export default function BulkTestScreen() {
         */}
       {jobsRead || jobsFailed ? (
         <Card>
-          <Label>Note the office's job</Label>
+          <Label>Job for the notes</Label>
           {jobsFailed ? (
             <Txt size="sm" tone="muted" style={{ marginTop: 4 }}>{jobsFailed}</Txt>
           ) : !jobs.length ? (
             <Txt size="sm" tone="warn" style={{ marginTop: 4, lineHeight: 19 }}>
-              The office has no open job at this site, so there is nowhere in Simpro to put this walk or the defects it
-              raises. Everything still records on the phone — ring the failures through, or ask the office to raise a
-              job here and report them from the defect list afterwards.
+              No open job here. Notes and defects stay on the phone. Ring failures through.
             </Txt>
           ) : (
             <>
               <Txt size="xs" tone="faint" style={{ marginTop: 4, lineHeight: 17 }}>
-                On the job you pick: one note listing what passed, failed and was not tested, and one note for each
-                defect raised — the class it falls under, what that class requires, and the state you left it in. Pick
-                no job and nothing reaches the office.
+                The job gets a summary and a note per defect.
               </Txt>
               <Rowed gap={2} wrap style={{ marginTop: t.space(2) }}>
                 {jobs.map((j) => (
@@ -586,7 +577,7 @@ export default function BulkTestScreen() {
                     onPress={() => draft.setValue((p) => ({ ...p, jobId: p.jobId === j.externalId ? null : j.externalId! }))}
                   />
                 ))}
-                <Chip label="No note" selected={d.jobId === null} onPress={() => draft.setValue((p) => ({ ...p, jobId: null }))} />
+                <Chip label="No job" selected={d.jobId === null} onPress={() => draft.setValue((p) => ({ ...p, jobId: null }))} />
               </Rowed>
             </>
           )}
@@ -609,7 +600,7 @@ export default function BulkTestScreen() {
           ))}
         </ScrollView>
       ) : null}
-      <SearchBox value={search} onChange={setSearch} placeholder="Name, level, room, serial or type" />
+      <SearchBox value={search} onChange={setSearch} placeholder="Search assets" />
 
       <Rowed gap={2} wrap>
         <Txt size="sm" tone="muted" style={{ flex: 1 }}>{d.selection.length} selected</Txt>
@@ -641,12 +632,12 @@ export default function BulkTestScreen() {
           ListHeaderComponent={header}
           ListEmptyComponent={
             loading ? null : assets.length ? (
-              <Txt tone="faint" size="sm" style={{ textAlign: 'center', marginTop: t.space(4) }}>Nothing matches.</Txt>
+              <Txt tone="faint" size="sm" style={{ textAlign: 'center', marginTop: t.space(4) }}>No matches.</Txt>
             ) : failed ? null : (
               <EmptyState
           icon="clipboard-list-outline"
-                title="No assets on this site's register"
-                body="Add them, import a device list, or sync from Simpro first. There is nothing to test until the register has something on it."
+                title="No assets here"
+                body="Add assets or sync from Simpro first."
               />
             )
           }
@@ -686,8 +677,8 @@ export default function BulkTestScreen() {
           </Rowed>
           <ScrollView contentContainerStyle={{ padding: t.space(4), gap: t.space(3), paddingBottom: t.space(12) }} keyboardShouldPersistTaps="handled">
             <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-              {sheetType ? `Codes offered for ${assetTypeById(sheetType)?.label ?? 'this type'}.` : 'Nothing selected.'}
-              {' '}The same observation, code, wording and photos go on every asset selected; each still gets its own defect.
+              {sheetType ? `Codes for ${assetTypeById(sheetType)?.label ?? 'this type'}.` : 'Nothing selected.'}
+              {' '}Each asset gets its own defect.
             </Txt>
             <Field
               label="What you found"
@@ -695,7 +686,7 @@ export default function BulkTestScreen() {
               onChangeText={(v) => setFail({ observation: v })}
               multiline
               placeholder="e.g. hose perished at the nozzle, pin seal broken"
-              hint="A few words is enough. The microphone on the keyboard will take them."
+              hint="A few words is enough. The keyboard mic works."
             />
 
             <Label>Library code</Label>
@@ -720,11 +711,11 @@ export default function BulkTestScreen() {
                 ))}
               </View>
             ) : (
-              <Txt size="sm" tone="faint">No library code covers this type. The observation goes on the record as written.</Txt>
+              <Txt size="sm" tone="faint">No codes for this type. Your words are the record.</Txt>
             )}
 
             <Field
-              label="Wording on the record"
+              label="Report wording"
               value={d.fail.wording ?? ''}
               onChangeText={(v) => setFail({ wording: v })}
               multiline
@@ -739,7 +730,7 @@ export default function BulkTestScreen() {
               ))}
             </Rowed>
             <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-              Critical goes on the record as critical; the rest as non-critical, the same as a routine run.
+              High, medium and low record as non-critical.
             </Txt>
 
             <Label>Photos</Label>
@@ -749,7 +740,7 @@ export default function BulkTestScreen() {
             </Rowed>
             {d.fail.photos.length ? (
               <Rowed gap={2}>
-                <Txt size="sm" tone="pass" style={{ flex: 1 }}>{d.fail.photos.length} photo{d.fail.photos.length === 1 ? '' : 's'} attached to each defect</Txt>
+                <Txt size="sm" tone="pass" style={{ flex: 1 }}>{d.fail.photos.length} photo{d.fail.photos.length === 1 ? '' : 's'} on each defect</Txt>
                 <Button title="Remove" variant="ghost" compact onPress={() => setFail({ photos: [] })} />
               </Rowed>
             ) : null}
@@ -767,12 +758,12 @@ export default function BulkTestScreen() {
       <Modal visible={sheet === 'not-tested'} animationType="slide" onRequestClose={() => setSheet(null)} presentationStyle="pageSheet">
         <View style={{ flex: 1, backgroundColor: t.color.bg }}>
           <Rowed gap={2} style={{ padding: t.space(4), paddingBottom: t.space(2) }}>
-            <Txt size="xl" weight="800" style={{ flex: 1 }}>Could not test {d.selection.length}</Txt>
+            <Txt size="xl" weight="800" style={{ flex: 1 }}>Not tested: {d.selection.length}</Txt>
             <Pressable onPress={() => setSheet(null)} hitSlop={10}><MaterialCommunityIcons name="close" size={26} color={t.color.textMuted} /></Pressable>
           </Rowed>
           <ScrollView contentContainerStyle={{ padding: t.space(4), gap: t.space(2) }}>
             <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-              Recorded as a coverage gap with the reason against each asset — never as a pass, never as a defect. The last-serviced date is left alone.
+              Saved with the reason. Not a pass or a defect.
             </Txt>
             {NOT_TESTED_REASONS.map((r) => (
               <Card key={r} onPress={() => apply({ kind: 'not-tested', reason: r })}>

@@ -1,13 +1,14 @@
-import { entrySendState, neverSendable } from '@/domain/clockSendState';
+import { cannotSend, entrySendState, waitingFor } from '@/domain/clockSendState';
 import type { ClockEntry } from '@/domain/clockOn';
 
 /**
  * What the clock says beside an entry.
  *
- * The rule worth pinning: hours with no cost centre, employee or activity on
- * them can never reach Simpro, because nothing fills those in later. The
- * screen used to say they would wait for the office; they say they can't be
- * sent instead.
+ * Two rules worth pinning. Hours with no employee or no job on them can
+ * never reach Simpro, so they say so. Hours with no cost centre or no
+ * Simpro activity id wait: a sync fills those in once the office has them,
+ * and the line says what they are waiting for, in the words the last match
+ * left on the entry.
  */
 
 const work = (over: Partial<ClockEntry> = {}): ClockEntry => ({
@@ -19,38 +20,50 @@ const work = (over: Partial<ClockEntry> = {}): ClockEntry => ({
 });
 
 describe('an entry that can never be sent', () => {
-  it('says so for a job with no cost centre, and does not promise it will wait', () => {
-    const e = work({ jobSectionExternalId: undefined, jobCostCenterExternalId: undefined, sendError: 'No cost centre on this job' });
-    const said = entrySendState(e, undefined);
-    expect(said.label).toBe("Can't send");
-    expect(said.words).toContain("can't be sent");
-    expect(said.words).toContain('cost centre');
-    expect(said.words).not.toMatch(/wait|yet|until/i);
-  });
-
   it('says so for an entry with no Simpro employee', () => {
     const said = entrySendState(work({ employeeExternalId: '' }), undefined);
     expect(said.label).toBe("Can't send");
     expect(said.words).toContain('employee');
+    expect(said.words).toContain('Tell the office');
   });
 
-  it('says so for an activity with no Simpro id', () => {
-    const e = work({ kind: 'travel', activityName: 'Travel', jobExternalId: undefined, jobSectionExternalId: undefined, jobCostCenterExternalId: undefined });
-    expect(neverSendable(e)).toContain('activity');
+  it('says so for hours with no job', () => {
+    const e = work({ jobExternalId: undefined, jobSectionExternalId: undefined, jobCostCenterExternalId: undefined });
+    expect(cannotSend(e)).toContain('No job');
     expect(entrySendState(e, undefined).label).toBe("Can't send");
   });
+});
 
-  it('warns while it is still running, so the person knows before clocking off', () => {
-    const e = work({ endedAt: undefined, jobCostCenterExternalId: undefined });
-    const said = entrySendState(e, undefined);
+describe('an entry waiting on a Simpro id', () => {
+  it('waits for a cost centre, in the words the last match left', () => {
+    const e = work({ jobSectionExternalId: undefined, jobCostCenterExternalId: undefined, sendError: 'Pick a cost centre for job 9001.' });
+    expect(cannotSend(e)).toBeUndefined();
+    expect(entrySendState(e, undefined)).toEqual({ label: 'Waiting', tone: 'warn', words: 'Pick a cost centre for job 9001.' });
+  });
+
+  it('names the gap where nothing has been matched yet', () => {
+    expect(waitingFor(work({ jobCostCenterExternalId: undefined }))).toBe('No cost centre on this job yet. Ask the office.');
+    const travel = work({ kind: 'travel', activityName: 'Travel', jobExternalId: undefined, jobSectionExternalId: undefined, jobCostCenterExternalId: undefined });
+    expect(waitingFor(travel)).toBe('Sends once Simpro activities sync.');
+    expect(entrySendState(travel, undefined).label).toBe('Waiting');
+  });
+
+  it('says so while it is still running, so the person knows before clocking off', () => {
+    const said = entrySendState(work({ endedAt: undefined, jobCostCenterExternalId: undefined }), undefined);
     expect(said.label).toBe('Running');
-    expect(said.words).toContain("can't be sent");
+    expect(said.words).toContain('cost centre');
+  });
+
+  it('never says it cannot be sent', () => {
+    const e = work({ jobSectionExternalId: undefined, jobCostCenterExternalId: undefined });
+    expect(entrySendState(e, undefined).words).not.toMatch(/can't be sent/i);
   });
 });
 
 describe('an entry that can be sent', () => {
   it('has nothing in the way', () => {
-    expect(neverSendable(work())).toBeUndefined();
+    expect(cannotSend(work())).toBeUndefined();
+    expect(waitingFor(work())).toBeUndefined();
     expect(entrySendState(work(), undefined)).toEqual({ label: 'To send', tone: 'muted' });
   });
 
@@ -64,7 +77,8 @@ describe('an entry that can be sent', () => {
   it('shows Sent once Simpro has it, and a break as a break', () => {
     expect(entrySendState(work({ sentAt: '2026-09-08T00:00:00.000Z' }), undefined).label).toBe('Sent');
     const brk = work({ kind: 'break', jobExternalId: undefined, jobSectionExternalId: undefined, jobCostCenterExternalId: undefined });
-    expect(neverSendable(brk)).toBeUndefined();
+    expect(cannotSend(brk)).toBeUndefined();
+    expect(waitingFor(brk)).toBeUndefined();
     expect(entrySendState(brk, undefined)).toEqual({ label: 'Break', tone: 'muted' });
   });
 

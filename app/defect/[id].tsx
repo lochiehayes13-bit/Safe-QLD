@@ -4,7 +4,9 @@ import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router
 import * as ImagePicker from 'expo-image-picker';
 import { deleteDefect, getDefect, getSite, reopenDefect, updateDefect } from '@/db/repo';
 import { attachmentsForDefect } from '@/domain/outboundWork';
-import { defectMove, describeDefectReport, type DefectReportNotice, type DefectReportOccasion } from '@/domain/defectReport';
+import {
+  defectMove, defectStatusLabel, describeDefectReport, type DefectReportNotice, type DefectReportOccasion,
+} from '@/domain/defectReport';
 import { photosWithSizes } from '@/simpro/attachmentFiles';
 import { queueJobAttachment } from '@/simpro/sync';
 import { listJobPage, queueDefectNote, type JobPick } from '@/db/opsRepo';
@@ -98,7 +100,7 @@ export default function DefectScreen() {
     if (!defect) return;
     setDefect({ ...defect, ...changes });
     void updateDefect(defect.id, changes).catch((e: unknown) => {
-      showAlert('Not saved', describeActionFailure(e, 'saving the defect'));
+      showAlert('Not saved', describeActionFailure(e, 'save the defect'));
       void load();
     });
   };
@@ -136,7 +138,7 @@ export default function DefectScreen() {
       }
       if (kept.length) patch({ photos: [...defect.photos, ...kept] });
     } catch (e) {
-      showAlert('Photo not added', describeActionFailure(e, 'adding the photo'));
+      showAlert('Photo not added', describeActionFailure(e, 'add the photo'));
     } finally {
       setBusy(false);
     }
@@ -144,9 +146,9 @@ export default function DefectScreen() {
 
   const removePhoto = (stored: string) => {
     if (!defect) return;
-    showAlert('Take this photo off the defect?', 'The file stays on the phone; the defect stops carrying it.', [
-      { text: 'Keep it' },
-      { text: 'Take it off', style: 'destructive', onPress: () => patch({ photos: defect.photos.filter((p) => p !== stored) }) },
+    showAlert('Remove this photo?', 'It stays in the phone’s storage.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: () => patch({ photos: defect.photos.filter((p) => p !== stored) }) },
     ]);
   };
 
@@ -169,7 +171,7 @@ export default function DefectScreen() {
         })));
       setPicking(mode);
     } catch (e) {
-      showAlert('Could not read the jobs', describeActionFailure(e, 'reading the jobs'));
+      showAlert('Jobs not loaded', describeActionFailure(e, 'load the jobs'));
     }
   };
 
@@ -197,15 +199,16 @@ export default function DefectScreen() {
       }
       const plural = (n: number) => `${n} photo${n === 1 ? '' : 's'}`;
       showAlert(
-        queued ? 'Photos queued for the office' : 'Nothing new to send',
+        queued ? (queued === 1 ? 'Photo queued' : 'Photos queued') : 'Nothing new to send',
         [
-          queued ? `${plural(queued)} queued for job ${job.externalId}. They go up with the next send.` : undefined,
-          duplicate ? `${plural(duplicate)} already queued or on the job, so not sent twice.` : undefined,
-          plan.missing ? `${plural(plan.missing)} could not be found on this phone and stay with the defect only.` : undefined,
+          queued ? `${plural(queued)} queued for job ${job.externalId}.` : undefined,
+          // A duplicate may still be pending here, not yet on the job.
+          duplicate ? `${plural(duplicate)} already queued or sent.` : undefined,
+          plan.missing ? `${plural(plan.missing)} not found on this phone.` : undefined,
         ].filter(Boolean).join('\n'),
       );
     } catch (e) {
-      showAlert('Not queued', describeActionFailure(e, 'queueing the photos'));
+      showAlert('Not queued', describeActionFailure(e, 'queue the photos'));
     } finally {
       setBusy(false);
     }
@@ -247,8 +250,8 @@ export default function DefectScreen() {
     } catch (e) {
       setReport({
         tone: 'warn',
-        title: 'The office has not been told',
-        body: describeActionFailure(e, 'queueing the note for the office'),
+        title: 'Office not told',
+        body: describeActionFailure(e, 'queue the note for the office'),
       });
     }
   };
@@ -296,7 +299,7 @@ export default function DefectScreen() {
           await updateDefect(d.id, next === 'rectified' ? { status: 'rectified', rectifiedAt: at } : { status: next });
         }
       } catch (e) {
-        showAlert('Not saved', describeActionFailure(e, 'saving the defect'));
+        showAlert('Not saved', describeActionFailure(e, 'save the defect'));
         void load();
         return;
       }
@@ -325,9 +328,8 @@ export default function DefectScreen() {
     setPicking(null);
     if (!job.externalId) {
       showAlert(
-        'That job is not in Simpro yet',
-        'This job only exists on this phone, so a note about the defect has nowhere to go. Pick one that has a '
-          + 'job number, or sync first and try again.',
+        'Job not in Simpro yet',
+        'Pick a job with a Simpro number, or sync and try again.',
       );
       return;
     }
@@ -339,7 +341,7 @@ export default function DefectScreen() {
       if (fresh) setDefect(fresh);
       await reportToOffice('job linked');
     } catch (e) {
-      showAlert('Not saved', describeActionFailure(e, 'setting the job on this defect'));
+      showAlert('Not saved', describeActionFailure(e, 'set the job on this defect'));
       void load();
     } finally {
       setBusy(false);
@@ -365,16 +367,15 @@ export default function DefectScreen() {
       'Delete this defect?',
       [
         defect.status === 'rectified'
-          ? 'It is already rectified, so deleting it removes the record that it was ever found or fixed.'
-          : 'Only do this for one raised in error. A defect that was real and is not fixed should be left open.',
+          ? 'Removes the record that it was found and fixed.'
+          : 'Only for a defect raised in error. Real faults stay open until fixed.',
         // Only where there is actually a note out there to be left behind.
         defect.jobId?.trim()
-          ? `Anything already sent to job ${defect.jobId.trim()} stays on that job. Deleting it here does not take `
-            + 'it back off, so ring the office if they need to know it was raised in error.'
+          ? `Notes already on job ${defect.jobId.trim()} stay there. Ring the office if it was raised in error.`
           : undefined,
       ].filter(Boolean).join('\n\n'),
       [
-        { text: 'Keep it' },
+        { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
@@ -384,7 +385,7 @@ export default function DefectScreen() {
                 await deleteDefect(defect.id);
                 router.back();
               } catch (e) {
-                showAlert('Not deleted', describeActionFailure(e, 'deleting the defect'));
+                showAlert('Not deleted', describeActionFailure(e, 'delete the defect'));
               }
             })();
           },
@@ -418,8 +419,8 @@ export default function DefectScreen() {
         heading={heading}
         suggested={jobs}
         suggestedLabel="Jobs at this site"
-        emptyWhenNoneSuggested="No job on this phone is filed under this site. Search for it by number, or sync."
-        emptyWhenNothingOnDevice="No jobs on this phone yet. Connect Simpro in Settings and sync, and every job on the books is here."
+        emptyWhenNoneSuggested="No jobs for this site. Search by job number."
+        emptyWhenNothingOnDevice="No jobs yet. Connect Simpro in Settings and sync."
         busy={busy}
         onPick={onPick}
         onClose={() => setPicking(null)}
@@ -434,7 +435,7 @@ export default function DefectScreen() {
         <RecordGate
           missing={missing}
           what="defect"
-          why="It may have been deleted, or the link came from another device."
+          why="It may have been deleted, or raised on another phone."
           failed={failed}
           onRetry={() => { void load(); }}
         />
@@ -459,8 +460,8 @@ export default function DefectScreen() {
             </View>
             <View style={{ alignItems: 'flex-end', gap: t.space(1) }}>
               <StatusPill
-                label={defect.status === 'rectified' ? 'Rectified' : defect.status === 'quoted' ? 'Quoted' : 'Open'}
-                tone={defect.status === 'rectified' ? 'pass' : defect.status === 'quoted' ? 'info' : 'warn'}
+                label={defectStatusLabel(defect.status)}
+                tone={defect.status === 'rectified' || defect.status === 'closed' ? 'pass' : defect.status === 'quoted' ? 'info' : 'warn'}
               />
               <Chip label={SEVERITY_LABEL[grade]} tone={critical ? 'fail' : grade === 'high' ? 'warn' : 'default'} />
             </View>
@@ -470,19 +471,19 @@ export default function DefectScreen() {
         {critical && !defect.noticeIssuedAt ? (
           <Banner
             tone="fail"
-            title="The occupier is owed a written notice"
-            body="Queensland gives them one within 24 hours of the maintenance. Open the notice, fill it and hand it over."
+            title="Occupier notice due"
+            body="Give the occupier a written notice within 24 hours."
           />
         ) : null}
         {critical ? (
           <Button
-            title={defect.noticeIssuedAt ? 'The critical defect notice' : 'Write the critical defect notice'}
+            title={defect.noticeIssuedAt ? 'Occupier notice' : 'Write occupier notice'}
             variant={defect.noticeIssuedAt ? 'secondary' : 'primary'}
             onPress={() => router.push({ pathname: '/work/notice/[id]', params: { id: defect.id } })}
           />
         ) : null}
 
-        <H2>What is wrong</H2>
+        <H2>What’s wrong</H2>
         <Field
           label="Description"
           value={defect.description}
@@ -495,15 +496,12 @@ export default function DefectScreen() {
           value={defect.notes ?? ''}
           onChangeText={(v) => patch({ notes: v })}
           multiline
-          hint="Anything the next person needs that is not the fault itself"
+          hint="Access, parts, who to ask"
         />
 
         <Card>
-          <Label>Reword it from the library</Label>
-          <Txt size="sm" tone="muted" style={{ marginTop: t.space(1), lineHeight: 19 }}>
-            The library’s wording is what the customer’s report prints and what the office quotes from.
-          </Txt>
-          <SearchBox value={wordingQuery} onChange={setWordingQuery} placeholder="battery, obstruction, tamper" />
+          <Label>Library wording</Label>
+          <SearchBox value={wordingQuery} onChange={setWordingQuery} placeholder="Search defect codes" />
           {wordingOptions.map((c) => (
             <Card key={c.code} onPress={() => { patch({ description: c.reportWording, defectCode: c.code }); setWordingQuery(''); }}>
               <Txt size="sm" weight="600">{c.code} · {SEVERITY_LABEL[c.severity]}</Txt>
@@ -512,20 +510,19 @@ export default function DefectScreen() {
           ))}
         </Card>
 
-        <H2>How bad</H2>
+        <H2>Severity</H2>
         <Rowed gap={2} wrap>
           {GRADES.map((g) => (
             <Chip key={g} label={SEVERITY_LABEL[g]} selected={grade === g} onPress={() => setGrade(g)} />
           ))}
         </Rowed>
         <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-          Critical is the statutory word: it starts the occupier’s notice and the 24 hour clock. The other three are
-          how the work is prioritised, and the worst of them sorts first on every list.
+          Critical starts the occupier notice and its 24 hour clock.
         </Txt>
 
-        <H2>Photographs</H2>
+        <H2>Photos</H2>
         {defect.photos.length === 0 ? (
-          <Txt size="sm" tone="muted">None on this defect.</Txt>
+          <Txt size="sm" tone="muted">No photos yet.</Txt>
         ) : (
           <Rowed gap={2} wrap>
             {defect.photos.map((p) => (
@@ -540,54 +537,47 @@ export default function DefectScreen() {
           </Rowed>
         )}
         <Rowed gap={2}>
-          <Button title="Take one" style={{ flex: 1 }} variant="secondary" loading={busy} onPress={() => { void addPhoto(true); }} />
-          <Button title="From the roll" style={{ flex: 1 }} variant="secondary" loading={busy} onPress={() => { void addPhoto(false); }} />
+          <Button title="Take photo" style={{ flex: 1 }} variant="secondary" loading={busy} onPress={() => { void addPhoto(true); }} />
+          <Button title="From library" style={{ flex: 1 }} variant="secondary" loading={busy} onPress={() => { void addPhoto(false); }} />
         </Rowed>
 
         <Card>
-          <Label>Photos onto a Simpro job</Label>
-          <Txt size="sm" tone="muted" style={{ marginTop: t.space(1), lineHeight: 19 }}>
-            Any job, any day — not just the one that was open when it was raised.
-          </Txt>
+          <Label>Send photos to a job</Label>
           <Button
-            title="Pick the job"
+            title="Pick job"
             variant="secondary"
             disabled={!defect.photos.length}
             onPress={() => { void openJobPicker('photos'); }}
             style={{ marginTop: t.space(2) }}
           />
           {!defect.photos.length ? (
-            <Txt size="sm" tone="muted" style={{ marginTop: t.space(1) }}>Nothing to send yet.</Txt>
+            <Txt size="sm" tone="muted" style={{ marginTop: t.space(1) }}>Add a photo first.</Txt>
           ) : null}
-          {picking === 'photos' ? jobPicker((j) => { void attachPhotos(j); }, 'Which job do the photos go on?') : null}
+          {picking === 'photos' ? jobPicker((j) => { void attachPhotos(j); }, 'Job for the photos') : null}
         </Card>
 
-        <H2>The job it belongs to</H2>
+        <H2>Job</H2>
         <Card>
-          <Label>Where the office reads about this defect</Label>
           {defect.jobId?.trim() ? (
-            <Txt size="sm" style={{ marginTop: t.space(1), lineHeight: 19 }}>
-              Job {defect.jobId.trim()}. Every change recorded here goes onto that job as a note, and the office
-              reads it there.
+            <Txt size="sm" style={{ lineHeight: 19 }}>
+              Job {defect.jobId.trim()}. Status changes go to it as notes.
             </Txt>
           ) : (
-            <Txt size="sm" tone="muted" style={{ marginTop: t.space(1), lineHeight: 19 }}>
-              No job yet. The office works in jobs rather than sites, so nothing about this defect can reach them
-              until one is set — a defect raised before the app started recording the job always looks like this.
-              Set it and the whole defect goes up as it now stands.
+            <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
+              No job set. The office isn’t told until one is.
             </Txt>
           )}
           <Button
-            title={defect.jobId?.trim() ? 'Change the job' : 'Set the job'}
+            title={defect.jobId?.trim() ? 'Change job' : 'Set job'}
             variant={defect.jobId?.trim() ? 'ghost' : 'primary'}
             loading={busy}
             onPress={() => { void openJobPicker('job'); }}
             style={{ marginTop: t.space(2) }}
           />
-          {picking === 'job' ? jobPicker((j) => { void linkJob(j); }, 'Which job is this defect under?') : null}
+          {picking === 'job' ? jobPicker((j) => { void linkJob(j); }, 'Job for this defect') : null}
         </Card>
 
-        <H2>Where it stands</H2>
+        <H2>Status</H2>
         <Rowed gap={2} wrap>
           <Chip label="Open" selected={defect.status === 'open'} onPress={() => moveStatus('open')} />
           <Chip label="Quoted" selected={defect.status === 'quoted'} onPress={() => moveStatus('quoted')} />
@@ -601,7 +591,7 @@ export default function DefectScreen() {
         {report ? <Banner tone={report.tone} title={report.title} body={report.body} /> : null}
 
         <Divider />
-        <Button title="Delete this defect" variant="ghost" onPress={remove} />
+        <Button title="Delete defect" variant="ghost" onPress={remove} />
       </Screen>
     </>
   );

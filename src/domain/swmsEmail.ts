@@ -1,4 +1,4 @@
-import { RISK_LABEL, type MergedSwms, type SwmsRecord } from './swms';
+import { AWAITING_APPROVAL, RISK_LABEL, type MergedSwms, type SwmsRecord } from './swms';
 
 /**
  * The safe work method statement, in the office's inbox.
@@ -128,7 +128,7 @@ export function swmsBody(
 
   if (merged.highRisk) {
     lines.push('HIGH-RISK CONSTRUCTION WORK');
-    for (const h of merged.hrcw) lines.push(`    ${h.clause} — ${h.text}`);
+    for (const h of merged.hrcw) lines.push(`    ${h.clause}: ${h.text}`);
     lines.push('');
   }
 
@@ -136,7 +136,7 @@ export function swmsBody(
     lines.push(`Worst risk after controls  ${RISK_LABEL[merged.residualRisk]}`);
   }
   if (record.addedHazards.length) {
-    lines.push(`Hazards the crew added on site  ${record.addedHazards.length}`);
+    lines.push(`Hazards added on site  ${record.addedHazards.length}`);
     for (const h of record.addedHazards) {
       const risk = h.risk ? ` (${RISK_LABEL[h.risk]})` : '';
       lines.push(`    ${h.hazard.trim()}${risk}`);
@@ -151,7 +151,7 @@ export function swmsBody(
   } else {
     // The whole reason the subject shouts DRAFT. Repeated here because the
     // body is what gets forwarded.
-    lines.push('NOT SIGNED. This is a draft and nobody has accepted it.');
+    lines.push('NOT SIGNED. Draft only.');
     const unread = merged.steps.filter((s) => !record.ticked.includes(s.key)).length;
     if (unread) lines.push(`    ${unread} of ${merged.steps.length} steps have not been read.`);
     if (!who.length) lines.push('    No worker has signed it.');
@@ -159,22 +159,15 @@ export function swmsBody(
 
   if (merged.notCleared.length) {
     lines.push('');
-    lines.push('Statements no reviewer has cleared for signature:');
-    for (const n of merged.notCleared) lines.push(`    ${n.title} — ${n.reason}`);
-    // Said once, for the office reading this rather than the crew: the two
-    // reasons a statement is uncleared need different things done about them.
-    if (merged.notCleared.every((n) => n.correctedAgainst)) {
-      lines.push('    All of these have been corrected against every finding the last read raised.');
-      lines.push('    What they are waiting on is a cold read by somebody who did not write the correction.');
-    }
+    lines.push(`${AWAITING_APPROVAL}:`);
+    for (const n of merged.notCleared) lines.push(`    ${n.title}`);
   }
 
   lines.push('');
   if (options.attached === false) {
     // Never silently. A body that reads as complete, with no PDF on it, is how
     // a statement gets filed as received when nothing was received.
-    lines.push('The PDF could not be attached from this device. The full statement is on the phone —');
-    lines.push('open it in the app and use Share to send it.');
+    lines.push('The PDF could not be attached. Open the statement on the phone and tap Share PDF.');
   } else {
     lines.push('The full statement is attached as a PDF.');
   }
@@ -193,10 +186,10 @@ export function swmsBody(
  */
 export function swmsNotReady(record: SwmsRecord, merged: MergedSwms): string | null {
   if (!merged.templates.length) {
-    return 'No statements have been chosen yet, so there is nothing to send.';
+    return 'No statement picked. Nothing to send yet.';
   }
   if (!record.jobExternalId?.trim() && !record.siteName?.trim()) {
-    return 'This statement has no job and no site on it, so the office cannot file it against anything.';
+    return 'No job and no site on it. Add one so the office can file it.';
   }
   return null;
 }

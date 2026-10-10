@@ -190,7 +190,7 @@ export const MODULES: AppModule[] = [
 
   // -- Forms and records ---------------------------------------------------
   { href: '/swms', label: 'SWMS and JSEA', icon: 'clipboard-check-outline', group: 'Forms and records',
-    blurb: 'Safe work method statements, signed on the phone.',
+    blurb: 'Brief the crew, then sign once the company approves it.',
     keywords: ['swms', 'jsea', 'jsa', 'safe work method', 'safety', 'hazard', 'risk assessment', 'permit'] },
   { href: '/work/reports', label: 'Test sheets', icon: 'file-document-outline', group: 'Forms and records',
     blurb: 'Test sheets on this phone.',
@@ -198,7 +198,7 @@ export const MODULES: AppModule[] = [
   { href: '/occupier', label: 'Occupier statement', icon: 'file-certificate-outline', group: 'Forms and records',
     blurb: 'The annual statement, checked against the defects.',
     keywords: ['MP 6.1', 'annual', 'statement'] },
-  { href: '/site/form72', label: 'Form 72', icon: 'clipboard-check-outline', group: 'Forms and records',
+  { href: '/form72', label: 'Form 72', icon: 'file-document-check-outline', group: 'Forms and records',
     blurb: 'Hydrant and sprinkler Form 72. Part A fills from the job.',
     keywords: ['hydrant', 'sprinkler', 'statutory', 'periodic', 'MP 6.1'] },
   { href: '/work/baselines', label: 'Baseline data', icon: 'database-outline', group: 'Forms and records',
@@ -295,12 +295,23 @@ const SUPERSEDED_DEFAULTS: readonly (readonly string[])[] = [
   SHORT_GRID_DEFAULT_SHORTCUTS,
 ];
 
+/**
+ * Tiles whose route moved, old href to new.
+ *
+ * A saved home screen holds the old href, and resolveShortcuts drops anything
+ * it does not know, so without this the tile would quietly disappear from
+ * every phone that has ever saved a setting.
+ */
+const MOVED_SHORTCUTS: Readonly<Record<string, string>> = {
+  '/site/form72': '/form72',
+};
+
 export function migrateShortcuts(saved: readonly string[] | undefined): string[] {
   if (!saved) return [...DEFAULT_SHORTCUTS];
   const untouched = SUPERSEDED_DEFAULTS.some(
     (was) => saved.length === was.length && saved.every((h, i) => h === was[i]),
   );
-  return untouched ? [...DEFAULT_SHORTCUTS] : [...saved];
+  return untouched ? [...DEFAULT_SHORTCUTS] : saved.map((h) => MOVED_SHORTCUTS[h] ?? h);
 }
 
 const BY_HREF = new Map(MODULES.map((m) => [m.href, m]));

@@ -69,12 +69,12 @@ export function decideAssetTest(test: AssetTestToSend, writingEnabled: boolean):
 export function explainRefusal(reason: AssetTestRefusal): string {
   switch (reason) {
     case 'writing-disabled':
-      return 'Writing results back to Simpro is switched off. The result is saved here and is in the job note.';
+      return 'Sending results to Simpro is off. Saved here and in the job note.';
     case 'no-external-id':
-      return 'This asset was not created from Simpro, so there is no record there to update.';
+      return 'Not a Simpro asset, so there is no record there to update.';
     case 'no-service-level':
-      return 'No service frequency is recorded against this asset, and Simpro files a result against one.';
+      return 'No service level on this asset in Simpro, so it can\'t take a result.';
     case 'result-not-expressible':
-      return 'Simpro records only a pass or a fail. This result and its reason stay in the job note, in words.';
+      return 'Simpro takes pass or fail only. The full result is in the job note.';
   }
 }

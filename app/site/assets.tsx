@@ -7,9 +7,10 @@ import { getSite } from '@/db/repo';
 import { SYSTEM_LABELS, assetTypeById, type SystemKind } from '@/seed/assetTypes';
 import type { Site } from '@/domain/types';
 import { useTheme } from '@/theme';
-import { Button, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
+import { Banner, Button, Card, Chip, EmptyState, Rowed, Screen, Txt } from '@/components/ui';
 import { ContextGate } from '@/components/ContextGate';
 import { contextId } from '@/domain/screenContext';
+import { describeLoadFailure } from '@/domain/loadFailure';
 
 /** The site's asset register, grouped by system. */
 export default function SiteAssetsScreen() {
@@ -23,6 +24,9 @@ export default function SiteAssetsScreen() {
   const [system, setSystem] = useState<SystemKind>();
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
+  // "No assets recorded" is a statement about the register, so a read that
+  // threw says so instead of making it.
+  const [failed, setFailed] = useState<string | null>(null);
 
   useEffect(() => {
     const h = setTimeout(() => setDebounced(search), 200);
@@ -31,14 +35,20 @@ export default function SiteAssetsScreen() {
 
   const load = useCallback(async () => {
     if (!siteId) return;
-    const [s, a, c] = await Promise.all([
-      getSite(siteId),
-      queryAssets({ siteId, system, search: debounced, limit: 2000 }),
-      assetCountsBySystem(siteId),
-    ]);
-    setSite(s);
-    setAssets(a);
-    setCounts(c);
+    setFailed(null);
+    try {
+      const [s, a, c] = await Promise.all([
+        getSite(siteId),
+        queryAssets({ siteId, system, search: debounced, limit: 2000 }),
+        assetCountsBySystem(siteId),
+      ]);
+      setSite(s);
+      setAssets(a);
+      setCounts(c);
+    } catch (e) {
+      setAssets([]);
+      setFailed(describeLoadFailure(e, "this site's assets"));
+    }
   }, [siteId, system, debounced]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
@@ -48,7 +58,7 @@ export default function SiteAssetsScreen() {
   // Opened from search or a stale link there is no site, and the screen used
   // to answer "No assets recorded" — a statement about a building nobody
   // named, and one a technician believes.
-  if (!siteId) return <ContextGate kind="site" what="an asset register" title="Assets" backTo="/site/assets" />;
+  if (!siteId) return <ContextGate kind="site" what="its assets" title="Assets" backTo="/site/assets" />;
 
   return (
     <>
@@ -67,7 +77,7 @@ export default function SiteAssetsScreen() {
             <TextInput
               value={search}
               onChangeText={setSearch}
-              placeholder="Code, serial, model or location"
+              placeholder="Search assets"
               placeholderTextColor={t.color.textFaint}
               autoCapitalize="none"
               style={{ flex: 1, color: t.color.text, fontSize: t.font.size.md }}
@@ -93,6 +103,8 @@ export default function SiteAssetsScreen() {
             onPress={() => router.push({ pathname: '/assets/new', params: { siteId: siteId ?? '', system: system ?? '' } })}
             icon={<MaterialCommunityIcons name="plus" size={18} color={t.color.onAccent} />}
           />
+          {failed ? <Banner tone="fail" title="Assets not loaded" body={failed} /> : null}
+          {failed ? <Button title="Try again" variant="secondary" onPress={() => { void load(); }} /> : null}
         </View>
 
         <FlatList
@@ -103,11 +115,13 @@ export default function SiteAssetsScreen() {
           initialNumToRender={15}
           removeClippedSubviews
           ListEmptyComponent={
-            <EmptyState
-          icon="clipboard-list-outline"
-              title={debounced || system ? 'Nothing matched' : 'No assets recorded'}
-              body="Build the register as you go — extinguishers, lights, hydrants, doors, pumps. Each one keeps its own history."
-            />
+            failed ? null : (
+              <EmptyState
+                icon="clipboard-list-outline"
+                title={debounced || system ? 'No matches' : 'No assets recorded'}
+                body={debounced || system ? undefined : 'Add assets or sync from Simpro.'}
+              />
+            )
           }
           renderItem={({ item }) => {
             const type = assetTypeById(item.assetTypeId);
@@ -126,7 +140,9 @@ export default function SiteAssetsScreen() {
                     </Txt>
                     {summary ? <Txt size="xs" tone="faint" numberOfLines={1}>{summary}</Txt> : null}
                   </View>
-                  {item.openDefects ? <Chip label={`${item.openDefects}`} tone="fail" /> : null}
+                  {item.openDefects ? (
+                    <Chip label={`${item.openDefects} defect${item.openDefects === 1 ? '' : 's'}`} tone="fail" />
+                  ) : null}
                   {item.lastResult ? (
                     <Chip label={item.lastResult === 'pass' ? 'Pass' : 'Fail'} tone={item.lastResult === 'pass' ? 'pass' : 'fail'} />
                   ) : null}

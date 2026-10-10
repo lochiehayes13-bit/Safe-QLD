@@ -19,7 +19,7 @@ import { timesheetDocumentHtml } from '@/export/timesheetDocument';
 import { timesheetGeometry, timesheetSheet } from '@/export/safeqldForms';
 import type { FormulaCell } from '@/export/xlsx';
 import {
-  setLeave, timesheetTotals, weekSummary, type Timesheet, type TimesheetEntry,
+  setLeave, timesheetTotals, weekSummary, withUnpaidBreaks, type Timesheet, type TimesheetEntry,
 } from '@/domain/timesheet';
 
 const entry = (over: Partial<TimesheetEntry> = {}): TimesheetEntry => ({
@@ -312,5 +312,47 @@ describe('hours somebody typed by hand', () => {
 
   it('says nothing on a row whose hours come from its own times', () => {
     expect(text(timesheetDocumentHtml(sheet([entry()])))).not.toContain('hours entered by hand');
+  });
+});
+
+/**
+ * The unpaid lunch, where the company has turned it on.
+ *
+ * Accounts sees exactly what came off: a line under the day on the page,
+ * and a row under the day in the workbook that its own sums take off.
+ */
+describe('the unpaid lunch on the page and the workbook', () => {
+  const long = sheet([
+    entry({ id: 'w', date: '2026-08-10', jobNumber: '9001', siteName: 'Fictional Tower', startTime: '06:30', finishTime: '15:00' }),
+    entry({ id: 's', date: '2026-08-11', jobNumber: '9002', siteName: 'Main St', startTime: '07:00', finishTime: '11:00' }),
+  ]);
+  const paid = withUnpaidBreaks(long, 30);
+  const page = text(timesheetDocumentHtml(paid));
+
+  it('prints the line under the long day only, and takes it off the totals', () => {
+    expect(page.match(/Less 30 min unpaid break/g)).toHaveLength(1);
+    expect(page).toContain('Less 30 min unpaid break -0.5 h');
+    expect(page).toContain('12 hours for the week');
+    expect(page).toContain('Unpaid breaks taken off 0.5');
+    expect(page).not.toContain('Untitled job');
+  });
+
+  it('says nothing about breaks where none came off', () => {
+    const plain = text(timesheetDocumentHtml(withUnpaidBreaks(long, 0)));
+    expect(plain).not.toContain('unpaid break');
+    expect(plain).toContain('12.5 hours for the week');
+  });
+
+  it('puts the line in the workbook under its day, inside the rows the totals add up', () => {
+    const book = timesheetSheet(paid);
+    const { first, last, totals: totalsRow } = timesheetGeometry(paid);
+    const rows = book.rows.slice(first - 1, last);
+    const at = rows.findIndex((r) => r.some((c) => !!c && typeof c === 'object' && 'v' in c && c.v === 'Less 30 min unpaid break'));
+    expect(at).toBe(1);
+    const ord = rows[at]![6];
+    expect(ord && typeof ord === 'object' && 'v' in ord ? ord.v : undefined).toBe(-0.5);
+    const total = book.rows[totalsRow - 1]![6];
+    expect(total && typeof total === 'object' && 'v' in total ? total.v : undefined).toBe(12);
+    expect(timesheetTotals(paid).ord).toBe(12);
   });
 });

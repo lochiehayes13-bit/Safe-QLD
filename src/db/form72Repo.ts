@@ -6,6 +6,7 @@ import {
   type SprinklerHydrostatic, type TestDevice,
 } from '@/domain/form72';
 import { seedDevices } from '@/domain/form72Devices';
+import { SITE_SEARCH_COLUMNS, type SiteSearchColumn } from '@/domain/siteSearch';
 
 /**
  * Storing Form 72s.
@@ -409,6 +410,64 @@ export async function listForm72(siteId?: string): Promise<StoredForm72[]> {
     )
     : await db.getAllAsync<Form72Row>('SELECT * FROM form_72 ORDER BY testDate DESC, createdAt DESC');
   return rows.map(toForm);
+}
+
+/**
+ * The building a form was raised at, as the site record holds it now.
+ *
+ * The form keeps the name and address it was raised under, which is right for
+ * a signed document and wrong for finding it: the client, the office's site
+ * number and the postcode are not on the form at all, and a building renamed
+ * since is only findable by its old name. These are the site search's own
+ * columns (domain/siteSearch), so the Form 72 list finds a building the way
+ * every other module does.
+ */
+export type Form72SiteNow = Partial<Record<SiteSearchColumn, string>>;
+
+export interface Form72ToFollowUp extends StoredForm72 {
+  /** Absent where the site row is no longer on the phone. */
+  siteNow?: Form72SiteNow;
+}
+
+type FollowUpRow = Form72Row & {
+  nowSiteId: string | null;
+} & { [K in SiteSearchColumn as `now_${K}`]: string | null };
+
+/**
+ * Every form on the phone, in the order the cross-site list works through them.
+ *
+ * Drafts first, the one touched last at the top. Then issued forms whose
+ * occupier copy is still owed, earliest test first, because that is the copy
+ * due soonest; a form with no test date leads, since nobody can say when its
+ * copy falls due. Then everything settled, newest test first.
+ *
+ * Read only. The grouping is in the query so the screen draws rows in the
+ * order they arrive rather than sorting a second time and disagreeing.
+ */
+export async function listForm72ToFollowUp(): Promise<Form72ToFollowUp[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<FollowUpRow>(
+    `SELECT f.*, s.id AS nowSiteId, ${SITE_SEARCH_COLUMNS.map((c) => `s.${c} AS now_${c}`).join(', ')}
+     FROM form_72 f LEFT JOIN site s ON s.id = f.siteId
+     ORDER BY
+       CASE WHEN f.status = 'draft' THEN 0 WHEN f.copyGivenAt IS NULL THEN 1 ELSE 2 END,
+       CASE WHEN f.status = 'draft' THEN f.updatedAt END DESC,
+       CASE WHEN f.status <> 'draft' AND f.copyGivenAt IS NULL THEN f.testDate END ASC,
+       f.testDate DESC,
+       f.createdAt DESC`,
+  );
+  return rows.map((r) => {
+    const form: Form72ToFollowUp = toForm(r);
+    if (r.nowSiteId) {
+      const siteNow: Form72SiteNow = {};
+      for (const c of SITE_SEARCH_COLUMNS) {
+        const v = r[`now_${c}`];
+        if (v) siteNow[c] = v;
+      }
+      form.siteNow = siteNow;
+    }
+    return form;
+  });
 }
 
 /**

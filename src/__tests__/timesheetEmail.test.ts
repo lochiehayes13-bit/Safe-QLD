@@ -9,7 +9,7 @@ import {
   timesheetRoute,
   timesheetSubject,
 } from '@/domain/timesheetEmail';
-import type { Timesheet, TimesheetEntry } from '@/domain/timesheet';
+import { withUnpaidBreaks, type Timesheet, type TimesheetEntry } from '@/domain/timesheet';
 
 /**
  * The timesheet that reaches payroll.
@@ -120,6 +120,15 @@ describe('subject', () => {
 });
 
 describe('body', () => {
+  it('prints the unpaid lunch as hours off, not as nothing recorded', () => {
+    const paid = withUnpaidBreaks(sheet({ entries: [entry({ startTime: '06:30', finishTime: '15:00' })] }), 30);
+    const body = timesheetBody(paid);
+    expect(body).toContain('Less 30 min unpaid break');
+    expect(body).toContain('    -0.5h');
+    expect(body).not.toContain('nothing recorded');
+    expect(body).toContain('TOTAL  8');
+  });
+
   it('names the technician, the week and the vehicle', () => {
     const body = timesheetBody(sheet());
     expect(body).toContain('Timesheet for Lachlan Hayes');

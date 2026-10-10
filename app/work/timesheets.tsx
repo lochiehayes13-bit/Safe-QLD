@@ -2,7 +2,9 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { FlatList, View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { createTimesheet, listTimesheets, saveTimesheet } from '@/db/timesheetRepo';
-import { copyForNextWeek, timesheetTotals, weekStartFor, type Timesheet } from '@/domain/timesheet';
+import {
+  copyForNextWeek, sheetUnpaidBreak, timesheetTotals, unpaidBreakMinutes, weekStartFor, withUnpaidBreaks, type Timesheet, type UnpaidBreak,
+} from '@/domain/timesheet';
 import { loadPrefs, patchPrefs } from '@/app-prefs';
 import { fillModeFor } from '@/domain/timesheetFromSchedule';
 import { qldIsoDay } from '@/domain/qldTime';
@@ -43,11 +45,15 @@ export default function TimesheetsScreen() {
   // empty state is withheld until the read has actually answered.
   const [failed, setFailed] = useState<string | null>(null);
   const [fillPref, setFillPref] = useState<'' | 'schedule' | 'manual'>('');
+  // The unpaid lunch from Settings, so a week's total here is the one on the sheet.
+  const [breakMinutes, setBreakMinutes] = useState<UnpaidBreak>(0);
 
   const load = useCallback(async () => {
     setFailed(null);
     try {
-      setFillPref(fillModeFor(await loadPrefs()) ?? '');
+      const prefs = await loadPrefs();
+      setFillPref(fillModeFor(prefs) ?? '');
+      setBreakMinutes(unpaidBreakMinutes(prefs.unpaidLunchMinutes));
       setSheets(await listTimesheets());
     } catch (e) {
       setSheets([]);
@@ -116,7 +122,7 @@ export default function TimesheetsScreen() {
     if (!thisWeek) return;
     const previous = sheets.find((s) => s.weekStarting < thisWeek && s.entries.length);
     if (!previous) {
-      showAlert('Nothing to copy', 'There is no earlier week on this phone with anything on it.');
+      showAlert('Nothing to copy', 'No earlier week to copy.');
       return;
     }
     setBusy(true);
@@ -126,10 +132,7 @@ export default function TimesheetsScreen() {
       const entries = copyForNextWeek(previous, thisWeek, newId);
       if (existing) {
         if (existing.entries.length) {
-          showAlert(
-            'This week already has work on it',
-            'Copying last week over the top would lose what is already here. Open the week and copy a day at a time instead.',
-          );
+          showAlert('This week has entries', 'Open it and copy one day at a time.');
           return;
         }
         await saveTimesheet({ ...existing, entries });
@@ -211,7 +214,7 @@ export default function TimesheetsScreen() {
           )}
           ListEmptyComponent={failed ? null : <EmptyState icon="calendar-clock" title="No timesheets yet" body="Start this week and fill it in as you go." />}
           renderItem={({ item }) => {
-            const totals = timesheetTotals(item);
+            const totals = timesheetTotals(withUnpaidBreaks(item, sheetUnpaidBreak(item, breakMinutes)));
             return (
               <Card onPress={() => router.push({ pathname: '/timesheet/[id]', params: { id: item.id } })}>
                 <Rowed align="flex-start">

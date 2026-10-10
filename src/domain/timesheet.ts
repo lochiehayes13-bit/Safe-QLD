@@ -62,6 +62,12 @@ export interface Timesheet {
   managerName: string;
   checkedBy: string;
   status: 'draft' | 'submitted';
+  /**
+   * The unpaid break, in minutes, the sheet was submitted with. Null on a
+   * draft, which takes the setting, and on sheets submitted before this was
+   * recorded, which had none.
+   */
+  unpaidBreakMinutes?: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -536,6 +542,8 @@ export interface DaySummary {
   /** How many jobs were on it, so an eight hour day across four sites reads as one. */
   jobs: number;
   weekend: boolean;
+  /** Hours of unpaid break taken off the day's work, already out of `worked` and `total`. 0 when none. */
+  unpaidBreak: number;
 }
 
 /**
@@ -559,16 +567,144 @@ export function weekSummary(sheet: Timesheet): DaySummary[] {
       leaveKind ??= l.kind;
     }
 
+    const unpaidBreak = -onDay.filter(isUnpaidBreakLine).reduce((n, e) => n + entryHours(e), 0);
+
     return {
       date,
       day: dayName(date),
       worked,
       leave: leaveKind ? { kind: leaveKind, hours: Math.round(leaveHours * 100) / 100 } : null,
       total: Math.round((worked + leaveHours) * 100) / 100,
-      jobs: onDay.filter((e) => !leaveOf(e)).length,
+      jobs: onDay.filter((e) => !leaveOf(e) && !isUnpaidBreakLine(e)).length,
       weekend: isWeekendDay(date),
+      unpaidBreak: Math.round(unpaidBreak * 100) / 100 || 0,
     };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Unpaid lunch
+//
+// Off unless the company turns it on in Settings. When on, a day whose
+// worked hours come to more than five loses one break, once, and the sheet
+// carries a line under that day saying so. The line is a row like any other,
+// with negative hours in the column the day was mostly paid at, so every
+// total, the workbook's rows and sums, the page and the email all take it
+// off the same way and accounts can see exactly what came off which day.
+// It is derived, never saved: the sheet as stored is the hours as worked.
+// ---------------------------------------------------------------------------
+
+/** The unpaid break taken off a long day, in minutes: none, or thirty. */
+export type UnpaidBreak = 0 | 30;
+
+/** A day has to be longer than this, in worked hours, before the break comes off it. */
+export const UNPAID_BREAK_AFTER_HOURS = 5;
+
+/** The setting as stored, read safely: anything but thirty is none. */
+export function unpaidBreakMinutes(raw: unknown): UnpaidBreak {
+  return raw === 30 || raw === '30' ? 30 : 0;
+}
+
+const BREAK_LINE_ID = 'unpaid-break:';
+
+/** What the line under a day says. */
+export function unpaidBreakLabel(minutes: number): string {
+  return `Less ${minutes} min unpaid break`;
+}
+
+/** Whether a row is the break line `withUnpaidBreaks` adds, rather than work or leave. */
+export function isUnpaidBreakLine(entry: Pick<TimesheetEntry, 'id'>): boolean {
+  return entry.id.startsWith(BREAK_LINE_ID);
+}
+
+/**
+ * The break a sheet is paid with: the setting while it is a draft, and what
+ * it was submitted with once it is submitted. Turning the setting on later
+ * must not change a week payroll already has.
+ */
+export function sheetUnpaidBreak(
+  sheet: Pick<Timesheet, 'status' | 'unpaidBreakMinutes'>,
+  setting: UnpaidBreak,
+): UnpaidBreak {
+  return sheet.status === 'submitted' ? unpaidBreakMinutes(sheet.unpaidBreakMinutes ?? 0) : setting;
+}
+
+/**
+ * The longest gap, in minutes, between the timed lines of a day.
+ *
+ * A clocked day that went 07:00 to 12:00 and 12:30 to 15:30 already left the
+ * lunch out of its hours. Lines without both times, and lines that run past
+ * midnight, say nothing about a gap and are skipped.
+ */
+function longestGapMinutes(day: readonly TimesheetEntry[]): number {
+  const spans = day
+    .map((e) => [parseTime(e.startTime), parseTime(e.finishTime)] as const)
+    .filter((s): s is readonly [number, number] => s[0] !== null && s[1] !== null && s[1] > s[0])
+    .sort((a, b) => a[0] - b[0]);
+  let gap = 0;
+  let end = spans[0]?.[1] ?? 0;
+  for (const [start, finish] of spans.slice(1)) {
+    if (start > end) gap = Math.max(gap, start - end);
+    end = Math.max(end, finish);
+  }
+  return gap;
+}
+
+/**
+ * The hours a day loses to the unpaid break: none, or the break once.
+ *
+ * Only worked hours count towards the five, and only worked hours lose it.
+ * Leave is never reduced and never makes a day long. Exactly five is not
+ * more than five, measured to the hundredth the sheet shows: lines of 0.12,
+ * 4.23 and 0.65 add to 5.000000000000001 in floating point and are a
+ * five-hour day. A day whose times already leave a gap as long as the break
+ * has had it taken out once, and does not lose it again.
+ */
+export function dayUnpaidBreakHours(entries: readonly TimesheetEntry[], date: string, minutes: UnpaidBreak): number {
+  if (!minutes) return 0;
+  const day = entries.filter((e) => e.date === date && !isUnpaidBreakLine(e));
+  const worked = day.reduce((n, e) => n + entryHours(e), 0);
+  if (Math.round(worked * 100) / 100 <= UNPAID_BREAK_AFTER_HOURS) return 0;
+  return longestGapMinutes(day) >= minutes ? 0 : minutes / 60;
+}
+
+/**
+ * The column the break comes out of: ordinary time where the day has
+ * enough of it, else whichever rate the day was mostly paid at.
+ */
+function breakColumn(day: readonly TimesheetEntry[], hours: number): HourKind {
+  const by: Record<HourKind, number> = { ord: 0, ot: 0, dt: 0 };
+  for (const e of day) by[e.hourKind] += entryHours(e);
+  if (by.ord >= hours) return 'ord';
+  return by.dt > by.ot ? 'dt' : 'ot';
+}
+
+/**
+ * The sheet as it is paid: each long day with its break line added.
+ *
+ * The same sheet back where the setting is none or no day is long enough.
+ * A break line already on the sheet is replaced rather than doubled.
+ */
+export function withUnpaidBreaks(sheet: Timesheet, minutes: UnpaidBreak): Timesheet {
+  const base = sheet.entries.filter((e) => !isUnpaidBreakLine(e));
+  if (!minutes) return base.length === sheet.entries.length ? sheet : { ...sheet, entries: base };
+  const lines: TimesheetEntry[] = [];
+  for (const date of [...new Set(base.map((e) => e.date))].sort()) {
+    const hours = dayUnpaidBreakHours(base, date, minutes);
+    if (!hours) continue;
+    const line = blankEntry(`${BREAK_LINE_ID}${date}`, date);
+    line.siteName = unpaidBreakLabel(minutes);
+    line.hourKind = breakColumn(base.filter((e) => e.date === date), hours);
+    line.hoursOverride = String(-hours);
+    lines.push(line);
+  }
+  return { ...sheet, entries: [...base, ...lines] };
+}
+
+/** Every hour of unpaid break taken off the week, as a positive number. */
+export function unpaidBreakTotal(sheet: Pick<Timesheet, 'entries'>): number {
+  const total = -sheet.entries.filter(isUnpaidBreakLine).reduce((n, e) => n + entryHours(e), 0);
+  return Math.round(total * 100) / 100 || 0;
 }
 
 /**

@@ -212,8 +212,8 @@ describe('a site the map cannot place', () => {
 
 describe('starting a Form 72 for a site with no job', () => {
   /*
-   * /site/form72 redirects to /form72/new when it is opened with no site —
-   * from the home screen, or a pinned tile — and that screen was a job picker
+   * /form72/new is where every Form 72 starts, from the Form 72 list and
+   * from a job, and that screen was a job picker
    * and nothing else. So a site with no job could not start a Form 72 from the
    * one screen that exists to start them, and plenty of this work is done
    * before the office books anything. The empty state even said that, and
@@ -263,7 +263,7 @@ describe('the SWMS builder’s site surface', () => {
   );
 
   it('offers the site as well as the job', () => {
-    expect(screen).toContain('title="No job — pick the site"');
+    expect(screen).toContain('title="No job? Pick the site"');
     expect(screen).toContain('<SitePicker');
   });
 
@@ -275,7 +275,7 @@ describe('the SWMS builder’s site surface', () => {
 
   it('no longer promises what the disabled button refused', () => {
     expect(screen).not.toContain('you can still pick statements below and add the job later');
-    expect(screen).toContain('or pick the site this work is at');
+    expect(screen).toContain('Sync in Settings or pick the site.');
   });
 
   it('reads the site list only when it is asked for', () => {

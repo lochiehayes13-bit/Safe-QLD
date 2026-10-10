@@ -358,12 +358,12 @@ export const DESTINATIONS: readonly Destination[] = [
   {
     route: '/swms', file: 'app/swms/index.tsx', tab: 'today', section: 'Before you start',
     label: 'Safe work method statements', modes: BOTH, openedFrom: ['/shortcuts'],
-    blurb: 'Safe work method statements, signed on the phone.',
+    blurb: 'Brief the crew, then sign once the company approves it.',
     terms: ['swms', 'jsea', 'jsa', 'safe work', 'method statement', 'safety', 'hazard', 'risk', 'permit', 'high risk'],
   },
   {
     route: '/swms/new', file: 'app/swms/new.tsx', tab: 'today', section: 'Before you start',
-    label: 'New statement', modes: BOTH, openedFrom: ['/swms'],
+    label: 'New statement', modes: BOTH, openedFrom: ['/swms', '/work/job/[id]'],
     blurb: 'Pick the job and the work. The statements it needs come up ticked.',
     terms: ['swms', 'jsea', 'new', 'start', 'builder', 'safe work', 'method statement', 'today'],
   },
@@ -634,6 +634,13 @@ export const DESTINATIONS: readonly Destination[] = [
     terms: ['test sheet', 'report', 'service report', 'results'],
   },
   {
+    route: '/form72', file: 'app/form72/index.tsx', opensVia: 'src/components/Form72Card.tsx',
+    tab: 'sites', section: 'Paperwork',
+    label: 'Form 72', modes: BOTH, openedFrom: ['/shortcuts', '/site/form72'],
+    blurb: 'Drafts and occupier copies owed, every site.',
+    terms: ['form 72', 'drafts', 'occupier copy', 'owed', 'hydrant test', 'sprinkler'],
+  },
+  {
     route: '/site/form72', file: 'app/site/form72.tsx', tab: 'sites', section: 'Paperwork',
     label: 'Form 72s', needsContext: true, modes: BOTH, openedFrom: ['/site/[id]'],
     blurb: 'Hydrant and sprinkler Form 72. Part A fills from the job.',
@@ -641,13 +648,13 @@ export const DESTINATIONS: readonly Destination[] = [
   },
   {
     route: '/form72/new', file: 'app/form72/new.tsx', tab: 'sites', section: 'Paperwork',
-    label: 'Start a Form 72', modes: BOTH, openedFrom: ['/site/form72', '/work/job/[id]'],
+    label: 'Start a Form 72', modes: BOTH, openedFrom: ['/form72', '/work/job/[id]'],
     blurb: 'Pick the job. Part A fills from it.',
     terms: ['form 72', 'new', 'hydrant test', 'start', 'raise'],
   },
   {
     route: '/form72/[id]', file: 'app/form72/[id].tsx', tab: 'sites', section: 'Paperwork',
-    label: 'Form 72', needsContext: true, modes: BOTH, openedFrom: ['/site/form72', '/form72/new'],
+    label: 'Form 72', needsContext: true, modes: BOTH, openedFrom: ['/site/form72', '/form72/new', '/form72'],
     blurb: 'One Form 72, part by part, signed on site.',
     terms: ['form 72', 'sign', 'declaration', 'booster', 'hydrant test'],
   },

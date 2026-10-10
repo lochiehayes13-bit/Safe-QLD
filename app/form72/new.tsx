@@ -72,9 +72,9 @@ export default function NewForm72Screen() {
   /*
    * Starting from a site instead of a job.
    *
-   * This screen is where /site/form72 redirects when it is opened with no
-   * site — from the home screen, or a pinned tile — and it was a job picker
-   * and nothing else. So a site with no job could not start a Form 72 from
+   * This screen is where a Form 72 is started from the cross-site list
+   * (/form72, where /site/form72 also lands when opened with no site), and it
+   * was a job picker and nothing else. So a site with no job could not start a Form 72 from
    * the one screen that exists to start them, and plenty of this work is
    * done before the office books anything. The empty state even said so and
    * offered no way to do it.
@@ -202,7 +202,7 @@ export default function NewForm72Screen() {
         // read that failed rather than leaving the job unchosen for good.
         autoPicked.current = true;
         if (job) await describeJob(job);
-        else showAlert('Job not on this phone', `Job ${params.jobId} is not held on this device yet. Pick the site below, or sync and come back.`);
+        else showAlert('Job not on this phone', 'Sync, or pick the site instead.');
       } catch (e) {
         showAlert('Could not read the job', describeActionFailure(e, 'reading the job'));
       }
@@ -250,12 +250,7 @@ export default function NewForm72Screen() {
      * taps the button. Better to say so here, with the way round it.
      */
     if (!job.siteId) {
-      showAlert(
-        'This job has no site on the phone yet',
-        'A Form 72 is filed against a site, and the office has not matched this job to one. '
-        + 'Open the site from the site list and raise the form there — everything else still '
-        + 'fills itself in, and the job can be linked to the form afterwards.',
-      );
+      showAlert('Job has no site yet', 'Pick the site instead. Link the job to the form after.');
       return;
     }
     setCreating(job.id);
@@ -303,17 +298,11 @@ export default function NewForm72Screen() {
 
   return (
     <Screen>
-      <Stack.Screen options={{ title: 'Start a Form 72' }} />
+      <Stack.Screen options={{ title: 'New Form 72' }} />
 
-      <Card>
-        <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-          Pick the job you did the test under. The site, the address, the date and — where the
-          job says so — which maintenance test this is all fill themselves in, and the site&rsquo;s
-          register fills the hydrant and valve lists behind them.
-        </Txt>
-      </Card>
+      <Txt size="sm" tone="muted">Pick the job. Part A and the lists fill in.</Txt>
 
-      {loadError ? <Banner tone="warn" title="The job list did not load" body={loadError} /> : null}
+      {loadError ? <Banner tone="warn" title="Jobs not loaded" body={loadError} /> : null}
 
       <SearchBox value={typed} onChange={setTyped} placeholder="Job number, site, suburb, client or customer" />
       <Segmented
@@ -344,22 +333,15 @@ export default function NewForm72Screen() {
           * query now, so the sentence is true.
           */}
         {capped
-          ? `First ${shown.length} of ${matching.toLocaleString()} — add the site or the customer to narrow it.`
+          ? `First ${shown.length} of ${matching.toLocaleString()}. Add the site or customer to narrow it.`
           : `${matching.toLocaleString()} job${matching === 1 ? '' : 's'}${
-            mode === 'all' ? '' : ', by the date the office raised it — the only date Simpro gives us'}`}
+            mode === 'all' ? '' : ', by date raised'}`}
       </Txt>
 
       {bySite ? (
         <Card>
-          <Rowed gap={2}>
-            <View style={{ flex: 1 }}>
-              <H2>Which site?</H2>
-              <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-                The form opens with the site&rsquo;s register already on it. A job can be linked to it
-                afterwards.
-              </Txt>
-            </View>
-          </Rowed>
+          <H2>Which site?</H2>
+          <Txt size="sm" tone="muted">The register fills the lists. Link a job later.</Txt>
           <SitePicker
             sites={sites}
             onChange={(id: string) => {
@@ -367,7 +349,7 @@ export default function NewForm72Screen() {
               router.push({ pathname: '/site/form72', params: { siteId: id } });
             }}
           />
-          <Button title="Back to the job list" variant="ghost" onPress={() => setBySite(false)} />
+          <Button title="Back to jobs" variant="ghost" onPress={() => setBySite(false)} />
         </Card>
       ) : preview ? (
         <Card>
@@ -395,41 +377,37 @@ export default function NewForm72Screen() {
           ) : null}
 
           {!preview.job.siteId ? (
-            <Banner
-              tone="warn"
-              title="This job has no site on the phone yet"
-              body={'A Form 72 is filed against a site, and the office has not matched this job to '
-                + 'one. Raise it from the site list instead; the job can be linked afterwards.'}
-            />
+            <Banner tone="warn" title="Job has no site yet" body="Pick the site instead. Link the job after." />
           ) : null}
 
           <Rowed gap={2} style={{ marginTop: t.space(3) }}>
-            <Button
-              title="Start the form"
-              style={{ flex: 1 }}
-              disabled={!preview.job.siteId}
-              loading={creating === preview.job.id}
-              onPress={() => { void create(preview.job, preview.mapped); }}
-            />
+            {preview.job.siteId ? (
+              <Button
+                title="Start the form"
+                style={{ flex: 1 }}
+                loading={creating === preview.job.id}
+                onPress={() => { void create(preview.job, preview.mapped); }}
+              />
+            ) : (
+              <Button
+                title="Pick the site"
+                style={{ flex: 1 }}
+                onPress={() => { setPreview(null); void openBySite(); }}
+              />
+            )}
             <Button title="Back" variant="secondary" onPress={() => setPreview(null)} />
           </Rowed>
         </Card>
       ) : (
         <>
           {jobs === null ? (
-            <Card><Txt size="sm" tone="muted">Reading the job list…</Txt></Card>
+            <Card><Txt size="sm" tone="muted">Loading jobs…</Txt></Card>
           ) : !shown.length ? (
-            <>
-              <EmptyState
-                icon="clipboard-text-off-outline"
-                title={typed ? 'No job matches that' : 'No job on this filter'}
-                body={'A form can also be raised against a site with no job on it — plenty of this '
-                  + 'work is done before the office books one.'}
-              />
-              {/* It said that and offered no way to do it, which is the dead
-                  end this button is. */}
-              <Button title="Pick a site instead" onPress={() => { void openBySite(); }} />
-            </>
+            <EmptyState
+              icon="clipboard-text-off-outline"
+              title={typed ? 'No job matches that' : 'No job on this filter'}
+              body="No job yet? Pick the site below."
+            />
           ) : (
             shown.map((j) => {
               const fire = looksLikeHydrantWork(toJobForForm(j));
@@ -454,15 +432,13 @@ export default function NewForm72Screen() {
             })
           )}
 
+          {/* The inline picker, not a trip out to the Sites tab and back. */}
           <Card>
-            <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-              No job for it? Open the site and raise the form there — the register still fills the
-              hydrant and valve lists.
-            </Txt>
+            <Txt size="sm" tone="muted">No job? The register still fills the lists.</Txt>
             <Button
               title="Pick a site instead"
               variant="secondary"
-              onPress={() => router.push('/sites')}
+              onPress={() => { void openBySite(); }}
             />
           </Card>
         </>

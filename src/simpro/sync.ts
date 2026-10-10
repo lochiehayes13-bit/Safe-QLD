@@ -11,6 +11,7 @@ import { flushSoon } from './flushSoon';
 import { keysAlreadyOnJob } from './testResults';
 import { reachabilityFailure, sendFailure } from './sendOutcome';
 import { createSite, getSite, listSites, updateSite } from '@/db/repo';
+import { reattachWaitingEntries } from '@/db/clockRepo';
 import { nowIso } from '@/db';
 import { saveRateCard } from '@/db/rateCardRepo';
 import { replaceEmployees } from '@/db/employeeRepo';
@@ -1162,6 +1163,14 @@ export async function pullFromSimpro(
     } catch (e) {
       result.errors.push(describe(e, 'quote details'));
     }
+  }
+
+  // A clocked entry that waited on an activity or a cost centre this sync has
+  // just brought down goes now, not the next time someone opens the clock.
+  try {
+    await reattachWaitingEntries();
+  } catch (e) {
+    result.errors.push(describe(e, 'clock entries'));
   }
 
   progress('Done', TOTAL_STAGES);

@@ -1,6 +1,7 @@
 import {
   MAX_ENTRY_MINUTES, addDays, clockContentKey, clockPayload, dayTotals, describeEntry, entryMinutes, entrySpan,
-  findAcceptedSchedule, formatMinutes, openEntryOf, qldClock, qldInstant, qldNextMidnight, sendReadiness, shortDay,
+  findAcceptedSchedule, formatMinutes, missingSimproIds, openEntryOf, qldClock, qldInstant, qldNextMidnight, reattachEntry,
+  sendReadiness, shortDay,
   splitAcrossMidnight, startEntry, stopEntry, switchJob, toScheduleBody, toScheduleRequest, validateTimes, weekStartOf,
   weekTotals, type ClockEntry,
 } from '@/domain/clockOn';
@@ -304,5 +305,67 @@ describe('naming an entry for a person', () => {
     expect(describeEntry(work({ kind: 'break', endedAt: undefined }))).toBe('Break, 07:00–now, 8 Sep');
     expect(shortDay('2026-12-01')).toBe('1 Dec');
     expect(shortDay('nonsense')).toBe('nonsense');
+  });
+});
+
+describe('filling in the Simpro ids an entry was made without', () => {
+  const noCc = (over: Partial<ClockEntry> = {}) => work({ jobSectionExternalId: undefined, jobCostCenterExternalId: undefined, ...over });
+  const chip = (over: Partial<ClockEntry> = {}): ClockEntry => work({
+    kind: 'activity', activityName: 'Meeting',
+    jobExternalId: undefined, jobSectionExternalId: undefined, jobCostCenterExternalId: undefined, jobTitle: undefined, siteName: undefined,
+    ...over,
+  });
+  const none = { activities: [], costCentres: new Map() };
+  const office = [{ id: '12', name: 'Meeting' }, { id: '13', name: 'Travel Time' }, { id: '14', name: 'Workshop' }];
+
+  it('knows which entries are short', () => {
+    expect(missingSimproIds(work())).toBe(false);
+    expect(missingSimproIds(noCc())).toBe(true);
+    expect(missingSimproIds(chip())).toBe(true);
+    expect(missingSimproIds(chip({ activityExternalId: '12' }))).toBe(false);
+    expect(missingSimproIds(noCc({ sentAt: '2026-09-08T00:00:00.000Z' }))).toBe(false);
+    expect(missingSimproIds(work({ kind: 'break', jobExternalId: undefined, jobCostCenterExternalId: undefined }))).toBe(false);
+  });
+
+  it('attaches an activity by its name, whatever the case, and makes it sendable', () => {
+    const r = reattachEntry(chip({ activityName: ' meeting ' }), { ...none, activities: office });
+    expect(r.attached).toBe(true);
+    expect(r.entry).toMatchObject({ activityExternalId: '12', activityName: 'Meeting' });
+    expect(sendReadiness(r.entry)).toEqual({ ready: true });
+  });
+
+  it('finds travel by the one activity named for it', () => {
+    const r = reattachEntry(chip({ kind: 'travel', activityName: 'Travel' }), { ...none, activities: office });
+    expect(r.entry.activityExternalId).toBe('13');
+  });
+
+  it('says why while it cannot be found', () => {
+    expect(reattachEntry(chip(), none)).toEqual({ entry: chip(), attached: false, why: 'Sends once Simpro activities sync.' });
+    expect(reattachEntry(chip({ activityName: 'Toolbox' }), { ...none, activities: office }).why)
+      .toBe('No Simpro activity called Toolbox. Ask the office.');
+  });
+
+  it('gives a job its cost centre where it now has exactly one', () => {
+    const ctx = { ...none, costCentres: new Map([['1001', [{ sectionExternalId: '5', costCenterExternalId: '9' }]]]) };
+    const r = reattachEntry(noCc(), ctx);
+    expect(r.attached).toBe(true);
+    expect(r.entry).toMatchObject({ jobSectionExternalId: '5', jobCostCenterExternalId: '9' });
+    expect(sendReadiness(r.entry)).toEqual({ ready: true });
+  });
+
+  it('takes the one the entry names among several, and never guesses between them', () => {
+    const several = new Map([['1001', [
+      { sectionExternalId: '4', costCenterExternalId: '7' },
+      { sectionExternalId: '5', costCenterExternalId: '9' },
+    ]]]);
+    expect(reattachEntry(noCc({ jobCostCenterExternalId: '9' }), { ...none, costCentres: several }).entry.jobSectionExternalId).toBe('5');
+    expect(reattachEntry(noCc(), { ...none, costCentres: several })).toMatchObject({ attached: false, why: 'Pick a cost centre for job 1001.' });
+    expect(reattachEntry(noCc(), none).why).toBe('No cost centre on job 1001 yet. Ask the office.');
+  });
+
+  it('leaves a whole entry, a sent one and a break as they are', () => {
+    expect(reattachEntry(work(), none)).toEqual({ entry: work(), attached: false });
+    const sent = noCc({ sentAt: '2026-09-08T00:00:00.000Z' });
+    expect(reattachEntry(sent, none)).toEqual({ entry: sent, attached: false });
   });
 });

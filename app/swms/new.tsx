@@ -1,12 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
-import { Stack, router } from 'expo-router';
+import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SWMS_TEMPLATES } from '@/seed/swms';
-import { RISK_LABEL, type SwmsTemplate } from '@/domain/swms';
+import { RISK_LABEL, worstRisk, type SwmsTemplate } from '@/domain/swms';
 import {
-  builderDraft, builderNotReady, matchSummary, matchesFor, worksFromJob, initialSelection,
-  type BuilderJob,
+  builderDraft, builderNotReady, matchSummary, matchesFor, swmsStartFromRoute, withJobRow, worksFromJob,
+  initialSelection, type BuilderJob,
 } from '@/domain/swmsBuilder';
 import { type TemplateMatch } from '@/domain/swmsMatch';
 import { createSwms } from '@/db/swmsRepo';
@@ -55,9 +55,12 @@ import {
 export default function SwmsBuilderScreen() {
   const t = useTheme();
   const today = qldIsoDay(nowIso()) ?? '';
+  // Opened from a job: its number and site come in on the route.
+  const params = useLocalSearchParams<{ job?: string; siteId?: string; site?: string }>();
+  const [fromRoute] = useState(() => swmsStartFromRoute(params));
 
-  const [job, setJob] = useState<BuilderJob | null>(null);
-  const [picking, setPicking] = useState(true);
+  const [job, setJob] = useState<BuilderJob | null>(fromRoute.job);
+  const [picking, setPicking] = useState(!fromRoute.job);
   const [suggested, setSuggested] = useState<JobPick[]>([]);
   /*
    * The site, where the work is at one the office has not raised a job for.
@@ -67,7 +70,9 @@ export default function SwmsBuilderScreen() {
    * a site with no job could not have a safe work method statement. That is
    * the one document that should never wait on the office's paperwork.
    */
-  const [site, setSite] = useState<SitePick | null>(null);
+  const [site, setSite] = useState<SitePick | null>(
+    fromRoute.site ? { id: fromRoute.site.id, name: fromRoute.site.name } as SitePick : null,
+  );
   const [sites, setSites] = useState<SitePick[]>([]);
   const [pickingSite, setPickingSite] = useState(false);
   const [works, setWorks] = useState('');
@@ -108,7 +113,7 @@ export default function SwmsBuilderScreen() {
     try {
       setSites(await listSitePicks());
     } catch (e) {
-      showAlert('Could not read the site list', describeActionFailure(e, 'read the site list'));
+      showAlert('Couldn’t load sites', describeActionFailure(e, 'read the site list'));
     }
   }, [sites.length]);
 
@@ -123,14 +128,15 @@ export default function SwmsBuilderScreen() {
     };
     setJob(picked);
 
-    const [rows, counts, due] = await Promise.all([
-      jobsByExternalIds([picked.externalId]).catch(() => []),
-      picked.siteId ? assetCountsBySystem(picked.siteId).catch(() => []) : Promise.resolve([]),
-      picked.siteId ? dueAtSite(picked.siteId, today).catch(() => []) : Promise.resolve([]),
+    const rows = await jobsByExternalIds([picked.externalId]).catch(() => []);
+    // The site off the row where the route or the picker did not carry one.
+    const siteId = picked.siteId || rows[0]?.siteId;
+    const [counts, due] = await Promise.all([
+      siteId ? assetCountsBySystem(siteId).catch(() => []) : Promise.resolve([]),
+      siteId ? dueAtSite(siteId, today).catch(() => []) : Promise.resolve([]),
     ]);
 
-    const full = rows[0];
-    const withDescription: BuilderJob = { ...picked, descriptionText: full?.descriptionText };
+    const withDescription = withJobRow(picked, rows[0]);
     setJob(withDescription);
     setSystems(counts.map((c) => c.system));
     setRoutineIds(due.map((d) => d.routineId));
@@ -139,6 +145,30 @@ export default function SwmsBuilderScreen() {
     // is theirs, and a job picked afterwards must not wipe it.
     if (!touchedWorks) setWorks(worksFromJob(withDescription));
   }, [today, touchedWorks]);
+
+  // A job handed over on the route is read once, the same as a picked one.
+  const routeRead = useRef(false);
+  useEffect(() => {
+    if (routeRead.current || !fromRoute.job) return;
+    routeRead.current = true;
+    void takeJob({ ...fromRoute.job, siteName: fromRoute.job.siteName ?? '', status: 'scheduled' });
+  }, [fromRoute.job, takeJob]);
+
+  // A site handed over on the route: its register and what is due there.
+  useEffect(() => {
+    const siteId = fromRoute.site?.id;
+    if (!siteId) return;
+    let live = true;
+    void Promise.all([
+      assetCountsBySystem(siteId).catch(() => []),
+      dueAtSite(siteId, today).catch(() => []),
+    ]).then(([counts, due]) => {
+      if (!live) return;
+      setSystems(counts.map((c) => c.system));
+      setRoutineIds(due.map((d) => d.routineId));
+    });
+    return () => { live = false; };
+  }, [fromRoute.site?.id, today]);
 
   const matches = useMemo(
     (): TemplateMatch[] => matchesFor(SWMS_TEMPLATES, { job, works, systems, routineIds }),
@@ -162,6 +192,9 @@ export default function SwmsBuilderScreen() {
   };
 
   const blocked = builderNotReady({ job, siteId: site?.id, templateIds: selected });
+  // Nothing matched what was typed, so the whole library is the list.
+  const autoAll = !!works.trim() && !matches.length;
+  const listAll = showAll || autoAll;
 
   const start = async () => {
     if (blocked) return;
@@ -182,7 +215,7 @@ export default function SwmsBuilderScreen() {
       const record = await createSwms(draft);
       router.replace({ pathname: '/swms/[id]', params: { id: record.id } });
     } catch (e) {
-      showAlert('Could not start it', describeActionFailure(e, 'starting the statement'));
+      showAlert('Couldn’t start it', describeActionFailure(e, 'starting the statement'));
     } finally {
       setStarting(false);
     }
@@ -193,14 +226,10 @@ export default function SwmsBuilderScreen() {
       <Stack.Screen options={{ title: 'New statement' }} />
 
       {failed ? (
-        <Banner
-          tone="warn"
-          title="The jobs on this phone could not be read"
-          body={`${failed}\n\nSearching still works, and so does everything below.`}
-        />
+        <Banner tone="warn" title="Couldn’t load jobs" body={`${failed}\n\nSearch still works.`} />
       ) : null}
 
-      <H2>Which job</H2>
+      <H2>Job</H2>
       {job && !picking ? (
         <Card onPress={() => setPicking(true)}>
           <Rowed gap={2}>
@@ -220,7 +249,7 @@ export default function SwmsBuilderScreen() {
             <View style={{ flex: 1 }}>
               <Txt weight="700">{site.name}</Txt>
               <Txt size="sm" tone="muted">
-                {[site.suburb, site.clientName].filter(Boolean).join(' · ') || 'No job — the site itself'}
+                {[site.suburb, site.clientName].filter(Boolean).join(' · ') || 'No job'}
               </Txt>
             </View>
             <Txt size="sm" tone="faint">Change</Txt>
@@ -228,30 +257,33 @@ export default function SwmsBuilderScreen() {
         </Card>
       ) : pickingSite ? (
         <Card>
-          <Txt weight="700">Which site is this statement for?</Txt>
-          <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-            The statement goes on the site. A job can be linked to it later if the office raises one.
-          </Txt>
+          <Txt weight="700">Which site?</Txt>
+          <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>You can link a job later.</Txt>
           <SitePicker
             sites={sites}
             onChange={(id: string) => {
+              // The site replaces any job still held (from the route, or picked
+              // before "No job?"), and that job's register with it.
               setSite(sites.find((x) => x.id === id) ?? null);
+              setJob(null);
+              setSystems([]);
+              setRoutineIds([]);
               setPickingSite(false);
             }}
           />
-          <Button title="Back to the job list" variant="ghost" onPress={() => setPickingSite(false)} />
+          <Button title="Back to jobs" variant="ghost" onPress={() => setPickingSite(false)} />
         </Card>
       ) : (
         <>
           <JobPicker
-            heading="Which job is this statement for?"
+            heading="Which job?"
             suggested={suggested}
-            suggestedLabel="Open jobs on this phone"
-            emptyWhenNoneSuggested="No open jobs on this phone. Search for it by number, or pick the site instead."
+            suggestedLabel="Open jobs"
+            emptyWhenNoneSuggested="No open jobs. Search by number or pick the site."
             /* It used to say "you can still pick statements below and add the
                job later" while the Start button stayed disabled without one —
                the message promised what the button refused. */
-            emptyWhenNothingOnDevice="No jobs on this phone yet. Run a sync in Settings, or pick the site this work is at."
+            emptyWhenNothingOnDevice="No jobs yet. Sync in Settings or pick the site."
             busy={starting}
             onPick={(pick) => { void takeJob(pick); }}
             onClose={() => setPicking(false)}
@@ -261,17 +293,17 @@ export default function SwmsBuilderScreen() {
             * a statement is read to a crew on the day rather than filed after.
             */}
           <Button
-            title="No job — pick the site"
+            title="No job? Pick the site"
             variant="secondary"
             onPress={() => { void openSitePicker(); }}
           />
         </>
       )}
 
-      <H2>What sort of works</H2>
+      <H2>The work</H2>
       <Card>
         <Field
-          label="In your own words"
+          label="Today’s work"
           value={works}
           onChangeText={(v) => { setTouchedWorks(true); setWorks(v); }}
           placeholder="Core drilling the slab to run pipe, occupied building"
@@ -279,12 +311,12 @@ export default function SwmsBuilderScreen() {
         />
         <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
           {job?.descriptionText?.trim()
-            ? 'Filled in from the job. Change it to what you are actually doing today.'
-            : 'The statements below follow from this. Say what you will actually be doing, not the job type.'}
+            ? 'From the job. Change it to suit today.'
+            : 'Describe today’s work, not the job type.'}
         </Txt>
       </Card>
 
-      <H2>Which statements</H2>
+      <H2>Statements</H2>
       <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{matchSummary(matches, works)}</Txt>
 
       {matches.map((m) => {
@@ -302,22 +334,21 @@ export default function SwmsBuilderScreen() {
 
       {rest.length ? (
         <>
-          <Card onPress={() => setShowAll((s) => !s)}>
-            <Rowed gap={2} align="center">
-              <MaterialCommunityIcons
-                name={showAll ? 'chevron-up' : 'chevron-down'}
-                size={20}
-                color={t.color.textFaint}
-              />
-              <View style={{ flex: 1 }}>
-                <Txt weight="600">{showAll ? 'Hide' : 'Show'} the other {rest.length} statements</Txt>
-                <Txt size="xs" tone="faint" style={{ lineHeight: 16 }}>
-                  The app being wrong about a hazard must not be the reason you cannot reach the statement for it.
+          {autoAll ? null : (
+            <Card onPress={() => setShowAll((x) => !x)}>
+              <Rowed gap={2} align="center">
+                <MaterialCommunityIcons
+                  name={showAll ? 'chevron-up' : 'chevron-down'}
+                  size={20}
+                  color={t.color.textFaint}
+                />
+                <Txt weight="600" style={{ flex: 1 }}>
+                  {showAll ? 'Hide' : 'Show'} {matches.length ? 'the other' : 'all'} {rest.length} statements
                 </Txt>
-              </View>
-            </Rowed>
-          </Card>
-          {showAll
+              </Rowed>
+            </Card>
+          )}
+          {listAll
             ? rest.map((template) => (
               <TemplateRow
                 key={template.id}
@@ -333,19 +364,14 @@ export default function SwmsBuilderScreen() {
 
       <View style={{ height: t.space(3) }} />
       <Button
-        title={selected.length > 1 ? `Start it — ${selected.length} statements` : 'Start it'}
+        title={selected.length > 1 ? `Start with ${selected.length} statements` : 'Start'}
         onPress={() => { void start(); }}
         loading={starting}
         disabled={!!blocked}
       />
       {blocked ? (
         <Txt size="sm" tone="muted" style={{ marginTop: t.space(2), lineHeight: 19 }}>{blocked}</Txt>
-      ) : (
-        <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
-          The next screen is the statement itself: the steps to read with the crew, the questions only
-          answerable on this site, the permits, and the signatures.
-        </Txt>
-      )}
+      ) : null}
     </Screen>
   );
 }
@@ -366,7 +392,7 @@ function TemplateRow({
   onToggle: () => void;
 }) {
   const t = useTheme();
-  const worst = template.steps.reduce<string | null>((acc, s) => acc ?? s.residualRisk ?? null, null);
+  const worst = worstRisk(template.steps.map((s) => s.residualRisk));
 
   return (
     <Card onPress={onToggle} style={checked ? { borderWidth: 1, borderColor: t.color.accent } : undefined}>
@@ -389,9 +415,11 @@ function TemplateRow({
           ) : null}
           <Rowed gap={2} style={{ marginTop: t.space(2), flexWrap: 'wrap' }}>
             <Chip label={`${template.steps.length} steps`} />
-            {template.permits.length ? <Chip label={`${template.permits.length} permits`} tone="warn" /> : null}
+            {template.permits.length ? (
+              <Chip label={`${template.permits.length} permit${template.permits.length === 1 ? '' : 's'}`} tone="warn" />
+            ) : null}
             {template.hrcw.length ? <Chip label="High-risk construction work" tone="fail" /> : null}
-            {worst ? <Chip label={`Worst after controls: ${RISK_LABEL[worst as keyof typeof RISK_LABEL]}`} /> : null}
+            {worst ? <Chip label={`After controls: ${RISK_LABEL[worst]}`} /> : null}
           </Rowed>
         </View>
       </Rowed>

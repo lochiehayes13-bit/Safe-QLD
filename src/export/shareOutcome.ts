@@ -56,8 +56,7 @@ export function notSharedNotice(fileName: string, what = 'file'): ShareNotice {
   return {
     title: 'Made, not shared',
     body:
-      `${fileName} was made, so nothing has been lost, but this device gave no way to hand the ${what} `
-      + 'on just now. Tap the button again — the share sheet, a download and the printer are all '
-      + 'offered — or try from a different browser.',
+      `${fileName} was made, so nothing has been lost, but this device couldn't hand the ${what} on. `
+      + 'Tap the button again to share, download or print, or try another browser.',
   };
 }

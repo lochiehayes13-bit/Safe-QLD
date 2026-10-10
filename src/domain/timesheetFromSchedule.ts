@@ -4,6 +4,7 @@ import {
 } from './timesheet';
 import { LEAVE_KINDS as BOOKABLE_LEAVE, type LeaveKindId } from './leaveBooking';
 import type { ScheduleEntry } from './myDay';
+import { entrySpan, qldClock, qldNextMidnight, type ClockEntry } from './clockOn';
 
 /**
  * Filling a week of timesheet from the person's own Simpro schedule.
@@ -118,6 +119,81 @@ export function blocksFromTimesheet(
 /** Blocks from the office's schedule, where the person's own timesheet has none. */
 export function blocksFromSchedule(rows: readonly ScheduleEntry[]): WorkBlock[] {
   return rows.map((r) => ({ date: r.date, jobId: r.jobId || undefined, startTime: r.startTime, endTime: r.endTime }));
+}
+
+/**
+ * Blocks from this phone's own clock: the hours clocked on a job, closed.
+ *
+ * Start and finish are the Queensland wall clock, as the block Simpro gets
+ * carries them, so a clocked block and the same block back from Simpro's
+ * timesheet are the same span and the fill counts it once. An entry that
+ * ran to midnight finishes at 23:59, as it is sent. Travel, activities and
+ * breaks are not job hours: leave already reaches the sheet from Simpro,
+ * and a break is the gap between two blocks. A block whose start and finish
+ * fall in the same minute (On and Off in one tap) is no hours, and is left
+ * out so it cannot stand in for a day's plan.
+ */
+export function blocksFromClock(entries: readonly ClockEntry[]): WorkBlock[] {
+  const out: WorkBlock[] = [];
+  for (const e of entries) {
+    if (e.kind !== 'work' || !e.jobExternalId || !e.endedAt) continue;
+    const span = entrySpan(e);
+    if (span.refused || span.minutes <= 0) continue;
+    const startTime = qldClock(e.startedAt);
+    const endTime = e.endedAt === qldNextMidnight(e.date) ? '23:59' : qldClock(e.endedAt);
+    if (!startTime || !endTime || endTime <= startTime) continue;
+    out.push({
+      date: e.date,
+      jobId: e.jobExternalId,
+      startTime,
+      endTime,
+      ...(e.scheduleRateName ? { rateName: e.scheduleRateName } : {}),
+    });
+  }
+  return out;
+}
+
+/**
+ * The blocks a week is filled from: Simpro's and this phone's clock together.
+ *
+ * Simpro's own timesheet is the record of hours the office holds, so a
+ * clocked block it already has (the same job, overlapping, on the same day)
+ * is taken from Simpro and not from the clock. That copy carries the rate
+ * Simpro put on it and any correction the office made since it was sent;
+ * both copies side by side would count the hours twice wherever the rates
+ * differ. Clocked blocks Simpro does not have yet (not sent, or not synced
+ * back) go in beside its own. The office's schedule is a plan, so on a past
+ * day this phone clocked, the clock is what happened and the plan for that
+ * day is dropped.
+ */
+export function blocksForFill(input: {
+  simpro: readonly WorkBlock[];
+  /** True where the Simpro blocks are the office's schedule rather than the person's timesheet. */
+  simproIsPlan: boolean;
+  clock: readonly WorkBlock[];
+  /**
+   * Today, in Queensland. The clock fills a day once it is over: a filled day
+   * is remembered and never filled again, so a sheet opened at lunch would
+   * otherwise keep the morning and never get the afternoon.
+   */
+  today?: string;
+}): WorkBlock[] {
+  const clock = input.today ? input.clock.filter((b) => b.date < input.today!) : input.clock;
+  if (input.simproIsPlan) {
+    const clocked = new Set(clock.map((b) => b.date));
+    return [...input.simpro.filter((b) => !clocked.has(b.date)), ...clock];
+  }
+  const held = (c: WorkBlock): boolean => input.simpro.some((s) => s.date === c.date && !!s.jobId && s.jobId === c.jobId && overlaps(s, c));
+  return [...input.simpro, ...clock.filter((c) => !held(c))];
+}
+
+/** Whether two timed blocks share any minute. A block without both times overlaps nothing. */
+function overlaps(a: WorkBlock, b: WorkBlock): boolean {
+  const as = hhmm(a.startTime);
+  const ae = hhmm(a.endTime);
+  const bs = hhmm(b.startTime);
+  const be = hhmm(b.endTime);
+  return !!(as && ae && bs && be) && as < be && bs < ae;
 }
 
 /** "07:00" out of the times Simpro writes ("7:00", "07:00:00"), or blank when there is none. */

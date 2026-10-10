@@ -138,3 +138,15 @@ describe('nothing outside the storage module writes the whole blob', () => {
     expect(files.filter((f) => /patchPrefs\s*\(/.test(readFileSync(f, 'utf8'))).length).toBeGreaterThan(4);
   });
 });
+
+describe('the unpaid lunch', () => {
+  it('is none on every phone until the company turns it on', async () => {
+    expect(DEFAULT_PREFS.unpaidLunchMinutes).toBe(0);
+    // A phone whose settings were saved before the setting existed reads none too.
+    const { unpaidLunchMinutes: _gone, ...older } = DEFAULT_PREFS;
+    void _gone;
+    await AsyncStorage.setItem('safeqld.prefs', JSON.stringify(older));
+    expect((await loadPrefs()).unpaidLunchMinutes).toBe(0);
+    expect((await patchPrefs({ unpaidLunchMinutes: 30 })).unpaidLunchMinutes).toBe(30);
+  });
+});

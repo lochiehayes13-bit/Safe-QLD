@@ -105,7 +105,8 @@ describe('the timesheet at whatever width it is given', () => {
     // and a sheet list is how they come to disagree, so there is one now.
     expect(timesheet).toContain('writeXlsx(');
     expect(timesheet.match(/writeXlsx\(/g)).toHaveLength(1);
-    expect(timesheet).toContain('[timesheetSheet(sheet), timesheetSummarySheet(sheet)]');
+    // The week as it is paid, unpaid lunch and all: see withUnpaidBreaks.
+    expect(timesheet).toContain('[timesheetSheet(payroll), timesheetSummarySheet(payroll)]');
     expect(timesheet.match(/workbook\(\)/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -127,11 +128,14 @@ describe('the timesheet at whatever width it is given', () => {
     // Resolved once, so the sentence under the buttons cannot name one set of
     // recipients while the mail app is handed another.
     expect(timesheet.match(/timesheetRoute\(routeId\)/g)).toHaveLength(1);
-    expect(timesheet).toContain("persist({ status: 'submitted' })");
+    // Marked with the break it went with, so a later change to the setting
+    // leaves the week payroll has alone.
+    const submit = "persist({ status: 'submitted', unpaidBreakMinutes: breakMinutes })";
+    expect(timesheet).toContain(submit);
     // On the one outcome that means the mail app said so, and no other. A
     // browser answers `handed-over`, and a week marked submitted on that is a
     // week nobody sent.
-    const marked = timesheet.slice(0, timesheet.indexOf("persist({ status: 'submitted' })"));
+    const marked = timesheet.slice(0, timesheet.indexOf(submit));
     expect(marked.lastIndexOf("outcome === 'sent'")).toBeGreaterThan(marked.lastIndexOf('const emailSheet'));
   });
 
@@ -148,7 +152,7 @@ describe('the timesheet at whatever width it is given', () => {
      * that is the one the office opens, and an email whose first attachment
      * changed would retrain everybody who handles it.
      */
-    expect(timesheet).toContain('timesheetDocumentHtml(sheet)');
+    expect(timesheet).toContain('timesheetDocumentHtml(payroll)');
     /*
      * The page is allowed to fail without taking the workbook with it: it is
      * rendered through the phone's print engine, which can refuse, and it used
@@ -169,7 +173,7 @@ describe('the timesheet at whatever width it is given', () => {
   it('gives the summary card the week, so it stands beside the paperwork', () => {
     // A four line card next to an eight line column left a hole the height of
     // a hand on every desktop.
-    expect(timesheet).toContain('weekSummary(sheet)');
+    expect(timesheet).toContain('weekSummary(paid)');
     expect(timesheet).toContain('<DayBar');
     expect(timesheet).toContain('byDay.map(');
   });

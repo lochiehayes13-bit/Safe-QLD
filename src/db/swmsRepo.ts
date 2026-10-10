@@ -214,8 +214,7 @@ export async function swmsForDay(date: string, siteId?: string): Promise<SwmsRec
   return row ? toRecord(row) : null;
 }
 
-export const SIGNED_REFUSAL = 'This statement has been signed and the crew is working under it. '
-  + 'A signed statement is not edited — if the work has changed, start a new one for the change.';
+export const SIGNED_REFUSAL = 'It’s signed and locked. If the work has changed, start a new statement.';
 
 export type SwmsPatch = Partial<Omit<SwmsRecord, 'id' | 'createdAt' | 'updatedAt' | 'status' | 'signedAt' | 'attachedAt'>>;
 

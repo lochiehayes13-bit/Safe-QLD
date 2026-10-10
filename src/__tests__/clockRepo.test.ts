@@ -1,7 +1,9 @@
 import {
   costCentresForJob, deleteEntry, getEntry, listEntriesBetween, listEntriesForDay, markEntrySendFailed, markEntrySent,
-  openEntry, queueStatesFor, startEntry, stopOpenEntry, unsentEntries, updateEntryTimes, weekWindow,
+  openEntry, queueStatesFor, reattachWaitingEntries, setEntryCostCentre, startEntry, stopOpenEntry, unsentEntries,
+  updateEntryTimes, weekWindow,
 } from '@/db/clockRepo';
+import { replaceSetupActivities } from '@/db/moreRepo';
 import { enqueueSync, markSyncFailed, upsertJob } from '@/db/opsRepo';
 import { replaceJobChildren } from '@/db/mirrorRepo';
 import { clockContentKey } from '@/domain/clockOn';
@@ -156,5 +158,99 @@ describe('the cost centres a job offers', () => {
       { sectionExternalId: '5', sectionName: 'Section B', costCenterExternalId: '9', name: 'Fire detection' },
     ]);
     expect(await costCentresForJob('1002')).toEqual([]);
+  });
+});
+
+/**
+ * Hours clocked before the phone held a Simpro id they need.
+ *
+ * An activity chip used before the activity list synced, and a job clocked
+ * before it had a cost centre. After the sync stores the missing piece, the
+ * entry is filled in, its old send error cleared, and it is queued.
+ */
+describe('filling in waiting entries after a sync', () => {
+  const MEETING = { employeeExternalId: EMP, kind: 'activity' as const, activityName: 'Meeting' };
+  const NO_CC = { employeeExternalId: EMP, kind: 'work' as const, jobExternalId: '9001', jobTitle: 'Six-monthly routine', siteName: 'Fictional Tower' };
+
+  const queued = async (id: string) => (await queueStatesFor([id])).get(id)?.status;
+
+  it('keeps saying why while the office list is not on the phone, then attaches and queues once it is', async () => {
+    await startEntry(MEETING, '2026-09-07T21:00:00.000Z');
+    const [meeting] = await stopOpenEntry('2026-09-07T22:00:00.000Z');
+    await markEntrySendFailed(meeting!.id, 'No Simpro activity for Meeting');
+
+    const before = await reattachWaitingEntries();
+    expect(before.attached).toEqual([]);
+    expect(before.waiting.map((w) => w.why)).toEqual(['Sends once Simpro activities sync.']);
+    expect((await getEntry(meeting!.id))?.sendError).toBe('Sends once Simpro activities sync.');
+
+    await replaceSetupActivities([{ id: '12', name: 'meeting' }, { id: '13', name: 'Travel Time' }]);
+    const after = await reattachWaitingEntries();
+    expect(after.attached.map((e) => e.id)).toEqual([meeting!.id]);
+    const saved = await getEntry(meeting!.id);
+    expect(saved?.activityExternalId).toBe('12');
+    expect(saved?.sendError).toBeUndefined();
+    expect(after.queued.map((e) => e.id)).toEqual([meeting!.id]);
+    expect(await queued(meeting!.id)).toBe('pending');
+
+    // Nothing left to do, and nothing queued twice.
+    const again = await reattachWaitingEntries();
+    expect(again).toEqual({ attached: [], queued: [], waiting: [], jobsWithoutCostCentres: [] });
+  });
+
+  it('gives a job its cost centre once it has exactly one, and leaves a running entry to queue when it stops', async () => {
+    await startEntry(NO_CC, '2026-09-07T21:00:00.000Z');
+    const [closed] = await stopOpenEntry('2026-09-07T23:00:00.000Z');
+    const { opened: running } = await startEntry(NO_CC, '2026-09-08T00:00:00.000Z');
+
+    const before = await reattachWaitingEntries();
+    expect(before.jobsWithoutCostCentres).toEqual(['9001']);
+    expect(before.waiting.map((w) => w.why)).toEqual([
+      'No cost centre on job 9001 yet. Ask the office.', 'No cost centre on job 9001 yet. Ask the office.',
+    ]);
+
+    await upsertJob({ id: 'simpro-9001', externalId: '9001', siteName: 'Fictional Tower', title: 'Six-monthly routine', status: 'scheduled' });
+    await replaceJobChildren('simpro-9001', {
+      sections: [{ id: '5', name: 'Main St', displayOrder: 1, costCenters: [{ id: '9', name: 'Fire detection', displayOrder: 1, items: [] }] }],
+    }, '2026-09-08T01:00:00.000Z');
+
+    const after = await reattachWaitingEntries();
+    expect(after.attached.map((e) => e.id).sort()).toEqual([closed!.id, running.id].sort());
+    expect(after.queued.map((e) => e.id)).toEqual([closed!.id]);
+    expect(await getEntry(closed!.id)).toMatchObject({ jobSectionExternalId: '5', jobCostCenterExternalId: '9' });
+    expect((await getEntry(running.id))?.jobCostCenterExternalId).toBe('9');
+    expect(await queued(running.id)).toBeUndefined();
+  });
+
+  it('leaves the choice to the person where the job has several, and takes the one they pick', async () => {
+    await upsertJob({ id: 'simpro-9001', externalId: '9001', siteName: 'Fictional Tower', title: 'Six-monthly routine', status: 'scheduled' });
+    await replaceJobChildren('simpro-9001', {
+      sections: [{ id: '5', name: 'Main St', displayOrder: 1, costCenters: [
+        { id: '8', name: 'Hydrants', displayOrder: 1, items: [] },
+        { id: '9', name: 'Fire detection', displayOrder: 2, items: [] },
+      ] }],
+    }, '2026-09-08T01:00:00.000Z');
+    await startEntry(NO_CC, '2026-09-07T21:00:00.000Z');
+    const [closed] = await stopOpenEntry('2026-09-07T23:00:00.000Z');
+
+    const out = await reattachWaitingEntries();
+    expect(out.attached).toEqual([]);
+    expect(out.jobsWithoutCostCentres).toEqual([]);
+    expect((await getEntry(closed!.id))?.sendError).toBe('Pick a cost centre for job 9001.');
+
+    expect(await setEntryCostCentre(closed!.id, { sectionExternalId: '5', costCenterExternalId: '7' }))
+      .toEqual({ ok: false, why: "That cost centre isn't on job 9001" });
+    const picked = await setEntryCostCentre(closed!.id, { sectionExternalId: '5', costCenterExternalId: '8' });
+    expect(picked.ok && picked.entry).toMatchObject({ jobSectionExternalId: '5', jobCostCenterExternalId: '8' });
+    expect(picked.ok && picked.entry.sendError).toBeUndefined();
+  });
+
+  it('never touches an entry the office already has', async () => {
+    await startEntry(MEETING, '2026-09-07T21:00:00.000Z');
+    const [meeting] = await stopOpenEntry('2026-09-07T22:00:00.000Z');
+    await markEntrySent(meeting!.id, '555');
+    await replaceSetupActivities([{ id: '12', name: 'Meeting' }]);
+    expect((await reattachWaitingEntries()).attached).toEqual([]);
+    expect((await getEntry(meeting!.id))?.activityExternalId).toBeUndefined();
   });
 });

@@ -1,5 +1,6 @@
 import { matchTemplates, preselectedTemplates, type MatchContext, type TemplateMatch } from './swmsMatch';
 import { swmsTitleFor, type SwmsTemplate, type SwmsWorker } from './swms';
+import { contextId } from './screenContext';
 
 /**
  * Building today's statement: the job, the works, the statements.
@@ -53,6 +54,49 @@ export function worksFromJob(job: BuilderJob | null): string {
   return `${title}. ${description}`;
 }
 
+/**
+ * The job and site a new statement starts with, from the route that opened it.
+ *
+ * The job screen passes `job` (the Simpro number), `siteId` and `site` (the
+ * name). expo-router can hand back an array, an empty string or nothing for
+ * any of them. A job number gives a job to start from; a site with no job
+ * gives the site on its own; neither gives nothing, and the screen asks.
+ */
+export function swmsStartFromRoute(params: {
+  job?: string | string[];
+  siteId?: string | string[];
+  site?: string | string[];
+}): { job: BuilderJob | null; site: { id: string; name: string } | null } {
+  const number = contextId(params.job);
+  const siteId = contextId(params.siteId);
+  const siteName = contextId(params.site);
+  if (number) return { job: { externalId: number, siteId, siteName }, site: null };
+  if (siteId) return { job: null, site: { id: siteId, name: siteName ?? '' } };
+  return { job: null, site: null };
+}
+
+/**
+ * A picked job, filled out from the job row on the phone.
+ *
+ * What was picked wins where it says something, because the job screen may
+ * have resolved a site the row itself does not carry. The row fills in the
+ * title, the customer and the office's description.
+ */
+export function withJobRow(
+  picked: BuilderJob,
+  row?: { siteName?: string; siteId?: string; customerName?: string; title?: string; descriptionText?: string } | null,
+): BuilderJob {
+  if (!row) return picked;
+  return {
+    ...picked,
+    siteId: picked.siteId || row.siteId || undefined,
+    siteName: picked.siteName?.trim() || row.siteName?.trim() || undefined,
+    customerName: picked.customerName?.trim() || row.customerName?.trim() || undefined,
+    title: picked.title?.trim() || row.title?.trim() || undefined,
+    descriptionText: row.descriptionText,
+  };
+}
+
 export interface BuilderContext {
   job: BuilderJob | null;
   /** What the technician typed, or what came off the job. */
@@ -95,19 +139,16 @@ export function matchesFor(
 export function matchSummary(matches: readonly TemplateMatch[], works: string): string {
   const ticked = matches.filter((m) => m.verdict === 'preselect').length;
   if (!works.trim()) {
-    return 'Say what the work is and the statements it needs come up below.';
+    return 'Describe the work to bring up its statements.';
   }
   if (!matches.length) {
-    return 'Nothing in the library matches that. Every statement is listed below — pick the ones that cover it.';
+    return 'No match. Pick from the full list below.';
   }
   if (!ticked) {
-    return `${matches.length} statement${matches.length === 1 ? '' : 's'} might cover this. None of them is a `
-      + 'clear match, so none is ticked — read them and choose.';
+    return `${matches.length} might fit. Tick the ones that apply.`;
   }
   const offered = matches.length - ticked;
-  return `${ticked} statement${ticked === 1 ? '' : 's'} ticked for this work`
-    + (offered ? `, and ${offered} more worth a look.` : '.')
-    + ' Take off anything that does not apply.';
+  return `${ticked} ticked${offered ? `, ${offered} more to check` : ''}. Untick any that don’t apply.`;
 }
 
 export interface BuilderDraft {
@@ -180,7 +221,7 @@ export function builderDraft(input: {
 export function builderTitle(job: BuilderJob | null, templates: readonly SwmsTemplate[]): string {
   const work = swmsTitleFor(templates);
   const number = job?.externalId?.trim();
-  return number ? `Job ${number} — ${work}` : work;
+  return number ? `Job ${number} · ${work}` : work;
 }
 
 /**
@@ -205,9 +246,9 @@ export function builderNotReady(input: {
    * never depend on the office's paperwork.
    */
   if (!input.job && !input.siteId) {
-    return 'Pick the job this is for, or the site if the office has not raised one.';
+    return 'Pick the job, or the site if there is no job.';
   }
-  if (!input.templateIds.length) return 'Tick at least one statement. Nothing below covers the work? Say more about it above.';
+  if (!input.templateIds.length) return 'Tick at least one statement.';
   return null;
 }
 

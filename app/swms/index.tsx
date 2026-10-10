@@ -5,7 +5,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { createSwms, listSwms, templatesFor } from '@/db/swmsRepo';
 import { SWMS_TEMPLATES } from '@/seed/swms';
 import {
-  carryForwardSwms, mergeSwms, swmsProgressLine,
+  carryForwardNote, carryForwardSwms, mergeSwms, swmsProgressLine,
   type SwmsRecord, type SwmsTemplate,
 } from '@/domain/swms';
 import { qldIsoDay } from '@/domain/qldTime';
@@ -16,7 +16,7 @@ import { describeActionFailure, describeLoadFailure } from '@/domain/loadFailure
 import { showAlert } from '@/components/alert';
 import { useTheme } from '@/theme';
 import {
-  Banner, Button, Card, Chip, EmptyState, H2, Label, Rowed, Screen, SearchBox, StatusPill, Txt,
+  Banner, Button, Card, Chip, EmptyState, H2, Rowed, Screen, SearchBox, StatusPill, Txt,
 } from '@/components/ui';
 
 /**
@@ -71,7 +71,7 @@ export default function SwmsLibraryScreen() {
       });
       router.push({ pathname: '/swms/[id]', params: { id: record.id } });
     } catch (e) {
-      showAlert('Could not start it', describeActionFailure(e, 'starting the statement'));
+      showAlert('Couldn’t start it', describeActionFailure(e, 'starting the statement'));
     } finally {
       setStarting(false);
     }
@@ -82,10 +82,10 @@ export default function SwmsLibraryScreen() {
     try {
       const { record: next, cleared } = carryForwardSwms(previous, today);
       const made = await createSwms({ ...next, templateIds: [...next.templateIds] });
-      showAlert('Copied to today', `Everything carried across except:\n\n${cleared.map((c) => `• ${c}`).join('\n')}`);
+      showAlert('Copied to today', carryForwardNote(cleared));
       router.push({ pathname: '/swms/[id]', params: { id: made.id } });
     } catch (e) {
-      showAlert('Could not copy it', describeActionFailure(e, 'copying the statement'));
+      showAlert('Couldn’t copy it', describeActionFailure(e, 'copying the statement'));
     } finally {
       setStarting(false);
     }
@@ -98,23 +98,22 @@ export default function SwmsLibraryScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Safe work method statements' }} />
+      <Stack.Screen options={{ title: 'SWMS' }} />
       <Screen>
-        {failed ? <Banner tone="fail" title="This list could not be read" body={failed} /> : null}
+        {failed ? <Banner tone="fail" title="Couldn’t load your statements" body={failed} /> : null}
 
         <Card>
           <Rowed align="flex-start">
             <MaterialCommunityIcons name="clipboard-check-outline" size={26} color={t.color.accent} />
             <View style={{ flex: 1, marginLeft: t.space(3) }}>
-              <Txt weight="700">Start today’s statement</Txt>
+              <Txt weight="700">Today’s statement</Txt>
               <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>
-                Pick the job, say what the work is, and the statements it needs come up ticked — from the words,
-                from the register at that site and from what is due there. Take off anything that does not apply.
+                Pick the job and describe the work.
               </Txt>
             </View>
           </Rowed>
           <Button
-            title="Start today’s statement"
+            title="Start"
             onPress={() => router.push('/swms/new')}
             style={{ marginTop: t.space(3) }}
           />
@@ -122,7 +121,7 @@ export default function SwmsLibraryScreen() {
 
         {recent.length ? (
           <>
-            <H2>Yours</H2>
+            <H2>Recent</H2>
             {recent.map((r) => {
               const merged = mergeSwms(templatesFor(r));
               const isToday = r.date === today;
@@ -144,7 +143,7 @@ export default function SwmsLibraryScreen() {
                         tone={r.status === 'signed' ? 'pass' : 'warn'}
                       />
                       {merged.highRisk ? <Chip label="High risk" tone="fail" /> : null}
-                      {r.attachedAt ? <Chip label="On the job" tone="pass" /> : null}
+                      {r.attachedAt ? <Chip label="Queued for the job" tone="pass" /> : null}
                     </View>
                   </Rowed>
                   {r.status === 'signed' && !isToday ? (
@@ -161,11 +160,10 @@ export default function SwmsLibraryScreen() {
           </>
         ) : null}
 
-        <H2>The statements</H2>
-        <SearchBox value={query} onChange={setQuery} placeholder="Search the statements" />
+        <H2>All statements</H2>
+        <SearchBox value={query} onChange={setQuery} placeholder="Search statements" />
         {templates.length === 0 ? (
-          <EmptyState
-          icon="magnify-close" title="Nothing by that name" body="Try the work rather than the hazard: hot work, heights, confined space." />
+          <EmptyState icon="magnify-close" title="No match" body="Try hot work, heights or confined space." />
         ) : null}
         {templates.map((x) => (
           <Card key={x.id} onPress={starting ? undefined : () => void startTemplate(x)}>
@@ -183,15 +181,6 @@ export default function SwmsLibraryScreen() {
             </Rowed>
           </Card>
         ))}
-
-        <Card>
-          <Label>Why this is not a folder of PDFs</Label>
-          <Txt size="sm" tone="muted" style={{ marginTop: t.space(2), lineHeight: 20 }}>
-            A statement has to be on site while the work is going on, and everybody doing the work has to have been
-            taken through it. A PDF on a laptop in the ute is neither. Here the crew ticks the steps as they are read,
-            signs on the phone, and the signed copy goes onto the Simpro job by itself.
-          </Txt>
-        </Card>
       </Screen>
     </>
   );

@@ -165,6 +165,13 @@ export interface Prefs {
   timesheetFill: '' | 'schedule' | 'manual';
   /** Days this phone has filled from the schedule, so a day cleared by hand is not filled again. */
   timesheetFilledDays: string[];
+  /**
+   * Unpaid lunch taken off a timesheet day of more than five worked hours, in
+   * minutes: 0 (none) or 30. None by default, so nobody's hours change until
+   * the company turns it on. Read through unpaidBreakMinutes in
+   * @/domain/timesheet, which treats anything else as none.
+   */
+  unpaidLunchMinutes: number;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -217,6 +224,7 @@ export const DEFAULT_PREFS: Prefs = {
   themeMovedToLight: true,
   timesheetFill: '',
   timesheetFilledDays: [],
+  unpaidLunchMinutes: 0,
 };
 
 export async function loadPrefs(): Promise<Prefs> {

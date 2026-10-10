@@ -39,6 +39,7 @@ import { MIGRATION_V37 } from './schemaV37';
 import { MIGRATION_V38 } from './schemaV38';
 import { MIGRATION_V39 } from './schemaV39';
 import { MIGRATION_V40 } from './schemaV40';
+import { MIGRATION_V41 } from './schemaV41';
 
 export const MIGRATIONS: string[] = [
   // v1 — initial schema
@@ -414,6 +415,10 @@ export const MIGRATIONS: string[] = [
   // v40 — the scope of works on a quote, so a reprint prints what the client
   // was first sent
   MIGRATION_V40,
+
+  // v41 — the unpaid break a timesheet was submitted with, so changing the
+  // setting later leaves weeks payroll already has as they were
+  MIGRATION_V41,
 ];
 
 /**

@@ -485,6 +485,91 @@ export function sendReadiness(entry: ClockEntry): Readiness {
   return { ready: true };
 }
 
+// ---------------------------------------------------------------------------
+// Filling in the Simpro ids after a sync
+// ---------------------------------------------------------------------------
+
+/** A cost centre a job's hours can land on, as the last sync read it. */
+export interface CostCentreRef {
+  sectionExternalId: string;
+  costCenterExternalId: string;
+}
+
+/** What the phone holds after a sync, for filling in an entry's missing Simpro ids. */
+export interface ReattachContext {
+  /** The office's activities (setup/activities), by id and name. */
+  activities: readonly { id: string; name: string }[];
+  /** Each job's cost centres, by Simpro job number. A job not in the map has none on the phone. */
+  costCentres: ReadonlyMap<string, readonly CostCentreRef[]>;
+}
+
+export interface ReattachResult {
+  entry: ClockEntry;
+  /** True where a missing id was filled in. */
+  attached: boolean;
+  /** Why the entry is still missing an id, in a technician's words. Absent once nothing is missing. */
+  why?: string;
+}
+
+/** Whether an entry is missing a Simpro id it needs before it can be sent. */
+export function missingSimproIds(entry: ClockEntry): boolean {
+  if (entry.sentAt || entry.kind === 'break') return false;
+  if (entry.kind === 'work') return !entry.jobSectionExternalId || !entry.jobCostCenterExternalId;
+  return !entry.activityExternalId;
+}
+
+const sameName = (a: string, b: string): boolean =>
+  a.trim().replace(/\s+/g, ' ').toLowerCase() === b.trim().replace(/\s+/g, ' ').toLowerCase();
+
+/**
+ * Fills in the Simpro ids an entry was made without, from what a sync read.
+ *
+ * Two ways an entry is made short: an activity chip used before the
+ * office's activity list had synced carries a name and no id, and "Clock on
+ * anyway" on a job with no cost centre carries the job and nothing under
+ * it. Either can be sent once the phone holds the missing piece, so after
+ * each sync the waiting entries are matched again: the activity by its
+ * name (and travel by the one activity named for travel, where the office
+ * calls it something longer), the cost centre where the job now has
+ * exactly one, or exactly one matching the section or cost centre the
+ * entry already names. Several to choose from is the person's choice,
+ * never a guess.
+ *
+ * A sent entry and a break are returned as they are.
+ */
+export function reattachEntry(entry: ClockEntry, ctx: ReattachContext): ReattachResult {
+  if (!missingSimproIds(entry)) return { entry, attached: false };
+
+  if (entry.kind === 'work') {
+    if (!entry.jobExternalId) return { entry, attached: false, why: 'No job on this entry. Tell the office the hours.' };
+    const job = entry.jobExternalId;
+    const all = ctx.costCentres.get(job) ?? [];
+    const fits = all.filter((c) =>
+      (!entry.jobCostCenterExternalId || c.costCenterExternalId === entry.jobCostCenterExternalId)
+      && (!entry.jobSectionExternalId || c.sectionExternalId === entry.jobSectionExternalId));
+    if (fits.length === 1) {
+      const only = fits[0]!;
+      return {
+        entry: { ...entry, jobSectionExternalId: only.sectionExternalId, jobCostCenterExternalId: only.costCenterExternalId },
+        attached: true,
+      };
+    }
+    if (!all.length) return { entry, attached: false, why: `No cost centre on job ${job} yet. Ask the office.` };
+    if (!fits.length) return { entry, attached: false, why: `That cost centre is gone from job ${job}. Pick another.` };
+    return { entry, attached: false, why: `Pick a cost centre for job ${job}.` };
+  }
+
+  const name = (entry.activityName ?? (entry.kind === 'travel' ? 'Travel' : '')).trim();
+  if (!ctx.activities.length) return { entry, attached: false, why: 'Sends once Simpro activities sync.' };
+  let found = name ? ctx.activities.filter((a) => sameName(a.name, name)) : [];
+  if (found.length !== 1 && entry.kind === 'travel') found = ctx.activities.filter((a) => /travel/i.test(a.name));
+  if (found.length === 1) {
+    const hit = found[0]!;
+    return { entry: { ...entry, activityExternalId: hit.id, activityName: hit.name }, attached: true };
+  }
+  return { entry, attached: false, why: name ? `No Simpro activity called ${name}. Ask the office.` : 'No Simpro activity on this entry.' };
+}
+
 /**
  * The one request that puts an entry in Simpro.
  *

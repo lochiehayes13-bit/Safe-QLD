@@ -3,7 +3,9 @@ import { FlatList, View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { getDefect, listDefects, listSitePicks, reopenDefect, updateDefect } from '@/db/repo';
 import { queueDefectNote } from '@/db/opsRepo';
-import { defectMove, describeDefectReport, type DefectReportNotice, type DefectReportOccasion } from '@/domain/defectReport';
+import {
+  defectMove, defectStatusLabel, describeDefectReport, type DefectReportNotice, type DefectReportOccasion,
+} from '@/domain/defectReport';
 import { nowIso } from '@/db';
 import type { Defect } from '@/domain/types';
 import { formatAuDate } from '@/export/sheets';
@@ -29,8 +31,12 @@ export default function DefectsScreen() {
   const t = useTheme();
   const [defects, setDefects] = useState<Defect[]>([]);
   const [sites, setSites] = useState<Map<string, string>>(new Map());
-  const [status, setStatus] = useState<'open' | 'all'>('open');
+  // Quoted has its own tab: a quoted defect is not fixed, and it has to be
+  // somewhere it can be found and marked rectified.
+  const [status, setStatus] = useState<'open' | 'quoted' | 'all'>('open');
   const [capped, setCapped] = useState(false);
+  // When the list was read, for each defect's age. Moved on with every load.
+  const [readAt, setReadAt] = useState(() => Date.now());
 
   // "Nothing outstanding" across every site is the strongest claim this app
   // makes. It must not be made on the strength of a read nobody checked.
@@ -51,15 +57,16 @@ export default function DefectsScreen() {
       // One more than the page, which is how the list knows it was cut
       // without a second count of a table nobody is counting.
       const [d, s] = await Promise.all([
-        listDefects(undefined, status === 'open' ? 'open' : undefined, PAGE + 1),
+        listDefects(undefined, status === 'all' ? undefined : status, PAGE + 1),
         listSitePicks(),
       ]);
       setDefects(d.slice(0, PAGE));
+      setReadAt(Date.now());
       setCapped(d.length > PAGE);
       setSites(new Map(s.map((x) => [x.id, x.name])));
     } catch (e) {
       setDefects([]);
-      setFailed(describeLoadFailure(e, 'the defects on this device'));
+      setFailed(describeLoadFailure(e, 'the defects'));
     }
   }, [status]);
 
@@ -102,8 +109,8 @@ export default function DefectsScreen() {
     } catch (e) {
       setReport({
         tone: 'warn',
-        title: 'The office has not been told',
-        body: describeActionFailure(e, 'queueing the note for the office'),
+        title: 'Office not told',
+        body: describeActionFailure(e, 'queue the note for the office'),
       });
     }
   };
@@ -135,7 +142,7 @@ export default function DefectsScreen() {
       } catch (e) {
         // These writes used to be unhandled rejections inside `void`, so a full
         // disk reloaded the list, left the defect as it was, and said nothing.
-        showAlert('Not saved', describeActionFailure(e, 'saving this defect'));
+        showAlert('Not saved', describeActionFailure(e, 'save this defect'));
         return;
       }
       if (move) await reportToOffice(d.id, sites.get(d.siteId), move);
@@ -151,8 +158,8 @@ export default function DefectsScreen() {
    */
   const markRectified = (d: Defect) => {
     showAlert(
-      'Mark this defect rectified?',
-      `${sites.get(d.siteId) ?? 'Unknown site'} — ${d.location}\n\nThis records today as the rectification date, which the occupier statement and any critical defect notice read back.`,
+      'Mark rectified?',
+      `${sites.get(d.siteId) ?? 'Unknown site'}, ${d.location}\n\nRecords today as the rectification date.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Rectified', onPress: () => moveStatus(d, 'rectified') },
@@ -161,7 +168,7 @@ export default function DefectsScreen() {
   };
 
   const reopen = (d: Defect) => {
-    showAlert('Reopen this defect?', 'It goes back to open and the rectification date is cleared.', [
+    showAlert('Reopen this defect?', 'Clears the rectification date.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Reopen', style: 'destructive', onPress: () => moveStatus(d, 'open') },
     ]);
@@ -170,7 +177,7 @@ export default function DefectsScreen() {
   /** Age in days, which is what makes an outstanding list feel urgent. */
   const ageDays = (iso: string): number => {
     const then = Date.parse(iso);
-    return Number.isFinite(then) ? Math.floor((Date.now() - then) / 86_400_000) : 0;
+    return Number.isFinite(then) ? Math.floor((readAt - then) / 86_400_000) : 0;
   };
 
   return (
@@ -181,22 +188,31 @@ export default function DefectsScreen() {
           <Segmented
             value={status}
             onChange={setStatus}
-            options={[{ value: 'open', label: 'Open' }, { value: 'all', label: 'All' }]}
+            options={[{ value: 'open', label: 'Open' }, { value: 'quoted', label: 'Quoted' }, { value: 'all', label: 'All' }]}
           />
-          <Button title="Raise a defect" onPress={() => router.push('/work/defect/new')} />
+          <Button title="Raise defect" onPress={() => router.push('/work/defect/new')} />
           {/* Said out loud where the list is cut, rather than a list that
               quietly stops at three hundred of the fourteen hundred on the
               book. */}
-          {capped ? <Txt size="xs" tone="faint">Worst {PAGE} shown. A site's own list has all of its defects.</Txt> : null}
+          {capped ? <Txt size="xs" tone="faint">First {PAGE} shown, critical first. Open a site for all of its defects.</Txt> : null}
           {report ? <Banner tone={report.tone} title={report.title} body={report.body} /> : null}
         </View>
         <FlatList
           data={shown}
           keyExtractor={(d) => d.id}
           contentContainerStyle={{ padding: t.space(4), paddingTop: 0, gap: t.space(3), paddingBottom: t.space(20) }}
-          ListHeaderComponent={failed ? <Banner tone="fail" title="This list could not be read" body={failed} /> : null}
-          ListEmptyComponent={failed ? null : <EmptyState
-          icon="alert-circle-check-outline" title={status === 'open' ? 'Nothing outstanding' : 'No defects recorded'} body="Defects raised on site appear here until they are cleared." />}
+          ListHeaderComponent={failed ? (
+            <View style={{ gap: t.space(2) }}>
+              <Banner tone="fail" title="Defects not loaded" body={failed} />
+              <Button title="Try again" variant="secondary" onPress={() => { void load(); }} />
+            </View>
+          ) : null}
+          ListEmptyComponent={failed ? null : (
+            <EmptyState
+              icon="alert-circle-check-outline"
+              title={status === 'open' ? 'No open defects' : status === 'quoted' ? 'No quoted defects' : 'No defects recorded'}
+            />
+          )}
           renderItem={({ item }) => {
             const days = ageDays(item.raisedAt);
             return (
@@ -204,8 +220,8 @@ export default function DefectsScreen() {
                 <Rowed align="flex-start" gap={2}>
                   <View style={{ flex: 1 }}>
                     <Rowed gap={2} wrap>
-                      <Chip label={item.severity === 'critical' ? 'CRITICAL' : 'Non-critical'} tone={item.severity === 'critical' ? 'fail' : 'warn'} />
-                      <Chip label={item.status} tone={item.status === 'open' ? 'default' : 'pass'} />
+                      <Chip label={item.severity === 'critical' ? 'Critical' : 'Non-critical'} tone={item.severity === 'critical' ? 'fail' : 'warn'} />
+                      <Chip label={defectStatusLabel(item.status)} tone={item.status === 'rectified' || item.status === 'closed' ? 'pass' : 'default'} />
                       {days > 30 ? <Chip label={`${days} days old`} tone="fail" /> : days > 0 ? <Chip label={`${days}d`} /> : null}
                     </Rowed>
                     <Txt weight="700" style={{ marginTop: t.space(1.5) }} numberOfLines={1}>{item.location}</Txt>
@@ -218,14 +234,14 @@ export default function DefectsScreen() {
                 </Rowed>
                 {item.severity === 'critical' && !item.noticeIssuedAt ? (
                   <Button
-                    title="The occupier's notice is not written"
+                    title="Write occupier notice"
                     variant="secondary"
                     compact
                     style={{ marginTop: t.space(2.5) }}
                     onPress={() => router.push({ pathname: '/work/notice/[id]', params: { id: item.id } })}
                   />
                 ) : null}
-                {item.status === 'open' ? (
+                {item.status === 'open' || item.status === 'quoted' ? (
                   <Rowed gap={2} style={{ marginTop: t.space(2.5) }}>
                     <Button
                       title="Rectified"
@@ -234,13 +250,15 @@ export default function DefectsScreen() {
                       style={{ flex: 1 }}
                       onPress={() => markRectified(item)}
                     />
-                    <Button
-                      title="Quoted"
-                      variant="secondary"
-                      compact
-                      style={{ flex: 1 }}
-                      onPress={() => moveStatus(item, 'quoted')}
-                    />
+                    {item.status === 'open' ? (
+                      <Button
+                        title="Quoted"
+                        variant="secondary"
+                        compact
+                        style={{ flex: 1 }}
+                        onPress={() => moveStatus(item, 'quoted')}
+                      />
+                    ) : null}
                   </Rowed>
                 ) : item.status === 'rectified' ? (
                   <Button

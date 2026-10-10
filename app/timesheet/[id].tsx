@@ -9,8 +9,8 @@ import { listScheduleFor } from '@/db/scheduleRepo';
 import { getEmployee } from '@/db/employeeRepo';
 import { whoseSchedule } from '@/domain/myDay';
 import {
-  blocksFromSchedule, blocksFromTimesheet, entriesFromSchedule, fillFromPosition, fillModeFor, fillSummary, fillsOnOpen,
-  rememberFilled, type TimesheetFill, type WorkBlock,
+  blocksForFill, blocksFromClock, blocksFromSchedule, blocksFromTimesheet, entriesFromSchedule, fillFromPosition, fillModeFor,
+  fillSummary, fillsOnOpen, rememberFilled, type TimesheetFill, type WorkBlock,
 } from '@/domain/timesheetFromSchedule';
 import { listSiteSummaries } from '@/db/repo';
 import { deleteEntry, insertClosedEntry, listEntriesBetween } from '@/db/clockRepo';
@@ -24,9 +24,9 @@ import { loadPrefs, patchPrefs } from '@/app-prefs';
 import {
   DEFAULT_EXTRAS, LEAVE_KINDS, LEAVE_LABEL, STANDARD_DAY_HOURS, STANDARD_WEEK_HOURS,
   blankEntry, copyDay, dayName, dayWorkedHours, entryHours, filterJobOptions, jobOptions, mergeJobOptions,
- leaveOf, nextTimesFor, previousDayWithEntries, setLeave, timesheetTotals, toggleExtra, usualTimes,
-  weekDates, weekPeak, weekSummary,
-  type DaySummary, type HourKind, type JobOption, type LeaveKind, type Timesheet, type TimesheetEntry,
+ leaveOf, nextTimesFor, previousDayWithEntries, setLeave, timesheetTotals, toggleExtra, unpaidBreakLabel, unpaidBreakMinutes,
+  sheetUnpaidBreak, unpaidBreakTotal, usualTimes, weekDates, weekPeak, weekSummary, withUnpaidBreaks,
+  type DaySummary, type HourKind, type JobOption, type LeaveKind, type Timesheet, type TimesheetEntry, type UnpaidBreak,
 } from '@/domain/timesheet';
 import {
   TIMESHEET_ROUTES, routeAddresses, timesheetBody, timesheetNotReady, timesheetRoute, timesheetSubject,
@@ -114,6 +114,8 @@ export default function TimesheetScreen() {
   const [suggestedFill, setSuggestedFill] = useState<TimesheetFill | undefined>(undefined);
   const [autoFilled, setAutoFilled] = useState(false);
   const autoTried = useRef(false);
+  // The company's unpaid lunch, from Settings. None until it is turned on.
+  const [breakMinutes, setBreakMinutes] = useState<UnpaidBreak>(0);
 
   /*
    * One read, not three. The week, the job list and the history each used to be
@@ -148,6 +150,7 @@ export default function TimesheetScreen() {
       const week = found ? weekDates(found.weekStarting) : [];
       const [prefs, synced] = await Promise.all([loadPrefs(), listSetupActivities()]);
       setEmployeeId(prefs.simproEmployeeId.trim());
+      setBreakMinutes(unpaidBreakMinutes(prefs.unpaidLunchMinutes));
       setActivities(synced.map((a) => ({ id: a.id, name: a.name })));
 
       // The person's own blocks for the week, read off the last sync: their
@@ -157,17 +160,25 @@ export default function TimesheetScreen() {
       setFillPref(mode ?? '');
       const who = whoseSchedule(prefs);
       setKnowsWho(!!who);
+      // This phone's own clock for the week: leave already booked, and the
+      // hours clocked on jobs, which fill the sheet beside Simpro's blocks.
+      const clocked = week.length ? await listEntriesBetween(week[0]!, week[week.length - 1]!) : [];
       if (who && week.length) {
         const from = week[0]!;
         const to = week[week.length - 1]!;
         const own = who.by === 'id' ? await listSimproTimesheets({ employeeId: who.staffId, from, to }) : [];
-        const blocks = own.length
-          ? blocksFromTimesheet(own, new Map(synced.map((a) => [a.id, a.name])))
-          : blocksFromSchedule(await listScheduleFor({
-            staffId: who.by === 'id' ? who.staffId : undefined,
-            staffName: who.by === 'name' ? who.staffName : undefined,
-            from, to,
-          }));
+        const blocks = blocksForFill({
+          simpro: own.length
+            ? blocksFromTimesheet(own, new Map(synced.map((a) => [a.id, a.name])))
+            : blocksFromSchedule(await listScheduleFor({
+              staffId: who.by === 'id' ? who.staffId : undefined,
+              staffName: who.by === 'name' ? who.staffName : undefined,
+              from, to,
+            })),
+          simproIsPlan: !own.length,
+          clock: blocksFromClock(clocked),
+          today: qldIsoDay(nowIso()) ?? undefined,
+        });
         const held = await jobSummariesByExternalIds(blocks.map((b) => b.jobId).filter((j): j is string => !!j));
         const sites = new Map(held
           .filter((j) => j.externalId)
@@ -203,12 +214,7 @@ export default function TimesheetScreen() {
       } else {
         setSchedule(null);
       }
-      if (week.length) {
-        const booked = (await listEntriesBetween(week[0]!, week[week.length - 1]!)).filter(isLeaveEntry);
-        setLeaveDays(booked.map((e) => e.date));
-      } else {
-        setLeaveDays([]);
-      }
+      setLeaveDays(clocked.filter(isLeaveEntry).map((e) => e.date));
     } catch (e) {
       setFailed(describeLoadFailure(e, 'this timesheet'));
     }
@@ -326,9 +332,19 @@ export default function TimesheetScreen() {
     if (choice === 'schedule') fillFromSchedule();
   };
 
-  const totals = useMemo(() => (sheet ? timesheetTotals(sheet) : null), [sheet]);
+  /**
+   * The week as it is paid: the sheet with the unpaid lunch taken off each
+   * long day. Every total, the workbook, the page and the email are built
+   * from this; the days are edited on `sheet`, which is what is saved. A
+   * submitted week keeps the break it was submitted with.
+   */
+  const paid = useMemo(
+    () => (sheet ? withUnpaidBreaks(sheet, sheetUnpaidBreak(sheet, breakMinutes)) : null),
+    [sheet, breakMinutes],
+  );
+  const totals = useMemo(() => (paid ? timesheetTotals(paid) : null), [paid]);
   const days = useMemo(() => (sheet ? weekDates(sheet.weekStarting) : []), [sheet]);
-  const byDay = useMemo(() => (sheet ? weekSummary(sheet) : []), [sheet]);
+  const byDay = useMemo(() => (paid ? weekSummary(paid) : []), [paid]);
   const options = useMemo(
     () => jobOptions(history.filter((h) => h.id !== id), jobs.map((j) => ({
       externalId: j.externalId, siteName: j.siteName, status: j.status,
@@ -355,6 +371,8 @@ export default function TimesheetScreen() {
   // arrives changes the hook count between renders, which React answers by
   // throwing — a blank screen where the week should be.
   if (!sheet || !totals) return <RecordGate missing={missing} what="timesheet" failed={failed} onRetry={() => { void load(); }} />;
+  const payroll = paid ?? sheet;
+  const breaksOff = unpaidBreakTotal(payroll);
 
   /*
    * The week is seven days of the same shape, which is a grid rather than a
@@ -407,7 +425,7 @@ export default function TimesheetScreen() {
    */
   const workbook = () => writeXlsx(
     `Timesheet ${sheet.employeeName || ''} ${formatAuDate(sheet.weekStarting)}`.trim(),
-    [timesheetSheet(sheet), timesheetSummarySheet(sheet)],
+    [timesheetSheet(payroll), timesheetSummarySheet(payroll)],
   );
 
   /**
@@ -427,7 +445,7 @@ export default function TimesheetScreen() {
    */
   const readingCopy = () => writePdf(
     `Timesheet ${sheet.employeeName || ''} ${formatAuDate(sheet.weekStarting)}`.trim(),
-    timesheetDocumentHtml(sheet),
+    timesheetDocumentHtml(payroll),
   );
 
   /*
@@ -474,7 +492,7 @@ export default function TimesheetScreen() {
         page = null;
       }
       const outcome = await sendMail(
-        { to: route.to, subject: timesheetSubject(sheet), body: timesheetBody(sheet) },
+        { to: route.to, subject: timesheetSubject(sheet), body: timesheetBody(payroll) },
         page ? [file, page] : [file],
       );
       const pageNote = page ? '' : ' Spreadsheet only attached.';
@@ -484,7 +502,7 @@ export default function TimesheetScreen() {
         return;
       }
       if (outcome === 'sent') {
-        void persist({ status: 'submitted' });
+        void persist({ status: 'submitted', unpaidBreakMinutes: breakMinutes });
         showAlert('Sent', `Sent to ${routeAddresses(route)}.${pageNote}`);
         return;
       }
@@ -593,6 +611,7 @@ export default function TimesheetScreen() {
         {totals.ot ? <Txt size="sm" tone="warn">· {totals.ot} O/T</Txt> : null}
         {totals.dt ? <Txt size="sm" tone="warn">· {totals.dt} D/T</Txt> : null}
         {totals.grand - totals.worked ? <Txt size="sm" tone="muted">· {Math.round((totals.grand - totals.worked) * 100) / 100} leave</Txt> : null}
+        {breaksOff ? <Txt size="sm" tone="muted">· less {breaksOff} for lunch</Txt> : null}
         {!sheet.employeeName.trim() ? <Txt size="sm" tone="fail">· no name set</Txt> : null}
       </Rowed>
 
@@ -628,14 +647,14 @@ export default function TimesheetScreen() {
   ) : null) : (emptyScheduledDays.length || autoFilled || (!knowsWho && fillPref === 'schedule')) ? (
     <Card>
       {autoFilled ? (
-        <Txt size="sm" weight="700">Filled from your Simpro schedule. Check the times.</Txt>
+        <Txt size="sm" weight="700">Filled from Simpro and your clock. Check the times.</Txt>
       ) : null}
       {!knowsWho ? (
         <Txt size="sm" tone="muted">Pick yourself in Settings first.</Txt>
       ) : null}
       {emptyScheduledDays.length ? (
         <Button
-          title={sheet.entries.length ? 'Fill empty days from my schedule' : 'Fill from my Simpro schedule'}
+          title={sheet.entries.length ? 'Fill empty days' : 'Fill from Simpro and my clock'}
           variant={sheet.entries.length ? 'secondary' : 'primary'}
           onPress={() => fillFromSchedule()}
           icon={<MaterialCommunityIcons name="calendar-import" size={20} color={sheet.entries.length ? t.color.accentText : t.color.onAccent} />}
@@ -671,7 +690,7 @@ export default function TimesheetScreen() {
         {unbookedLeave.map((l) => `${dayName(l.date)} ${formatAuDate(l.date)} — ${l.activity.name}`).join('\n')}
       </Txt>
       <Txt size="sm" tone="muted" style={{ marginTop: t.space(2), lineHeight: 19 }}>
-        Add them so the office knows you're away.
+        {"Add them so the office knows you're away."}
       </Txt>
       <Button
         title="Put them on my Simpro schedule"
@@ -692,6 +711,8 @@ export default function TimesheetScreen() {
             <DayCard
               date={date}
               entries={onDay}
+              unpaidBreak={byDay.find((d) => d.date === date)?.unpaidBreak ?? 0}
+              breakMinutes={breakMinutes}
               theme={t}
               extraChoices={extraChoices}
               // An empty day is one line with its actions on it, weekday or
@@ -768,7 +789,9 @@ export default function TimesheetScreen() {
       <Button
         title={sheet.status === 'submitted' ? 'Back to draft' : 'Mark submitted'}
         variant="ghost"
-        onPress={() => void persist({ status: sheet.status === 'submitted' ? 'draft' : 'submitted' })}
+        onPress={() => void persist(sheet.status === 'submitted'
+          ? { status: 'draft', unpaidBreakMinutes: null }
+          : { status: 'submitted', unpaidBreakMinutes: breakMinutes })}
       />
       {/*
         * The addresses in full rather than the names, because "Matt" is a
@@ -900,9 +923,12 @@ function DayBar({ day, peak, theme: t }: { day: DaySummary; peak: number; theme:
 const DAY_CARD_MIN = 300;
 
 function DayCard({
-  date, entries, theme: t, extraChoices, quiet, grid, onAdd, onQuickAdd, onDuplicate, onLeave, onChange, onRemove, canDuplicate,
+  date, entries, unpaidBreak, breakMinutes, theme: t, extraChoices, quiet, grid, onAdd, onQuickAdd, onDuplicate, onLeave, onChange,
+  onRemove, canDuplicate,
 }: {
   date: string; entries: TimesheetEntry[]; theme: Theme; extraChoices: string[];
+  /** Hours of unpaid lunch off this day, 0 when none; the minutes name the line. */
+  unpaidBreak: number; breakMinutes: number;
   /** A weekend with nothing on it: the same day, drawn as one row instead of a page. */
   quiet?: boolean;
   /** Laid out beside other days rather than under them. */
@@ -913,7 +939,7 @@ function DayCard({
 }) {
   const leave = entries.map(leaveOf).find(Boolean) ?? null;
   const jobs = entries.filter((e) => !leaveOf(e));
-  const worked = dayWorkedHours(entries, date);
+  const worked = Math.round((dayWorkedHours(entries, date) - unpaidBreak) * 100) / 100;
   const isToday = date === (qldIsoDay(nowIso()) ?? '');
   const shell: ViewStyle = {
     borderColor: isToday ? t.color.accent : t.color.border,
@@ -983,6 +1009,13 @@ function DayCard({
       {jobs.map((e) => (
         <JobEntry key={e.id} entry={e} theme={t} extraChoices={extraChoices} onChange={onChange} onRemove={() => onRemove(e.id)} />
       ))}
+
+      {unpaidBreak > 0 ? (
+        <Rowed gap={2} style={{ marginTop: t.space(3), paddingTop: t.space(3), borderTopWidth: 1, borderTopColor: t.color.border }}>
+          <Txt size="sm" tone="muted" style={{ flex: 1 }}>{unpaidBreakLabel(breakMinutes)}</Txt>
+          <Txt size="sm" weight="800" tone="muted" style={{ fontFamily: t.font.mono }}>-{unpaidBreak} h</Txt>
+        </Rowed>
+      ) : null}
 
       {leave ? (
         <View style={{ marginTop: t.space(2.5), gap: t.space(2) }}>

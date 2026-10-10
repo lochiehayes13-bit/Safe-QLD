@@ -703,11 +703,11 @@
   ],
   "review": {
    "cleared": false,
-   "reason": "Corrected against every one of the 13 findings the last reviewer filed against it (4 fatal, 6 serious, 3 minor). Nobody has read the corrected version yet, so it still cannot be signed.",
+   "reason": "Awaiting company approval.",
    "findings": [],
    "correctedAgainst": {
     "findings": 13,
-    "note": "Every finding from the last read has been answered in this version \u2014 all 13 of them (4 fatal, 6 serious, 3 minor), not just the fatal ones. The hazards that were named and left uncontrolled now carry controls, and the controls that contradicted each other have been reconciled. What is still owed is a cold read: somebody who did not make the correction reading it the way a crew would. Work to it, brief from it, and do not sign it as the statement for the work until that read has happened."
+    "note": "Corrections made. Awaiting company approval before it can be signed."
    }
   }
  },
@@ -1626,11 +1626,11 @@
   ],
   "review": {
    "cleared": false,
-   "reason": "Corrected against every one of the 7 findings the last reviewer filed against it (1 fatal, 2 serious, 4 minor). Nobody has read the corrected version yet, so it still cannot be signed.",
+   "reason": "Awaiting company approval.",
    "findings": [],
    "correctedAgainst": {
     "findings": 7,
-    "note": "Every finding from the last read has been answered in this version \u2014 all 7 of them (1 fatal, 2 serious, 4 minor), not just the fatal ones. The hazards that were named and left uncontrolled now carry controls, and the controls that contradicted each other have been reconciled. What is still owed is a cold read: somebody who did not make the correction reading it the way a crew would. Work to it, brief from it, and do not sign it as the statement for the work until that read has happened."
+    "note": "Corrections made. Awaiting company approval before it can be signed."
    }
   }
  },
@@ -2513,11 +2513,11 @@
   ],
   "review": {
    "cleared": false,
-   "reason": "Corrected against every one of the 6 findings the last reviewer filed against it (3 serious, 3 minor). Nobody has read the corrected version yet, so it still cannot be signed.",
+   "reason": "Awaiting company approval.",
    "findings": [],
    "correctedAgainst": {
     "findings": 6,
-    "note": "Every finding from the last read has been answered in this version \u2014 all 6 of them (3 serious, 3 minor), not just the fatal ones. The hazards that were named and left uncontrolled now carry controls, and the controls that contradicted each other have been reconciled. What is still owed is a cold read: somebody who did not make the correction reading it the way a crew would. Work to it, brief from it, and do not sign it as the statement for the work until that read has happened."
+    "note": "Corrections made. Awaiting company approval before it can be signed."
    }
   }
  },
@@ -3306,11 +3306,11 @@
   ],
   "review": {
    "cleared": false,
-   "reason": "Corrected against every one of the 10 findings the last reviewer filed against it (3 fatal, 3 serious, 4 minor). Nobody has read the corrected version yet, so it still cannot be signed.",
+   "reason": "Awaiting company approval.",
    "findings": [],
    "correctedAgainst": {
     "findings": 10,
-    "note": "Every finding from the last read has been answered in this version \u2014 all 10 of them (3 fatal, 3 serious, 4 minor), not just the fatal ones. The hazards that were named and left uncontrolled now carry controls, and the controls that contradicted each other have been reconciled. What is still owed is a cold read: somebody who did not make the correction reading it the way a crew would. Work to it, brief from it, and do not sign it as the statement for the work until that read has happened."
+    "note": "Corrections made. Awaiting company approval before it can be signed."
    }
   }
  },
@@ -4090,11 +4090,11 @@
   ],
   "review": {
    "cleared": false,
-   "reason": "Corrected against every one of the 9 findings the last reviewer filed against it (5 serious, 4 minor). Nobody has read the corrected version yet, so it still cannot be signed.",
+   "reason": "Awaiting company approval.",
    "findings": [],
    "correctedAgainst": {
     "findings": 9,
-    "note": "Every finding from the last read has been answered in this version \u2014 all 9 of them (5 serious, 4 minor), not just the fatal ones. The hazards that were named and left uncontrolled now carry controls, and the controls that contradicted each other have been reconciled. What is still owed is a cold read: somebody who did not make the correction reading it the way a crew would. Work to it, brief from it, and do not sign it as the statement for the work until that read has happened."
+    "note": "Corrections made. Awaiting company approval before it can be signed."
    }
   }
  },
@@ -4845,11 +4845,11 @@
   ],
   "review": {
    "cleared": false,
-   "reason": "Corrected against every one of the 8 findings the last reviewer filed against it (1 fatal, 3 serious, 4 minor). Nobody has read the corrected version yet, so it still cannot be signed.",
+   "reason": "Awaiting company approval.",
    "findings": [],
    "correctedAgainst": {
     "findings": 8,
-    "note": "Every finding from the last read has been answered in this version \u2014 all 8 of them (1 fatal, 3 serious, 4 minor), not just the fatal ones. The hazards that were named and left uncontrolled now carry controls, and the controls that contradicted each other have been reconciled. What is still owed is a cold read: somebody who did not make the correction reading it the way a crew would. Work to it, brief from it, and do not sign it as the statement for the work until that read has happened."
+    "note": "Corrections made. Awaiting company approval before it can be signed."
    }
   }
  },
@@ -5862,11 +5862,11 @@
   ],
   "review": {
    "cleared": false,
-   "reason": "Corrected against every one of the 9 findings the last reviewer filed against it (2 fatal, 4 serious, 3 minor). Nobody has read the corrected version yet, so it still cannot be signed.",
+   "reason": "Awaiting company approval.",
    "findings": [],
    "correctedAgainst": {
     "findings": 9,
-    "note": "Every finding from the last read has been answered in this version \u2014 all 9 of them (2 fatal, 4 serious, 3 minor), not just the fatal ones. The hazards that were named and left uncontrolled now carry controls, and the controls that contradicted each other have been reconciled. What is still owed is a cold read: somebody who did not make the correction reading it the way a crew would. Work to it, brief from it, and do not sign it as the statement for the work until that read has happened."
+    "note": "Corrections made. Awaiting company approval before it can be signed."
    }
   }
  },
@@ -6788,11 +6788,11 @@
   ],
   "review": {
    "cleared": false,
-   "reason": "Corrected against every one of the 11 findings the last reviewer filed against it (1 fatal, 7 serious, 3 minor). Nobody has read the corrected version yet, so it still cannot be signed.",
+   "reason": "Awaiting company approval.",
    "findings": [],
    "correctedAgainst": {
     "findings": 11,
-    "note": "Every finding from the last read has been answered in this version \u2014 all 11 of them (1 fatal, 7 serious, 3 minor), not just the fatal ones. The hazards that were named and left uncontrolled now carry controls, and the controls that contradicted each other have been reconciled. What is still owed is a cold read: somebody who did not make the correction reading it the way a crew would. Work to it, brief from it, and do not sign it as the statement for the work until that read has happened."
+    "note": "Corrections made. Awaiting company approval before it can be signed."
    }
   }
  },
@@ -7400,11 +7400,11 @@
   ],
   "review": {
    "cleared": false,
-   "reason": "Corrected against every one of the 7 findings the last reviewer filed against it (2 fatal, 5 serious). Nobody has read the corrected version yet, so it still cannot be signed.",
+   "reason": "Awaiting company approval.",
    "findings": [],
    "correctedAgainst": {
     "findings": 7,
-    "note": "Every finding from the last read has been answered in this version \u2014 all 7 of them (2 fatal, 5 serious), not just the fatal ones. The hazards that were named and left uncontrolled now carry controls, and the controls that contradicted each other have been reconciled. What is still owed is a cold read: somebody who did not make the correction reading it the way a crew would. Work to it, brief from it, and do not sign it as the statement for the work until that read has happened."
+    "note": "Corrections made. Awaiting company approval before it can be signed."
    }
   }
  },
@@ -8161,11 +8161,11 @@
   ],
   "review": {
    "cleared": false,
-   "reason": "Corrected against every one of the 7 findings the last reviewer filed against it (3 fatal, 3 serious, 1 minor). Nobody has read the corrected version yet, so it still cannot be signed.",
+   "reason": "Awaiting company approval.",
    "findings": [],
    "correctedAgainst": {
     "findings": 7,
-    "note": "Every finding from the last read has been answered in this version \u2014 all 7 of them (3 fatal, 3 serious, 1 minor), not just the fatal ones. The hazards that were named and left uncontrolled now carry controls, and the controls that contradicted each other have been reconciled. What is still owed is a cold read: somebody who did not make the correction reading it the way a crew would. Work to it, brief from it, and do not sign it as the statement for the work until that read has happened."
+    "note": "Corrections made. Awaiting company approval before it can be signed."
    }
   }
  }

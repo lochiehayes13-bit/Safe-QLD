@@ -329,11 +329,7 @@ export interface MergedSwms {
    * to a signature passes it — the record's own validation, the button, and
    * the PDF all read the same list.
    */
-  notCleared: {
-    id: string; title: string; reason: string; findings: string[];
-    /** Set where the findings were answered and only the cold read is outstanding. */
-    correctedAgainst?: { findings: number; note: string };
-  }[];
+  notCleared: { id: string; title: string }[];
 }
 
 /**
@@ -368,13 +364,7 @@ export function mergeSwms(templates: readonly SwmsTemplate[]): MergedSwms {
      */
     notCleared: templates
       .filter((t) => !t.review?.cleared)
-      .map((t) => ({
-        id: t.id,
-        title: t.title,
-        reason: t.review?.reason ?? 'No reviewer has read this statement.',
-        findings: t.review?.findings ?? [],
-        ...(t.review?.correctedAgainst ? { correctedAgainst: t.review.correctedAgainst } : {}),
-      })),
+      .map((t) => ({ id: t.id, title: t.title })),
   };
   return merged;
 }
@@ -427,13 +417,23 @@ export interface SwmsIssue {
   what: string;
   /** What to do about it, in a technician's words. */
   fix: string;
+  /**
+   * Set on the one issue the crew cannot fix: a chosen statement the company
+   * has not approved for signing. The screens say it once, on its own, and
+   * list everything else as the crew's to-do.
+   */
+  approval?: true;
 }
+
+/** What the company has not approved yet, worded for the crew. */
+export const AWAITING_APPROVAL = 'Awaiting company approval';
+export const AWAITING_APPROVAL_FIX = 'Brief the crew from it; it can’t be signed yet.';
 
 export function validateSwms(record: SwmsRecord, merged: MergedSwms): SwmsIssue[] {
   const issues: SwmsIssue[] = [];
 
   if (!record.templateIds.length) {
-    issues.push({ blocking: true, what: 'No method statement chosen', fix: 'Pick the work you are doing today.' });
+    issues.push({ blocking: true, what: 'No statement picked', fix: 'Tick today’s work on The work tab.' });
   }
 
   /*
@@ -446,27 +446,15 @@ export function validateSwms(record: SwmsRecord, merged: MergedSwms): SwmsIssue[
    * that the hazard they were hurt by was named in the document with nothing
    * written against it.
    */
-  for (const t of merged.notCleared) {
-    issues.push({
-      blocking: true,
-      what: `"${t.title}" has not been cleared for signature`,
-      fix: t.findings.length
-        ? `${t.reason} What is unresolved: ${t.findings.join(' · ')}. Read it and work to it if it helps, `
-          + 'but it cannot be signed as the statement for this work until those are answered.'
-        : t.correctedAgainst
-          ? `${t.reason} Read it and work to it — it is the current version and it answers everything `
-            + 'the last read raised. It cannot be signed as the statement for this work until somebody '
-            + 'who did not write the correction has read it cold and would sign it.'
-          : `${t.reason} Read it and work to it if it helps, but it cannot be signed as the statement for `
-            + 'this work until somebody has.',
-    });
+  if (merged.notCleared.length) {
+    issues.push({ blocking: true, what: AWAITING_APPROVAL, fix: AWAITING_APPROVAL_FIX, approval: true });
   }
 
   if (!record.date) {
-    issues.push({ blocking: true, what: 'No date', fix: 'A statement covers one day. Set the day.' });
+    issues.push({ blocking: true, what: 'No date', fix: 'Set the day of the work.' });
   }
   if (!record.siteName?.trim()) {
-    issues.push({ blocking: true, what: 'No site', fix: 'Say where the work is. A statement without an address covers nothing.' });
+    issues.push({ blocking: true, what: 'No site', fix: 'Add the site on The work tab.' });
   }
 
   const unanswered = merged.prompts.filter((p) => !record.answers[p]?.trim());
@@ -474,7 +462,7 @@ export function validateSwms(record: SwmsRecord, merged: MergedSwms): SwmsIssue[
     issues.push({
       blocking: true,
       what: `Not answered: ${p}`,
-      fix: 'This is the part of the statement that can only be answered here, on this site.',
+      fix: 'Answer it on the This site tab.',
     });
   }
 
@@ -492,8 +480,7 @@ export function validateSwms(record: SwmsRecord, merged: MergedSwms): SwmsIssue[
     issues.push({
       blocking: true,
       what: `${unticked.length} step${unticked.length === 1 ? '' : 's'} not read`,
-      fix: 'Every step has to be read before it is signed. Tick them as you go through them with the crew, '
-        + 'or take one off if it genuinely does not apply to this job.',
+      fix: 'Tick each one as you read it to the crew, or mark it as not applying.',
     });
   }
 
@@ -509,8 +496,8 @@ export function validateSwms(record: SwmsRecord, merged: MergedSwms): SwmsIssue[
   if (merged.steps.length && !applicable.length) {
     issues.push({
       blocking: true,
-      what: 'Every step has been taken off as not applicable',
-      fix: 'Then this is not the statement for this work. Pick the statements that do cover it.',
+      what: 'Every step is marked not applicable',
+      fix: 'Pick the statements that cover this work.',
     });
   }
 
@@ -530,16 +517,14 @@ export function validateSwms(record: SwmsRecord, merged: MergedSwms): SwmsIssue[
       issues.push({
         blocking: true,
         what: `Nothing written against "${named}"`,
-        fix: 'Say what is being done about it. A hazard on the page with an empty control column is the '
-          + 'one thing this document must never show.',
+        fix: 'Add what you did about it.',
       });
     }
     if (!h.risk) {
       issues.push({
         blocking: false,
         what: `No risk set on "${named}"`,
-        fix: 'Every step in the statement carries a rating from whoever reviewed it. This one is yours: '
-          + 'say how risky it is with the control in place.',
+        fix: 'Set how risky it is with your control in place.',
       });
     }
   }
@@ -549,7 +534,7 @@ export function validateSwms(record: SwmsRecord, merged: MergedSwms): SwmsIssue[
     issues.push({
       blocking: true,
       what: `No ${p}`,
-      fix: 'This work does not start without it. Get it from the site or the principal contractor and put its number on here.',
+      fix: 'Get it from the site or principal contractor and add its number.',
     });
   }
 
@@ -558,7 +543,7 @@ export function validateSwms(record: SwmsRecord, merged: MergedSwms): SwmsIssue[
     issues.push({
       blocking: true,
       what: 'Nobody has signed',
-      fix: 'Everybody doing the work signs, including you.',
+      fix: 'Everyone doing the work signs, including you.',
     });
   }
   const unsigned = record.workers.filter((w) => w.name.trim() && !w.signature);
@@ -566,7 +551,7 @@ export function validateSwms(record: SwmsRecord, merged: MergedSwms): SwmsIssue[
     issues.push({
       blocking: true,
       what: `${w.name.trim()} has not signed`,
-      fix: 'Either they sign it or take them off the list. A name on a SWMS without a signature reads as a person who never saw it.',
+      fix: 'Get their signature or take them off the list.',
     });
   }
 
@@ -575,7 +560,7 @@ export function validateSwms(record: SwmsRecord, merged: MergedSwms): SwmsIssue[
     issues.push({
       blocking: false,
       what: `${missingPpe.length} item${missingPpe.length === 1 ? '' : 's'} of PPE not confirmed`,
-      fix: `Not blocking, but it prints on the page: ${missingPpe.join(', ')}.`,
+      fix: `Tick them on the This site tab: ${missingPpe.join(', ')}.`,
     });
   }
 
@@ -583,7 +568,7 @@ export function validateSwms(record: SwmsRecord, merged: MergedSwms): SwmsIssue[
     issues.push({
       blocking: false,
       what: 'No supervisor named',
-      fix: 'The person to ring when the work changes. It prints on the page for the crew and the principal contractor.',
+      fix: 'Add who to ring if the work changes.',
     });
   }
 
@@ -591,7 +576,7 @@ export function validateSwms(record: SwmsRecord, merged: MergedSwms): SwmsIssue[
     issues.push({
       blocking: false,
       what: 'Not linked to a Simpro job',
-      fix: 'High-risk work should end up on the job file. Pick the job and the signed PDF goes onto it.',
+      fix: 'Link the job so the signed PDF can go on it.',
     });
   }
 
@@ -606,6 +591,36 @@ export function canSign(record: SwmsRecord, merged: MergedSwms): boolean {
 export function whyNotSigned(record: SwmsRecord, merged: MergedSwms): string | undefined {
   const first = validateSwms(record, merged).find((i) => i.blocking);
   return first ? `${first.what}. ${first.fix}` : undefined;
+}
+
+/** The blocking issues the crew can fix themselves, leaving out company approval. */
+export function crewToDo(issues: readonly SwmsIssue[]): SwmsIssue[] {
+  return issues.filter((i) => i.blocking && !i.approval);
+}
+
+/**
+ * The line under a greyed-out Sign button.
+ *
+ * The crew's next job where there is one. Approval is said once, at the top of
+ * the statement, so here it is only the note that their part is done.
+ */
+export function signHint(record: SwmsRecord, merged: MergedSwms): string | undefined {
+  const issues = validateSwms(record, merged);
+  const next = crewToDo(issues)[0];
+  if (next) return `${next.what}. ${next.fix}`;
+  return issues.some((i) => i.approval) ? 'Ready to sign once approved.' : undefined;
+}
+
+/** The notice at the top of a statement the company has not approved, or null. */
+export function approvalNotice(merged: MergedSwms): { title: string; body: string } | null {
+  if (!merged.notCleared.length) return null;
+  const all = merged.notCleared.length === merged.templates.length;
+  return {
+    title: AWAITING_APPROVAL,
+    body: all
+      ? AWAITING_APPROVAL_FIX
+      : `Not approved yet: ${merged.notCleared.map((n) => n.title).join(', ')}. ${AWAITING_APPROVAL_FIX}`,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -698,12 +713,17 @@ export function carryForwardSwms(previous: SwmsRecord, date: string): CarryForwa
       status: 'draft',
       notes: previous.notes,
     },
-    cleared: [
-      'Signatures — everybody signs again today.',
-      'The steps — they get read again before they are ticked.',
-      'Permits — a permit is for a day, so its box is unticked and its number kept.',
-    ],
+    cleared: ['signatures', 'step ticks', 'permit ticks'],
   };
+}
+
+/** "Signatures, step ticks and permit ticks start fresh." for the copy alert. */
+export function carryForwardNote(cleared: readonly string[]): string {
+  if (!cleared.length) return 'Everything carried across.';
+  const list = cleared.length === 1
+    ? cleared[0]!
+    : `${cleared.slice(0, -1).join(', ')} and ${cleared[cleared.length - 1]}`;
+  return `${list.charAt(0).toUpperCase()}${list.slice(1)} start fresh.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -734,11 +754,11 @@ export function swmsTitleFor(templates: readonly SwmsTemplate[]): string {
  * countdown.
  */
 export const SWMS_REVIEW_TRIGGERS: readonly string[] = [
-  'The work changed — a different method, a different tool, a different part of the building.',
-  'Somebody new joined the crew. They sign, or the statement does not cover them.',
-  'A control did not work, or a near miss happened.',
-  'The site changed around you: new trades, a scaffold moved, power isolated.',
-  'A new day. A statement signed yesterday does not cover today.',
+  'The work changes: a different method, tool or part of the building.',
+  'Someone joins the crew. They sign, or they are not covered.',
+  'A control fails, or there is a near miss.',
+  'The site changes: new trades, scaffold moved, power isolated.',
+  'A new day. Yesterday’s statement does not cover today.',
 ];
 
 /**

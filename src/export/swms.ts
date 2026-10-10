@@ -1,6 +1,6 @@
 import {
-  CONTROL_LEVEL_LABEL, RISK_LABEL, SWMS_REVIEW_TRIGGERS, mergeSwms, orderedControls, validateSwms,
-  type MergedSwms, type RiskLevel, type SwmsRecord, type SwmsTemplate,
+  AWAITING_APPROVAL, CONTROL_LEVEL_LABEL, RISK_LABEL, SWMS_REVIEW_TRIGGERS, crewToDo, mergeSwms, orderedControls,
+  validateSwms, type MergedSwms, type RiskLevel, type SwmsRecord, type SwmsTemplate,
 } from '@/domain/swms';
 import { qldIsoDay } from '@/domain/qldTime';
 import { letterheaded } from './letterhead';
@@ -91,7 +91,7 @@ function factsTable(input: SwmsDocumentInput, merged: MergedSwms): string {
     ['Site', r.siteName ?? 'Not stated'],
     ['Date of work', r.date ? formatAuDate(r.date) : 'Not stated'],
     ['Work covered', merged.templates.map((t) => t.activity).join('; ') || 'Not stated'],
-    ['Simpro job', r.jobExternalId ? `${r.jobExternalId}${r.jobTitle ? ` — ${r.jobTitle}` : ''}` : 'Not linked'],
+    ['Simpro job', r.jobExternalId ? `${r.jobExternalId}${r.jobTitle ? ` · ${r.jobTitle}` : ''}` : 'Not linked'],
     ['Supervisor', r.supervisor ? `${r.supervisor}${r.supervisorPhone ? ` · ${r.supervisorPhone}` : ''}` : 'Not stated'],
     ['Highest risk after controls', merged.residualRisk ? RISK_LABEL[merged.residualRisk] : 'Not assessed'],
     ['Prepared by', input.preparedBy ?? 'Safe QLD Fire Protection'],
@@ -101,12 +101,11 @@ function factsTable(input: SwmsDocumentInput, merged: MergedSwms): string {
 
 function hrcwBlock(merged: MergedSwms): string {
   if (!merged.hrcw.length) {
-    return `<p class="note">This work is not high-risk construction work under the Work Health and Safety `
-      + `Regulation 2011 (Qld). The statement is used because the work carries risk worth controlling, not `
-      + `because the regulation compels one.</p>`;
+    return `<p class="note">Not high-risk construction work under the Work Health and Safety `
+      + `Regulation 2011 (Qld).</p>`;
   }
   return `<div class="hrcw"><div class="t">High-risk construction work</div>`
-    + `<ul>${merged.hrcw.map((h) => `<li><strong>${esc(h.clause)}</strong> — ${esc(h.text)}</li>`).join('')}</ul></div>`;
+    + `<ul>${merged.hrcw.map((h) => `<li><strong>${esc(h.clause)}</strong>: ${esc(h.text)}</li>`).join('')}</ul></div>`;
 }
 
 /**
@@ -133,7 +132,7 @@ function stepsTable(input: SwmsDocumentInput, merged: MergedSwms): string {
       .join('');
     const skipped = off.has(s.key);
     const note = skipped
-      ? 'not applicable to this job'
+      ? 'not applicable'
       : ticked.has(s.key) ? 'read on site' : '';
     const crew = crewRisk[s.key];
     const after = skipped
@@ -200,19 +199,20 @@ function signaturesBlock(input: SwmsDocumentInput): string {
       + `<td class="sig">${w.signature ? `<img src="${w.signature}" alt="" />` : '<em>Not signed</em>'}</td>`
       + `<td>${w.signedAt ? esc(formatAuDate(qldIsoDay(w.signedAt) ?? w.signedAt)) : '—'}</td></tr>`).join('')
     : `<tr><td colspan="4"><em>Nobody has signed this statement.</em></td></tr>`;
-  return `<h2>Everybody doing this work has read it</h2>`
-    + `<p class="note">A signature here is a statement that this person was taken through every step above, `
-    + `on the day named, at the site named.</p>`
+  return `<h2>Crew sign-on</h2>`
+    + `<p class="note">Signing confirms this person was taken through every step above, on this day, at this site.</p>`
     + `<table><thead><tr><th>Name</th><th>Licence or ticket</th><th>Signature</th><th>Date</th></tr></thead>`
     + `<tbody>${rows}</tbody></table>`;
 }
 
 function draftStamp(input: SwmsDocumentInput, merged: MergedSwms): string {
   if (input.record.status === 'signed') return '';
-  const blocking = validateSwms(input.record, merged).filter((i) => i.blocking);
-  return `<div class="draft"><div class="t">DRAFT — NOT SIGNED</div>`
-    + `<p class="note">Work does not start under this statement until it is signed by everybody doing it.`
-    + (blocking.length ? ` Outstanding: ${esc(blocking.map((b) => b.what).join('; '))}.` : '')
+  const issues = validateSwms(input.record, merged);
+  const todo = crewToDo(issues);
+  const pending = issues.some((i) => i.approval);
+  return `<div class="draft"><div class="t">DRAFT, NOT SIGNED</div>`
+    + `<p class="note">${pending ? `${AWAITING_APPROVAL}.` : 'Work does not start until everyone doing it has signed.'}`
+    + (todo.length ? ` Outstanding: ${esc(todo.map((b) => b.what).join('; '))}.` : '')
     + `</p></div>`;
 }
 
@@ -234,13 +234,13 @@ export function swmsHtml(input: SwmsDocumentInput): string {
     ${listBlock('Personal protective equipment', merged.ppe, 'None listed.')}
     ${listBlock('Licences, tickets and training', merged.training, 'None listed.')}
     <h2>If it goes wrong</h2>
-    <ul>${merged.templates.map((t) => `<li><strong>${esc(t.title)}</strong> — ${esc(t.emergency)}</li>`).join('')}</ul>
+    <ul>${merged.templates.map((t) => `<li><strong>${esc(t.title)}</strong>: ${esc(t.emergency)}</li>`).join('')}</ul>
     ${signaturesBlock(input)}
-    <h2>When this statement stops covering the work</h2>
+    <h2>Review this statement when</h2>
     <ul>${SWMS_REVIEW_TRIGGERS.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
-    ${listBlock('Legislation, codes and standards this is written to', merged.references, 'None listed.')}
+    ${listBlock('Legislation, codes and standards', merged.references, 'None listed.')}
     ${r.notes?.trim() ? `<h2>Notes</h2><p>${esc(r.notes)}</p>` : ''}
-    <p class="note">Generated ${esc(formatAuDate(qldIsoDay(input.generatedAt) ?? input.generatedAt))}. Keep this on site while the work is being done.</p>
+    <p class="note">Generated ${esc(formatAuDate(qldIsoDay(input.generatedAt) ?? input.generatedAt))}. Keep on site while the work is under way.</p>
   `;
 
   return letterheaded({ title: r.title || 'Safe work method statement', css: CSS, body });

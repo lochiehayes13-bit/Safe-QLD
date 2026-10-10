@@ -106,6 +106,15 @@ describe('a saved home screen from the previous build', () => {
   it('is the default when nothing was ever saved', () => {
     expect(migrateShortcuts(undefined)).toEqual(DEFAULT_SHORTCUTS);
   });
+
+  it('keeps a Form 72 tile saved under its old route, pointed at the list', () => {
+    // Saved before the cross-site list existed. Dropped as unknown, the tile
+    // would vanish from every phone that had saved a setting.
+    const saved = ['/work/jobs', '/site/form72', '/sites'];
+    expect(migrateShortcuts(saved)).toEqual(['/work/jobs', '/form72', '/sites']);
+    expect(resolveShortcuts(migrateShortcuts(saved)).map((m) => m.href))
+      .toEqual(['/work/jobs', '/form72', '/sites']);
+  });
 });
 
 describe('resolving saved shortcuts', () => {

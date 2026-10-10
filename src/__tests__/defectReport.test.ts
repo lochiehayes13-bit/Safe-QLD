@@ -1,4 +1,4 @@
-import { defectMove, describeDefectReport, type DefectReportOccasion } from '@/domain/defectReport';
+import { defectMove, defectStatusLabel, describeDefectReport, type DefectReportOccasion } from '@/domain/defectReport';
 import { defectRaisedNote, keyIdentity, type DefectRaisedContext, type RaisedDefect } from '@/domain/outboundWork';
 import type { DefectStatus } from '@/domain/types';
 
@@ -70,7 +70,7 @@ describe('describeDefectReport', () => {
       expect(notice.tone).toBe('pass');
       // The word that must appear, and the promise that must not.
       expect(notice.title).toContain('Queued');
-      expect(notice.body).toMatch(/goes up with the next send/);
+      expect(notice.body).toMatch(/goes with the next send/);
       expect(`${notice.title} ${notice.body}`).not.toMatch(/\bsent to the office\b|\bthe office has it\b/i);
     }
   });
@@ -78,10 +78,10 @@ describe('describeDefectReport', () => {
   it('warns and names the remedy when the defect has no job, and does not pretend the change was lost', () => {
     const notice = describeDefectReport({ occasion: 'rectified', queued: false });
     expect(notice.tone).toBe('warn');
-    expect(notice.title).toBe('The office has not been told');
+    expect(notice.title).toBe('No job on this defect');
     // The remedy has to be in the words. A technician told only that it failed
     // has no way to work out that a defect raised last year has no job on it.
-    expect(notice.body).toMatch(/set the job it belongs to/i);
+    expect(notice.body).toMatch(/set the job/i);
     // And the local record is safe, which is the other half of what they need.
     expect(notice.body).toMatch(/saved on this phone/i);
   });
@@ -92,7 +92,23 @@ describe('describeDefectReport', () => {
     expect(duplicate.tone).toBe('info');
     expect(duplicate.tone).not.toBe(notice.tone);
     expect(duplicate.title).toContain('39901');
-    expect(duplicate.body).toMatch(/not sent a second time/i);
+    expect(duplicate.body).toMatch(/no change since the last note/i);
+  });
+
+  it('does not claim the job holds a duplicate, because the earlier copy may still be pending here', () => {
+    // enqueueSync calls a row a duplicate while the first copy is still
+    // 'pending' on this phone, so "Job 39901 already has this" could be false.
+    for (const occasion of OCCASIONS) {
+      const { title, body } = describeDefectReport({ occasion, jobId: '39901', queued: false });
+      expect(`${title} ${body}`).not.toMatch(/already has|already on|office has/i);
+    }
+  });
+
+  it('reads as one note going for every occasion, so the verb agrees', () => {
+    for (const occasion of OCCASIONS) {
+      const { body } = describeDefectReport({ occasion, jobId: '39901', queued: true });
+      expect(body).toMatch(/ note goes with the next send\.$/);
+    }
   });
 
   it('admits, on the notice screen, that handing the notice over is not itself in the note', () => {
@@ -101,8 +117,8 @@ describe('describeDefectReport', () => {
     // changed on produces a duplicate and goes nowhere. The technician is told
     // that plainly instead of reading a message that implies the office knows.
     const notice = describeDefectReport({ occasion: 'notice issued', jobId: '39901', queued: false });
-    expect(notice.body).toMatch(/handing the notice over does not change the defect/);
-    expect(notice.body).not.toMatch(/already reads it the way it now stands/);
+    expect(notice.body).toMatch(/notice recorded on this defect/i);
+    expect(notice.body).not.toMatch(/no change since the last note/i);
   });
 
   it('says something different for each occasion, so the banner is not the same sentence four times', () => {
@@ -116,6 +132,18 @@ describe('describeDefectReport', () => {
     for (const occasion of OCCASIONS) {
       const body = describeDefectReport({ occasion, jobId: '39901', queued: true }).body;
       expect(body).not.toMatch(/told (open|rectified|quoted|closed)[.,]/);
+    }
+  });
+
+  it('keeps every banner short', () => {
+    for (const occasion of OCCASIONS) {
+      for (const jobId of ['39901', undefined]) {
+        for (const queued of [true, false]) {
+          const { title, body } = describeDefectReport({ occasion, jobId, queued });
+          expect(title.split(' ').length).toBeLessThanOrEqual(5);
+          expect(body.split(' ').length).toBeLessThanOrEqual(14);
+        }
+      }
     }
   });
 });
@@ -169,5 +197,11 @@ describe('what the note key does with a change', () => {
     // own that nothing recognises as a duplicate. Hence: report moves, not writes.
     expect(keyIdentity(halfTyped.key)).toBeDefined();
     expect(keyIdentity(halfTyped.key)).not.toBe(keyIdentity(first.key));
+  });
+});
+
+describe('defectStatusLabel', () => {
+  it('shows every status capitalised, never the stored value', () => {
+    expect(ALL_STATUSES.map(defectStatusLabel)).toEqual(['Open', 'Rectified', 'Quoted', 'Closed']);
   });
 });

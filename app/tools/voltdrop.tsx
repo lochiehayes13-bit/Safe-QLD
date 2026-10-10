@@ -1,108 +1,101 @@
 import React, { useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { Stack } from 'expo-router';
+import { STANDARD_AREAS_MM2, type Conductor } from '@/calc/electrical';
 import {
-  STANDARD_AREAS_MM2, minimumCableSize, voltageDrop, type Conductor,
-} from '@/calc/electrical';
+  BLANK_VOLT_DROP, anyTyped, readVoltDrop, type Circuit, type VoltDropFields,
+} from '@/calc/voltdropEntry';
 import { useTheme } from '@/theme';
-import { Banner, Card, Chip, Divider, Field, H2, Label, ResultBlock, Rowed, Screen, Segmented, Txt } from '@/components/ui';
+import { Banner, Button, Chip, Field, H2, Label, ResultBlock, Rowed, Screen, Segmented, Txt } from '@/components/ui';
 
 /**
  * Cable volt drop.
  *
  * Answers the question that matters on a long sounder or loop run: will the
- * device at the far end still see enough voltage to operate in alarm.
+ * device at the far end still see enough voltage to operate in alarm. Opens
+ * blank, and gives no verdict until the technician's own figures are in.
  */
 export default function VoltDropScreen() {
   const t = useTheme();
-  const [volts, setVolts] = useState('24');
-  const [amps, setAmps] = useState('0.5');
-  const [length, setLength] = useState('100');
+  const [fields, setFields] = useState<VoltDropFields>(BLANK_VOLT_DROP);
   const [area, setArea] = useState(1.5);
-  const [minVolts, setMinVolts] = useState('18');
   const [conductor, setConductor] = useState<Conductor>('copper');
-  const [circuit, setCircuit] = useState<'dc' | 'single-phase' | 'three-phase'>('dc');
+  const [circuit, setCircuit] = useState<Circuit>('dc');
 
-  const result = useMemo(
-    () =>
-      voltageDrop({
-        sourceVolts: parseFloat(volts) || 0,
-        amps: parseFloat(amps) || 0,
-        lengthM: parseFloat(length) || 0,
-        areaMm2: area,
-        conductor,
-        circuit,
-        minimumVolts: minVolts ? parseFloat(minVolts) : undefined,
-      }),
-    [volts, amps, length, area, conductor, circuit, minVolts],
-  );
+  const set = (key: keyof VoltDropFields) => (text: string) => setFields((f) => ({ ...f, [key]: text }));
 
-  const smallest = useMemo(
-    () =>
-      minVolts
-        ? minimumCableSize({
-            sourceVolts: parseFloat(volts) || 0,
-            amps: parseFloat(amps) || 0,
-            lengthM: parseFloat(length) || 0,
-            conductor,
-            circuit,
-            minimumVolts: parseFloat(minVolts),
-          })
-        : null,
-    [volts, amps, length, conductor, circuit, minVolts],
+  const reading = useMemo(
+    () => readVoltDrop(fields, { areaMm2: area, conductor, circuit }),
+    [fields, area, conductor, circuit],
   );
+  const result = reading.kind === 'result' ? reading.result : null;
+  const minimum = reading.kind === 'result' ? reading.minimumVolts : undefined;
+  const smallest = reading.kind === 'result' ? reading.smallestMm2 : undefined;
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Cable volt drop' }} />
+      <Stack.Screen options={{ title: 'Volt drop' }} />
       <Screen>
         <ResultBlock
-          label="Voltage at the device"
+          label="Volts at the device"
           value={result ? result.voltsAtLoad.toFixed(2) : '—'}
           unit="V"
           tone={result?.withinLimit === false ? 'fail' : 'accent'}
           detail={
             result
-              ? `${result.dropVolts.toFixed(2)} V dropped over the run (${result.dropPercent.toFixed(1)}%), loop resistance ${result.resistanceOhms.toFixed(3)} Ω`
-              : 'Enter the run details'
+              ? `${result.dropVolts.toFixed(2)} V drop (${result.dropPercent.toFixed(1)}%) · loop ${result.resistanceOhms.toFixed(3)} Ω`
+              : 'Enter supply, load and length.'
           }
         />
 
-        {result?.withinLimit === false ? (
-          <Banner
-            tone="fail"
-            title="Below the device minimum"
-            body={`The device needs ${minVolts} V and would see ${result.voltsAtLoad.toFixed(2)} V. Shorten the run, increase the conductor size, or supply it locally.`}
-          />
-        ) : result?.withinLimit === true ? (
-          <Banner
-            tone="pass"
-            title="Within limit"
-            body={`Longest run at this size and load is about ${result.maxLengthM} m.`}
-          />
+        {reading.kind === 'check' ? (
+          <Banner tone="warn" title="Check the figures" body={reading.problem} />
         ) : null}
 
-        {smallest !== null && smallest !== undefined && smallest !== area ? (
-          <Banner
-            tone="info"
-            title={`${smallest} mm² is the smallest size that works`}
-            body={smallest < area ? 'You could go smaller than currently selected.' : 'The selected size will not do it.'}
-          />
+        {result && minimum !== undefined ? (
+          result.withinLimit === false ? (
+            <Banner
+              tone="fail"
+              title="Below the device minimum"
+              body={`Needs ${minimum} V, gets ${result.voltsAtLoad.toFixed(2)} V. Shorten the run, go up a size or supply it locally.`}
+            />
+          ) : (
+            <Banner
+              tone="pass"
+              title="Within limit"
+              body={`Longest run at this size and load: about ${result.maxLengthM} m.`}
+            />
+          )
+        ) : null}
+
+        {result && minimum !== undefined ? (
+          smallest === null ? (
+            <Banner tone="warn" title="No listed size works" body="Shorten the run or supply it locally." />
+          ) : smallest !== undefined && smallest !== area ? (
+            <Banner
+              tone="info"
+              title={`Smallest that works: ${smallest} mm²`}
+              body={smallest < area ? 'Smaller than selected.' : 'Selected size is too small.'}
+            />
+          ) : null
         ) : null}
 
         <H2>The run</H2>
         <Rowed gap={2} align="flex-start">
-          <View style={{ flex: 1 }}><Field label="Supply" value={volts} onChangeText={setVolts} keyboardType="decimal-pad" suffix="V" /></View>
-          <View style={{ flex: 1 }}><Field label="Load" value={amps} onChangeText={setAmps} keyboardType="decimal-pad" suffix="A" /></View>
+          <View style={{ flex: 1 }}><Field label="Supply" value={fields.supply} onChangeText={set('supply')} keyboardType="decimal-pad" suffix="V" /></View>
+          <View style={{ flex: 1 }}><Field label="Load" value={fields.load} onChangeText={set('load')} keyboardType="decimal-pad" suffix="A" /></View>
         </Rowed>
         <Rowed gap={2} align="flex-start">
-          <View style={{ flex: 1 }}><Field label="Length (one way)" value={length} onChangeText={setLength} keyboardType="decimal-pad" suffix="m" /></View>
-          <View style={{ flex: 1 }}><Field label="Device minimum" value={minVolts} onChangeText={setMinVolts} keyboardType="decimal-pad" suffix="V" /></View>
+          <View style={{ flex: 1 }}><Field label="Length (one way)" value={fields.length} onChangeText={set('length')} keyboardType="decimal-pad" suffix="m" /></View>
+          <View style={{ flex: 1 }}><Field label="Device minimum" value={fields.minimum} onChangeText={set('minimum')} keyboardType="decimal-pad" suffix="V" /></View>
         </Rowed>
+        {anyTyped(fields) ? (
+          <Button title="Clear" variant="ghost" compact onPress={() => setFields(BLANK_VOLT_DROP)} />
+        ) : null}
 
-        <Label>Conductor size</Label>
+        <Label>Conductor size (mm²)</Label>
         <Rowed gap={2} wrap>
-          {STANDARD_AREAS_MM2.slice(0, 9).map((a) => (
+          {STANDARD_AREAS_MM2.map((a) => (
             <Chip key={a} label={`${a}`} selected={area === a} onPress={() => setArea(a)} />
           ))}
         </Rowed>
@@ -122,18 +115,9 @@ export default function VoltDropScreen() {
           ]}
         />
 
-        <Card>
-          <Label>How this is worked out</Label>
-          <Txt size="sm" tone="muted" style={{ marginTop: t.space(2), lineHeight: 20 }}>
-            Resistance is taken at 75 °C rather than the 20 °C bench figure, because a cable running warm has higher
-            resistance and drops more volts — the cooler number would flatter the result.
-          </Txt>
-          <Divider />
-          <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-            DC and single-phase runs count the length twice, because the current travels out and back. Forgetting that is
-            what makes a long sounder circuit look fine on paper and fail on site.
-          </Txt>
-        </Card>
+        <Txt size="xs" tone="faint" style={{ marginTop: t.space(1), lineHeight: 17 }}>
+          Resistance at 75 °C. DC and 1 phase count the run out and back.
+        </Txt>
       </Screen>
     </>
   );

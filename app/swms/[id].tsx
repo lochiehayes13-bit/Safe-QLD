@@ -10,8 +10,8 @@ import { SWMS_TEMPLATES } from '@/seed/swms';
 import { listJobPage, type JobPick } from '@/db/opsRepo';
 import { queueJobAttachment } from '@/simpro/sync';
 import {
-  CONTROL_LEVEL_LABEL, RISK_LABEL, SWMS_REVIEW_TRIGGERS, mergeSwms, orderedControls, validateSwms,
-  whyNotSigned, type AddedHazard, type MergedSwms, type RiskLevel, type SwmsRecord, type SwmsWorker,
+  CONTROL_LEVEL_LABEL, RISK_LABEL, SWMS_REVIEW_TRIGGERS, approvalNotice, crewToDo, mergeSwms, orderedControls,
+  signHint, validateSwms, type AddedHazard, type MergedSwms, type RiskLevel, type SwmsRecord, type SwmsWorker,
 } from '@/domain/swms';
 import { attachmentContentKey } from '@/domain/outboundWork';
 import { qldIsoDay } from '@/domain/qldTime';
@@ -135,6 +135,9 @@ export default function SwmsRecordScreen() {
   const locked = record?.status === 'signed';
   const issues = useMemo(() => (record ? validateSwms(record, merged) : []), [record, merged]);
   const blocking = issues.filter((i) => i.blocking);
+  // What the crew can do something about. Approval is said once, at the top.
+  const toDo = crewToDo(issues);
+  const approval = approvalNotice(merged);
 
   /**
    * Writes land immediately rather than on a save button, and the screen keeps
@@ -227,11 +230,7 @@ export default function SwmsRecordScreen() {
     try {
       const signed = await signSwms(record.id);
       setRecord(signed);
-      showAlert(
-        'Signed',
-        'Everybody on the list has signed and the statement covers today’s work at this site. '
-        + 'It stays on the phone, and the PDF can go onto the Simpro job.',
-      );
+      showAlert('Signed', 'It covers today’s work at this site. Email it or put it on the job.');
     } catch (e) {
       showAlert('Not signed', e instanceof Error ? e.message : describeActionFailure(e, 'signing the statement'));
     } finally {
@@ -261,7 +260,7 @@ export default function SwmsRecordScreen() {
         showAlert(notice.title, notice.body);
       }
     } catch (e) {
-      showAlert('Could not make the PDF', describeActionFailure(e, 'making the PDF'));
+      showAlert('Couldn’t make the PDF', describeActionFailure(e, 'making the PDF'));
     } finally {
       setBusy(false);
     }
@@ -286,13 +285,13 @@ export default function SwmsRecordScreen() {
         localUri: file.uri,
         filename,
         mimeType: 'application/pdf',
-        subject: `Safe work method statement — ${record.siteName ?? ''} ${formatAuDate(record.date)}`.trim(),
+        subject: ['SWMS', record.siteName, formatAuDate(record.date)].filter(Boolean).join(' · '),
         sizeBytes: file.size,
         key: attachmentContentKey({ jobId: record.jobExternalId, filename, sizeBytes: file.size }),
       });
       await recordSwmsAttached(record.id);
       setRecord({ ...record, attachedAt: nowIso() });
-      showAlert('On its way to the job', `It goes onto Simpro job ${record.jobExternalId} with the next sync.`);
+      showAlert('Queued for the job', `Goes onto job ${record.jobExternalId} at the next sync.`);
     } catch (e) {
       showAlert('Not attached', describeActionFailure(e, 'attaching it to the job'));
     } finally {
@@ -337,20 +336,19 @@ export default function SwmsRecordScreen() {
       if (outcome === 'offered') {
         // The share sheet is up with the PDF on it and the inbox named.
       } else if (outcome === 'no-mail-app') {
-        showAlert('No mail app set up', `This device has no email account configured. The statement goes to ${to}.`);
+        showAlert('No mail app', `Add an email account to this phone, then send it to ${to}.`);
       } else if (outcome === 'sent') {
-        showAlert('Sent', `It is on its way to ${to}.${attached ? '' : ' The PDF could not be attached — use Share to send it.'}`);
+        showAlert('Sent', `Sent to ${to}.${attached ? '' : ' The PDF didn’t attach. Use Share PDF.'}`);
       } else if (outcome === 'handed-over') {
         showAlert(
-          'Draft opened',
-          `An email to ${to} is open in your mail app. Press send there.`
-          + (attached ? '' : ' A browser cannot attach the PDF, so the email says so — use Share to send the document itself.'),
+          'Email ready',
+          `Press send in your mail app.${attached ? '' : ' The PDF can’t attach from a browser. Use Share PDF.'}`,
         );
       } else {
-        showAlert('Not sent', 'The email was not sent, so nothing has reached the office.');
+        showAlert('Not sent', 'The email wasn’t sent.');
       }
     } catch (e) {
-      showAlert('Could not send it', describeActionFailure(e, 'emailing the statement'));
+      showAlert('Couldn’t send it', describeActionFailure(e, 'emailing the statement'));
     } finally {
       setBusy(false);
     }
@@ -377,7 +375,7 @@ export default function SwmsRecordScreen() {
         })));
       setPickingJob(true);
     } catch (e) {
-      showAlert('Could not read the jobs', describeActionFailure(e, 'reading the jobs'));
+      showAlert('Couldn’t load jobs', describeActionFailure(e, 'reading the jobs'));
     }
   };
 
@@ -425,7 +423,7 @@ export default function SwmsRecordScreen() {
         <RecordGate
           missing={missing}
           what="safe work method statement"
-          why="It may have been deleted from this phone, or the link came from another device."
+          why="It may have been deleted, or made on another phone."
           failed={failed}
           onRetry={() => void load()}
         />
@@ -459,45 +457,22 @@ export default function SwmsRecordScreen() {
           </Txt>
         </Card>
 
-        {merged.notCleared.length ? (
-          <Banner
-            tone="fail"
-            title={merged.notCleared.length === 1
-              ? 'This statement has not been cleared for signature'
-              : `${merged.notCleared.length} of these statements have not been cleared for signature`}
-            body={[
-              merged.notCleared.map((n) => {
-                const head = `${n.title} — ${n.reason}`;
-                // Three states, three things to print. Listing findings that a
-                // correction round has already answered is how a crew learns
-                // the banner is stale and stops reading it.
-                if (n.findings.length) {
-                  return `${head}\n${n.findings.map((f) => `  • ${f}`).join('\n')}`;
-                }
-                return n.correctedAgainst ? `${head}\n  ${n.correctedAgainst.note}` : head;
-              }).join('\n\n'),
-              '',
-              'Read it and use it to brief the crew — it is the current version. It cannot be signed as the '
-              + 'statement for this work: a signature says the document describes how the work will actually '
-              + 'be done, and that takes somebody who did not write it reading it and saying they would sign it.',
-            ].join('\n')}
-          />
-        ) : null}
+        {approval && !locked ? <Banner tone="warn" title={approval.title} body={approval.body} /> : null}
 
         {merged.highRisk ? (
           <Banner
             tone="fail"
             title="High-risk construction work"
-            body={merged.hrcw.map((h) => `${h.clause} — ${h.text}`).join('\n\n')}
+            body={merged.hrcw.map((h) => `${h.clause}: ${h.text}`).join('\n\n')}
           />
         ) : null}
 
         {locked ? (
           <Banner
             tone="pass"
-            title="Signed, and not editable"
-            body={`Signed ${record.signedAt ? formatAuDate(qldIsoDay(record.signedAt) ?? record.date) : ''}. `
-              + 'If the work changes, start a new statement for the change rather than editing this one.'}
+            title="Signed and locked"
+            body={`${record.signedAt ? `Signed ${formatAuDate(qldIsoDay(record.signedAt) ?? record.date)}. ` : ''}`
+              + 'If the work changes, start a new statement.'}
           />
         ) : null}
 
@@ -505,10 +480,9 @@ export default function SwmsRecordScreen() {
 
         {tab === 'work' ? (
           <>
-            <H2>What is being done today</H2>
+            <H2>Today’s work</H2>
             <Txt size="sm" tone="muted" style={{ marginBottom: t.space(2), lineHeight: 20 }}>
-              Chosen from what is due at this site and what is on its register. Take off what does not apply, add
-              anything else you are doing.
+              Untick what doesn’t apply. Tick anything else you’re doing.
             </Txt>
             {SWMS_TEMPLATES.map((x) => {
               const on = record.templateIds.includes(x.id);
@@ -541,20 +515,20 @@ export default function SwmsRecordScreen() {
             />
 
             <Card>
-              <Label>The Simpro job</Label>
+              <Label>Simpro job</Label>
               {record.jobExternalId ? (
                 <Rowed align="flex-start" style={{ marginTop: t.space(1) }}>
                   <View style={{ flex: 1 }}>
                     <Txt weight="600">Job {record.jobExternalId}</Txt>
                     {record.jobTitle ? <Txt size="sm" tone="muted">{record.jobTitle}</Txt> : null}
-                    {record.attachedAt ? <Chip label="PDF sent to the job" tone="pass" /> : null}
+                    {record.attachedAt ? <Chip label="Queued for the job" tone="pass" /> : null}
                   </View>
                   <Button title="Change" variant="ghost" compact onPress={() => void openJobPicker()} />
                 </Rowed>
               ) : (
                 <>
                   <Txt size="sm" tone="muted" style={{ marginTop: t.space(1), lineHeight: 19 }}>
-                    Not linked yet. The signed statement goes onto the job’s attachments by itself once it is.
+                    Not linked to a job yet.
                   </Txt>
                   <Button title="Pick the job" variant="secondary" onPress={() => void openJobPicker()} style={{ marginTop: t.space(2) }} />
                 </>
@@ -573,11 +547,11 @@ export default function SwmsRecordScreen() {
               {pickingJob ? (
                 <View style={{ marginTop: t.space(2) }}>
                   <JobPicker
-                    heading="Which job does this statement go on?"
+                    heading="Which job?"
                     suggested={jobs}
                     suggestedLabel="Jobs at this site"
-                    emptyWhenNoneSuggested="No job on this phone is filed under this site. Search for it by number, or sync."
-                    emptyWhenNothingOnDevice="No jobs on this phone yet. Connect Simpro in Settings and sync, and every job on the books is here."
+                    emptyWhenNoneSuggested="No jobs for this site. Search by number or sync."
+                    emptyWhenNothingOnDevice="No jobs yet. Sync in Settings."
                     busy={busy}
                     onPick={(job) => { void linkJob(job); }}
                     onClose={() => setPickingJob(false)}
@@ -592,8 +566,7 @@ export default function SwmsRecordScreen() {
           <>
             <H2>Read it with the crew</H2>
             <Txt size="sm" tone="muted" style={{ marginBottom: t.space(2), lineHeight: 20 }}>
-              Open each step, read it out, tick it. The page says which ones were read on site, so ticking without
-              reading is the only way to make it lie.
+              Read each step aloud, then tick it.
             </Txt>
             {merged.steps.map((s, i) => {
               const on = openStep === s.key;
@@ -606,7 +579,7 @@ export default function SwmsRecordScreen() {
                     <View style={{ flex: 1 }}>
                       <Txt weight="700">{i + 1}. {s.step}</Txt>
                       <Txt size="xs" tone="faint">
-                        {s.templateTitle} · {s.responsible}{off ? ' · not applicable today' : ''}
+                        {s.templateTitle} · {s.responsible}{off ? ' · N/A' : ''}
                       </Txt>
                     </View>
                     <View style={{ alignItems: 'flex-end', gap: t.space(1) }}>
@@ -626,7 +599,7 @@ export default function SwmsRecordScreen() {
                   {on ? (
                     <>
                       <Divider />
-                      <Label>What can hurt you</Label>
+                      <Label>Hazards</Label>
                       {s.hazards.map((h) => (
                         <Txt key={h} size="sm" style={{ marginTop: t.space(1) }}>• {h}</Txt>
                       ))}
@@ -635,7 +608,7 @@ export default function SwmsRecordScreen() {
                       </Txt>
 
                       <Divider />
-                      <Label>What we do about it</Label>
+                      <Label>Controls</Label>
                       {orderedControls(s.controls).map((c) => (
                         <View key={c.control} style={{ marginTop: t.space(1.5) }}>
                           <Txt size="xs" tone="accent">{CONTROL_LEVEL_LABEL[c.level].toUpperCase()}</Txt>
@@ -647,10 +620,9 @@ export default function SwmsRecordScreen() {
                       </Txt>
 
                       <Divider />
-                      <Label>How risky is it here, with those in place</Label>
+                      <Label>Risk on this site</Label>
                       <Txt size="xs" tone="faint" style={{ marginTop: 2, marginBottom: t.space(2), lineHeight: 16 }}>
-                        The rating above is the reviewer&rsquo;s, arrived at in an office. Set yours if this site
-                        is different — both print, and a disagreement between them is worth more than either.
+                        Change it if this site differs. Both print.
                       </Txt>
                       <Segmented
                         value={crew ?? 'same'}
@@ -659,21 +631,21 @@ export default function SwmsRecordScreen() {
                       />
 
                       <Button
-                        title={done ? 'Read — tap to untick' : 'We have read this step'}
+                        title={done ? 'Read. Tap to untick' : 'Mark as read'}
                         variant={done ? 'ghost' : 'primary'}
                         onPress={() => toggleStep(s.key)}
                         disabled={locked || off}
                         style={{ marginTop: t.space(3) }}
                       />
                       <Button
-                        title={off ? 'Put this step back' : 'Does not apply to this job'}
+                        title={off ? 'Put it back' : 'Doesn’t apply'}
                         variant="ghost"
                         onPress={() => toggleNotApplicable(s.key)}
                         disabled={locked}
                       />
                       {off ? (
                         <Txt size="xs" tone="faint" style={{ marginTop: t.space(1), lineHeight: 16 }}>
-                          It prints as not applicable rather than disappearing, so the page says what was decided.
+                          Prints as N/A.
                         </Txt>
                       ) : null}
                     </>
@@ -694,9 +666,9 @@ export default function SwmsRecordScreen() {
 
         {tab === 'site' ? (
           <>
-            <H2>Only this site can answer these</H2>
+            <H2>Site questions</H2>
             {merged.prompts.length === 0 ? (
-              <Txt size="sm" tone="muted">Nothing site-specific on the statements chosen.</Txt>
+              <Txt size="sm" tone="muted">None for these statements.</Txt>
             ) : null}
             {merged.prompts.map((p) => (
               <Field
@@ -734,7 +706,7 @@ export default function SwmsRecordScreen() {
                               editable={!locked}
                             />
                           ) : (
-                            <Txt size="sm" tone="muted">Work does not start without it.</Txt>
+                            <Txt size="sm" tone="muted">Work doesn’t start without it.</Txt>
                           )}
                         </View>
                       </Rowed>
@@ -758,8 +730,7 @@ export default function SwmsRecordScreen() {
 
             <H2>Found on arrival</H2>
             <Txt size="sm" tone="muted" style={{ lineHeight: 20 }}>
-              Anything the office could not have known about: a trade working above you, a blocked exit, a pump room
-              that is now a storeroom.
+              Anything new on site, like a blocked exit or trades overhead.
             </Txt>
             {record.addedHazards.map((h, i) => (
               <Card key={`hazard-${i}`}>
@@ -771,7 +742,7 @@ export default function SwmsRecordScreen() {
                   known about until the crew arrived, which makes their reading
                   of it the only one there is.
                 */}
-                <Label>How risky, with what you did about it</Label>
+                <Label>Risk with that control</Label>
                 <Segmented
                   value={h.risk ?? ''}
                   onChange={(next) => setHazard(i, { risk: (next || undefined) as RiskLevel | undefined })}
@@ -779,27 +750,26 @@ export default function SwmsRecordScreen() {
                 />
                 {h.hazard.trim() && !h.control.trim() ? (
                   <Txt size="xs" tone="warn" style={{ marginTop: t.space(2), lineHeight: 16 }}>
-                    A hazard on the page with nothing written against it is the one thing this document must never
-                    show. It cannot be signed until you say what you did.
+                    Add what you did before signing.
                   </Txt>
                 ) : null}
               </Card>
             ))}
-            <Button title="Add something you found" variant="secondary" onPress={addHazard} disabled={locked} />
+            <Button title="Add a hazard" variant="secondary" onPress={addHazard} disabled={locked} />
           </>
         ) : null}
 
         {tab === 'sign' ? (
           <>
-            {blocking.length ? (
+            {toDo.length && !locked ? (
               <Banner
                 tone="warn"
-                title={`${blocking.length} thing${blocking.length === 1 ? '' : 's'} before it can be signed`}
-                body={blocking.slice(0, 6).map((b) => `${b.what} — ${b.fix}`).join('\n\n')}
+                title={`${toDo.length} to do before signing`}
+                body={toDo.slice(0, 6).map((b) => `${b.what}. ${b.fix}`).join('\n\n')}
               />
             ) : null}
 
-            <H2>Everybody doing this work</H2>
+            <H2>Crew</H2>
             {record.workers.map((w, i) => (
               <Card key={`worker-${i}`}>
                 <Field label="Name" value={w.name} onChangeText={(v) => setWorker(i, { name: v })} editable={!locked} />
@@ -831,13 +801,13 @@ export default function SwmsRecordScreen() {
                     }}
                   />
                 ) : null}
-                {!locked ? <Button title="Take off the list" variant="ghost" onPress={() => removeWorker(i)} /> : null}
+                {!locked ? <Button title="Remove" variant="ghost" onPress={() => removeWorker(i)} /> : null}
               </Card>
             ))}
 
             {!locked ? (
               <Card>
-                <Field label="Add somebody" value={newWorker} onChangeText={setNewWorker} placeholder="Their name" />
+                <Field label="Add a person" value={newWorker} onChangeText={setNewWorker} placeholder="Name" />
                 <Button title="Add" variant="secondary" onPress={addWorker} disabled={!newWorker.trim()} />
               </Card>
             ) : null}
@@ -851,13 +821,13 @@ export default function SwmsRecordScreen() {
               />
             ) : null}
             {!locked && blocking.length ? (
-              <Txt size="sm" tone="muted" style={{ textAlign: 'center' }}>{whyNotSigned(record, merged)}</Txt>
+              <Txt size="sm" tone="muted" style={{ textAlign: 'center' }}>{signHint(record, merged)}</Txt>
             ) : null}
 
-            <H2>Afterwards</H2>
+            <H2>Send and file</H2>
 
             <Card>
-              <Label>Send it to the office</Label>
+              <Label>Email the office</Label>
               <Segmented
                 value={inbox}
                 onChange={(next) => {
@@ -875,47 +845,44 @@ export default function SwmsRecordScreen() {
               </Txt>
               {record.emailedAt ? (
                 <Txt size="xs" tone="faint" style={{ marginTop: t.space(1), lineHeight: 16 }}>
-                  Already sent to {record.emailedTo ?? 'the office'} on {formatAuDate(record.emailedAt)}.
+                  Sent to {record.emailedTo ?? 'the office'} on {formatAuDate(record.emailedAt)}.
                 </Txt>
               ) : null}
               <Button
-                title={record.emailedAt ? 'Send it again' : 'Send it'}
+                title={record.emailedAt ? 'Send again' : 'Send'}
                 onPress={() => void emailIt()}
                 loading={busy}
                 style={{ marginTop: t.space(3) }}
               />
               {!locked ? (
                 <Txt size="xs" tone="warn" style={{ marginTop: t.space(2), lineHeight: 16 }}>
-                  This is not signed yet. It will go marked DRAFT, which is honest and sometimes what you want —
-                  but the office files a signed one.
+                  Not signed. It will be marked DRAFT.
                 </Txt>
               ) : null}
             </Card>
 
-            <Button title="Share the PDF" variant="secondary" onPress={() => void share()} loading={busy} />
+            <Button title="Share PDF" variant="secondary" onPress={() => void share()} loading={busy} />
             {record.jobExternalId ? (
               <Button
-                title={record.attachedAt ? 'Send it to the job again' : 'Put it on the Simpro job'}
+                title={record.attachedAt ? 'Send to the job again' : 'Put on the Simpro job'}
                 variant="secondary"
                 onPress={() => void attach()}
                 loading={busy}
                 disabled={!locked}
               />
             ) : null}
-            {!locked ? (
-              <Txt size="sm" tone="muted">
-                Only a signed statement goes on the job. A draft filed there reads as a briefing that happened.
-              </Txt>
+            {record.jobExternalId && !locked ? (
+              <Txt size="sm" tone="muted">Sign it to put it on the job.</Txt>
             ) : null}
 
             <Card>
-              <Label>When this stops covering the work</Label>
+              <Label>Review it when</Label>
               {SWMS_REVIEW_TRIGGERS.map((x) => (
                 <Txt key={x} size="sm" tone="muted" style={{ marginTop: t.space(1.5), lineHeight: 20 }}>• {x}</Txt>
               ))}
             </Card>
 
-            <Button title="Back to the statements" variant="ghost" onPress={() => router.push('/swms')} />
+            <Button title="All statements" variant="ghost" onPress={() => router.push('/swms')} />
           </>
         ) : null}
       </Screen>

@@ -858,7 +858,7 @@ function PlaceCard({
         ) : (
           <Rowed gap={2}>
             {theirs && onOpenCustomer ? <Button title="Open customer" onPress={onOpenCustomer} style={{ flex: 1 }} /> : null}
-            <Button title="Add as a site" variant={theirs && onOpenCustomer ? 'secondary' : 'primary'} onPress={onAddSite} style={{ flex: 1 }} />
+            <Button title="Add site to phone" variant={theirs && onOpenCustomer ? 'secondary' : 'primary'} onPress={onAddSite} style={{ flex: 1 }} />
           </Rowed>
         )}
         <Rowed gap={2}>

@@ -48,11 +48,11 @@ export async function createTimesheet(seed: Partial<Timesheet> & { weekStarting:
   };
   await db.runAsync(
     `INSERT INTO timesheet (id, employeeName, vehicleRego, kilometerReading, weekStarting, entries,
-       employeeSignature, managerName, checkedBy, status, createdAt, updatedAt)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+       employeeSignature, managerName, checkedBy, status, unpaidBreakMinutes, createdAt, updatedAt)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     sheet.id, sheet.employeeName, sheet.vehicleRego, sheet.kilometerReading, sheet.weekStarting,
     JSON.stringify(sheet.entries), sheet.employeeSignature ?? null, sheet.managerName,
-    sheet.checkedBy, sheet.status, sheet.createdAt, sheet.updatedAt,
+    sheet.checkedBy, sheet.status, sheet.unpaidBreakMinutes ?? null, sheet.createdAt, sheet.updatedAt,
   );
   return sheet;
 }
@@ -61,11 +61,12 @@ export async function saveTimesheet(sheet: Timesheet): Promise<void> {
   const db = await getDb();
   await db.runAsync(
     `UPDATE timesheet SET employeeName = ?, vehicleRego = ?, kilometerReading = ?, weekStarting = ?,
-       entries = ?, employeeSignature = ?, managerName = ?, checkedBy = ?, status = ?, updatedAt = ?
+       entries = ?, employeeSignature = ?, managerName = ?, checkedBy = ?, status = ?,
+       unpaidBreakMinutes = ?, updatedAt = ?
      WHERE id = ?`,
     sheet.employeeName, sheet.vehicleRego, sheet.kilometerReading, sheet.weekStarting,
     JSON.stringify(sheet.entries), sheet.employeeSignature ?? null, sheet.managerName,
-    sheet.checkedBy, sheet.status, nowIso(), sheet.id,
+    sheet.checkedBy, sheet.status, sheet.unpaidBreakMinutes ?? null, nowIso(), sheet.id,
   );
 }
 

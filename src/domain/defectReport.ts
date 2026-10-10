@@ -105,21 +105,31 @@ export interface DefectReportNotice {
   body: string;
 }
 
+/** The status as a technician reads it on a chip. */
+export function defectStatusLabel(status: DefectStatus): string {
+  switch (status) {
+    case 'open': return 'Open';
+    case 'quoted': return 'Quoted';
+    case 'rectified': return 'Rectified';
+    case 'closed': return 'Closed';
+  }
+}
+
 /**
- * The news itself, as the sentence that follows "the office is told".
+ * The news itself, as the opening of the banner's sentence.
  *
- * Written as a clause rather than a word so the three outcomes below can each
- * put it in a different sentence without any of them reading like a status
- * column pasted into prose.
+ * One phrase per occasion so the queued banner says which change is on its
+ * way rather than the same sentence for all of them.
  */
 function newsOf(occasion: DefectReportOccasion): string {
   switch (occasion) {
-    case 'rectified': return 'that it has been rectified';
-    case 'reopened': return 'that it is open again';
-    case 'quoted': return 'that it has been quoted';
-    case 'closed': return 'that it is closed';
-    case 'notice issued': return 'the details from the notice';
-    case 'job linked': return 'about this defect';
+    case 'rectified': return 'Rectified note';
+    case 'reopened': return 'Reopened note';
+    case 'quoted': return 'Quoted note';
+    case 'closed': return 'Closed note';
+    // Each phrase is one note, so "goes" agrees with all of them.
+    case 'notice issued': return 'Notice handover note';
+    case 'job linked': return 'Defect note';
   }
 }
 
@@ -131,48 +141,38 @@ function newsOf(occasion: DefectReportOccasion): string {
  * there for the rest of the afternoon — so the words say queued and say when it
  * goes, because a technician who reads "sent" and drives away has been told
  * something the app does not know.
+ *
+ * Handing the critical defect notice over does not change the defect, and the
+ * note is built from the defect, so a notice given on a defect that changed in
+ * no other way comes back as a duplicate. That banner says the notice is
+ * recorded rather than implying the office was told.
+ *
+ * A duplicate is not proof the office has it either: the queue also calls a
+ * note a duplicate while the earlier copy is still pending on this phone, so
+ * that banner says nothing new went rather than that the job holds it.
  */
 export function describeDefectReport(outcome: DefectReportOutcome): DefectReportNotice {
-  const news = newsOf(outcome.occasion);
-
   if (!outcome.jobId) {
     return {
       tone: 'warn',
-      title: 'The office has not been told',
-      body: 'The office works in jobs, not sites, so there is nowhere on their side to put a note about a '
-        + 'defect until the defect is linked to one. This one has no job on it, which almost always means it '
-        + 'was raised before the app started recording the job. Open the defect, set the job it belongs to, '
-        + `and the office is told ${news} then. The change is saved on this phone either way.`,
+      title: 'No job on this defect',
+      body: 'Saved on this phone. Set the job to send it to the office.',
     };
   }
 
   if (!outcome.queued) {
     return {
       tone: 'info',
-      title: `Job ${outcome.jobId} already has this`,
+      title: `Nothing new for job ${outcome.jobId}`,
       body: outcome.occasion === 'notice issued'
-        // Said out loud because it is a real limit and not a tidy outcome. The
-        // note is built from the defect, and the defect's note does not carry
-        // the fact that the written notice changed hands — so where the
-        // technician filled nothing else in on the notice screen there is
-        // genuinely nothing new to send, and claiming otherwise would have them
-        // believe the office knows the notice was given when it does not.
-        ? 'The note on the job is built from the defect itself, and handing the notice over does not change '
-          + 'the defect. Nothing on it has changed since the last note, so nothing is sent twice. The notice '
-          + 'itself is the document you have just handed over, and it is recorded against this defect.'
-        : `Nothing about this defect has changed since the last note went to job ${outcome.jobId}, so it is `
-          + 'not sent a second time. The office already reads it the way it now stands.',
+        ? 'Notice recorded on this defect.'
+        : 'No change since the last note.',
     };
   }
 
   return {
     tone: 'pass',
     title: `Queued for job ${outcome.jobId}`,
-    // Deliberately does not call it an amendment. It usually is one -- the office
-    // already holds a note about this defect and this one supersedes it -- but a
-    // defect that has just been linked to a job for the first time has no earlier
-    // note to amend, and the same sentence has to be true for both.
-    body: `The office is told ${news}. It is queued on this phone and goes up with the next send, so a plant `
-      + 'room with no signal costs nothing but a wait.',
+    body: `${newsOf(outcome.occasion)} goes with the next send.`,
   };
 }

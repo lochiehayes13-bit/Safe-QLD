@@ -2,25 +2,23 @@ import React, { useCallback, useState } from 'react';
 import { View } from 'react-native';
 import { Redirect, Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { createForm72, deleteForm72, listForm72, type StoredForm72 } from '@/db/form72Repo';
+import { createForm72, listForm72, type StoredForm72 } from '@/db/form72Repo';
 import { listJobPage } from '@/db/opsRepo';
 import { nowIso } from '@/db';
 import { qldIsoDay } from '@/domain/qldTime';
 import { autoLinkJob } from '@/domain/form72Link';
 import { getSite } from '@/db/repo';
 import { queryAssets } from '@/db/assetRepo';
-import { validateForm72, emptyForm72 } from '@/domain/form72';
+import { emptyForm72 } from '@/domain/form72';
 import { applyForm72Prefill, form72FromAssets } from '@/domain/formsFromAssets';
-import {
-  FORM_TITLE, OCCUPIER_COPY_BUSINESS_DAYS, occupierCopyDue,
-} from '@/export/form72';
-import { formatAuDate } from '@/export/sheets';
+import { FORM_TITLE, OCCUPIER_COPY_BUSINESS_DAYS } from '@/export/form72';
 import { loadPrefs } from '@/app-prefs';
 import type { Site } from '@/domain/types';
 import { useTheme } from '@/theme';
 import {
-  Banner, Button, Card, Chip, EmptyState, H2, Rowed, Screen, Txt,
+  Banner, Button, EmptyState, H2, Screen, Txt,
 } from '@/components/ui';
+import { Form72Card } from '@/components/Form72Card';
 import { contextId } from '@/domain/screenContext';
 import { showAlert } from '@/components/alert';
 import { describeLoadFailure } from '@/domain/loadFailure';
@@ -70,7 +68,7 @@ export default function SiteForm72ListScreen() {
 
   const onNew = useCallback(async () => {
     if (!site) {
-      showAlert('Site not known', failed ?? 'This site could not be read, so a form cannot be started against it. Go back and open it again.');
+      showAlert('Site not loaded', failed ?? 'Go back and open the site again.');
       return;
     }
     setCreating(true);
@@ -127,39 +125,15 @@ export default function SiteForm72ListScreen() {
     }
   }, [site, failed]);
 
-  const onDelete = useCallback((form: StoredForm72) => {
-    showAlert(
-      'Delete this draft?',
-      'Nothing on it is kept.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteForm72(form.id);
-              await load();
-            } catch (e) {
-              showAlert('Not deleted', e instanceof Error ? e.message : String(e));
-            }
-          },
-        },
-      ],
-    );
-  }, [load]);
-
   const owing = forms.filter((f) => f.status === 'issued' && !f.copyGivenAt);
+  const today = qldIsoDay(nowIso()) ?? '';
 
   /*
-   * Opened with no site — from the home screen, or from a pinned tile.
-   *
-   * It used to show the context gate, which told somebody who had tapped
-   * "Form 72" to go and find a site first. The form is nearly always raised
-   * against a job, and the job knows the site, so that is where this goes
-   * instead. The route stays the same so a pinned tile keeps working.
+   * Opened with no site, from the home screen or a pinned tile: the list of
+   * every Form 72 on the phone, which starts a new one from a job or a site.
+   * The route stays the same so an old pinned tile keeps working.
    */
-  if (!siteId) return <Redirect href="/form72/new" />;
+  if (!siteId) return <Redirect href="/form72" />;
 
   return (
     <Screen>
@@ -175,9 +149,8 @@ export default function SiteForm72ListScreen() {
       {owing.length ? (
         <Banner
           tone="warn"
-          title={`${owing.length} issued form${owing.length === 1 ? '' : 's'} the occupier has not been given`}
-          body={`The copy is due within ${OCCUPIER_COPY_BUSINESS_DAYS} business days of the work. `
-            + 'Producing the PDF is not the same event as handing it over, so the app asks separately.'}
+          title={`Occupier copy owed on ${owing.length} form${owing.length === 1 ? '' : 's'}`}
+          body={`Copy due within ${OCCUPIER_COPY_BUSINESS_DAYS} business days of the test.`}
         />
       ) : null}
 
@@ -188,81 +161,22 @@ export default function SiteForm72ListScreen() {
         icon={<MaterialCommunityIcons name="plus" size={18} color={t.color.onAccent} />}
       />
 
-      {failed ? (
-        <Banner tone="fail" title="Could not read this site" body={`${failed} The forms below are whatever was read before it failed.`} />
-      ) : null}
+      {failed ? <Banner tone="fail" title="Site not loaded" body={failed} /> : null}
 
       {loaded && !failed && !forms.length ? (
         <EmptyState
           icon="file-certificate-outline"
           title="No Form 72 for this site yet"
-          body={'This is the department’s form for periodic testing and maintenance of a '
-            + 'hydrant or sprinkler system. Start one and it fills in from the site, its asset '
-            + 'register and your licence details.'}
+          body="Start one. It fills from the site and register."
         />
       ) : null}
 
-      {forms.map((f) => {
-        const blockers = f.status === 'draft'
-          ? validateForm72(f).filter((i) => i.blocking).length
-          : 0;
-        const due = occupierCopyDue(f.testDate);
-        return (
-          <Card key={f.id} onPress={() => router.push({ pathname: '/form72/[id]', params: { id: f.id } })}>
-            <Rowed>
-              <View style={{ flex: 1 }}>
-                <Txt weight="700">{f.systemLabel || 'System not named'}</Txt>
-                <Txt size="sm" tone="muted">
-                  {f.testDate ? formatAuDate(f.testDate) : 'No test date'}
-                  {f.licenceNumber ? ` · ${f.licenceNumber}` : ''}
-                </Txt>
-              </View>
-              <Chip
-                label={f.status === 'issued' ? 'Issued' : 'Draft'}
-                tone={f.status === 'issued' ? 'pass' : 'warn'}
-              />
-            </Rowed>
-
-            <Rowed gap={2} wrap>
-              {blockers ? (
-                <Chip label={`${blockers} to do before issue`} tone="warn" />
-              ) : null}
-              {f.status === 'draft' && !blockers ? <Chip label="Ready to issue" tone="pass" /> : null}
-              {f.status === 'issued' && f.copyGivenAt ? (
-                <Chip label={`Occupier copy ${formatAuDate(f.copyGivenAt)}`} tone="pass" />
-              ) : null}
-              {f.status === 'issued' && !f.copyGivenAt ? (
-                <Chip
-                  // Never "no deadline". A date the app cannot work out — a
-                  // test dated beyond the holidays Queensland has appointed, or
-                  // no test date at all — is still ten business days somebody
-                  // has to count by hand.
-                  label={due.date ? `Copy due ${formatAuDate(due.date)}` : 'Copy due — count it by hand'}
-                  tone="fail"
-                />
-              ) : null}
-              {f.systemResult !== 'na' ? (
-                <Chip
-                  label={f.systemResult === 'pass' ? 'System passed' : 'System failed'}
-                  tone={f.systemResult === 'pass' ? 'pass' : 'fail'}
-                />
-              ) : null}
-              {f.criticalDefectsIdentified ? <Chip label="Critical defect" tone="fail" /> : null}
-            </Rowed>
-
-            {f.status === 'draft' ? (
-              <Rowed>
-                <View style={{ flex: 1 }} />
-                <Button title="Delete draft" variant="ghost" compact onPress={() => onDelete(f)} />
-              </Rowed>
-            ) : null}
-          </Card>
-        );
-      })}
+      {forms.map((f) => (
+        <Form72Card key={f.id} form={f} today={today} onDeleted={load} />
+      ))}
 
       <Txt size="xs" tone="faint" style={{ lineHeight: 17 }}>
-        An issued form cannot be deleted. MP 6.1 requires the person who carried out the
-        maintenance to keep a record of it for at least five years.
+        Issued forms can&rsquo;t be deleted. Keep them five years (MP 6.1).
       </Txt>
       <View style={{ height: t.space(4) }} />
     </Screen>

@@ -1,7 +1,7 @@
 import {
-  CONTROL_LEVEL_ORDER, SWMS_REVIEW_TRIGGERS, canSign, carryForwardSwms, mergeSwms, orderedControls,
-  stepKey, stillCovers, suggestTemplates, swmsProgressLine, swmsTitleFor, validateSwms, whyNotSigned,
-  worstRisk, type SwmsRecord, type SwmsTemplate,
+  CONTROL_LEVEL_ORDER, SWMS_REVIEW_TRIGGERS, approvalNotice, canSign, carryForwardNote, carryForwardSwms,
+  crewToDo, mergeSwms, orderedControls, signHint, stepKey, stillCovers, suggestTemplates, swmsProgressLine,
+  swmsTitleFor, validateSwms, whyNotSigned, worstRisk, type SwmsRecord, type SwmsTemplate,
 } from '@/domain/swms';
 
 /**
@@ -215,6 +215,14 @@ describe('what stops a statement being signed', () => {
     ]));
   });
 
+  it('does not promise the PDF marks PPE nobody confirmed', () => {
+    // The PDF lists the PPE and says nothing about which items were ticked,
+    // so "prints as unconfirmed" was a claim the page never made good.
+    const ppe = validateSwms(ready({ ppeChecked: [] }), merged).find((i) => /PPE not confirmed/.test(i.what));
+    expect(ppe?.fix).not.toMatch(/print/i);
+    expect(ppe?.fix).toMatch(/^Tick them on the This site tab: /);
+  });
+
   it('blocks a statement with no site on it, because a statement covers a place', () => {
     expect(whyNotSigned(ready({ siteName: '  ' }), merged)).toContain('No site');
   });
@@ -242,6 +250,12 @@ describe('the same work tomorrow', () => {
     expect(next.permits[0]!.reference).toBe('HW-114');
     expect(next.status).toBe('draft');
     expect(cleared.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('says in one line what starts fresh', () => {
+    const { cleared } = carryForwardSwms(ready(), '2026-09-11');
+    expect(carryForwardNote(cleared)).toBe('Signatures, step ticks and permit ticks start fresh.');
+    expect(carryForwardNote(['signatures'])).toBe('Signatures start fresh.');
   });
 
   it('deep-copies, so editing tomorrow does not rewrite yesterday', () => {
@@ -328,25 +342,27 @@ describe('a statement no reviewer has cleared', () => {
     record.ppeChecked = [...merged.ppe];
 
     expect(canSign(record, merged)).toBe(false);
-    expect(whyNotSigned(record, merged)).toContain('has not been cleared for signature');
+    expect(whyNotSigned(record, merged)).toContain('Awaiting company approval');
   });
 
-  it('says what the reviewer would not sign it over', () => {
-    const merged = mergeSwms([uncleared()]);
+  it('says it is awaiting approval, and nothing from the review itself', () => {
+    const merged = mergeSwms([uncleared({
+      reason: 'Corrected against 4 fatal, 6 serious and 3 minor findings.',
+      correctedAgainst: { findings: 13, note: 'What is still owed is a cold read by somebody else.' },
+    })]);
     const why = whyNotSigned(complete(['uncleared']), merged) ?? '';
-    // Leads with the clearance, ahead of anything about this crew or this day:
-    // the others a technician can fix in two minutes, this one they cannot.
-    expect(why).toContain('has not been cleared for signature');
-    expect(why).toContain('A hazard with no control');
+    // Leads with approval, ahead of anything about this crew or this day: the
+    // others a technician can fix in two minutes, this one they cannot.
+    expect(why).toBe('Awaiting company approval. Brief the crew from it; it can’t be signed yet.');
+    const everything = validateSwms(complete(['uncleared']), merged).map((i) => `${i.what} ${i.fix}`).join(' ');
+    expect(everything).not.toMatch(/fatal|serious|minor|cold read|reviewer|A hazard with no control/i);
   });
 
-  it('says so differently when nobody has read it at all', () => {
-    // An unread statement and a rejected one are different situations, and a
-    // technician should be able to tell which one is in front of them.
-    const merged = mergeSwms([uncleared({ reason: 'The second review never ran.', findings: [] })]);
-    const why = whyNotSigned(complete(['uncleared']), merged) ?? '';
-    expect(why).toContain('never ran');
-    expect(why).toContain('cannot be signed');
+  it('says it once, however many of the day’s statements are waiting', () => {
+    const merged = mergeSwms([uncleared(), { ...uncleared(), id: 'second', title: 'Another one' }]);
+    const approval = validateSwms(complete(['uncleared', 'second']), merged).filter((i) => i.approval);
+    expect(approval).toHaveLength(1);
+    expect(approval[0]!.blocking).toBe(true);
   });
 
   it('treats a statement with no review record as not cleared', () => {
@@ -367,6 +383,43 @@ describe('a statement no reviewer has cleared', () => {
 
   it('leaves a cleared statement alone', () => {
     expect(mergeSwms([HOT, HEIGHTS]).notCleared).toEqual([]);
+    expect(approvalNotice(mergeSwms([HOT, HEIGHTS]))).toBeNull();
+  });
+
+  it('puts one plain notice at the top of the statement', () => {
+    expect(approvalNotice(mergeSwms([uncleared()]))).toEqual({
+      title: 'Awaiting company approval',
+      body: 'Brief the crew from it; it can’t be signed yet.',
+    });
+    // Only some of the day's statements waiting: it names those.
+    const partial = approvalNotice(mergeSwms([HOT, uncleared()]));
+    expect(partial?.body).toContain('Something nobody signed off');
+    expect(partial?.body).not.toContain('Hot work');
+  });
+
+  it('leaves approval out of the crew’s to-do list, so everything else can still be finished', () => {
+    const merged = mergeSwms([HOT, uncleared()]);
+    const record = complete(['hot-work', 'uncleared']);
+    const todo = crewToDo(validateSwms(record, merged));
+    expect(todo.length).toBeGreaterThan(0);
+    expect(todo.some((i) => i.approval)).toBe(false);
+    // The hint under the Sign button is the crew's next job, not approval again.
+    expect(signHint(record, merged)).toBe(`${todo[0]!.what}. ${todo[0]!.fix}`);
+  });
+
+  it('tells a crew that has done its part that only approval is left', () => {
+    const merged = mergeSwms([uncleared()]);
+    const record = complete(['uncleared']);
+    record.ticked = merged.steps.map((s) => s.key);
+    record.permits = merged.permits.map((permit) => ({ permit, held: true }));
+    record.answers = Object.fromEntries(merged.prompts.map((q) => [q, 'answered']));
+    expect(crewToDo(validateSwms(record, merged))).toEqual([]);
+    expect(canSign(record, merged)).toBe(false);
+    expect(signHint(record, merged)).toBe('Ready to sign once approved.');
+  });
+
+  it('gives no hint once a statement can be signed', () => {
+    expect(signHint(ready(), mergeSwms(TEMPLATES))).toBeUndefined();
   });
 });
 

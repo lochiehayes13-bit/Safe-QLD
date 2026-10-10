@@ -14,13 +14,21 @@ import {
   parseTime,
   previousDayWithEntries,
   setLeave,
+  sheetUnpaidBreak,
   timesheetTotals,
   toggleExtra,
+  UNPAID_BREAK_AFTER_HOURS,
+  dayUnpaidBreakHours,
+  isUnpaidBreakLine,
+  unpaidBreakLabel,
+  unpaidBreakMinutes,
+  unpaidBreakTotal,
   usualTimes,
   validateTimesheet,
   weekDates,
   weekPeak,
   weekSummary,
+  withUnpaidBreaks,
   type Timesheet,
   type TimesheetEntry,
 } from '@/domain/timesheet';
@@ -546,5 +554,149 @@ describe('a day off is a full day', () => {
     const off = setLeave(blankEntry('x', '2026-09-07'), 'annual', STANDARD_DAY_HOURS);
     expect(off.annual).toBe('8');
     expect(leaveOf(off)).toEqual({ kind: 'annual', hours: 8 });
+  });
+});
+
+/**
+ * The unpaid lunch.
+ *
+ * Off unless Settings turns it on. On, a day with more than five worked
+ * hours loses thirty minutes once, as a line under the day that every total
+ * and export reads like any other row.
+ */
+describe('the unpaid lunch', () => {
+  const WED = '2026-08-12';
+  const THU = '2026-08-13';
+
+  it('reads the setting safely, none unless it is thirty', () => {
+    expect(unpaidBreakMinutes(30)).toBe(30);
+    expect(unpaidBreakMinutes('30')).toBe(30);
+    expect(unpaidBreakMinutes(0)).toBe(0);
+    expect(unpaidBreakMinutes(45)).toBe(0);
+    expect(unpaidBreakMinutes(undefined)).toBe(0);
+  });
+
+  it('takes nothing off while the setting is none', () => {
+    const s = sheet([entry({ date: WED, startTime: '06:30', finishTime: '15:00' })]);
+    expect(dayUnpaidBreakHours(s.entries, WED, 0)).toBe(0);
+    expect(withUnpaidBreaks(s, 0)).toBe(s);
+    expect(timesheetTotals(withUnpaidBreaks(s, 0)).grand).toBe(8.5);
+  });
+
+  it('takes nothing off a day of five hours or less', () => {
+    const exactly = [entry({ date: WED, startTime: '07:00', finishTime: '12:00' })];
+    expect(UNPAID_BREAK_AFTER_HOURS).toBe(5);
+    expect(dayUnpaidBreakHours(exactly, WED, 30)).toBe(0);
+    expect(withUnpaidBreaks(sheet(exactly), 30).entries).toHaveLength(1);
+    expect(dayUnpaidBreakHours([entry({ date: WED, startTime: '07:00', finishTime: '10:00' })], WED, 30)).toBe(0);
+  });
+
+  it('reads a five-hour day of several lines as five, not a hair over', () => {
+    // 0.12 + 4.23 + 0.65 is 5.000000000000001 in floating point; the sheet shows 5.
+    const pieces = [
+      entry({ id: 'a', date: WED, startTime: '07:00', finishTime: '07:07' }),
+      entry({ id: 'b', date: WED, startTime: '07:07', finishTime: '11:21' }),
+      entry({ id: 'c', date: WED, startTime: '11:21', finishTime: '12:00' }),
+    ];
+    expect(dayUnpaidBreakHours(pieces, WED, 30)).toBe(0);
+    expect(timesheetTotals(withUnpaidBreaks(sheet(pieces), 30)).grand).toBe(5);
+  });
+
+  it('takes thirty minutes off once on a day over five hours, however many jobs', () => {
+    const jobs = [
+      entry({ id: 'a', date: WED, startTime: '06:30', finishTime: '10:30' }),
+      entry({ id: 'b', date: WED, startTime: '10:30', finishTime: '14:30' }),
+    ];
+    expect(dayUnpaidBreakHours(jobs, WED, 30)).toBe(0.5);
+    const paid = withUnpaidBreaks(sheet(jobs), 30);
+    const lines = paid.entries.filter(isUnpaidBreakLine);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ date: WED, siteName: 'Less 30 min unpaid break', hourKind: 'ord' });
+    expect(entryHours(lines[0]!)).toBe(-0.5);
+    expect(unpaidBreakLabel(30)).toBe('Less 30 min unpaid break');
+  });
+
+  it('never takes it off leave, and leave never makes a day long', () => {
+    const leaveDay = [setLeave(entry({ date: WED }), 'annual', 8)];
+    expect(dayUnpaidBreakHours(leaveDay, WED, 30)).toBe(0);
+    const halfAndHalf = [
+      entry({ id: 'a', date: THU, startTime: '06:30', finishTime: '10:30' }),
+      setLeave(entry({ id: 'b', date: THU }), 'sick', 4),
+    ];
+    expect(dayUnpaidBreakHours(halfAndHalf, THU, 30)).toBe(0);
+    const paid = withUnpaidBreaks(sheet([...leaveDay, ...halfAndHalf]), 30);
+    expect(paid.entries.some(isUnpaidBreakLine)).toBe(false);
+    expect(timesheetTotals(paid).annual).toBe(8);
+  });
+
+  it('comes out of the day and the week totals, and says how much', () => {
+    const s = sheet([
+      entry({ id: 'a', date: WED, startTime: '06:30', finishTime: '15:00' }),
+      entry({ id: 'b', date: THU, startTime: '06:30', finishTime: '15:00' }),
+      entry({ id: 'c', date: '2026-08-14', startTime: '06:30', finishTime: '10:00' }),
+      setLeave(entry({ id: 'd', date: '2026-08-17' }), 'rdo', 8),
+    ]);
+    const paid = withUnpaidBreaks(s, 30);
+    const totals = timesheetTotals(paid);
+    expect(totals.ord).toBe(8.5 + 8.5 + 3.5 - 1);
+    expect(totals.worked).toBe(19.5);
+    expect(totals.grand).toBe(27.5);
+    expect(unpaidBreakTotal(paid)).toBe(1);
+    expect(unpaidBreakTotal(s)).toBe(0);
+
+    const week = weekSummary(paid);
+    expect(week[0]).toMatchObject({ worked: 8, total: 8, jobs: 1, unpaidBreak: 0.5 });
+    expect(week[2]).toMatchObject({ worked: 3.5, unpaidBreak: 0 });
+    expect(week[5]).toMatchObject({ worked: 0, total: 8, unpaidBreak: 0 });
+    expect(dayWorkedHours(paid.entries, WED)).toBe(8);
+    const summed = Math.round(week.reduce((n, d) => n + d.total, 0) * 100) / 100;
+    expect(summed).toBe(totals.grand);
+  });
+
+  it('comes out of overtime where the day has no ordinary time', () => {
+    const paid = withUnpaidBreaks(sheet([entry({ date: '2026-08-15', startTime: '06:00', finishTime: '14:00', hourKind: 'ot' })]), 30);
+    expect(paid.entries.find(isUnpaidBreakLine)?.hourKind).toBe('ot');
+    expect(timesheetTotals(paid)).toMatchObject({ ord: 0, ot: 7.5 });
+  });
+
+  it('takes nothing more off a day whose times already leave the lunch out', () => {
+    const clockedLunch = [
+      entry({ id: 'a', date: WED, startTime: '07:00', finishTime: '12:00' }),
+      entry({ id: 'b', date: WED, startTime: '12:30', finishTime: '15:30' }),
+    ];
+    expect(dayUnpaidBreakHours(clockedLunch, WED, 30)).toBe(0);
+    expect(timesheetTotals(withUnpaidBreaks(sheet(clockedLunch), 30)).grand).toBe(8);
+    // A gap shorter than the break is not the break.
+    const smoko = [
+      entry({ id: 'a', date: WED, startTime: '07:00', finishTime: '12:00' }),
+      entry({ id: 'b', date: WED, startTime: '12:15', finishTime: '15:30' }),
+    ];
+    expect(dayUnpaidBreakHours(smoko, WED, 30)).toBe(0.5);
+    // Lines given out of order, or overlapping, are read by their times.
+    const muddled = [
+      entry({ id: 'b', date: WED, startTime: '10:00', finishTime: '15:00' }),
+      entry({ id: 'a', date: WED, startTime: '07:00', finishTime: '11:00' }),
+    ];
+    expect(dayUnpaidBreakHours(muddled, WED, 30)).toBe(0.5);
+  });
+
+  it('keeps the break a week was submitted with, whatever the setting says now', () => {
+    const draft = sheet([entry({ date: WED, startTime: '06:30', finishTime: '15:00' })]);
+    expect(sheetUnpaidBreak(draft, 30)).toBe(30);
+    expect(sheetUnpaidBreak(draft, 0)).toBe(0);
+    const before = { ...draft, status: 'submitted' as const };
+    expect(sheetUnpaidBreak(before, 30)).toBe(0);
+    const withIt = { ...before, unpaidBreakMinutes: 30 };
+    expect(sheetUnpaidBreak(withIt, 0)).toBe(30);
+    expect(timesheetTotals(withUnpaidBreaks(withIt, sheetUnpaidBreak(withIt, 0))).grand).toBe(8);
+    expect(timesheetTotals(withUnpaidBreaks(before, sheetUnpaidBreak(before, 30))).grand).toBe(8.5);
+  });
+
+  it('is added once however many times it is worked out, and leaves the stored sheet alone', () => {
+    const s = sheet([entry({ date: WED, startTime: '06:30', finishTime: '15:00' })]);
+    const twice = withUnpaidBreaks(withUnpaidBreaks(s, 30), 30);
+    expect(twice.entries.filter(isUnpaidBreakLine)).toHaveLength(1);
+    expect(s.entries).toHaveLength(1);
+    expect(withUnpaidBreaks(twice, 0).entries).toHaveLength(1);
   });
 });

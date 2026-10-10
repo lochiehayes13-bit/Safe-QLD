@@ -50,7 +50,18 @@ describe('the critical defect notice', () => {
   });
 
   it('says why it cannot make the notice', () => {
-    expect(source).toContain("title={failed ? 'The site could not be read' : 'This defect has no site on this phone'}");
+    expect(source).toContain("title={failed ? 'Site not loaded' : 'Site not on this phone'}");
+  });
+
+  it('offers another go when the site read failed', () => {
+    // It used to say "pull down to try again" on a screen with no pull to refresh.
+    expect(source).not.toMatch(/pull down/i);
+    // Both when the read threw and when the site is not on this phone: the
+    // second says "Sync, then try again", and the screen reads the site only
+    // when it opens, so without the button there is nothing to try.
+    expect(source).toContain('{isCritical && !site ? (\n          <Button title="Try again"');
+    expect(source).not.toContain('{isCritical && !site && failed ? (');
+    expect(source).toContain('<Button title="Try again" variant="secondary" onPress={() => { void load(); }} />');
   });
 
   it('stops the button rather than letting it do nothing', () => {

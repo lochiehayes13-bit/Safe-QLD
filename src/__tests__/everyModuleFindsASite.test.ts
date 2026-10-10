@@ -30,6 +30,8 @@ import { listInvoices, listQuotePage, upsertInvoice, upsertQuote } from '@/db/mi
 import { listLeads, searchContacts, searchVendorOrders, upsertContact, upsertLead, upsertVendorOrder } from '@/db/moreRepo';
 import { createQuote, listQuotes } from '@/db/quoteRepo';
 import { createOccupierStatement, listOccupierStatements } from '@/db/occupierRepo';
+import { createForm72, listForm72ToFollowUp } from '@/db/form72Repo';
+import { followUpMatches } from '@/domain/formFollowUp';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openMigrated, type NodeSqliteDb } from './support/nodeSqlite';
@@ -111,6 +113,7 @@ beforeEach(async () => {
       siteId: site.id, reference: `Q-LOCAL-${n}`, siteName: site.name, clientName: 'A Body Corporate',
     });
     await createOccupierStatement(site.id, { premisesName: site.name, periodEnd: '2026-06-30' });
+    await createForm72({ siteId: site.id, siteName: site.name, systemLabel: 'Fire hydrant system' });
     await upsertContact({
       id: `c${n}`, name: `Contact ${n}`, sites: [{ id: site.externalId, name: site.name }], customers: [],
     } as never, '2026-09-02T00:00:00.000Z');
@@ -139,6 +142,7 @@ const MODULES: readonly [string, (q: string) => Promise<string[]>][] = [
   ['the office’s quotes', async (q) => (await listQuotePage({ filter: 'all', query: q, limit: 50 })).rows.map((r) => r.externalId)],
   ['the quotes raised here', async (q) => (await listQuotes({ query: q })).rows.map((r) => r.reference)],
   ['the occupier statements', async (q) => (await listOccupierStatements({ query: q })).rows.map((r) => r.premisesName)],
+  ['the Form 72 list', async (q) => (await listForm72ToFollowUp()).filter((f) => followUpMatches(f, q)).map((f) => f.siteName)],
   ['the contacts', async (q) => (await searchContacts(q)).map((c) => c.id)],
   ['the leads', async (q) => (await listLeads({ query: q })).map((l) => l.id)],
   ['the purchase orders', async (q) => (await searchVendorOrders(q)).map((o) => o.id)],
@@ -153,6 +157,7 @@ const MINE: Record<string, string> = {
   'the office’s quotes': '991',
   'the quotes raised here': 'Q-LOCAL-1',
   'the occupier statements': 'Barren Heights Tower',
+  'the Form 72 list': 'Barren Heights Tower',
   'the contacts': 'c1',
   'the leads': 'l1',
   'the purchase orders': 'PO-1',
@@ -214,6 +219,7 @@ describe('every search box says it searches the suburb', () => {
     ['the shared job picker', 'src/components/JobPicker.tsx'],
     ['the timesheet’s job sheet', 'app/timesheet/[id].tsx'],
     ['starting a Form 72', 'app/form72/new.tsx'],
+    ['the Form 72 list', 'app/form72/index.tsx'],
     ['the invoices', 'app/invoices/index.tsx'],
     ['the office’s quotes', 'app/quotes/simpro.tsx'],
     ['the quotes raised here', 'app/quotes/index.tsx'],

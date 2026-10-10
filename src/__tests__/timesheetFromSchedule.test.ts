@@ -6,9 +6,10 @@
  * has already filled in.
  */
 import { blankEntry, weekDates } from '@/domain/timesheet';
+import type { ClockEntry } from '@/domain/clockOn';
 import {
-  blocksFromSchedule, blocksFromTimesheet, entriesFromSchedule, fillFromPosition, fillModeFor, fillSummary, fillsOnOpen,
-  leaveColumn, rateKind, rememberFilled, type ScheduleFill, type WorkBlock,
+  blocksForFill, blocksFromClock, blocksFromSchedule, blocksFromTimesheet, entriesFromSchedule, fillFromPosition, fillModeFor,
+  fillSummary, fillsOnOpen, leaveColumn, rateKind, rememberFilled, type ScheduleFill, type WorkBlock,
 } from '@/domain/timesheetFromSchedule';
 
 const WEEK = weekDates('2026-10-07'); // Wed 7 to Tue 13 October
@@ -183,6 +184,135 @@ describe('where the blocks come from', () => {
     ['Public Holiday', 'publicHoliday'], ['Training', undefined], [undefined, undefined],
   ])('activity %s fills %s', (name, column) => {
     expect(leaveColumn(name)).toBe(column);
+  });
+});
+
+/**
+ * The hours this phone clocked, so they are not typed again on Friday.
+ *
+ * Instants are UTC; the sheet is in Queensland wall time. 21:00Z on the 6th
+ * is 07:00 on Wednesday the 7th in Brisbane.
+ */
+describe("this phone's own clock", () => {
+  const clocked = (over: Partial<ClockEntry>): ClockEntry => ({
+    id: 'c1', employeeExternalId: '77', kind: 'work', jobExternalId: '9001', jobSectionExternalId: '5', jobCostCenterExternalId: '9',
+    date: '2026-10-07', startedAt: '2026-10-06T21:00:00.000Z', endedAt: '2026-10-07T05:30:00.000Z',
+    ...over,
+  });
+
+  it('turns closed job hours into blocks in Queensland time', () => {
+    expect(blocksFromClock([
+      clocked({}),
+      clocked({ id: 'c2', date: '2026-10-08', startedAt: '2026-10-07T22:15:00.000Z', endedAt: '2026-10-08T02:00:00.000Z', scheduleRateName: 'Overtime' }),
+    ])).toEqual([
+      { date: '2026-10-07', jobId: '9001', startTime: '07:00', endTime: '15:30' },
+      { date: '2026-10-08', jobId: '9001', startTime: '08:15', endTime: '12:00', rateName: 'Overtime' },
+    ]);
+  });
+
+  it('leaves out what is not job hours, and what is still running', () => {
+    expect(blocksFromClock([
+      clocked({ id: 'run', endedAt: undefined }),
+      clocked({ id: 'brk', kind: 'break', jobExternalId: undefined }),
+      clocked({ id: 'trv', kind: 'travel', jobExternalId: undefined, activityName: 'Travel' }),
+      clocked({ id: 'lve', kind: 'activity', jobExternalId: undefined, activityName: 'Annual Leave' }),
+      clocked({ id: 'long', endedAt: '2026-10-07T20:00:00.000Z' }),
+    ])).toEqual([]);
+  });
+
+  it('finishes a block that ran to midnight at 23:59, as it is sent', () => {
+    expect(blocksFromClock([clocked({ startedAt: '2026-10-07T10:00:00.000Z', endedAt: '2026-10-07T14:00:00.000Z' })]))
+      .toEqual([{ date: '2026-10-07', jobId: '9001', startTime: '20:00', endTime: '23:59' }]);
+  });
+
+  it('counts a clocked block and the same block back from Simpro once', () => {
+    const blocks = blocksForFill({
+      simpro: [block({ jobId: '9001', startTime: '07:00', endTime: '15:30', rateName: 'Normal' })],
+      simproIsPlan: false,
+      clock: blocksFromClock([clocked({})]),
+    });
+    expect(blocks).toHaveLength(1);
+    const f = fill(blocks);
+    expect(f.entries.map((e) => [e.date, e.jobNumber, e.startTime, e.finishTime])).toEqual([['2026-10-07', '9001', '07:00', '15:30']]);
+  });
+
+  it("takes Simpro's copy of a sent block at Simpro's rate, not both", () => {
+    // Saturday at time and a half in Simpro; the phone clocked it with no rate.
+    const f = fill(blocksForFill({
+      simpro: [block({ date: '2026-10-10', jobId: '9001', startTime: '07:00', endTime: '12:00', rateName: 'Time and a Half' })],
+      simproIsPlan: false,
+      clock: blocksFromClock([clocked({ date: '2026-10-10', startedAt: '2026-10-09T21:00:00.000Z', endedAt: '2026-10-10T02:00:00.000Z' })]),
+    }));
+    expect(f.entries.map((e) => [e.startTime, e.finishTime, e.hourKind])).toEqual([['07:00', '12:00', 'ot']]);
+  });
+
+  it("keeps the office's correction to a sent block", () => {
+    const f = fill(blocksForFill({
+      simpro: [block({ jobId: '9001', startTime: '07:30', endTime: '15:30', rateName: 'Normal' })],
+      simproIsPlan: false,
+      clock: blocksFromClock([clocked({})]),
+    }));
+    expect(f.entries.map((e) => [e.startTime, e.finishTime])).toEqual([['07:30', '15:30']]);
+  });
+
+  it("adds clocked hours Simpro's timesheet does not have yet", () => {
+    const blocks = blocksForFill({
+      simpro: [block({ jobId: '9001', startTime: '07:00', endTime: '12:00' })],
+      simproIsPlan: false,
+      clock: blocksFromClock([
+        clocked({ endedAt: '2026-10-07T02:00:00.000Z' }),
+        clocked({ id: 'c2', jobExternalId: '9002', startedAt: '2026-10-07T02:30:00.000Z', endedAt: '2026-10-07T05:30:00.000Z' }),
+      ]),
+    });
+    expect(fill(blocks).entries.map((e) => [e.jobNumber, e.startTime, e.finishTime])).toEqual([['9001', '07:00', '12:00'], ['9002', '12:30', '15:30']]);
+  });
+
+  it('leaves out an On and Off in the same minute, so the plan still fills the day', () => {
+    const tap = clocked({ startedAt: '2026-10-06T21:00:10.000Z', endedAt: '2026-10-06T21:00:50.000Z' });
+    expect(blocksFromClock([tap])).toEqual([]);
+    const blocks = blocksForFill({
+      simpro: [block({ jobId: '9002', startTime: '07:00', endTime: '15:00' })],
+      simproIsPlan: true,
+      clock: blocksFromClock([tap]),
+    });
+    expect(fill(blocks).entries.map((e) => [e.jobNumber, e.startTime, e.finishTime])).toEqual([['9002', '07:00', '15:00']]);
+  });
+
+  it('keeps the lunch the clock recorded as two lines', () => {
+    const f = fill(blocksFromClock([
+      clocked({ endedAt: '2026-10-07T02:00:00.000Z' }),
+      clocked({ id: 'c2', startedAt: '2026-10-07T02:30:00.000Z', endedAt: '2026-10-07T05:30:00.000Z' }),
+    ]));
+    expect(f.entries.map((e) => [e.startTime, e.finishTime])).toEqual([['07:00', '12:00'], ['12:30', '15:30']]);
+  });
+
+  it("takes the clock over the office's plan on a day the phone clocked, and the plan elsewhere", () => {
+    const blocks = blocksForFill({
+      simpro: [
+        block({ date: '2026-10-07', jobId: '9002', startTime: '07:00', endTime: '15:00' }),
+        block({ date: '2026-10-08', jobId: '9002', startTime: '07:00', endTime: '15:00' }),
+      ],
+      simproIsPlan: true,
+      clock: blocksFromClock([clocked({})]),
+    });
+    expect(fill(blocks).entries.map((e) => [e.date, e.jobNumber])).toEqual([['2026-10-07', '9001'], ['2026-10-08', '9002']]);
+  });
+
+  it('fills a day from the clock only once the day is over', () => {
+    // Opened at lunch on the 7th: a filled day is never filled again, so the
+    // morning alone would keep the afternoon off the sheet for good.
+    const plan = [block({ date: '2026-10-07', jobId: '9002', startTime: '07:00', endTime: '15:00' })];
+    const morning = blocksFromClock([clocked({ endedAt: '2026-10-07T02:00:00.000Z' })]);
+    expect(blocksForFill({ simpro: plan, simproIsPlan: true, clock: morning, today: '2026-10-07' })).toEqual(plan);
+    expect(blocksForFill({ simpro: [], simproIsPlan: false, clock: morning, today: '2026-10-07' })).toEqual([]);
+    // The next day, the clock is what happened.
+    expect(blocksForFill({ simpro: plan, simproIsPlan: true, clock: morning, today: '2026-10-08' })).toEqual(morning);
+  });
+
+  it('never touches a day already typed', () => {
+    const f = fill(blocksFromClock([clocked({})]), { existing: [{ ...blankEntry('x', '2026-10-07'), jobNumber: '9002' }] });
+    expect(f.entries).toEqual([]);
+    expect(f.kept).toEqual(['2026-10-07']);
   });
 });
 

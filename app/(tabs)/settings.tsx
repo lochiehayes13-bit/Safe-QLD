@@ -41,6 +41,7 @@ import { useTheme } from '@/theme';
 import { Banner, Button, Card, Chip, Divider, Field, H2, Label, Rowed, Screen, Segmented, Txt } from '@/components/ui';
 import { showAlert } from '@/components/alert';
 import { THEME_CHOICE_LABEL, useThemeChoice } from '@/theme/choice';
+import { unpaidBreakMinutes } from '@/domain/timesheet';
 
 
 export default function SettingsScreen() {
@@ -504,6 +505,20 @@ export default function SettingsScreen() {
           value={prefs.timesheetFill}
           onChange={(v) => update({ timesheetFill: v })}
         />
+        <View style={{ height: t.space(3) }} />
+        <Label>Unpaid lunch</Label>
+        <View style={{ height: t.space(2) }} />
+        <Segmented<'0' | '30'>
+          options={[
+            { value: '0', label: 'None' },
+            { value: '30', label: '30 min' },
+          ]}
+          value={unpaidBreakMinutes(prefs.unpaidLunchMinutes) === 30 ? '30' : '0'}
+          onChange={(v) => update({ unpaidLunchMinutes: v === '30' ? 30 : 0 })}
+        />
+        <Txt size="xs" tone="faint" style={{ marginTop: t.space(2), lineHeight: 17 }}>
+          Taken off days over 5 hours, unless the times already show the break. Submitted weeks keep theirs.
+        </Txt>
       </Card>
 
       {/*

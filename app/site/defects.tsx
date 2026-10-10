@@ -3,11 +3,12 @@ import { FlatList, View } from 'react-native';
 import { Stack, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { getDefect, getSite, listDefects, reopenDefect, updateDefect } from '@/db/repo';
 import { queueDefectNote } from '@/db/opsRepo';
-import { defectMove, describeDefectReport, type DefectReportNotice, type DefectReportOccasion } from '@/domain/defectReport';
+import {
+  defectMove, defectStatusLabel, describeDefectReport, type DefectReportNotice, type DefectReportOccasion,
+} from '@/domain/defectReport';
 import { nowIso } from '@/db';
 import type { Defect, Site } from '@/domain/types';
-import { formatAuDate } from '@/export/sheets';
-import { defectSheet } from '@/export/sheets';
+import { defectSheet, formatAuDate } from '@/export/sheets';
 import { shareFile, writeXlsx } from '@/export/files';
 import { notSharedNotice } from '@/export/shareOutcome';
 import { useTheme } from '@/theme';
@@ -25,7 +26,9 @@ export default function SiteDefectsScreen() {
   const siteId = contextId(useLocalSearchParams<{ siteId?: string }>().siteId);
   const [site, setSite] = useState<Site | null>(null);
   const [defects, setDefects] = useState<Defect[]>([]);
-  const [status, setStatus] = useState<'open' | 'all'>('open');
+  // Quoted has its own tab: a quoted defect is not fixed, and it has to be
+  // somewhere it can be found and marked rectified.
+  const [status, setStatus] = useState<'open' | 'quoted' | 'all'>('open');
   const [busy, setBusy] = useState(false);
 
   // An empty list under "Nothing outstanding here" is a compliance statement
@@ -59,7 +62,7 @@ export default function SiteDefectsScreen() {
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
-  const shown = defects.filter((d) => (status === 'open' ? d.status === 'open' : true));
+  const shown = defects.filter((d) => status === 'all' || d.status === status);
 
   /**
    * Puts the defect's new state onto the Simpro job it belongs to.
@@ -100,8 +103,8 @@ export default function SiteDefectsScreen() {
     } catch (e) {
       setReport({
         tone: 'warn',
-        title: 'The office has not been told',
-        body: describeActionFailure(e, 'queueing the note for the office'),
+        title: 'Office not told',
+        body: describeActionFailure(e, 'queue the note for the office'),
       });
     }
   };
@@ -114,8 +117,8 @@ export default function SiteDefectsScreen() {
    */
   const markRectified = (d: Defect) => {
     showAlert(
-      'Mark this defect rectified?',
-      `${d.location}\n\nThis records today as the rectification date, which the occupier statement and any critical defect notice read back.`,
+      'Mark rectified?',
+      `${d.location}\n\nRecords today as the rectification date.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -132,7 +135,7 @@ export default function SiteDefectsScreen() {
                 // This used to be an unhandled rejection inside `void`, which
                 // goes nowhere at all: the list reloaded, the defect was still
                 // open, and nothing said why.
-                showAlert('Not saved', describeActionFailure(e, 'marking this defect rectified'));
+                showAlert('Not saved', describeActionFailure(e, 'mark this defect rectified'));
                 return;
               }
               if (move) await reportToOffice(d.id, move);
@@ -145,7 +148,7 @@ export default function SiteDefectsScreen() {
   };
 
   const reopen = (d: Defect) => {
-    showAlert('Reopen this defect?', 'It goes back to open and the rectification date is cleared.', [
+    showAlert('Reopen this defect?', 'Clears the rectification date.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Reopen',
@@ -157,7 +160,7 @@ export default function SiteDefectsScreen() {
             try {
               await reopenDefect(d.id);
             } catch (e) {
-              showAlert('Not saved', describeActionFailure(e, 'reopening this defect'));
+              showAlert('Not saved', describeActionFailure(e, 'reopen this defect'));
               return;
             }
             if (move) await reportToOffice(d.id, move);
@@ -175,8 +178,10 @@ export default function SiteDefectsScreen() {
       showAlert(
         'Nothing to export',
         status === 'open'
-          ? 'There are no open defects at this site. Switch to All if you want the ones already cleared.'
-          : 'No defects have been recorded at this site yet.',
+          ? 'No open defects here. Pick All to export cleared ones.'
+          : status === 'quoted'
+            ? 'No quoted defects here.'
+            : 'No defects recorded here.',
       );
       return;
     }
@@ -189,20 +194,24 @@ export default function SiteDefectsScreen() {
         showAlert(notice.title, notice.body);
       }
     } catch (e) {
-      showAlert('Could not export', describeActionFailure(e, 'export this defect list'));
+      showAlert('Not exported', describeActionFailure(e, 'export this defect list'));
     } finally {
       setBusy(false);
     }
   };
 
-  if (!siteId) return <ContextGate kind="site" what="the defects raised" title="Defects" backTo="/site/defects" />;
+  if (!siteId) return <ContextGate kind="site" what="its defects" title="Defects" backTo="/site/defects" />;
 
   return (
     <>
       <Stack.Screen options={{ title: site ? `${site.name} — defects` : 'Defects' }} />
       <Screen scroll={false} padded={false}>
         <View style={{ padding: t.space(4), gap: t.space(2) }}>
-          <Segmented value={status} onChange={setStatus} options={[{ value: 'open', label: 'Open' }, { value: 'all', label: 'All' }]} />
+          <Segmented
+            value={status}
+            onChange={setStatus}
+            options={[{ value: 'open', label: 'Open' }, { value: 'quoted', label: 'Quoted' }, { value: 'all', label: 'All' }]}
+          />
           <Rowed gap={2}>
             <Button
               title="Raise defect"
@@ -211,7 +220,8 @@ export default function SiteDefectsScreen() {
             />
             <Button title="Export" variant="secondary" style={{ flex: 1 }} onPress={exportList} loading={busy} />
           </Rowed>
-          {failed ? <Banner tone="fail" title="This list could not be read" body={failed} /> : null}
+          {failed ? <Banner tone="fail" title="Defects not loaded" body={failed} /> : null}
+          {failed ? <Button title="Try again" variant="secondary" onPress={() => { void load(); }} /> : null}
           {report ? <Banner tone={report.tone} title={report.title} body={report.body} /> : null}
         </View>
 
@@ -222,32 +232,31 @@ export default function SiteDefectsScreen() {
           ListEmptyComponent={
             failed ? null : (
               <EmptyState
-          icon="alert-circle-check-outline"
-                title={status === 'open' ? 'Nothing outstanding here' : 'No defects recorded'}
-                body="Defects raised on this site appear here until they are cleared."
+                icon="alert-circle-check-outline"
+                title={status === 'open' ? 'No open defects' : status === 'quoted' ? 'No quoted defects' : 'No defects recorded'}
               />
             )
           }
           renderItem={({ item }) => (
             <Card onPress={() => router.push({ pathname: '/defect/[id]', params: { id: item.id } })}>
               <Rowed gap={2} wrap>
-                <Chip label={item.severity === 'critical' ? 'CRITICAL' : 'Non-critical'} tone={item.severity === 'critical' ? 'fail' : 'warn'} />
-                <Chip label={item.status} tone={item.status === 'open' ? 'default' : 'pass'} />
-                {item.photos.length ? <Chip label={`${item.photos.length} photo`} /> : null}
+                <Chip label={item.severity === 'critical' ? 'Critical' : 'Non-critical'} tone={item.severity === 'critical' ? 'fail' : 'warn'} />
+                <Chip label={defectStatusLabel(item.status)} tone={item.status === 'rectified' || item.status === 'closed' ? 'pass' : 'default'} />
+                {item.photos.length ? <Chip label={`${item.photos.length} photo${item.photos.length === 1 ? '' : 's'}`} /> : null}
               </Rowed>
               <Txt weight="700" style={{ marginTop: t.space(1.5) }}>{item.location}</Txt>
               <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{item.description}</Txt>
               <Txt size="xs" tone="faint" style={{ marginTop: 4 }}>Raised {formatAuDate(item.raisedAt)}</Txt>
               {item.severity === 'critical' && !item.noticeIssuedAt ? (
                 <Button
-                  title="The occupier’s notice is not written"
+                  title="Write occupier notice"
                   variant="secondary"
                   compact
                   style={{ marginTop: t.space(2.5) }}
                   onPress={() => router.push({ pathname: '/work/notice/[id]', params: { id: item.id } })}
                 />
               ) : null}
-              {item.status === 'open' ? (
+              {item.status === 'open' || item.status === 'quoted' ? (
                 <Button
                   title="Mark rectified"
                   variant="secondary"
