@@ -92,6 +92,13 @@ export interface TestDevice {
   /** Defaults to 'gauge' where absent, which is every form already stored. */
   kind?: DeviceKind;
   /**
+   * A flow meter that read the pressures too, on an integrated transducer
+   * calibrated with it. The technician's claim, never a preset's: the
+   * certificate does not say, and the form has to name what read every kPa
+   * on it, so a meter without this needs a gauge beside it in Part C.
+   */
+  readsPressure?: boolean;
+  /**
    * What the device is, in the manufacturer's words.
    *
    * Not a field on the department's form. It is what makes a stored device
@@ -483,16 +490,27 @@ export function flowCellState(row: FlowRow, column: FlowRowColumn): FlowCellStat
   if (row[column] !== undefined) return 'read';
   if (flowRowUntouched(row)) return 'not-run';
 
+  const read = FLOW_ROW_COLUMNS.map((c) => row[c] !== undefined);
+  const first = read.indexOf(true);
+  const last = read.lastIndexOf(true);
+  const at = FLOW_ROW_COLUMNS.indexOf(column);
+
   /*
    * A row with a device named against it and no reading anywhere is a row
    * somebody started and did not finish, so its first column is the gap. The
-   * alternative reading — that naming the gauge means nothing was attempted —
+   * alternative reading, that naming the gauge means nothing was attempted,
    * would let a half-filled row print as eight words of "Not run" and no red
    * at all, which is the state this table exists to make visible.
    */
-  const run = Math.max(flowRowColumnsRun(row), 1);
-  const at = FLOW_ROW_COLUMNS.indexOf(column) + 1;
-  return at > run ? 'not-run' : 'missing';
+  if (first < 0) return at === 0 ? 'missing' : 'not-run';
+
+  /*
+   * Only a blank between two readings is a gap. A duty proved with two
+   * hydrants open together has no single-hydrant reading to give, and a
+   * column to the right of the last reading was not run either; red in
+   * either says a test was missed when it was not.
+   */
+  return at > first && at < last ? 'missing' : 'not-run';
 }
 
 /** Part E — the pump appliance booster test. */
@@ -1671,6 +1689,52 @@ export function validateForm72(form: Form72): FormIssue[] {
         hydrantReadings.length === 1 ? 's' : ''} pressures and Part C lists no test equipment. Name the `
         + 'gauge or meter they were read with.',
       blocking: true,
+    });
+  }
+
+  /*
+   * Pressures need a pressure instrument.
+   *
+   * Part C can hold the company's two flow meters and nothing else, under a
+   * Part D full of kPa readings nothing on the page says what read them. A
+   * meter that reads pressure on an integrated transducer says so on its
+   * card; otherwise the gauge goes on the form with its own serial, date and
+   * certificate.
+   */
+  if (hydrantReadings.length && named.length
+    && !named.some((d) => (d.kind ?? 'gauge') === 'gauge' || d.readsPressure === true)) {
+    issues.push({
+      part: 'C',
+      message: `Part${hydrantReadings.length === 1 ? '' : 's'} ${hydrantReadings.join(', ')} record${
+        hydrantReadings.length === 1 ? 's' : ''} pressures and Part C lists only flow meters. Add the `
+        + 'pressure gauge they were read with, or mark the meter as reading pressure on an integrated '
+        + 'calibrated transducer.',
+      blocking: true,
+    });
+  }
+
+  /*
+   * Two hydrants at the same place are one hydrant to anybody reading the
+   * form later. The register often holds both as "RHS Building", and the
+   * person who stood at each is the only one who can say which was which.
+   */
+  if (form.flowTest.result !== 'na') {
+    const seen = new Map<string, number>();
+    form.flowTest.hydrantLocations.forEach((place, i) => {
+      const key = place.trim().toLowerCase();
+      if (!key) return;
+      const first = seen.get(key);
+      if (first === undefined) {
+        seen.set(key, i);
+        return;
+      }
+      issues.push({
+        part: 'D',
+        message: `Hydrants ${first + 1} and ${i + 1} are both recorded at `
+          + `"${form.flowTest.hydrantLocations[first]!.trim()}". Say where each one is, e.g. north-east `
+          + 'corner, near gate 2.',
+        blocking: true,
+      });
     });
   }
 

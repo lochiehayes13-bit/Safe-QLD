@@ -1,10 +1,10 @@
 import {
-  CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, DEPARTMENT_DEVICE_SLOTS, FLOW_DEVICE_LABEL,
+  CALIBRATED_FLOW_DEVICE_KINDS, DEPARTMENT_DEVICE_SLOTS, FLOW_DEVICE_LABEL,
   FLOW_ROW_GROUP_LABEL, FRICTIONAL_LOSS_TOLERANCE_KPA, PART_D_DEVICE_RATES_LPS,
   PART_D_LOCATION_SLOTS, PART_D_ROWS,
-  canIssue, deviceCalibration, elevationHeadKpa, flowCellState, flowDeviceCalibrationFrom, flowRowGroup,
+  canIssue, elevationHeadKpa, flowCellState, flowDeviceCalibrationFrom, flowRowGroup,
   flowRowKey, flowRowLabel,
-  flowRowLongLabel, flowRowUntouched, overloadCheck, overloadRun, resolveFrictionalLoss,
+  flowRowUntouched, overloadCheck, overloadRun, resolveFrictionalLoss,
   sprinklerTestPointUntouched, validateForm72,
   type BoosterTest, type FlowRow, type FlowRowColumn, type FlowRowGroup, type FlowTest,
   type Form72, type FormDefect, type FormIssue, type PartResult, type SprinklerTestPoint,
@@ -450,6 +450,12 @@ export interface Form72DocumentInput {
    * carried here and the check is answered instead of merely stated.
    */
   overload?: { flowLps: number; pressureKpa: number };
+  /**
+   * The Simpro job the test was done under. Part I's "Licensee report no."
+   * prints it where nobody typed a report number, because the job is the
+   * report the office files the test against.
+   */
+  jobExternalId?: string;
 }
 
 function esc(s: string | number | undefined | null): string {
@@ -552,9 +558,7 @@ function tick(label: string, on: boolean): string {
  * The result boxes on the right of a part's dark band.
  *
  * The department prints PASS and FAIL and nothing else on Parts B, D, E and F.
- * Every other box in that band is Safe QLD's, and each one is marked, because
- * the band is the first place a reader's eye lands and an extra box there reads
- * as the department's.
+ * The N/A box, and Part D's "Refer to Report", are Safe QLD's.
  *
  * They are kept rather than dropped. N/A is the answer a technician actually
  * has for a part the job did not cover, and the alternative — three unticked
@@ -563,7 +567,7 @@ function tick(label: string, on: boolean): string {
  */
 function resultBoxes(result: string, options: ResultOption[]): string {
   return `<span class="results">${options
-    .map((o) => `<span class="rl">${esc(o.label)}${o.added ? '<sup>+</sup>' : ''}</span><span class="rb${
+    .map((o) => `<span class="rl">${esc(o.label)}</span><span class="rb${
       o.value === result ? ' on' : ''}">${o.value === result ? '&#10007;' : ''}</span>`)
     .join('')}</span>`;
 }
@@ -571,30 +575,22 @@ function resultBoxes(result: string, options: ResultOption[]): string {
 interface ResultOption {
   value: string;
   label: string;
-  /** True for a box the department's form does not print. */
-  added?: boolean;
 }
 
 const RESULT_OPTIONS: ResultOption[] = [
-  { value: 'na', label: 'N/A', added: true },
+  { value: 'na', label: 'N/A' },
   { value: 'pass', label: 'PASS' },
   { value: 'fail', label: 'FAIL' },
 ];
 
 const FLOW_RESULT_OPTIONS: ResultOption[] = [
-  { value: 'refer-to-report', label: 'Refer to Report', added: true },
+  { value: 'refer-to-report', label: 'Refer to Report' },
   { value: 'pass', label: 'PASS' },
   { value: 'fail', label: 'FAIL' },
 ];
 
-/** Part G is banded with no result boxes at all, so every one of ours is added. */
-const PART_G_RESULT_OPTIONS: ResultOption[] = RESULT_OPTIONS.map((o) => ({ ...o, added: true }));
-
-/** What the <sup>+</sup> on a band box means, said once at the foot of the page. */
-export const ADDED_BOX_NOTE = 'A result box marked + is not on the department\'s form. '
-  + 'The department prints PASS and FAIL; N/A is recorded here because a part the job did '
-  + 'not cover is an answer, and three empty boxes are indistinguishable from a part nobody '
-  + 'filled in. Part D\'s \u201cRefer to Report\u201d is recorded for the same reason.';
+/** Part G is banded with no result boxes at all on the department's form. */
+const PART_G_RESULT_OPTIONS: ResultOption[] = RESULT_OPTIONS;
 
 function band(title: string, boxes?: string): string {
   return `<div class="band"><span class="bandtitle">${esc(title)}</span>${boxes ?? ''}</div>`;
@@ -616,9 +612,8 @@ function pair(a: [string, string], b?: [string, string]): string {
 /**
  * A label across the first column and its value across the rest.
  *
- * The label is markup rather than escaped text, so a row the app added can
- * carry its "added" marker. Every label passed here is written in this file;
- * none of them comes off a form.
+ * The label is markup rather than escaped text. Every label passed here is
+ * written in this file; none of them comes off a form.
  */
 /**
  * A reading in its own cell with its unit in the next one.
@@ -689,7 +684,7 @@ function partA(form: Form72): string {
     <tr><td class="mtl">fire hydrant</td><td>${tick('', m.hydrantAnnual)}</td><td>${tick('', m.hydrantFiveYear)}</td></tr>
     <tr><td class="mtl">fire sprinkler</td><td>${tick('', m.sprinklerAnnual)}</td><td>${tick('', m.sprinklerFiveYear)}</td></tr>
     <tr><td class="mtl">combined</td><td>${tick('', m.combinedAnnual)}</td><td>${tick('', m.combinedFiveYear)}</td></tr>
-  </table>${nothingTicked ? '<span class="missing">Not answered — the form does not say what was done</span>' : ''}`;
+  </table>${nothingTicked ? '<span class="missing">Not answered. The form does not say what was done</span>' : ''}`;
 
   /*
    * The department's own shape for the bottom of Part A.
@@ -776,40 +771,16 @@ function partB(form: Form72): string {
 export { DEPARTMENT_DEVICE_SLOTS };
 
 /**
- * The basis a device's calibration was accepted on, with everything the
- * certificate says about it.
- *
- * The department's grid prints a date and a certificate number and leaves the
- * reader to know the interval and to find the paper. This row carries what the
- * paper says — who issued it, who signed it, the accuracy it claims — and how
- * old it was on the day of the test, so a reader comparing the certificate
- * date with the test date is told the arithmetic rather than left to do it.
- * The manufacturer's service-life claim prints with the conditions it
- * carries: unconditionally it would read as a guarantee, and both conditions
- * are things only the person holding the meter can answer.
+ * What the instrument is, in the manufacturer's words, and whether it also
+ * read the pressures on the page: a meter with an integrated transducer is the
+ * pressure instrument too, and the form has to say so or list the gauge.
  */
-function basis(d: TestDevice, testDate?: string): string | undefined {
-  if (!d.serialNumber.trim()) return undefined;
-  const cal = deviceCalibration(d, testDate);
-  const age = cal.monthsBefore !== undefined
-    ? ` Certificate ${cal.monthsBefore < 1 ? 'under a month' : `${Math.floor(cal.monthsBefore)} month${Math.floor(cal.monthsBefore) === 1 ? '' : 's'}`} old at this test.`
-    : '';
-  const paper = [
-    d.issuedBy?.trim() ? `Issued by ${esc(d.issuedBy)}` : '',
-    d.certifiedBy?.trim() ? `certified by ${esc(d.certifiedBy)}` : '',
-    d.accuracy?.trim() ? esc(d.accuracy) : '',
-  ].filter(Boolean).join(', ');
-  // The basis is what the device carries, not what the calibration check made
-  // of it: a meter whose date is after the test is still a meter certified
-  // for its service life, with that date's own fault reported beside it.
-  if (d.calibrationBasis === 'service-life' && d.kind === 'flow-meter') {
-    return `Manufacturer certifies for the device's service life, absent fault or damage, unless an `
-      + `authority stipulates recertification.${paper ? ` ${paper}.` : ''}${age}`;
-  }
-  const wrongBasis = d.calibrationBasis === 'service-life'
-    ? ' <span class="extra">recorded as service life, which applies to a flow meter and not to a gauge</span>'
-    : '';
-  return `${CALIBRATION_MONTHS} month interval.${paper ? ` ${paper}.` : ''}${age}${wrongBasis}`;
+function describeDevice(d: TestDevice): string {
+  const model = d.model?.trim();
+  const transducer = d.kind === 'flow-meter' && d.readsPressure === true;
+  if (!model && !transducer) return '';
+  return esc([model, transducer ? 'Integrated pressure transducer, calibrated with the meter' : '']
+    .filter(Boolean).join('. '));
 }
 
 function partC(form: Form72, issues: FormIssue[], issued: boolean): string {
@@ -841,8 +812,8 @@ function partC(form: Form72, issues: FormIssue[], issued: boolean): string {
   // rendered against the live result rather than N/A: a blank here is never
   // "not applicable".
   const c: PartResult = 'pass';
-  // The label is markup rather than text, because one row carries an "added"
-  // marker. Every label here is written in this file, none comes from a form.
+  // The label is markup rather than text. Every label here is written in this
+  // file, none comes from a form.
   /*
    * A column nobody used is unused, not a column of missing readings.
    *
@@ -909,7 +880,7 @@ function partC(form: Form72, issues: FormIssue[], issued: boolean): string {
       ${kinds.length === 0
     ? flowDeviceInPlay
       ? '<span class="missing">Not answered</span>'
-      : '<span class="na">N/A — no flow test on this form</span>'
+      : '<span class="na">N/A, no flow test on this form</span>'
     : ''}
     </td></tr>
     ${/*
@@ -930,21 +901,20 @@ function partC(form: Form72, issues: FormIssue[], issued: boolean): string {
       // A meter is in the columns with a date and no kind ticked. "Not used"
       // against both boxes would contradict the column two rows down, so the
       // date prints with the one thing that is actually missing named.
-      ? `${esc(formatAuDate(fromColumns.date))} <span class="extra">from ${esc(fromColumns.from)} — kind not ticked</span>`
+      ? esc(formatAuDate(fromColumns.date))
       : !kinds.includes(kind)
         ? '<span class="na">Not used</span>'
         : fromColumns
           // Read off the equipment list below, which asks for the same date. It
           // says so: a figure in one of the department's boxes that nobody typed
           // has to carry where it came from.
-          ? `${esc(formatAuDate(fromColumns.date))} <span class="extra">from ${esc(fromColumns.from)}</span>`
+          ? esc(formatAuDate(fromColumns.date))
           : '<span class="missing">Not recorded</span>'
 }</td>`).join('')}
     </tr>
   </table></div>
   <table class="grid devices">
-    <tr><td class="k"></td>${columns.map((col, i) => `<td class="dh">${esc(col.head)}${
-  i >= DEPARTMENT_DEVICE_SLOTS.length ? ' <span class="extra">added</span>' : ''}${
+    <tr><td class="k"></td>${columns.map((col) => `<td class="dh">${esc(col.head)}${
   col.named ? `<br /><span class="extra">${esc(col.named)}</span>` : ''}</td>`).join('')}</tr>
     ${/*
        * The one row where a blank is the point. A column with a device on it
@@ -974,14 +944,12 @@ function partC(form: Form72, issues: FormIssue[], issued: boolean): string {
        * department never asked — red would be an omission against a field that
        * does not exist.
        */''}
-    ${held.some((d) => d.model?.trim()) ? `<tr>
-      <td class="k">Device/gauge model <span class="extra">added</span></td>${
+    ${held.some((d) => d.model?.trim() || (d.kind === 'flow-meter' && d.readsPressure)) ? `<tr>
+      <td class="k">Device/gauge model</td>${
   columns.map((col) => `<td class="v">${
     !col.device.serialNumber.trim()
       ? '<span class="na">Not used</span>'
-      : col.device.model?.trim()
-        ? esc(col.device.model)
-        : '<span class="na">Not recorded</span>'
+      : describeDevice(col.device) || '<span class="na">Not recorded</span>'
   }</td>`).join('')}
     </tr>` : ''}
     ${row('Date calibrated', (d) => formatAuDate(d.dateCalibrated))}
@@ -993,10 +961,9 @@ function partC(form: Form72, issues: FormIssue[], issued: boolean): string {
        * percentage, and the printed grid has nowhere to put one — it has a
        * "Correction certificate" row and that is a document reference, not a
        * figure. So the row exists, because every pressure on the page is wrong
-       * by that factor until it is applied, and it is marked as ours so a
-       * reader is never shown an added row as the department's.
+       * by that factor until it is applied.
        */
-  row('Correction factor (kPa or %) <span class="extra">added</span>', (d) => d.correctionFactor, undefined, true)}
+  row('Correction factor (kPa or %)', (d) => d.correctionFactor, undefined, true)}
     ${/*
        * Two rows that describe a dial.
        *
@@ -1009,15 +976,6 @@ function partC(form: Form72, issues: FormIssue[], issued: boolean): string {
     ${row('65/100/150 mm face', (d) => d.faceSize, gaugeOnly)}
     ${row('Digital reader', (d) => (d.digitalReader === undefined ? undefined : d.digitalReader ? 'Yes' : 'No'))}
     ${row('Increments (kPa)', (d) => d.incrementsKpa, gaugeOnly)}
-    ${/*
-       * Also ours. The department's grid prints a calibration date and leaves
-       * the reader to know the interval; one of Safe QLD's two flow meters is
-       * certified for its service life rather than for twelve months, and a
-       * reader comparing that date with the test date would otherwise conclude
-       * the meter was a year out. So the basis each device was accepted on
-       * prints beside the date that was accepted.
-       */
-  row('Calibration basis <span class="extra">added</span>', () => undefined, (d) => basis(d, form.testDate), true)}
   </table>
   ${partCIssues.length
     ? `<div class="issues"><b>Test equipment</b><ul>${partCIssues
@@ -1103,9 +1061,7 @@ function partD(form: Form72, issued: boolean): string {
      * A row the department does not print gets its own group cell.
      *
      * Merged into the span above it, a 25 L/s reading sat under "Other portable
-     * testing devices" as though the department printed a 25 L/s line — the
-     * "added" marker on the row label was the only thing saying otherwise, and
-     * it is three columns away from the heading doing the implying.
+     * testing devices" as though the department printed a 25 L/s line.
      */
     const joins = last
       && last.group === group
@@ -1123,9 +1079,7 @@ function partD(form: Form72, issued: boolean): string {
    * a half-line beside the heading, so a blank answers in grey rather than as
    * an omission.
    */
-  const zone = d.pressureZone?.trim()
-    ? esc(d.pressureZone)
-    : r === 'na' ? '<span class="na">N/A</span>' : '<span class="na">Not stated</span>';
+  const zone = d.pressureZone?.trim() ? esc(d.pressureZone) : '<span class="na">N/A</span>';
 
   const table = `<table class="grid flow">
     <tr>
@@ -1134,7 +1088,7 @@ function partD(form: Form72, issued: boolean): string {
       <td class="dh">Hydrant 1 only</td><td class="dh">Hydrants 1 and 2</td>
       <td class="dh">Hydrants 1, 2 and 3</td><td class="dh">Hydrants 1, 2, 3 and 4</td>
     </tr>
-    ${rows.map(({ row, standard }, i) => {
+    ${rows.map(({ row }, i) => {
     // A line with nothing against it was not run, which is not the same thing
     // as a reading somebody forgot to write down. The department prints all
     // eight lines whether or not the job needs them, so most forms legitimately
@@ -1169,9 +1123,8 @@ function partD(form: Form72, issued: boolean): string {
 
     const sp = spanAt.get(i);
     return `<tr>
-      ${sp ? `<td class="grp" rowspan="${sp.count}">${esc(FLOW_ROW_GROUP_LABEL[sp.group])}${
-  sp.standard ? '' : ' <span class="extra">added</span>'}</td>` : ''}
-      <td class="k">${esc(flowRowLabel(row))}${standard ? '' : ' <span class="extra">added</span>'}</td>
+      ${sp ? `<td class="grp" rowspan="${sp.count}">${esc(FLOW_ROW_GROUP_LABEL[sp.group])}</td>` : ''}
+      <td class="k">${esc(flowRowLabel(row))}</td>
       <td class="v">${devicesCell}</td>
       <td class="v">${pressure('hydrant1Kpa')}</td>
       <td class="v">${pressure('hydrants12Kpa')}</td>
@@ -1181,8 +1134,6 @@ function partD(form: Form72, issued: boolean): string {
   }).join('')}
     <tr><td class="k" colspan="2">System achieved:</td><td class="v" colspan="5">${achieved}</td></tr>
   </table>`;
-
-  const extras = rows.filter((x) => !x.standard);
 
   // The register prefills every hydrant on the site and the department prints
   // four fields. A fifth location that was typed or prefilled is listed here
@@ -1201,11 +1152,8 @@ function partD(form: Form72, issued: boolean): string {
     // draft the wording is honest about where N/A came from: it is the stored
     // default, and a form nobody has opened Part D on has not "recorded" it.
     ? `<div class="stated keep">${issued
-      ? 'Recorded as not applicable. Part D of the department\'s form carries no N/A box, so none '
-        + 'of the three boxes above is ticked; this line says why.'
-      : 'Marked not applicable, which is how a new form starts — change it in Part D if a flow test '
-        + 'was run. The department\'s form carries no N/A box for this part, so none of the three '
-        + 'boxes above is ticked.'}</div>`
+      ? 'Not applicable to this test.'
+      : 'Marked not applicable, which is how a new form starts. Change it in Part D if a flow test was run.'}</div>`
     : ''}
   <div class="whole"><table class="grid">
     ${/*
@@ -1228,27 +1176,16 @@ function partD(form: Form72, issued: boolean): string {
         ? r === 'na' ? ' <span class="na">N/A</span>' : ' <span class="missing">Not answered</span>'
         : ''}`)}
     ${/*
-       * Ours. Parts B, E, F and G carry a Comments field and Part D does not —
-       * the department's Part D ends at the pressure zone number. It is kept
-       * because a flow test that did not make its duty needs a sentence
-       * somewhere, and marked because it is not one of their boxes.
+       * Ours. Parts B, E, F and G carry a Comments field and Part D does not;
+       * the department's Part D ends at the pressure zone number. A flow test
+       * that did not make its duty needs a sentence somewhere, so the row
+       * prints when there is one and not otherwise.
        */''}
-    ${wide('Comment <span class="extra">added</span>', addedComment(d.comment, r))}
+    ${d.comment?.trim() ? wide('Comment', addedComment(d.comment, r)) : ''}
   </table>
   ${table}</div>
   ${spareLocations.length
-    ? `<div class="stated">${spareLocations.length} further hydrant location${
-      spareLocations.length === 1 ? ' is' : 's are'} recorded against this test than the `
-      + `department's form prints fields for (${esc(spareLocations.join('; '))}). `
-      + `${spareLocations.length === 1 ? 'It is' : 'They are'} listed here rather than dropped; the `
-      + 'four fields above are the ones the pressure columns refer to.</div>'
-    : ''}
-  ${extras.length
-    ? `<div class="stated">${extras.length} flow rate${extras.length === 1 ? ' was' : 's were'} recorded `
-      + `that the department's table does not print `
-      + `(${esc(extras.map((x) => flowRowLongLabel(x.row)).join(', '))}). `
-      + `${extras.length === 1 ? 'It is' : 'They are'} shown above marked "added" rather than `
-      + 'dropped to fit the printed layout.</div>'
+    ? `<div class="stated">Further hydrants tested: ${esc(spareLocations.join('; '))}.</div>`
     : ''}`;
 }
 
@@ -1293,19 +1230,15 @@ function partE(form: Form72, input: Form72DocumentInput): string {
     ? `Calculated: ${b.boostPressureKpa} kPa boost less ${head} kPa of elevation head over `
       + `${b.highestHydrantAboveBoosterM} m less ${b.hydrantResidualKpa} kPa residual at the hydrant.`
     : loss.source === 'stated'
-      ? `Stated by the technician as ${loss.kpa} kPa. It is not calculated here — this form does not `
-        + `record ${gaps.join(', ')} — so the figure stands on whoever typed it rather than on `
-        + 'readings this document holds.'
-      : `Not calculated — this form does not record ${gaps.join(', ')}. A frictional loss worked out `
-        + 'from an assumed figure is indistinguishable on the page from a measured one, and this form '
-        + 'is signed.';
+      ? `Stated by the technician as ${loss.kpa} kPa, not calculated here: this form does not `
+        + `record ${gaps.join(', ')}.`
+      : `Not calculated: this form does not record ${gaps.join(', ')}.`;
 
   const lossConflict = loss.disagreesWithKpa !== undefined
-    ? `<div class="stated fail"><b>Frictional loss — two different figures.</b> The readings give `
+    ? `<div class="stated fail"><b>Frictional loss: two different figures.</b> The readings give `
       + `${esc(loss.kpa)} kPa; ${esc(loss.disagreesWithKpa)} kPa was entered as the stated loss. `
-      + 'The calculated figure is printed above because the page can show its working. More than '
-      + `${FRICTIONAL_LOSS_TOLERANCE_KPA} kPa apart is not rounding, so one of the two is wrong and `
-      + 'the licensee is the one who can say which.</div>'
+      + `The calculated figure is printed above. More than ${FRICTIONAL_LOSS_TOLERANCE_KPA} kPa apart `
+      + 'is not rounding, so one of the two is wrong.</div>'
     : '';
 
   /*
@@ -1325,23 +1258,21 @@ function partE(form: Form72, input: Form72DocumentInput): string {
   if (r === 'na' && run) {
     // The run is stored beside the parts, so an N/A booster part would
     // otherwise drop a reading somebody took on site off the page entirely.
-    overloadBlock = '<div class="stated"><b>150% overload check</b> — an overload run is recorded '
-      + `against this form (${esc(run.flowLps)} L/s at ${esc(run.pressureKpa)} `
-      + 'kPa) while Part E is marked not applicable. One of the two is wrong, and the reading is '
-      + 'shown rather than discarded.</div>';
+    overloadBlock = '<div class="stated"><b>150% overload check:</b> an overload run is recorded '
+      + `(${esc(run.flowLps)} L/s at ${esc(run.pressureKpa)} kPa) while Part E is marked not `
+      + 'applicable. One of the two is wrong.</div>';
   } else if (r !== 'na') {
     if (!check) {
-      overloadBlock = '<div class="stated"><b>150% overload check</b> — cannot be stated. Part E does '
-        + 'not record the system requirement as a flow and a pressure, and the check is a percentage '
-        + 'of both.</div>';
+      overloadBlock = '<div class="stated"><b>150% overload check:</b> cannot be stated without the '
+        + 'system requirement as a flow and a pressure.</div>';
     } else if (check.achieved === undefined) {
-      overloadBlock = `<div class="stated"><b>150% overload check</b> — ${esc(check.note)} No overload `
-        + 'run is recorded on this form, so the requirement is stated rather than answered.</div>';
+      overloadBlock = `<div class="stated"><b>150% overload check:</b> ${esc(check.note)} No overload `
+        + 'run is recorded on this form.</div>';
     } else if (check.achieved) {
-      overloadBlock = `<div class="stated pass"><b>150% overload check — achieved.</b> ${esc(check.note)} `
+      overloadBlock = `<div class="stated pass"><b>150% overload check: achieved.</b> ${esc(check.note)} `
         + `Measured ${esc(run?.flowLps)} L/s at ${esc(run?.pressureKpa)} kPa.</div>`;
     } else {
-      overloadBlock = `<div class="stated fail"><b>150% overload check — not achieved.</b> ${esc(check.note)}`
+      overloadBlock = `<div class="stated fail"><b>150% overload check: not achieved.</b> ${esc(check.note)}`
         + `${check.shortfallKpa !== undefined
           ? ` Measured ${esc(run?.pressureKpa)} kPa, short by ${check.shortfallKpa} kPa.` : ''}</div>`;
     }
@@ -1364,7 +1295,8 @@ function partE(form: Form72, input: Form72DocumentInput): string {
        * nowhere else on the page, so a reader could not check the subtraction
        * they were being shown. Now they can.
        */''}
-    ${wide('Residual at the hydrant <span class="extra">added</span>', addedReading(b.hydrantResidualKpa, 'kPa', r))}
+    ${b.hydrantResidualKpa !== undefined
+    ? wide('Residual at the hydrant', addedReading(b.hydrantResidualKpa, 'kPa', r)) : ''}
     ${wide('Comments:', comment(b.comments, r))}
   </table>
   ${/*
@@ -1486,7 +1418,7 @@ function partG(form: Form72): string {
       if (typed !== undefined) return outcomeBoxes(typed);
       if (derived !== undefined) {
         return `${tick('Pass', false)}${tick('Fail', false)} <span class="extra">${
-          derived === 'pass' ? 'Pass' : 'Fail'} on the figures — not ticked</span>`;
+          derived === 'pass' ? 'Pass' : 'Fail'} on the figures, not ticked</span>`;
       }
       return outcomeBoxes(undefined);
     };
@@ -1497,7 +1429,7 @@ function partG(form: Form72): string {
        * by a Location row is a row the form does not have.
        */''}
     <tr>
-      <td class="sub">Test point ${n}${extraPoint ? ' <span class="extra">added</span>' : ''}</td>
+      <td class="sub">Test point ${n}</td>
       <td class="k">Location</td><td class="v" colspan="2">${c(p?.location)}</td>
     </tr>
     ${/*
@@ -1547,7 +1479,7 @@ function partG(form: Form72): string {
   const achieved = achievedFrom !== undefined
     // Built from two numbers and this file's own markup, so it is not escaped
     // — nothing a technician typed reaches it.
-    ? `${achievedFrom} <span class="extra">from test point 1</span>`
+    ? achievedFrom
     : cell(undefined, r);
 
   // Built before the table string so the rows have run and filled it.
@@ -1580,8 +1512,8 @@ function partG(form: Form72): string {
   </table></div>
   ${disagreements.length
     ? `<div class="stated fail"><b>Ticked result against the figures.</b> ${
-      esc(disagreements.join(' '))} The tick is what prints — a reading inside the standard's `
-      + 'tolerance is a pass the subtraction cannot see — but the two are shown apart rather than '
+      esc(disagreements.join(' '))} The tick is what prints, since a reading inside the standard's `
+      + 'tolerance is a pass the subtraction cannot see, but the two are shown apart rather than '
       + 'one being quietly replaced by the other.</div>'
     : ''}
   ${extra.length
@@ -1617,9 +1549,9 @@ function partH(form: Form72, issued: boolean): string {
     ${/*
        * Not one of the department's rows. Part H prints the System Pass/Fail
        * pair and nothing else; the note is where the app keeps what the
-       * technician wrote about the result, so it says it is ours.
+       * technician wrote about the result, and prints only when they wrote.
        */''}
-    ${wide('System notes: <span class="extra">added</span>', addedComment(form.systemNotes, form.systemResult))}
+    ${form.systemNotes?.trim() ? wide('System notes:', addedComment(form.systemNotes, form.systemResult)) : ''}
   </table></div>
   ${form.systemResult === 'na'
     // The department's System row carries Pass and Fail and nothing else. An
@@ -1627,11 +1559,8 @@ function partH(form: Form72, issued: boolean): string {
     // department's part, where a reader has no way to tell the two apart — so
     // neither box is ticked and the reason is written out, as in Part D.
     ? `<div class="stated">${issued
-      ? 'Recorded as not applicable. The department\'s System row carries only Pass and Fail, so '
-        + 'neither is ticked; this line says why, rather than a box being added to the '
-        + 'department\'s form.'
-      : 'Not yet answered — N/A is how a new form starts, and the system result is given in Part H. '
-        + 'The department\'s System row carries only Pass and Fail, so neither is ticked.'}</div>`
+      ? 'System result not applicable to this test.'
+      : 'System result not yet given. Answer it in Part H.'}</div>`
     : ''}`;
 }
 
@@ -1654,7 +1583,7 @@ function signatureCell(signature: string | undefined): string {
   return `<img class="sig" src="${esc(v)}" alt="Licensee signature" />`;
 }
 
-function partI(form: Form72): string {
+function partI(form: Form72, jobExternalId?: string): string {
   return `${band('Part I—Signature')}
   <div class="decl">${esc(DECLARATION)}</div>
   <div class="whole"><table class="grid sig">
@@ -1662,7 +1591,10 @@ function partI(form: Form72): string {
     ${pair(['Licence no. (QBCC/PIC)', cell(form.licenceNumber, 'pass')],
     // Not every job has one, so its absence is answered rather than flagged.
     ['Licensee report no.', form.licenseeReportNumber?.trim()
-      ? esc(form.licenseeReportNumber) : '<span class="na">None</span>'])}
+      ? esc(form.licenseeReportNumber)
+      : jobExternalId?.trim()
+        ? esc(`Job ${jobExternalId.trim()}`)
+        : '<span class="na">None</span>'])}
   </table></div>`;
 }
 
@@ -1712,9 +1644,8 @@ function attachment(form: Form72): string {
   // QLD added to it is the whole point of this section, and a page break is the
   // one way of saying it that survives being printed and photocopied.
   return `<div class="attachpage">
-  ${band('Attachment — not part of the department\'s form')}
-  ${note('Facts about this test that Form 72 has no field for, and the defect list Part H refers to '
-    + "the licensee's report. Added to the department's form, not written into it.")}
+  ${band('Attachment to Form 72, not part of the department\'s form')}
+  ${note('Details Form 72 has no field for, and the defect list Part H refers to as the licensee\'s report.')}
   ${filled.length
     ? `<table class="grid">
     ${filled.map(([label, value]) => wide(label, esc(value))).join('')}
@@ -1727,13 +1658,11 @@ function attachment(form: Form72): string {
   </table>
   <div class="stated">${defects.length} defect${defects.length === 1 ? '' : 's'} recorded${
   criticals
-    ? `, ${criticals} of them critical. A critical defect obliges the owner or occupier to be given `
-      + 'a critical defect notice — Part H above is where that obligation is answered.'
-    : ', none of them critical.'}</div>`
-    : `<div class="stated">No defects were recorded against this test.${
+    ? `, ${criticals} critical. The critical defect notice is answered in Part H.`
+    : ', none critical.'}</div>`
+    : `<div class="stated">No defects recorded against this test.${
       form.repairsRequired === true
-        ? ' Part H says repairs or corrective actions are required, so the details are in the '
-          + "licensee's report rather than here."
+        ? ' Part H records repairs or corrective actions; the details are in the licensee\'s report.'
         : ''}</div>`}
   </div>`;
 }
@@ -1765,7 +1694,6 @@ const CSS = `
   .rb.on { background: #fff; }
   .note { background: #F5F6FA; border: 1px solid #D5D8E4; border-top: none;
           padding: 5px 9px; font-size: 7.5px; line-height: 1.45; color: #333; }
-  .subnote { padding: 3px 2px; font-size: 7.5px; color: #444; }
   table.grid { width: 100%; border-collapse: collapse; margin-top: 4px; }
   table.grid td { border: 1px solid #8C8C8C; padding: 4px 6px; vertical-align: top; }
   td.k { background: #F2F2F2; font-weight: 700; width: 24%; }
@@ -1952,9 +1880,9 @@ export function form72Html(input: Form72DocumentInput): string {
      *
      * The system descriptor had to go somewhere. It is not on the department's
      * form, and it is the one thing that tells two forms for the same site on
-     * the same day apart, so it cannot be dropped — but marked "added" inside
-     * the reproduced header it still left a reader comparing the two documents
-     * finding an extra line in the department's own masthead.
+     * the same day apart, so it cannot be dropped; but inside the reproduced
+     * header it left a reader comparing the two documents finding an extra
+     * line in the department's own masthead.
      *
      * Above it, in a strip that is visibly not the form, both hold: the
      * reproduced header is the title and nothing else, exactly as published,
@@ -2011,18 +1939,18 @@ export function form72Html(input: Form72DocumentInput): string {
      * issued on a date and held unaltered since.
      */''}
   ${issued || issuable ? '' : `<div class="stamp">
-    <h2>DRAFT — NOT FOR ISSUE</h2>
+    <h2>DRAFT. NOT FOR ISSUE</h2>
     <div>This form is not complete enough to be given to an occupier or relied on as a record under
       QDC MP 6.1. ${blocking.length} matter${blocking.length === 1 ? '' : 's'} must be resolved
       first:</div>
-    <ul>${blocking.map((i) => `<li>Part ${esc(i.part)} — ${esc(i.message)}</li>`).join('')}</ul>
+    <ul>${blocking.map((i) => `<li>Part ${esc(i.part)}: ${esc(i.message)}</li>`).join('')}</ul>
   </div>`}
 
   ${!issued && cautions.length ? `<div class="caution"><b>Check before issue</b><ul>${
-  cautions.map((i) => `<li>Part ${esc(i.part)} — ${esc(i.message)}</li>`).join('')}</ul></div>` : ''}
+  cautions.map((i) => `<li>Part ${esc(i.part)}: ${esc(i.message)}</li>`).join('')}</ul></div>` : ''}
 
   ${issuable && input.status === 'draft' ? `<div class="caution">
-    <b>Draft copy — this form has not been issued</b>
+    <b>Draft copy. This form has not been issued</b>
     Nothing on it is outstanding, but the app still holds it as a draft, which means it can still be
     edited. Issue it before it is given to anybody: a copy handed over now and the record kept
     afterwards can end up saying different things, and the occupier's copy is the one that counts.
@@ -2036,7 +1964,7 @@ export function form72Html(input: Form72DocumentInput): string {
   ${partF(form)}
   ${partG(form)}
   ${partH(form, issued)}
-  ${partI(form)}
+  ${partI(form, input.jobExternalId)}
 
   ${/*
      * The department's own closing matter follows Part I, before anything of
@@ -2046,7 +1974,6 @@ export function form72Html(input: Form72DocumentInput): string {
      * them, and the sentence explaining the + boxes was two pages from the
      * boxes.
      */''}
-  <div class="subnote">${esc(ADDED_BOX_NOTE)}</div>
   <div class="deptnote">${esc(DEPARTMENT_NOTE)}</div>
   <div class="deptnote">${esc(DEPARTMENT_DEFINITIONS)}</div>
   <div class="deptfine">${esc(DEPARTMENT_PRIVACY)}</div>
@@ -2066,24 +1993,16 @@ export function form72Html(input: Form72DocumentInput): string {
     <b>Not part of the department's form.</b>
     Produced by ${esc(company)} from the readings recorded on site${
   generatedOn ? `, ${esc(formatAuDate(generatedOn))}` : ''}.
-    ${input.status === 'issued'
-    ? `Issued${input.issuedAt ? ` ${esc(formatAuDate(qldCalendarDate(input.issuedAt)))}` : ''}, and
-       held unaltered since.`
+    ${input.status === 'issued' && input.issuedAt
+    ? `Issued ${esc(formatAuDate(qldCalendarDate(input.issuedAt)))}.`
     : ''}
     ${due.date
-    ? `A copy is due to the building occupier by ${esc(formatAuDate(due.date))} — ${OCCUPIER_COPY_BUSINESS_DAYS}
-       business days after the work, under QDC MP 6.1 acceptable solution A4(b), counted under
-       ${esc(due.legalRef)}.${
-  due.holidaysApplied.length
-    ? ` Public holidays passed over: ${esc(due.holidaysApplied.join('; '))}.`
-    : ' No public holiday falls inside that count.'} ${esc(due.caveats.join(' '))}`
-    : `The date a copy is due to the occupier cannot be given. ${esc(due.reason)}`}
+    ? `Copy due to the building occupier by ${esc(formatAuDate(due.date))}, ${OCCUPIER_COPY_BUSINESS_DAYS}
+       business days after the test (QDC MP 6.1 A4(b)).`
+    : `Occupier copy due date cannot be given: ${esc(due.reason)}`}
     ${keepUntil
-    ? `The person who carried out the maintenance keeps a record of this form until at least
-       ${esc(formatAuDate(keepUntil))} — ${TESTER_RETENTION_YEARS} years, under MP 6.1 acceptable
-       solution A5.`
+    ? `Record kept by the tester until at least ${esc(formatAuDate(keepUntil))} (MP 6.1 A5, ${TESTER_RETENTION_YEARS} years).`
     : ''}
-    The department's form and MP 6.1 are published at hpw.qld.gov.au.
   </div>
   `,
   });

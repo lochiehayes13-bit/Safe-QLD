@@ -176,6 +176,7 @@ function renderForm72(form: StoredForm72, companyName: string): string {
     status: form.status,
     issuedAt: form.issuedAt,
     overload: form.overload,
+    jobExternalId: form.jobExternalId,
   });
 }
 
@@ -2176,7 +2177,7 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
               />
             )}
             {!locked && d.calibrationBasis === 'service-life' && (d.kind ?? 'gauge') !== 'flow-meter' ? (
-              <Chip label="Recorded as service life — tap to use the interval" tone="warn" onPress={() => setDevice(i, { calibrationBasis: 'interval' })} />
+              <Chip label="Recorded as service life, tap to use the interval" tone="warn" onPress={() => setDevice(i, { calibrationBasis: 'interval' })} />
             ) : null}
             {d.calibrationBasis === 'service-life' && (d.kind ?? 'gauge') === 'flow-meter' ? (
               <Txt size="xs" tone="faint">
@@ -2276,6 +2277,24 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
             onChange={(v) => setDevice(i, { digitalReader: v })}
             locked={locked}
           />
+          {d.kind === 'flow-meter' ? (
+            <>
+              {/*
+                * Every kPa on the form was read with something. A meter with
+                * an integrated transducer is that something; otherwise the
+                * gauge goes on the form beside it.
+                */}
+              <TriState
+                label="Reads pressure too"
+                value={d.readsPressure}
+                onChange={(v) => setDevice(i, { readsPressure: v })}
+                locked={locked}
+              />
+              <Txt size="xs" tone="faint">
+                Integrated transducer, calibrated with the meter. If not, add the pressure gauge.
+              </Txt>
+            </>
+          ) : null}
         </Card>
         );
       })}
@@ -3745,7 +3764,13 @@ function PartI({ form, locked, patch }: PartProps) {
           hint="The form is a statement by a licensed person and is not valid without it."
           editable={!locked}
         />
-        <Field label="Report number" value={form.licenseeReportNumber ?? ''} onChangeText={(v) => patch({ licenseeReportNumber: v })} editable={!locked} />
+        <Field
+          label="Report number"
+          value={form.licenseeReportNumber ?? ''}
+          onChangeText={(v) => patch({ licenseeReportNumber: v })}
+          editable={!locked}
+          hint={form.jobExternalId ? `Blank prints Job ${form.jobExternalId}.` : undefined}
+        />
       </Card>
 
       <Card>

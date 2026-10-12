@@ -9,6 +9,10 @@
  * a clean hydrostatic test printing "Not recorded" against a loss that was
  * nil, every empty Comments box in red, and every modern sprinkler system red
  * against a running test it does not have.
+ *
+ * The reviewer's pass added two refusals: a Part D full of kPa with nothing
+ * in Part C but flow meters to have read them, and two hydrants recorded at
+ * the same place.
  */
 import {
   DEPARTMENT_DEVICE_SLOTS, PART_D_ROWS, canIssue, defaultFlowRowDevices, deviceSlotName, emptyForm72,
@@ -26,6 +30,9 @@ const gauge = (serialNumber = 'PG-7', over: Partial<TestDevice> = {}): TestDevic
   slot: 'Device/gauge 2', serialNumber, kind: 'gauge', dateCalibrated: '2026-03-14', calibrationCertificate: 'CAL-0314', ...over,
 });
 
+/** The department's eight rows, with the 19 mm nozzle run on one hydrant and read with `device`. */
+const rowsOn = (device: string) => PART_D_ROWS.map((r) => (r.nozzleMm === 19 ? { ...r, devices: device, hydrant1Kpa: 620 } : r));
+
 /** A hydrant form with nothing blocking it, so each test can spoil one thing. */
 const issuable = (over: Partial<Form72> = {}): Form72 => ({
   ...emptyForm72({ id: 'f1', siteId: 's1', siteName: 'Fictional Tower', contractor: 'A Contractor', now: NOW }),
@@ -40,7 +47,7 @@ const issuable = (over: Partial<Form72> = {}): Form72 => ({
   flowDeviceKinds: ['orifice'],
   flowTest: {
     result: 'pass', hydrantLocations: ['Front fence'],
-    rows: PART_D_ROWS.map((r) => (r.nozzleMm === 19 ? { ...r, devices: 'PG-7', hydrant1Kpa: 620 } : r)),
+    rows: rowsOn('PG-7'),
     achievedLps: 10, achievedKpa: 620,
   },
   systemResult: 'pass',
@@ -130,10 +137,35 @@ describe('Part C against the pressures the rest of the form records', () => {
   it('refuses a flow meter whose kind is not ticked, and names the meter', () => {
     const form = issuable({ devices: [meter(), gauge()], flowDeviceKinds: [] });
     expect(blocking(form)).toEqual([expect.stringContaining('SQF-001 is a flow meter and none of Orifice / Mechanical / Electro magnetic is ticked')]);
-    expect(blocking(issuable({ devices: [meter(), meter('SQF-002', { slot: 'Device/gauge 2' })], flowDeviceKinds: [] })))
+    // Two meters and no gauge: the first reads pressure too, so the kind is the one thing missing.
+    const two = [meter('SQF-001', { readsPressure: true }), meter('SQF-002', { slot: 'Device/gauge 2' })];
+    expect(blocking(issuable({ devices: two, flowDeviceKinds: [], flowTest: { ...issuable().flowTest, rows: rowsOn('SQF-001') } })))
       .toEqual([expect.stringContaining('SQF-001 and SQF-002 are flow meters')]);
     // Answered, and it is not asked again.
     expect(blocking(issuable({ devices: [meter(), gauge()], flowDeviceKinds: ['mechanical'] }))).toEqual([]);
+  });
+
+  it('refuses pressures read with nothing but flow meters, unless one of them reads pressure', () => {
+    // The company's two meters under a Part D full of kPa: nothing on the page says what read them.
+    const metersOnly = (over: Partial<TestDevice> = {}) => issuable({
+      devices: [meter('SQF-001', over), meter('SQF-002', { slot: 'Device/gauge 2' })],
+      flowDeviceKinds: ['mechanical'],
+      flowTest: { ...issuable().flowTest, rows: rowsOn('SQF-001') },
+    });
+    expect(blocking(metersOnly())).toEqual([
+      'C: Part D records pressures and Part C lists only flow meters. Add the pressure gauge they were '
+        + 'read with, or mark the meter as reading pressure on an integrated calibrated transducer.',
+    ]);
+    // Names every part with a reading, as the no-equipment refusal does.
+    expect(blocking({
+      ...metersOnly(),
+      hydrostatic: { result: 'pass', boostPressureKpa: 1700, testPressureKpa: 1700, durationMinutes: 120, endPressureKpa: 1700 },
+    })).toEqual([expect.stringContaining('Parts B, D record pressures and Part C lists only flow meters')]);
+    // A meter with an integrated transducer is the pressure instrument; so is a gauge beside the meters.
+    expect(blocking(metersOnly({ readsPressure: true }))).toEqual([]);
+    expect(blocking({ ...metersOnly(), devices: [...metersOnly().devices, gauge('PG-7', { slot: 'Device/gauge 3' })] })).toEqual([]);
+    // Ticked "no" is not an integrated transducer.
+    expect(blocking(metersOnly({ readsPressure: false }))).toHaveLength(1);
   });
 
   it('refuses a flow test with no flow measuring device ticked, even with only a gauge on the form', () => {
@@ -160,12 +192,26 @@ describe('Part C against the pressures the rest of the form records', () => {
 describe('Part D rows and the instrument that read them', () => {
   it('refuses a row with pressures and no device named', () => {
     const form = issuable({
-      flowTest: {
-        result: 'pass', hydrantLocations: ['Front fence'],
-        rows: PART_D_ROWS.map((r) => (r.nozzleMm === 19 ? { ...r, devices: '', hydrant1Kpa: 620 } : r)),
-      },
+      flowTest: { result: 'pass', hydrantLocations: ['Front fence'], rows: rowsOn('') },
     });
     expect(blocking(form)).toEqual([expect.stringContaining('A row of the flow table (19 mm) has pressures recorded and no Part C device named')]);
+  });
+
+  it('refuses two hydrants recorded at the same place, whatever the case or spacing', () => {
+    const at = (...hydrantLocations: string[]) => issuable({ flowTest: { ...issuable().flowTest, hydrantLocations } });
+    expect(blocking(at('RHS Building', ' rhs building '))).toEqual([
+      'D: Hydrants 1 and 2 are both recorded at "RHS Building". Say where each one is, e.g. north-east corner, near gate 2.',
+    ]);
+    // Each later duplicate is named against the first, so three the same is two refusals.
+    expect(blocking(at('RHS Building', 'Gate 2', 'RHS Building', 'RHS Building'))).toEqual([
+      expect.stringContaining('Hydrants 1 and 3 are both recorded at "RHS Building"'),
+      expect.stringContaining('Hydrants 1 and 4 are both recorded at "RHS Building"'),
+    ]);
+    // Blanks are holes left by taking a hydrant off, not places.
+    expect(blocking(at('RHS Building', '', ''))).toEqual([]);
+    // Distinct places, and a Part D that was not run, are not asked.
+    expect(blocking(at('RHS Building, north-east corner', 'RHS Building, near gate 2'))).toEqual([]);
+    expect(blocking(issuable({ flowTest: { result: 'na', hydrantLocations: ['RHS Building', 'RHS Building'], rows: [] } }))).toEqual([]);
   });
 
   it('knows the answer where the form has one instrument, or one already cited', () => {
@@ -258,7 +304,7 @@ describe('what no longer prints red', () => {
   it('a pressure zone nobody knows, printed where the department prints it', () => {
     const html = flat(form72Html(doc()));
     const head = between(html, '<table class="grid flow">', '</tr>');
-    expect(head).toContain('Pressure zone number: <span class="dz"><span class="na">Not stated</span></span>');
+    expect(head).toContain('Pressure zone number: <span class="dz"><span class="na">N/A</span></span>');
     expect(head).toContain('Size/flow rate');
     // And not twice.
     expect(html.split('Pressure zone number').length).toBe(2);
@@ -279,7 +325,7 @@ describe('the page order and the sheet', () => {
   it('prints the department’s closing notes and imprint before the attachment, not under its band', () => {
     const html = form72Html(doc({ form: issuable({ owner: 'An Owner', defects: [] }) }));
     const imprint = html.indexOf('<div class="imprint">');
-    const attachment = html.indexOf('Attachment — not part of the department');
+    const attachment = html.indexOf('Attachment to Form 72, not part of the department');
     const privacy = html.indexOf('Privacy:');
     expect(attachment).toBeGreaterThan(0);
     expect(imprint).toBeLessThan(attachment);

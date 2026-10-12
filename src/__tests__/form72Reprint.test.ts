@@ -2,23 +2,22 @@
  * An issued Form 72 reprints as the issued form, from every path.
  *
  * form72Html decides three things from the record's status: whether to stamp
- * "DRAFT — NOT FOR ISSUE", whether to print the "Check before issue" cautions,
- * and whether to print "Issued dd/mm/yyyy, and held unaltered since". It
- * treats a caller that does not say as a draft, which is the cautious default
- * and is deliberate.
+ * "DRAFT. NOT FOR ISSUE", whether to print the "Check before issue" cautions,
+ * and whether to print "Issued dd/mm/yyyy" in the closing block. It treats a
+ * caller that does not say as a draft, which is the cautious default and is
+ * deliberate.
  *
  * Four paths produce this document — Produce PDF, Email to the office, the
  * attachment queued onto the Simpro job, and the occupier's copy — and three
  * of them built the call by hand and left the status off. So every issued form
  * reprinted as a draft except the occupier's: the cautions printed as advice
- * about a decision already taken, the "held unaltered since" line was missing,
- * and a clean draft from Produce PDF was indistinguishable from the statutory
- * record. The attachment is the one that runs automatically on issue, so the
- * copy filed against the Simpro job disagreed with the copy in the occupier's
- * hand.
+ * about a decision already taken, the issued date was missing, and a clean
+ * draft from Produce PDF was indistinguishable from the statutory record. The
+ * attachment is the one that runs automatically on issue, so the copy filed
+ * against the Simpro job disagreed with the copy in the occupier's hand.
  *
  * And it reached backwards. A rule added to validateForm72 after a form was
- * issued stamps that form's reprint DRAFT — which is what happened the morning
+ * issued stamps that form's reprint DRAFT, which is what happened the morning
  * the Part C date reader learned to read a slashed date, turning a stale
  * certificate from an unreadable-date caution into an out-of-calibration
  * blocker.
@@ -78,9 +77,11 @@ const render = (over: Parameters<typeof form72Html>[0] extends infer T ? Partial
 });
 
 describe('what the status decides', () => {
-  it('an issued form says it was issued and held unaltered', () => {
+  it('an issued form says the date it was issued', () => {
+    // The closing block carries the issue date and nothing else about it: no
+    // "held unaltered since", no holiday count, no caveats.
     expect(render({ status: 'issued', issuedAt: '2026-10-06T01:00:00.000Z' }))
-      .toContain('held unaltered since');
+      .toContain('Issued 06/10/2026.');
   });
 
   it('an issued form does not carry "Check before issue" advice', () => {
@@ -97,7 +98,7 @@ describe('what the status decides', () => {
      */
     const silent = render({});
     expect(silent).toContain('Check before issue');
-    expect(silent).not.toContain('held unaltered since');
+    expect(silent).not.toMatch(/Issued \d\d\/\d\d\/\d{4}\./);
   });
 
   it('so the two renderings of one issued form differ, which is what went wrong', () => {
@@ -106,10 +107,10 @@ describe('what the status decides', () => {
   });
 
   it('a clean draft says it is a draft, which it could not when nobody passed the status', () => {
-    // "Draft copy — this form has not been issued" is the only thing telling a
+    // "Draft copy. This form has not been issued" is the only thing telling a
     // clean draft from the statutory record.
-    expect(render({ status: 'draft' })).toContain('this form has not been issued');
-    expect(render({})).not.toContain('this form has not been issued');
+    expect(render({ status: 'draft' })).toContain('This form has not been issued');
+    expect(render({})).not.toContain('This form has not been issued');
   });
 });
 
@@ -127,8 +128,8 @@ describe('a rule added after a form was issued', () => {
       generatedAt: '2026-10-06T00:00:00.000Z',
       status: 'issued', issuedAt: '2026-10-06T01:00:00.000Z',
     });
-    expect(html).not.toContain('DRAFT — NOT FOR ISSUE');
-    expect(html).toContain('held unaltered since');
+    expect(html).not.toContain('DRAFT. NOT FOR ISSUE');
+    expect(html).toContain('Issued 06/10/2026.');
   });
 
   it('and the same form as a draft is stamped, because then it is true', () => {
@@ -137,6 +138,6 @@ describe('a rule added after a form was issued', () => {
     expect(form72Html({
       form, systemLabel: 'Towns Main System', companyName: 'A Contractor',
       generatedAt: '2026-10-06T00:00:00.000Z', status: 'draft',
-    })).toContain('DRAFT — NOT FOR ISSUE');
+    })).toContain('DRAFT. NOT FOR ISSUE');
   });
 });

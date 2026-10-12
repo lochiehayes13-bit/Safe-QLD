@@ -192,15 +192,19 @@ export function currentPresetDevice(
   remembered: readonly { device: Omit<TestDevice, 'slot'> }[] = [],
 ): { device: Omit<TestDevice, 'slot'>; recertified?: string } {
   const key = preset.device.serialNumber.trim().toUpperCase();
-  const later = remembered.find((r) => r.device.serialNumber?.trim().toUpperCase() === key
-    && !!r.device.dateCalibrated
+  const same = remembered.filter((r) => r.device.serialNumber?.trim().toUpperCase() === key);
+  // Whether this meter reads pressure is a fact about the meter, answered on
+  // its card; the latest form's answer carries, whatever the certificate date.
+  const answered = same.find((r) => typeof r.device.readsPressure === 'boolean');
+  const readsPressure = answered ? { readsPressure: answered.device.readsPressure } : {};
+  const later = same.find((r) => !!r.device.dateCalibrated
     && !!preset.device.dateCalibrated
     && r.device.dateCalibrated > preset.device.dateCalibrated);
-  if (!later) return { device: preset.device };
+  if (!later) return { device: { ...preset.device, ...readsPressure } };
   const over = Object.fromEntries(
     Object.entries(later.device).filter(([, v]) => v !== undefined && v !== ''),
   ) as Partial<Omit<TestDevice, 'slot'>>;
-  return { device: { ...preset.device, ...over }, recertified: later.device.dateCalibrated };
+  return { device: { ...preset.device, ...over, ...readsPressure }, recertified: later.device.dateCalibrated };
 }
 
 /**

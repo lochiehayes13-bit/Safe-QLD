@@ -1,4 +1,4 @@
-import { ADDED_BOX_NOTE, form72Html, type Form72DocumentInput } from '@/export/form72';
+import { DEPARTMENT_NOTE, form72Html, type Form72DocumentInput } from '@/export/form72';
 import { emptyForm72, type Form72 } from '@/domain/form72';
 import {
   OFFICIAL_FORM_72, OFFICIAL_FORM_72_UNITS, OFFICIAL_RESULT_BANDS, OFFICIAL_UNBANDED_PARTS,
@@ -109,7 +109,7 @@ const PART_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'] as const;
  * it one day — and a sectioning anchor that breaks on a copy edit would fail
  * three hundred of the cases below for a reason none of them name.
  */
-const FOOTER_ANCHOR = `class="subnote">${ADDED_BOX_NOTE.slice(0, 24)}`;
+const FOOTER_ANCHOR = `class="deptnote">${DEPARTMENT_NOTE.slice(0, 24)}`;
 
 /** Where our own attachment page starts, when the form prints one. */
 const ATTACHMENT_ANCHOR = '<div class="attachpage">';
@@ -251,6 +251,18 @@ describe('every unit annotation prints beside the reading it belongs to', () => 
   });
 });
 
+/**
+ * The result boxes in the bands.
+ *
+ * The department bands Parts B, D, E and F with PASS and FAIL and bands the
+ * rest with nothing. Safe QLD adds one box to each of those four (N/A, or
+ * Part D's "Refer to Report") and gives Part G all three, because a part the
+ * job did not cover is an answer and three empty boxes are indistinguishable
+ * from a part nobody filled in. Every box prints plain: the grey "+" marker
+ * and the footnote explaining it are gone, so what this suite guards is that
+ * the department's two are where it prints them, that ours are the ones named
+ * here and no others, and that nothing in a band carries a marker.
+ */
 describe('the parts the department bands with PASS and FAIL, and the ones it does not', () => {
   /** A part's band: the dark strip, up to the end of its own div. */
   const bandOf = (sections: Record<OfficialSection, string>, letter: string): string => {
@@ -266,25 +278,21 @@ describe('the parts the department bands with PASS and FAIL, and the ones it doe
     }
   });
 
-  it('marks every box in those bands that is not the department’s', () => {
+  it('adds exactly one box of ours to each of those bands, printed plain', () => {
     for (const letter of Object.keys(OFFICIAL_RESULT_BANDS)) {
       const band = bandOf(FILLED_SECTIONS, letter);
       const labels = [...band.matchAll(/<span class="rl">(.*?)<\/span>/g)].map((m) => m[1]!);
-      for (const label of labels) {
-        const departmental = OFFICIAL_RESULT_BANDS[letter]!.includes(label);
-        expect({ letter, label, marked: label.includes('<sup>+</sup>') })
-          .toEqual({ letter, label, marked: !departmental });
-      }
+      const ours = labels.filter((label) => !OFFICIAL_RESULT_BANDS[letter]!.includes(label));
+      expect({ letter, ours }).toEqual({ letter, ours: [letter === 'D' ? 'Refer to Report' : 'N/A'] });
+      expect({ letter, marker: band.includes('<sup>') }).toEqual({ letter, marker: false });
     }
   });
 
-  it.each(OFFICIAL_UNBANDED_PARTS)('Part %s has no departmental result box, so any box there is marked', (letter) => {
+  it.each(OFFICIAL_UNBANDED_PARTS)('Part %s has no departmental result box, and only Part G prints ours, plain', (letter) => {
     const band = bandOf(FILLED_SECTIONS, letter);
     const labels = [...band.matchAll(/<span class="rl">(.*?)<\/span>/g)].map((m) => m[1]!);
-    for (const label of labels) {
-      expect({ letter, label, marked: label.includes('<sup>+</sup>') })
-        .toEqual({ letter, label, marked: true });
-    }
+    expect({ letter, labels }).toEqual({ letter, labels: letter === 'G' ? ['N/A', 'PASS', 'FAIL'] : [] });
+    expect({ letter, marker: band.includes('<sup>') }).toEqual({ letter, marker: false });
   });
 });
 
@@ -335,7 +343,7 @@ describe('what Safe QLD added, and where it is allowed to be', () => {
     // A blank form has no flow test and no meter, so the question has no
     // bearing on it and the page says so rather than asking; a form with a
     // flow test and nothing ticked says "Not answered" (form72.test.ts).
-    expect(BLANK_SECTIONS.C).toContain('N/A — no flow test on this form');
+    expect(BLANK_SECTIONS.C).toContain('N/A, no flow test on this form');
     expect(FILLED_SECTIONS.C).not.toContain('Not answered');
     expect(FILLED_SECTIONS.C).not.toContain('no flow test on this form');
   });
