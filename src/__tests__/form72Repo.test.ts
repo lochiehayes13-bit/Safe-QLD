@@ -3,7 +3,7 @@ import {
   recordOccupierCopy, updateForm72,
 } from '@/db/form72Repo';
 import { createSite } from '@/db/repo';
-import { DEVICE_PRESETS } from '@/domain/form72Devices';
+import { DEVICE_PRESETS, seedDevices } from '@/domain/form72Devices';
 import type { FlowRow, Form72, TestDevice } from '@/domain/form72';
 import { openMigrated, type NodeSqliteDb } from './support/nodeSqlite';
 
@@ -57,9 +57,12 @@ const completable: Partial<Form72> = {
   licenseeName: 'D. McKee',
   licenceNumber: '1310717',
   signature: 'data:image/png;base64,AAA',
-  // A new form starts with the company's two meters on it (seedDevices), and a
-  // meter with no kind ticked blocks. Answered here as the technician would.
+  // A new form starts with the company's two meters and its gauge on it
+  // (seedDevices). A meter with no kind ticked blocks, and so does the gauge
+  // until the serial off its body is typed, because the code does not hold
+  // it. Both answered here as the technician would.
   flowDeviceKinds: ['mechanical'],
+  devices: seedDevices().map((d) => (d.presetId === 'company-gauge' ? { ...d, serialNumber: 'PG-0210' } : d)),
 };
 
 describe('the attachment columns v34 added', () => {
@@ -220,15 +223,15 @@ describe('the fields that ride inside the JSON parts', () => {
     expect(back!.answeredParts).toEqual(['B']);
   });
 
-  it('keeps a device’s correction factor, calibration basis, kind and model', async () => {
+  it('keeps a device’s correction factor, calibration basis, kind, model and preset', async () => {
     const rec = await start();
     const devices: TestDevice[] = DEVICE_PRESETS.map((p, i) => ({
-      slot: `Device/gauge ${i + 1}`, ...p.device,
+      slot: `Device/gauge ${i + 1}`, ...p.device, presetId: p.id,
     }));
     await updateForm72(rec.id, { devices });
 
     const back = await getForm72(rec.id);
-    expect(back!.devices).toHaveLength(2);
+    expect(back!.devices).toHaveLength(3);
     expect(back!.devices[0]).toMatchObject({
       serialNumber: 'SQF-001',
       correctionFactor: 'Meter error +0.35 % at certification (reads high); correction −0.35 %',
@@ -237,6 +240,12 @@ describe('the fields that ride inside the JSON parts', () => {
       dateCalibrated: '2026-07-18',
     });
     expect(back!.devices[0]!.model).toContain('Flowtech');
+    // The gauge's preset id is the only thing the next form can find it by
+    // until somebody types its serial, so it has to survive storage.
+    expect(back!.devices[2]).toEqual({
+      slot: 'Device/gauge 3', serialNumber: '', kind: 'gauge', dateCalibrated: '2026-10-02',
+      presetId: 'company-gauge',
+    });
   });
 
   it('keeps a nozzle row and a four-hydrant reading, which the model gained together', async () => {
@@ -378,6 +387,20 @@ describe('what an issued form refuses', () => {
     const issued = await issueForm72(rec.id);
     expect(issued.status).toBe('issued');
     expect(issued.issuedAt).toBeTruthy();
+  });
+
+  it('refuses to issue a new form until the gauge it started with has a serial', async () => {
+    // The company's gauge goes onto every new form with its calibration date
+    // and no serial, because the code does not hold one. A gauge nobody can
+    // identify is not an instrument the pressures can be traced to.
+    const { devices: _typed, ...untyped } = completable;
+    const rec = await start();
+    await updateForm72(rec.id, untyped);
+    await expect(issueForm72(rec.id))
+      .rejects.toThrow('Device/gauge 3 has details recorded but no serial number');
+
+    await updateForm72(rec.id, { devices: completable.devices });
+    expect((await issueForm72(rec.id)).status).toBe('issued');
   });
 
   it('refuses a critical defect listed against a Part H that says there are none', async () => {

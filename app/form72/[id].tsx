@@ -21,7 +21,7 @@ import {
   CALIBRATED_FLOW_DEVICE_KINDS, CALIBRATION_MONTHS, FLOW_DEVICE_LABEL,
   PART_RESULT_LABEL, SYSTEM_TYPE_LABEL, TEST_INTERVAL_LABEL,
   PART_G_PRINTED_TEST_POINTS,
-  defaultFlowRowDevices, deviceCalibration, deviceSlotName, dutyToCarry, elevationHeadKpa, flowRowDevices, flowRowKey, flowRowLongLabel,
+  defaultFlowRowDevices, deviceCalibration, deviceCitation, deviceInUse, deviceSlotName, dutyToCarry, elevationHeadKpa, flowRowDevices, flowRowKey, flowRowLongLabel,
   flowKindsAfterAnswer, flowRowRead, flowRowUntouched, form72DefectForRegister,
   hydrantSlotCount, partDLines, setHydrantLocation, toggleTestedHydrant,
   provedDuty, provedDutyDisagrees,
@@ -44,7 +44,9 @@ import {
 import {
   guideSteps, nextGuideStep, outstandingParts, recordAnswered, type GuidePart,
 } from '@/domain/form72Guide';
-import { DEVICE_PRESETS, currentPresetDevice, offerableDevices, unusedDevicePresets } from '@/domain/form72Devices';
+import {
+  COMPANY_GAUGE_ID, DEVICE_PRESETS, currentPresetDevice, devicePreset, offerableDevices, unusedDevicePresets,
+} from '@/domain/form72Devices';
 import {
   deviceKindKey, getDeviceKinds, setDeviceKind, type DeviceKindAnswer,
 } from '@/db/deviceKindRepo';
@@ -1695,6 +1697,12 @@ function PartB({ form, locked, patch }: PartProps) {
  * in it that no device matches. Round-tripping through a list of known devices
  * would silently drop that.
  */
+/** A row's device text with every name that means this column taken out. */
+function withoutDevice(value: string, d: TestDevice): string {
+  const names = [d.serialNumber.trim(), d.slot.trim()].filter(Boolean).map((x) => x.toLowerCase());
+  return value.split(',').map((x) => x.trim()).filter((x) => x && !names.includes(x.toLowerCase())).join(', ');
+}
+
 function toggleNamed(value: string, name: string): string {
   const parts = value.split(',').map((x) => x.trim()).filter(Boolean);
   const at = parts.findIndex((x) => x.toLowerCase() === name.toLowerCase());
@@ -1962,18 +1970,28 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
   const devices = form.devices;
   const unused = unusedDevicePresets(devices);
   const setDevice = (i: number, p: Partial<TestDevice>) => patch({
-    devices: devices.map((d, n) => (n === i ? { ...d, ...p } : d)),
+    devices: devices.map((d, n) => {
+      if (n !== i) return d;
+      const next = { ...d, ...p };
+      // A meter column given another serial is another instrument now, and
+      // must not come back on the next form as the company's meter.
+      const from = next.presetId ? devicePreset(next.presetId) : undefined;
+      if (from?.device.serialNumber && p.serialNumber !== undefined
+        && p.serialNumber.trim().toUpperCase() !== from.device.serialNumber.toUpperCase()) {
+        delete next.presetId;
+      }
+      return next;
+    }),
   });
 
   /*
-   * The gauges this phone has recorded before.
+   * The instruments this phone has recorded before.
    *
-   * Part C is nine fields per instrument, and the company's two flow meters
-   * are chips because they are transcribed from their certificates. The
-   * pressure gauge never is: a technician's own, or a borrowed one, typed out
-   * in full at a booster on every single form. What is wanted is not a
-   * catalogue somebody maintains but what this technician typed last time, so
-   * it is read back off the forms already here.
+   * Part C is nine fields per instrument. The company's two flow meters and
+   * its gauge are chips, the gauge with its serial as first typed here; a
+   * borrowed gauge or meter was typed out in full at a booster on every form.
+   * What is wanted is not a catalogue somebody maintains but what this
+   * technician typed last time, so it is read back off the forms already here.
    */
   const [remembered, setRemembered] = useState<RememberedDevice[]>([]);
   useEffect(() => {
@@ -1985,6 +2003,15 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
     return () => { cancelled = true; };
   }, []);
   const offerable = offerableDevices(remembered, devices);
+  // The company gauge typed by hand on an older draft is already on the form.
+  const onForm = new Set(devices.map((d) => d.serialNumber.trim().toUpperCase()).filter(Boolean));
+  const presetsToOffer = unused.filter((p) => {
+    const serial = currentPresetDevice(p, remembered).device.serialNumber.trim().toUpperCase();
+    return !serial || !onForm.has(serial);
+  });
+  // A gauge from the used-before list fills the company gauge's empty column
+  // rather than sitting in a column of its own beside it.
+  const waitingGauge = devices.findIndex((d) => d.presetId === COMPANY_GAUGE_ID && !d.serialNumber.trim());
 
 
   return (
@@ -2084,7 +2111,15 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
               <RemoveButton what="device" onRemove={() => patch({ devices: devices.filter((_, n) => n !== i) })} />
             ) : null}
           </Rowed>
-          <Field label="Serial number" value={d.serialNumber} onChangeText={(v) => setDevice(i, { serialNumber: v })} editable={!locked} />
+          <Field
+            label="Serial number"
+            value={d.serialNumber}
+            onChangeText={(v) => setDevice(i, { serialNumber: v })}
+            editable={!locked}
+            hint={d.presetId === COMPANY_GAUGE_ID && !d.serialNumber.trim()
+              ? 'Off the gauge. Type it once; later forms fill it in, with the certificate number.'
+              : undefined}
+          />
           {/*
             * Gauge or flow meter, which decides how two of the department's
             * rows read.
@@ -2115,8 +2150,8 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
             *
             * This was a plain text field with an ISO placeholder: eleven
             * characters, two symbol-layer hyphens, in a format nobody here
-            * writes — on the one device that is never a preset, so it is typed
-            * by hand on every hydrant form. And the consequence was worse than
+            * writes, on a date typed by hand for anything that is not one of
+            * our own instruments. And the consequence was worse than
             * the typing: an AU-typed date read as UNREADABLE, which is a
             * caution, where the same date read properly is OUT OF
             * CALIBRATION, which is a blocker. A form could be issued with
@@ -2181,9 +2216,8 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
             ) : null}
             {d.calibrationBasis === 'service-life' && (d.kind ?? 'gauge') === 'flow-meter' ? (
               <Txt size="xs" tone="faint">
-                Only for a device whose certificate says so — our inline meters do, absent fault or
-                damage, and unless an authority has stipulated recertification. The form prints which
-                basis each device was accepted on, and how old the certificate was on the day.
+                Only for a device whose certificate says so. Our inline meters do, absent fault or
+                damage, and unless an authority has stipulated recertification.
               </Txt>
             ) : null}
           </View>
@@ -2203,6 +2237,9 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
             * appears once nothing on the list is picked, so the common case is
             * one tap and the uncommon one is not shut out.
             */}
+          {/* A flow meter has no dial; the form answers both rows N/A for it. */}
+          {(d.kind ?? 'gauge') === 'gauge' ? (
+          <>
           <View style={{ gap: 6 }}>
             <Label>Gauge face</Label>
             <Rowed gap={2} wrap>
@@ -2265,6 +2302,8 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
               />
             ) : null}
           </View>
+          </>
+          ) : null}
           {/*
             * Three states, as the department's tickbox has: ticked, not
             * ticked, and nobody answered. The chip read "Analogue" whenever
@@ -2316,33 +2355,37 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
           ? 'The form prints a four-column equipment table. With nothing on it, every column prints '
             + 'as not used — and a form with pressures recorded cannot be issued until the gauge or '
             + 'meter they were read with is on it.'
-          : `${devices.length} of the department's four columns filled. The other ${
-            DEPARTMENT_DEVICE_SLOTS.length - devices.length} print${
-            DEPARTMENT_DEVICE_SLOTS.length - devices.length === 1 ? 's' : ''} as not used, which is `
-            + 'an answer — a column you meant to fill is not.'}
+          : devices.length >= DEPARTMENT_DEVICE_SLOTS.length
+            ? `All ${DEPARTMENT_DEVICE_SLOTS.length} of the department's columns filled${
+              devices.length > DEPARTMENT_DEVICE_SLOTS.length
+                ? `, and ${devices.length - DEPARTMENT_DEVICE_SLOTS.length} more printed beside them` : ''}.`
+            : `${devices.length} of the department's four columns filled. The other ${
+              DEPARTMENT_DEVICE_SLOTS.length - devices.length} print${
+              DEPARTMENT_DEVICE_SLOTS.length - devices.length === 1 ? 's' : ''} as not used, which is `
+              + 'an answer; a column you meant to fill is not.'}
       </Txt>
 
       {!locked ? (
         <Card>
           {/*
-            * The company's own meters, in one tap.
+            * The company's own meters and gauge, in one tap.
             *
-            * Part C is the same two instruments on nearly every hydrant form
+            * Part C is the same three instruments on nearly every hydrant form
             * this company raises, and it was typed again every time: a serial
             * number, a date, a certificate reference and a correction factor.
             * A serial number mistyped reads exactly like a serial number, and
             * the form it is on is signed. What a chip adds is still editable —
             * a serviced meter has a new certificate date before this app does.
             */}
-          {unused.length ? (
+          {presetsToOffer.length ? (
             <>
               <Label>Our test equipment</Label>
               <Txt size="sm" tone="muted">
-                Adds the meter with its serial number, certificate and correction factor already
-                filled in. Check them against the certificate in your hand.
+                Adds it with what we hold for it already filled in. Check it against the
+                certificate in your hand.
               </Txt>
               <View style={{ gap: 8 }}>
-                {unused.map((preset) => {
+                {presetsToOffer.map((preset) => {
                   // The certificate in the code, unless this phone has seen
                   // the meter recertified since — then that certificate.
                   const current = currentPresetDevice(preset, remembered);
@@ -2371,16 +2414,21 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
                       })}
                     />
                     <Txt size="xs" tone="faint">
-                      {current.recertified
+                      {current.recertified && !preset.device.serialNumber
+                        ? `Serial ${current.device.serialNumber.trim() || 'not typed yet'} · recalibrated ${
+                          formatAuDate(current.recertified)} (bought calibrated ${formatAuDate(preset.device.dateCalibrated)})`
+                        : current.recertified
                         ? `Recertified ${formatAuDate(current.recertified)}, as recorded on this phone's last form `
                           + `with it; the certificate transcribed in the app is dated ${formatAuDate(preset.device.dateCalibrated)}.`
-                        : preset.detail}
+                        : !preset.device.serialNumber && current.device.serialNumber.trim()
+                          ? `Serial ${current.device.serialNumber.trim()} · calibrated ${formatAuDate(current.device.dateCalibrated)}`
+                          : preset.detail}
                     </Txt>
                   </View>
                   );
                 })}
               </View>
-              {unused.some((p) => p.flowDeviceKindNote) ? (
+              {presetsToOffer.some((p) => p.flowDeviceKindNote) ? (
                 <Txt size="xs" tone="faint">
                   The Orifice / Mechanical / Electro magnetic tick is asked above, once per meter.
                 </Txt>
@@ -2388,15 +2436,14 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
             </>
           ) : (
             <Txt size="sm" tone="muted">
-              Both of our meters are on this form. Anything else you used goes on by hand.
+              All our test equipment is on this form. Anything else you used goes on by hand.
             </Txt>
           )}
 
           {/*
-            * And the gauge, which is never a preset.
-            *
-            * Nine fields, retyped at a booster on every form, for an
-            * instrument that has not changed since the last one. Offered with
+            * And anything else this phone has seen: a borrowed gauge, a
+            * second meter. Nine fields, retyped at a booster on every form,
+            * for an instrument that has not changed since the last one. Offered with
             * the date it was last used on, so a technician can see at a glance
             * whether its certificate has moved since — and offered rather than
             * filled, because what comes back is a calibration date and the
@@ -2416,7 +2463,11 @@ function PartC({ form, locked, patch, kinds }: PartProps & { kinds: DeviceKinds 
                     <Chip
                       label={`+ ${r.device.serialNumber}`}
                       onPress={() => patch({
-                        devices: [...devices, { slot: deviceSlotName(devices), ...r.device }],
+                        devices: (r.device.kind ?? 'gauge') === 'gauge' && waitingGauge >= 0
+                          ? devices.map((d, n) => (n === waitingGauge
+                            ? { ...d, ...r.device, slot: d.slot, presetId: COMPANY_GAUGE_ID }
+                            : d))
+                          : [...devices, { slot: deviceSlotName(devices), ...r.device }],
                       })}
                     />
                     <Txt size="xs" tone="faint">
@@ -2591,6 +2642,15 @@ function PartD({ form, locked, patch }: PartProps) {
   const heldEveryHydrant = siteHydrants.length > PART_D_LOCATION_SLOTS
     && f.hydrantLocations.length === siteHydrants.length
     && f.hydrantLocations.every((x, i) => x.trim() === siteHydrants[i]);
+
+  /*
+   * What a row can cite: each Part C column by its serial, or by its column
+   * name where the serial is still to be typed. flowRowDevices resolves both.
+   */
+  const pickable = form.devices
+    .filter(deviceInUse)
+    .map((device) => ({ device, name: deviceCitation(device) }))
+    .filter((p) => p.name);
 
   const setLine = (
     line: { row: FlowRow; index?: number },
@@ -2866,10 +2926,28 @@ function PartD({ form, locked, patch }: PartProps) {
               */}
             <View style={{ gap: 6 }}>
               <Label>Device/gauge used (Part C)</Label>
-              {form.devices.some((d) => d.serialNumber.trim()) ? (
+              {pickable.length ? (
                 <Rowed gap={2} wrap>
-                  {form.devices.filter((d) => d.serialNumber.trim()).map((d) => {
-                    const name = d.serialNumber.trim();
+                  {/*
+                    * Every column on Part C, not only those with a serial: a
+                    * gauge whose serial is still to be typed is still the
+                    * gauge, and Part D refers to it by its column until then.
+                    */}
+                  {pickable.length > 1 ? (() => {
+                    const cited = flowRowDevices(r, form.devices);
+                    const all = pickable.every((p) => cited.known.includes(p.device));
+                    return (
+                      <Chip
+                        label="All devices"
+                        selected={all}
+                        tone={all ? 'accent' : 'default'}
+                        onPress={locked ? undefined : () => setLine(line, {
+                          devices: [...(all ? [] : pickable.map((p) => p.name)), ...cited.unknown].join(', '),
+                        })}
+                      />
+                    );
+                  })() : null}
+                  {pickable.map(({ device: d, name }) => {
                     const on = flowRowDevices(r, form.devices).known.includes(d);
                     return (
                       <Chip
@@ -2878,7 +2956,9 @@ function PartD({ form, locked, patch }: PartProps) {
                         selected={on}
                         tone={on ? 'accent' : 'default'}
                         onPress={locked ? undefined : () => setLine(line, {
-                          devices: toggleNamed(r.devices, name),
+                          // Off takes every name that means this column, its
+                          // serial or its column name; on adds it once.
+                          devices: on ? withoutDevice(r.devices, d) : toggleNamed(r.devices, name),
                         })}
                       />
                     );

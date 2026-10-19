@@ -202,6 +202,14 @@ describe('the answer in the database', () => {
 });
 
 describe('what our own meters claim, and what they do not', () => {
+  // The flow meters, not the gauge: the three ticks describe how a flow
+  // measuring device measures, and a pressure gauge is not one.
+  const meters = DEVICE_PRESETS.filter((p) => p.device.kind === 'flow-meter');
+
+  it('is both Flowtech meters, so the loops below are about something', () => {
+    expect(meters.map((p) => p.device.serialNumber)).toEqual(['SQF-001', 'SQF-002']);
+  });
+
   it('ticks neither box for either Flowtech meter', () => {
     /*
      * Not an oversight, and not a thing to "finish" later. Neither the
@@ -212,7 +220,7 @@ describe('what our own meters claim, and what they do not', () => {
      * replaced once in ten years and "near equivalence of a Class 2 Water
      * Meter" suit a mechanical one.
      */
-    for (const preset of DEVICE_PRESETS) {
+    for (const preset of meters) {
       expect(preset.flowDeviceKind).toBeUndefined();
     }
   });
@@ -222,9 +230,18 @@ describe('what our own meters claim, and what they do not', () => {
     // question the app forgot to ask, and the technician scrolls past it. The
     // type makes the note mandatory when the kind is absent; this is about the
     // note being worth reading.
-    for (const preset of DEVICE_PRESETS) {
+    for (const preset of meters) {
       expect(preset.flowDeviceKindNote!.length).toBeGreaterThan(120);
       expect(preset.flowDeviceKindNote).toContain('yours');
     }
+  });
+
+  it('asks nothing of the gauge, which none of the three ticks describes', () => {
+    // No kind, so nothing is ticked on its behalf, and no note, because there
+    // is no flow-device question to answer about a pressure gauge.
+    const gauge = DEVICE_PRESETS.find((p) => p.id === 'company-gauge');
+    expect(gauge).toMatchObject({ gauge: true, device: { kind: 'gauge' } });
+    expect(gauge!.flowDeviceKind).toBeUndefined();
+    expect(gauge!.flowDeviceKindNote).toBeUndefined();
   });
 });

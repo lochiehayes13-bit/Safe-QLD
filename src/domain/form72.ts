@@ -99,6 +99,14 @@ export interface TestDevice {
    */
   readsPressure?: boolean;
   /**
+   * Which of the company's own instruments this column was added from.
+   *
+   * The pressure gauge's serial and certificate are not in the code, so
+   * there is no serial to recognise it by until somebody types one. This is
+   * what lets the next form find it and carry what was typed.
+   */
+  presetId?: string;
+  /**
    * What the device is, in the manufacturer's words.
    *
    * Not a field on the department's form. It is what makes a stored device
@@ -865,22 +873,57 @@ export function deviceSlotName(held: readonly TestDevice[]): string {
 }
 
 /**
+ * Whether a Part C column holds an instrument: a serial, one of the company's
+ * own (whose serial may still be to type), or anything recorded about it. A
+ * column added and left empty is not one.
+ */
+export function deviceInUse(d: TestDevice): boolean {
+  return !!(d.serialNumber.trim() || d.presetId || d.dateCalibrated || d.calibrationCertificate
+    || d.model || d.correctionFactor || d.faceSize || d.digitalReader !== undefined
+    || d.incrementsKpa !== undefined);
+}
+
+/** How a Part D row refers to a column: its serial, or its column name until it has one. */
+export function deviceCitation(d: TestDevice): string {
+  return d.serialNumber.trim() || d.slot.trim();
+}
+
+/**
+ * A Part D row's device column as it should print: each name that resolves to
+ * a Part C column printed as that column's serial, so a row picked before the
+ * gauge's serial was typed reads the same as one picked after. A name that
+ * matches nothing prints as written.
+ */
+export function citedDevicesText(row: Pick<FlowRow, 'devices'>, devices: readonly TestDevice[]): string {
+  const out: string[] = [];
+  for (const part of row.devices.split(',').map((x) => x.trim()).filter(Boolean)) {
+    const lower = part.toLowerCase();
+    const found = devices.find((d) => d.serialNumber.trim().toLowerCase() === lower
+      || d.slot.trim().toLowerCase() === lower);
+    const name = found ? deviceCitation(found) : part;
+    if (!out.some((x) => x.toLowerCase() === name.toLowerCase())) out.push(name);
+  }
+  return out.join(', ');
+}
+
+/**
  * What to name in a Part D row's device column when the technician has not.
  *
  * The column is a cross-reference to Part C, and on most forms it has one
  * right answer: the one instrument on the form, or the one every other row
- * already names. Those two cases are filled without a tap. Anything else —
- * two meters and no pattern yet, rows citing different instruments — is a
+ * already names. Those two cases are filled without a tap. Anything else
+ * (two instruments and no pattern yet, rows citing different ones) is a
  * question only the technician can answer, and this answers nothing rather
- * than guess which meter was on the hydrant.
+ * than guess which instrument was on the hydrant.
  */
 export function defaultFlowRowDevices(
   form: Pick<Form72, 'devices'> & { flowTest: Pick<FlowTest, 'rows'> },
 ): string | undefined {
-  const named = form.devices.filter((d) => d.serialNumber.trim());
-  if (named.length === 1) return named[0]!.serialNumber.trim();
+  const columns = form.devices.filter(deviceInUse);
+  if (columns.length === 1) return deviceCitation(columns[0]!);
   const cited = new Set(
-    form.flowTest.rows.filter((r) => flowRowRead(r) && r.devices.trim()).map((r) => r.devices.trim()),
+    form.flowTest.rows.filter((r) => flowRowRead(r) && r.devices.trim())
+      .map((r) => citedDevicesText(r, form.devices)),
   );
   if (cited.size === 1) return [...cited][0];
   return undefined;
@@ -1682,7 +1725,13 @@ export function validateForm72(form: Form72): FormIssue[] {
   ].some((v) => v !== undefined)) {
     hydrantReadings.push('E');
   }
-  if (hydrantReadings.length && !named.length) {
+  /*
+   * The company gauge waits on its serial on a new form. The rule below says
+   * so in its own words; these two would only say the same thing worse.
+   */
+  const gaugeAwaitingSerial = form.devices.some((d) => !d.serialNumber.trim()
+    && (d.kind ?? 'gauge') === 'gauge' && deviceInUse(d));
+  if (hydrantReadings.length && !named.length && !gaugeAwaitingSerial) {
     issues.push({
       part: 'C',
       message: `Part${hydrantReadings.length === 1 ? '' : 's'} ${hydrantReadings.join(', ')} record${
@@ -1701,7 +1750,7 @@ export function validateForm72(form: Form72): FormIssue[] {
    * card; otherwise the gauge goes on the form with its own serial, date and
    * certificate.
    */
-  if (hydrantReadings.length && named.length
+  if (hydrantReadings.length && named.length && !gaugeAwaitingSerial
     && !named.some((d) => (d.kind ?? 'gauge') === 'gauge' || d.readsPressure === true)) {
     issues.push({
       part: 'C',

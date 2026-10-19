@@ -3,14 +3,15 @@ import { deviceSlotName, type FlowDeviceKind, type TestDevice } from '@/domain/f
 /**
  * Safe QLD's own test equipment, so Part C is a tap rather than a typing job.
  *
- * Part C is the same two meters on nearly every hydrant form the company
- * raises, and every time it was typed again: a serial number, a date, a
- * certificate reference and a correction factor, four fields where one of them
- * invalidates every pressure on the page if it is typed wrong. A serial number
- * mistyped reads exactly like a serial number, and the form it is on is signed.
+ * Part C is the same two meters and one gauge on nearly every hydrant form the
+ * company raises, and every time it was typed again: a serial number, a date,
+ * a certificate reference and a correction factor, four fields where one of
+ * them invalidates every pressure on the page if it is typed wrong. A serial
+ * number mistyped reads exactly like a serial number, and the form it is on is
+ * signed.
  *
- * So the equipment is held here, transcribed once from the manufacturer's
- * certificates, and added to a form whole. What is added is still editable —
+ * So the equipment is held here, transcribed once from what the company holds
+ * for it, and added to a form whole. What is added is still editable:
  * the certificate date moves when a meter is serviced, and a technician who has
  * the new certificate in their hand should not have to wait for a release — but
  * nobody has to type it from memory at a booster.
@@ -21,7 +22,10 @@ import { deviceSlotName, type FlowDeviceKind, type TestDevice } from '@/domain/f
  */
 
 /** A device somebody can add to Part C in one tap. */
-export type DevicePreset = DeviceKindClaim & {
+export type DevicePreset = (
+  | (DeviceKindClaim & { device: { kind: 'flow-meter' } })
+  | (GaugeClaim & { device: { kind: 'gauge' } })
+) & {
   id: string;
   /** What the chip says: short enough for a phone, specific enough to pick. */
   label: string;
@@ -51,6 +55,13 @@ export type DeviceKindClaim =
    * the technician answers it once for that meter.
    */
   | { flowDeviceKind?: undefined; flowDeviceKindNote: string };
+
+/**
+ * A pressure gauge, which the three flow-device ticks do not describe at all.
+ * Named rather than left as a preset with no claim, so the silent case above
+ * still cannot be written by accident.
+ */
+export type GaugeClaim = { gauge: true; flowDeviceKind?: undefined; flowDeviceKindNote?: undefined };
 
 /**
  * The transcription source, named so the next person can check it.
@@ -163,9 +174,36 @@ const flowtech = (serial: string, report: string): DevicePreset => ({
   },
 });
 
+/**
+ * The company's pressure gauge: bought new and calibrated when it was picked
+ * up on 2 October 2026, on the twelve-month interval every gauge is judged by.
+ *
+ * Its serial number and certificate reference are not transcribed here. They
+ * are typed on the first form it goes on, and every later form carries them:
+ * currentPresetDevice finds that form's column by presetId, because until
+ * somebody types it there is no serial to recognise the gauge by. A form will
+ * not issue with the serial blank, which is the point: a gauge nobody can
+ * identify is not an instrument the pressures can be traced to.
+ */
+/** The gauge's preset id, which is how a form's column is recognised as it. */
+export const COMPANY_GAUGE_ID = 'company-gauge';
+
+const COMPANY_GAUGE: DevicePreset = {
+  id: COMPANY_GAUGE_ID,
+  gauge: true,
+  label: 'Pressure gauge',
+  detail: 'New unit · calibrated 02/10/2026 · type its serial once',
+  device: {
+    serialNumber: '',
+    kind: 'gauge',
+    dateCalibrated: '2026-10-02',
+  },
+};
+
 export const DEVICE_PRESETS: DevicePreset[] = [
   flowtech('SQF-001', 'CR-SQF-001-IN-01'),
   flowtech('SQF-002', 'CR-SQF-002-IN-01'),
+  COMPANY_GAUGE,
 ];
 
 /** A preset by its id, for a screen that stores the choice rather than the device. */
@@ -174,53 +212,63 @@ export function devicePreset(id: string): DevicePreset | undefined {
 }
 
 /**
- * The preset's device as it should go onto a form today: from the certificate
- * transcribed here, unless this phone has seen the meter recertified since.
+ * The preset's device as it should go onto a form today: from what is
+ * transcribed here, unless this phone has seen more since.
  *
  * A meter comes back from a repair with a new certificate, and the technician
  * holding it edits the date and report number on that day's form. Every later
  * form offered the preset again, with the superseded certificate on it, and
  * the "used before" list dropped the corrected row because its serial was a
  * preset's. So a remembered row for a preset's serial with a later calibration
- * date is the current certificate, and it is what goes on — laid over the
- * preset, so a field the technician left blank keeps the transcribed value.
+ * date is the current certificate, and it is what goes on, laid over the
+ * preset so a field the technician left blank keeps the transcribed value.
  * `recertified` carries the date, so the chip can say it is not the
  * certificate in the code.
+ *
+ * The gauge has no serial in the code, so the last form it was on is what it
+ * carries: the serial, certificate and date typed there.
  */
 export function currentPresetDevice(
   preset: DevicePreset,
   remembered: readonly { device: Omit<TestDevice, 'slot'> }[] = [],
 ): { device: Omit<TestDevice, 'slot'>; recertified?: string } {
   const key = preset.device.serialNumber.trim().toUpperCase();
-  const same = remembered.filter((r) => r.device.serialNumber?.trim().toUpperCase() === key);
+  // A meter is its serial: a hire meter typed over its card is another
+  // instrument. The gauge has no serial here, so its column is how it is known.
+  const same = key
+    ? remembered.filter((r) => r.device.serialNumber?.trim().toUpperCase() === key)
+    : remembered.filter((r) => r.device.presetId === preset.id);
+  const base = { ...preset.device, presetId: preset.id };
   // Whether this meter reads pressure is a fact about the meter, answered on
   // its card; the latest form's answer carries, whatever the certificate date.
   const answered = same.find((r) => typeof r.device.readsPressure === 'boolean');
   const readsPressure = answered ? { readsPressure: answered.device.readsPressure } : {};
-  const later = same.find((r) => !!r.device.dateCalibrated
-    && !!preset.device.dateCalibrated
-    && r.device.dateCalibrated > preset.device.dateCalibrated);
-  if (!later) return { device: { ...preset.device, ...readsPressure } };
+  const later = key
+    ? same.find((r) => !!r.device.dateCalibrated
+      && !!preset.device.dateCalibrated
+      && r.device.dateCalibrated > preset.device.dateCalibrated)
+    : same[0];
+  if (!later) return { device: { ...base, ...readsPressure } };
   const over = Object.fromEntries(
     Object.entries(later.device).filter(([, v]) => v !== undefined && v !== ''),
   ) as Partial<Omit<TestDevice, 'slot'>>;
-  return { device: { ...preset.device, ...over, ...readsPressure }, recertified: later.device.dateCalibrated };
+  const from = preset.device.dateCalibrated;
+  const moved = !!later.device.dateCalibrated && !!from && later.device.dateCalibrated > from;
+  return {
+    device: { ...base, ...over, ...readsPressure, presetId: preset.id },
+    ...(moved ? { recertified: later.device.dateCalibrated } : {}),
+  };
 }
 
 /**
  * The equipment a new form starts with.
  *
- * Part C is the company's two meters on nearly every hydrant form it raises,
- * and the ask was that the calibration data be on every form without a tap.
- * So the presets go on at creation, in the department's first columns, with
- * whatever recertification this phone has seen. A sprinkler-only form gets
- * them too — the system is not known when the form is made — and takes them
- * off with one tap each; validateForm72 says so if they are left on.
- *
- * The pressure gauge is not seeded. It is never a preset: its certificate is
- * not transcribed here, and the only person who can say whether last form's
- * date still holds is the one holding the gauge. It stays one tap away on the
- * "used before" list.
+ * Part C is the company's two meters and its gauge on nearly every hydrant
+ * form it raises, and the ask was that the calibration data be on every form
+ * without a tap. So the presets go on at creation, in the department's first
+ * columns, with whatever this phone has seen since. A sprinkler-only form gets
+ * the meters too (the system is not known when the form is made) and takes
+ * them off with one tap each; validateForm72 says so if they are left on.
  */
 export function seedDevices(
   remembered: readonly { device: Omit<TestDevice, 'slot'> }[] = [],
@@ -235,14 +283,18 @@ export function seedDevices(
 /**
  * The presets not already on a form, so a chip cannot add the same meter twice.
  *
- * Matched on serial number rather than on the preset id, because a device typed
- * by hand with the same serial is the same meter — adding it again would put
- * one instrument in two Part C columns and make the form look like a test run
- * with twice the equipment it had.
+ * Matched on serial number as well as on the preset id, because a device typed
+ * by hand with the same serial is the same meter: adding it again would put one
+ * instrument in two Part C columns and make the form look like a test run with
+ * twice the equipment it had. The gauge has no serial in the code, so for it
+ * the id is the only match.
  */
 export function unusedDevicePresets(devices: readonly TestDevice[]): DevicePreset[] {
   const held = new Set(devices.map((d) => d.serialNumber.trim().toUpperCase()).filter(Boolean));
-  return DEVICE_PRESETS.filter((p) => !held.has(p.device.serialNumber.toUpperCase()));
+  const ids = new Set(devices.map((d) => d.presetId).filter(Boolean));
+  return DEVICE_PRESETS.filter((p) => (p.device.serialNumber
+    ? !held.has(p.device.serialNumber.toUpperCase())
+    : !ids.has(p.id)));
 }
 
 /**
@@ -254,16 +306,20 @@ export function unusedDevicePresets(devices: readonly TestDevice[]): DevicePrese
  * had — the same rule unusedDevicePresets applies. And the presets themselves,
  * because they have their own chips: offering the company's own flow meter in
  * two places, once from its certificate and once from however it was typed
- * last March, is two sources for one fact and they can disagree.
+ * last March, is two sources for one fact and they can disagree. The company
+ * gauge is recognised by its column's preset id, since it has no serial here.
  */
 export function offerableDevices<T extends { device: Omit<TestDevice, 'slot'> }>(
   remembered: readonly T[],
   onForm: readonly TestDevice[],
 ): T[] {
   const held = new Set(onForm.map((d) => d.serialNumber.trim().toUpperCase()).filter(Boolean));
-  const preset = new Set(DEVICE_PRESETS.map((p) => p.device.serialNumber.trim().toUpperCase()));
+  const preset = new Set(DEVICE_PRESETS.map((p) => p.device.serialNumber.trim().toUpperCase()).filter(Boolean));
+  // Only the presets with no serial are known by id; a meter is known by serial.
+  const presetIds = new Set(DEVICE_PRESETS.filter((p) => !p.device.serialNumber).map((p) => p.id));
   return remembered.filter((r) => {
     const key = r.device.serialNumber?.trim().toUpperCase();
-    return !!key && !held.has(key) && !preset.has(key);
+    return !!key && !held.has(key) && !preset.has(key)
+      && !(r.device.presetId && presetIds.has(r.device.presetId));
   });
 }

@@ -45,6 +45,13 @@ import { MIGRATION_V37 } from '@/db/schemaV37';
 
 const NOW = '2026-07-03T00:00:00.000Z';
 
+/**
+ * The company's flow meters, which is every preset but the pressure gauge.
+ * 'records our own meters as meters' pins which presets those are, so this
+ * filter cannot quietly come back empty and pass every loop over it.
+ */
+const OUR_METERS = DEVICE_PRESETS.filter((p) => p.device.kind === 'flow-meter');
+
 /** A form with nothing blocking it, so a test can spoil exactly one thing. */
 const issuable = (over: Partial<Form72> = {}): Form72 => ({
   ...emptyForm72({
@@ -1789,7 +1796,8 @@ describe('a calibration date typed the way people write it', () => {
    * whose certificate date was typed 15/01/2025 — two years before the test —
    * came back unreadable, and the form could be ISSUED with every pressure on
    * it read by a gauge two years stale. The box took only ISO, in a format
-   * nobody in Australia writes, on the one device that is never a preset.
+   * nobody in Australia writes, on a gauge, whose date is the one most often
+   * typed by hand.
    */
   const gauge = (dateCalibrated: string) => ({
     slot: 'Device/gauge 1', serialNumber: 'PG-1', dateCalibrated,
@@ -1994,7 +2002,7 @@ describe('the company’s own test equipment', () => {
   it('leaves the gauge-only fields off a flow meter rather than filling them', () => {
     // Face size and increments describe a pressure gauge's dial. A flow meter
     // has neither, and anything written there reads as a measured specification.
-    for (const preset of DEVICE_PRESETS) {
+    for (const preset of OUR_METERS) {
       expect(preset.device.faceSize).toBeUndefined();
       expect(preset.device.incrementsKpa).toBeUndefined();
     }
@@ -2004,15 +2012,21 @@ describe('the company’s own test equipment', () => {
     // The certificate says "microprocessor based" and nothing about orifice,
     // mechanical or electromagnetic. The three Part C ticks are a statement
     // about the instrument on a document somebody signs.
-    for (const preset of DEVICE_PRESETS) {
+    for (const preset of OUR_METERS) {
       expect(preset.flowDeviceKind).toBeUndefined();
       // What the note says, and that it says enough to act on, is asserted in
       // deviceKind.test.ts beside the store that answers it.
       expect(preset.flowDeviceKindNote).toContain('tick is yours');
     }
+    // The gauge is not a flow measuring device at all, so it neither ticks a
+    // box nor carries a note asking somebody to.
+    const gauge = DEVICE_PRESETS.find((p) => p.device.kind === 'gauge');
+    expect(gauge).toMatchObject({ gauge: true });
+    expect(gauge!.flowDeviceKind).toBeUndefined();
+    expect(gauge!.flowDeviceKindNote).toBeUndefined();
   });
 
-  it('will not offer a meter the form already holds, matched on serial not on id', () => {
+  it('will not offer a meter the form already holds, typed by hand with the same serial', () => {
     const [first] = DEVICE_PRESETS;
     expect(unusedDevicePresets([])).toHaveLength(DEVICE_PRESETS.length);
     // Typed by hand with the same serial is the same meter: offering it again
@@ -2439,8 +2453,13 @@ describe('a Part C row that describes a dial, on a device that has none', () => 
     expect(html).not.toContain('N/A for a flow meter');
   });
 
-  it('records our own meters as meters', () => {
-    for (const preset of DEVICE_PRESETS) expect(preset.device.kind).toBe('flow-meter');
+  it('records our own meters as meters, and our gauge as a gauge', () => {
+    expect(DEVICE_PRESETS.map((p) => [p.id, p.device.kind])).toEqual([
+      ['flowtech-sqf-001', 'flow-meter'],
+      ['flowtech-sqf-002', 'flow-meter'],
+      ['company-gauge', 'gauge'],
+    ]);
+    expect(OUR_METERS.map((p) => p.device.serialNumber)).toEqual(['SQF-001', 'SQF-002']);
   });
 });
 
@@ -3278,7 +3297,7 @@ describe('a preset that names its measuring element', () => {
    * patch in a screen this suite cannot mount.
    */
   it('leaves the kind unset where the certificate does not name one', () => {
-    for (const preset of DEVICE_PRESETS) {
+    for (const preset of OUR_METERS) {
       expect({ id: preset.id, kind: preset.flowDeviceKind })
         .toEqual({ id: preset.id, kind: undefined });
       expect(preset.flowDeviceKindNote).toBeTruthy();
@@ -3287,11 +3306,16 @@ describe('a preset that names its measuring element', () => {
 
   it('pairs an unset kind with a note, and a set kind with none', () => {
     // One or the other, never neither: a preset that names no element has to
-    // say so on the screen, because the tick is then the technician's.
+    // say so on the screen, because the tick is then the technician's. The
+    // one exception is named rather than silent: a pressure gauge, which none
+    // of the three ticks describes, says it is a gauge and claims neither.
     for (const preset of DEVICE_PRESETS) {
       const named = preset.flowDeviceKind !== undefined;
-      expect({ id: preset.id, ok: named !== (preset.flowDeviceKindNote !== undefined) })
-        .toEqual({ id: preset.id, ok: true });
+      const noted = preset.flowDeviceKindNote !== undefined;
+      const ok = 'gauge' in preset
+        ? preset.gauge === true && preset.device.kind === 'gauge' && !named && !noted
+        : named !== noted;
+      expect({ id: preset.id, ok }).toEqual({ id: preset.id, ok: true });
     }
   });
 
@@ -3547,7 +3571,8 @@ describe('what the instrument is, where a tick depends on it', () => {
   });
 
   it('carries a model on both of our meters, so the tick can always be checked', () => {
-    for (const preset of DEVICE_PRESETS) {
+    expect(OUR_METERS).toHaveLength(2);
+    for (const preset of OUR_METERS) {
       expect(preset.device.model).toContain('Flowtech');
       expect(preset.device.model).toContain('Omega');
     }

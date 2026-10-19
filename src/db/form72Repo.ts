@@ -250,13 +250,14 @@ export async function createForm72(input: {
     now: at,
   });
   /*
-   * The company's own meters, on the form before anybody types.
+   * The company's own meters and gauge, on the form before anybody types.
    *
-   * Part C was the same two instruments on nearly every hydrant form the
+   * Part C was the same three instruments on nearly every hydrant form the
    * company raises, and a form started empty and was issued empty more often
-   * than not — four columns of "Not used" under pressures the meters read.
-   * So they go on here, with whatever recertification this phone has seen
-   * (seedDevices). A caller that passes its own devices keeps them.
+   * than not: four columns of "Not used" under pressures they read. So they
+   * go on here, with whatever this phone has seen since (seedDevices),
+   * including the gauge's serial once it has been typed on a form. A caller
+   * that passes its own devices keeps them.
    */
   const parts = input.parts ?? {};
   let devices = parts.devices;
@@ -489,11 +490,12 @@ export interface RememberedDevice {
  * Part C is nine fields per instrument — serial, model, calibration date,
  * certificate, correction factor, dial size, digital reader, increments, and
  * which basis the date was accepted on — and on nearly every hydrant form they
- * are the same instruments as last time, typed again. Two of them are presets
- * (see domain/form72Devices) because they are the company's own flow meters,
- * transcribed from their certificates. The pressure gauge is the one that
- * never is: a technician's own, or a borrowed one, typed out in full at a
- * booster on every form.
+ * are the same instruments as last time, typed again. Three of them are
+ * presets (see domain/form72Devices): the company's two flow meters,
+ * transcribed from their certificates, and its gauge, whose serial is typed
+ * on its first form and found again here by its column's preset id. A column
+ * still waiting for its serial is skipped, so what carries is what was typed.
+ * Anything else is a borrowed instrument typed out in full at a booster.
  *
  * Read back off the forms already on this phone rather than from a new table,
  * because what is wanted is precisely what this technician typed last time —

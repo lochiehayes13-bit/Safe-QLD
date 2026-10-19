@@ -2,7 +2,7 @@ import {
   CALIBRATED_FLOW_DEVICE_KINDS, DEPARTMENT_DEVICE_SLOTS, FLOW_DEVICE_LABEL,
   FLOW_ROW_GROUP_LABEL, FRICTIONAL_LOSS_TOLERANCE_KPA, PART_D_DEVICE_RATES_LPS,
   PART_D_LOCATION_SLOTS, PART_D_ROWS,
-  canIssue, elevationHeadKpa, flowCellState, flowDeviceCalibrationFrom, flowRowGroup,
+  canIssue, citedDevicesText, elevationHeadKpa, flowCellState, flowDeviceCalibrationFrom, flowRowGroup,
   flowRowKey, flowRowLabel,
   flowRowUntouched, overloadCheck, overloadRun, resolveFrictionalLoss,
   sprinklerTestPointUntouched, validateForm72,
@@ -1097,7 +1097,7 @@ function partD(form: Form72, issued: boolean): string {
     const untouched = flowRowUntouched(row);
     const devicesCell = untouched
       ? (r === 'na' ? '<span class="na">N/A</span>' : '<span class="na">Not run</span>')
-      : cell(row.devices, r);
+      : cell(citedDevicesText(row, form.devices), r);
 
     /*
      * Three states per cell, not two.
