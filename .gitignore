@@ -1,6 +1,95 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
 node_modules/
+
+# Expo
 .expo/
 dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+# generated native folders
+/ios
+/android
+
+# Safe QLD
+/android
+/ios
 *.apk
 *.aab
 .env
+
+# Customer panel configurations. These are live site data — Grange Hall,
+# Ipswich Hospital and the rest are real buildings — and they are used for
+# parser development only, never committed. Tests that read them skip when
+# they are absent.
+*.ffp
+*.nle
+*.pci
+*.pcf
+*.sts
+*.ncf
+*.NCF
+*.accdb
+*.mdb
+*.util
+
+# Customer asset registers and reports. The register export is Safe QLD's live
+# book of work — 12,553 assets across 897 named sites, with addresses and
+# locations — and the report examples are real jobs for real buildings. Used
+# for development only, never committed. Tests that read them skip when absent.
+*.csv
+*.pdf
+*.xlsx
+*.docx
+!data/*.template.csv
+/data/registers/
+
+# Compiled output next to a TypeScript source shadows it: jest and Metro both
+# resolve the .js first, so the app and the suite quietly read a stale copy of
+# a file somebody is actively editing. This happened once with the standards
+# catalogue and cost an afternoon of edits that appeared to do nothing.
+src/**/*.js
+src/**/*.js.map
+src/**/*.d.ts
+app/**/*.js
+app/**/*.js.map
+
+# Editor and script backups. Not a resolution hazard the way a compiled .js is,
+# but 55KB of stale duplicate turns up in every grep and reads as live code to
+# whoever finds it next.
+*.bak
+*.orig
+*.rej
+*~
+# The directory and, in a worktree, the symlink to it.
+node_modules
+node_modules/

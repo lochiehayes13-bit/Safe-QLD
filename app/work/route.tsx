@@ -1,0 +1,368 @@
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { nowIso } from '@/db';
+import { qldClock, qldIsoDay } from '@/domain/qldTime';
+import { Linking, Platform, View } from 'react-native';
+import { Stack, router } from 'expo-router';
+import * as Location from 'expo-location';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { jobsByExternalIds, listJobs, type JobRecord } from '@/db/opsRepo';
+import { listScheduleFor } from '@/db/scheduleRepo';
+import { whoseSchedule } from '@/domain/myDay';
+import { loadPrefs } from '@/app-prefs';
+import { formatKm, navigationUrl, planRoute, runCandidates, type RoutePoint } from '@/domain/routing';
+import { whoName } from '@/domain/dayHeader';
+import { useTheme } from '@/theme';
+import { showAlert } from '@/components/alert';
+import { describeLoadFailure } from '@/domain/loadFailure';
+import {
+  Banner, Button, Card, Chip, EmptyState, H2, Rowed, Screen, Segmented, Txt,
+} from '@/components/ui';
+
+/**
+ * The day's run, ordered by where the work is.
+ *
+ * Two things this is honest about on the screen, because getting them wrong
+ * would cost a technician real time:
+ *
+ * The distances are straight-line. Across SEQ that understates badly — two
+ * sites a kilometre apart across the river are a fifteen-minute drive. The
+ * ordering usually survives, the kilometres do not.
+ *
+ * Nearest-neighbour is not the shortest possible route. For the handful of
+ * stops a day actually holds it is close, and it has the property that matters
+ * more: the order is one a technician can look at and see the reasoning behind.
+ *
+ * Urgent work is never reordered behind routine work to save a few kilometres.
+ * A router that suggests driving past a callout gets ignored on the first day
+ * and distrusted after that.
+ */
+type Start = 'here' | 'first';
+
+/**
+ * How many open jobs the "All open" tab will plan a route over.
+ *
+ * Above the open work on this book — around seven hundred of 4,562 — with
+ * room, and said out loud where it bites, because a route planned over part of
+ * the outstanding work and labelled "All open" is the kind of wrong that gets
+ * trusted.
+ */
+const OPEN_PAGE = 1500;
+
+
+export default function RouteScreen() {
+  const t = useTheme();
+  const [jobs, setJobs] = useState<JobRecord[]>([]);
+  const [start, setStart] = useState<Start>('here');
+  const [here, setHere] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [locationNote, setLocationNote] = useState<string | null>(null);
+  const [scope, setScope] = useState<'today' | 'open'>('today');
+  /*
+   * Whose day this is, and whether the phone knows.
+   *
+   * "Today's run" used to be every job in the company scheduled today, read
+   * off the newest five hundred job rows and ordered by how far each was from
+   * where the technician is standing. On a company with four technicians that
+   * is three other people's work, presented as yours, sorted so convincingly
+   * that there is nothing on the screen to suggest otherwise. It also missed
+   * anything outside those five hundred rows, which on this book is most of
+   * the contract services.
+   *
+   * The office's own schedule already says who is on what. Where the phone
+   * knows who it belongs to, that is what the run is built from; where it does
+   * not, the old behaviour is kept and the screen says out loud that it is
+   * showing everybody's.
+   */
+  const [mine, setMine] = useState<{ label: string } | null>(null);
+  const [everyones, setEveryones] = useState(false);
+  // A read that threw. An empty run and a run that could not be read are
+  // different things and only one of them means there is no work.
+  const [failed, setFailed] = useState<string | null>(null);
+  /** The ids the office has this person on today. Empty where the phone does not know who it is. */
+  const [bookedToday, setBookedToday] = useState<Set<string>>(new Set());
+  /** Whether there is more open work than the page took, so the tab can say so. */
+  const [openCut, setOpenCut] = useState(false);
+
+  /**
+   * Everything still on, asked for as such.
+   *
+   * It read the first five hundred rows of the whole job table. The order puts
+   * open work first, so on a small book that is the same thing and on this one
+   * it is not: 4,562 jobs, around seven hundred of them open, so a couple of
+   * hundred open jobs were never offered to the run and the tab called itself
+   * "All open". One extra row is asked for so the screen can tell a full page
+   * from a complete list, because a cut nobody is told about is the whole
+   * fault here.
+   */
+  const openJobs = useCallback(async () => {
+    const rows = await listJobs({ open: true, limit: OPEN_PAGE + 1 });
+    setOpenCut(rows.length > OPEN_PAGE);
+    return rows.slice(0, OPEN_PAGE);
+  }, []);
+
+  const load = useCallback(async () => {
+    setFailed(null);
+    try {
+      const prefs = await loadPrefs();
+      const who = whoseSchedule(prefs);
+      const day = qldIsoDay(nowIso()) ?? '';
+      if (!who || !day) {
+        setMine(null);
+        setEveryones(true);
+        setBookedToday(new Set());
+        setJobs(await openJobs());
+        return;
+      }
+      const blocks = await listScheduleFor({
+        staffId: who.by === 'id' ? who.staffId : undefined,
+        staffName: who.by === 'name' ? who.staffName : undefined,
+        from: day,
+        to: day,
+      });
+      const booked = await jobsByExternalIds(blocks.map((b) => b.jobId).filter((id): id is string => !!id));
+      /*
+       * Everything still open is a different question from what is booked
+       * today, so the other tab keeps reading the job list. Both are loaded
+       * here because switching tabs should not be a second wait.
+       */
+      const open = await openJobs();
+      const byId = new Map(open.map((j) => [j.id, j]));
+      for (const j of booked) byId.set(j.id, j);
+      /*
+       * Set together, at the end. A screen that has taken the bookings but not
+       * the jobs shows an empty run and says the office has you on nothing,
+       * which is a lie told confidently.
+       */
+      setJobs([...byId.values()]);
+      setBookedToday(new Set(booked.map((j) => j.id)));
+      setMine({ label: whoName(who, prefs.technicianName) });
+      setEveryones(false);
+    } catch (e) {
+      setFailed(describeLoadFailure(e, "today's run"));
+    }
+  }, [openJobs]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const findMe = useCallback(async () => {
+    setLocating(true);
+    setLocationNote(null);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setLocationNote('Location is off. Ordered from the first job.');
+        setStart('first');
+        return;
+      }
+      // Balanced accuracy: this decides an order, not a position on a map, and
+      // a high-accuracy fix costs battery and time for precision that changes
+      // nothing here.
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      setHere({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+    } catch (e) {
+      setLocationNote(`No position (${e instanceof Error ? e.message : String(e)}). Ordered from the first job.`);
+      setStart('first');
+    } finally {
+      setLocating(false);
+    }
+  }, []);
+
+  useEffect(() => { if (start === 'here' && !here) void findMe(); }, [start, here, findMe]);
+
+  // The Queensland calendar day. Between midnight and 10am a UTC day is
+  // yesterday's, and this company starts at seven.
+  const today = qldIsoDay(nowIso()) ?? '';
+
+  const candidates = useMemo(
+    () => runCandidates(jobs, { scope, bookedToday, everyones, today, dayOf: qldIsoDay }),
+    [jobs, scope, today, bookedToday, everyones],
+  );
+
+  const route = useMemo(() => {
+    const points: (RoutePoint & { job: JobRecord })[] = candidates.map((j) => ({
+      id: j.id,
+      label: j.siteName,
+      latitude: j.latitude,
+      longitude: j.longitude,
+      priority: j.priority,
+      job: j,
+    }));
+    return planRoute(points, start === 'here' ? (here ?? undefined) : undefined);
+  }, [candidates, start, here]);
+
+  const navigateTo = (job: JobRecord) => {
+    // Hands off to whatever the phone uses for navigation rather than
+    // pretending to route: the maps app knows about roads and traffic. On the
+    // web build (every iPhone) that is an https link; see navigationUrl.
+    const url = navigationUrl(job, Platform.OS);
+    void Linking.openURL(url).catch(() => {
+      showAlert('Could not open maps', job.address ?? job.siteName);
+    });
+  };
+
+  return (
+    <>
+      <Stack.Screen options={{ title: "Today's run" }} />
+      <Screen>
+        <Rowed gap={2}>
+          <View style={{ flex: 1 }}>
+            <Segmented
+              value={scope}
+              onChange={setScope}
+              options={[{ value: 'today', label: 'Today' }, { value: 'open', label: 'All open' }]}
+            />
+          </View>
+        </Rowed>
+
+        <Segmented
+          value={start}
+          onChange={setStart}
+          options={[{ value: 'here', label: 'From here' }, { value: 'first', label: 'From first job' }]}
+        />
+
+        {failed ? (
+          <Banner tone="fail" title="Couldn't load today's run" body={failed} />
+        ) : null}
+
+        {scope === 'today' && everyones && !failed ? (
+          <>
+            <Banner tone="warn" title="Everyone's jobs" body="Pick yourself to see only yours." />
+            <Button title="Pick who I am" variant="secondary" compact onPress={() => router.push('/whoami')} />
+          </>
+        ) : null}
+        {scope === 'today' && mine ? (
+          <Txt size="sm" tone="muted">Booked for {mine.label} today.</Txt>
+        ) : null}
+        {/*
+          * A tab called "All open" that is not all of it has to say so. It
+          * used to read the first five hundred rows of the job table, which on
+          * this book left a couple of hundred open jobs off the run with
+          * nothing to mark their absence — a route planned over part of the
+          * outstanding work, labelled as the whole of it, is the kind of wrong
+          * that gets trusted.
+          */}
+        {scope === 'open' && openCut ? (
+          <Banner
+            tone="warn"
+            title={`More than ${OPEN_PAGE.toLocaleString()} open jobs`}
+            body={`The run covers the first ${OPEN_PAGE.toLocaleString()}. Use the job list for the rest.`}
+          />
+        ) : null}
+
+        {locationNote ? <Banner tone="warn" title="No position" body={locationNote} /> : null}
+
+        {start === 'here' && !here && !locationNote ? (
+          <Card>
+            <Rowed gap={2} align="center">
+              <MaterialCommunityIcons name="crosshairs-gps" size={20} color={t.color.textFaint} />
+              <Txt size="sm" tone="muted" style={{ flex: 1 }}>
+                {locating ? 'Finding where you are…' : 'Waiting on a position.'}
+              </Txt>
+            </Rowed>
+            {!locating ? (
+              <Button title="Try again" variant="secondary" compact onPress={findMe} style={{ marginTop: t.space(2) }} />
+            ) : null}
+          </Card>
+        ) : null}
+
+        {route.stops.length ? (
+          <Card>
+            <Rowed style={{ justifyContent: 'space-between' }}>
+              <Txt weight="700">
+                {route.stops.length} stop{route.stops.length === 1 ? '' : 's'}
+              </Txt>
+              <Chip label={`${formatKm(route.totalKm)} straight line`} />
+            </Rowed>
+            <Txt size="xs" tone="faint" style={{ marginTop: t.space(1.5) }}>
+              Straight-line distances. Urgent jobs first.
+            </Txt>
+          </Card>
+        ) : null}
+
+        {!route.stops.length && !route.unplaceable.length ? (
+          <EmptyState
+          icon="map-marker-path"
+            title={scope === 'today' ? (mine ? 'Nothing booked for you today' : 'Nothing scheduled today') : 'Nothing open'}
+            body={
+              scope === 'today'
+                ? mine
+                  ? 'Try All open, or book yourself on from the calendar.'
+                  : 'Try All open.'
+                : 'Sync in Settings if you expect some.'
+            }
+          />
+        ) : null}
+
+        {route.stops.map((stop, i) => {
+          const job = (stop.point as RoutePoint & { job: JobRecord }).job;
+          return (
+            <Card key={job.id} onPress={() => router.push({ pathname: '/work/job/[id]', params: { id: job.id } })}>
+              <Rowed align="flex-start" gap={2}>
+                <View
+                  style={{
+                    width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center',
+                    backgroundColor: job.priority === 'urgent' ? t.color.fail : t.color.surfaceAlt,
+                  }}
+                >
+                  <Txt size="xs" weight="700" tone={job.priority === 'urgent' ? undefined : 'muted'}>{i + 1}</Txt>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Txt weight="700">{job.siteName}</Txt>
+                  <Txt size="sm" tone="muted" style={{ lineHeight: 19 }}>{job.title}</Txt>
+                  {job.address ? <Txt size="xs" tone="faint">{job.address}</Txt> : null}
+                  <Rowed gap={2} wrap style={{ marginTop: t.space(1.5) }}>
+                    {job.priority === 'urgent' ? <Chip label="Urgent" tone="fail" /> : null}
+                    <Chip label={i === 0 && stop.legKm === 0 ? 'Start' : formatKm(stop.legKm)} />
+                    {job.scheduledFor ? <Chip label={qldClock(job.scheduledFor) ?? 'Scheduled'} /> : null}
+                  </Rowed>
+                </View>
+              </Rowed>
+              <Button
+                title="Navigate"
+                variant="secondary"
+                compact
+                onPress={() => navigateTo(job)}
+                style={{ marginTop: t.space(2.5) }}
+              />
+            </Card>
+          );
+        })}
+
+        {route.unplaceable.length ? (
+          <>
+            <H2>Not in the run</H2>
+            <Banner
+              tone="warn"
+              title={`${route.unplaceable.length} job${route.unplaceable.length === 1 ? '' : 's'} with no location`}
+              body="No location, so not in the run."
+            />
+            {route.unplaceable.map((p) => {
+              const job = (p as RoutePoint & { job: JobRecord }).job;
+              return (
+                <Card key={job.id} onPress={() => router.push({ pathname: '/work/job/[id]', params: { id: job.id } })}>
+                  <Rowed align="flex-start" gap={2}>
+                    <MaterialCommunityIcons name="map-marker-off-outline" size={20} color={t.color.warn} />
+                    <View style={{ flex: 1 }}>
+                      <Txt weight="700">{job.siteName}</Txt>
+                      <Txt size="sm" tone="muted">{job.title}</Txt>
+                      {job.address ? <Txt size="xs" tone="faint">{job.address}</Txt> : null}
+                    </View>
+                  </Rowed>
+                  {job.address ? (
+                    <Button
+                      title="Navigate by address"
+                      variant="secondary"
+                      compact
+                      onPress={() => navigateTo(job)}
+                      style={{ marginTop: t.space(2.5) }}
+                    />
+                  ) : null}
+                </Card>
+              );
+            })}
+          </>
+        ) : null}
+      </Screen>
+    </>
+  );
+}
