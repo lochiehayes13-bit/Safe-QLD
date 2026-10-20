@@ -3,10 +3,11 @@ import { Modal, Pressable, ScrollView, TextInput, View, useWindowDimensions, typ
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { getTimesheet, listTimesheets, saveTimesheet } from '@/db/timesheetRepo';
+import { getTimesheet, listTimesheets, nameUnnamedDrafts, ownerOfThisPhone, saveTimesheet } from '@/db/timesheetRepo';
 import { jobCount, jobSummariesByExternalIds, openJobPicks, searchJobPicks, type JobPick } from '@/db/opsRepo';
 import { listScheduleFor } from '@/db/scheduleRepo';
 import { getEmployee } from '@/db/employeeRepo';
+import { NO_NAME_ON_SHEET } from '@/domain/timesheetOwner';
 import { whoseSchedule } from '@/domain/myDay';
 import {
   blocksForFill, blocksFromClock, blocksFromSchedule, blocksFromTimesheet, entriesFromSchedule, fillFromPosition, fillModeFor,
@@ -127,7 +128,7 @@ export default function TimesheetScreen() {
     if (!id) return;
     setFailed(null);
     try {
-      const [found, jobList, past, jobsHeld] = await Promise.all([
+      const [read, jobList, past, jobsHeld] = await Promise.all([
         // Four columns of the open jobs, not four hundred whole job rows —
         // description, office notes, contact, contract and tags included —
         // read to offer a list of job numbers and site names and then have
@@ -139,6 +140,20 @@ export default function TimesheetScreen() {
         // as the app being broken when it says "nothing matches".
         jobCount(),
       ]);
+      /*
+       * Every week carries its owner's name, for the audit accounts asked
+       * about. A draft begun before the name was set picks it up here; the
+       * save is the name alone, and a failed one does not stop the week
+       * opening.
+       */
+      let found = read;
+      if (found && found.status === 'draft' && !found.employeeName.trim()) {
+        const owner = await ownerOfThisPhone(await loadPrefs()).catch(() => null);
+        if (owner?.name) {
+          found = { ...found, employeeName: owner.name };
+          await nameUnnamedDrafts(owner.name, found.id).catch(() => 0);
+        }
+      }
       setSheet(found);
       setMissing(!found);
       setJobs(jobList);
@@ -533,6 +548,7 @@ export default function TimesheetScreen() {
   };
 
   const sharePage = async () => {
+    if (!sheet.employeeName.trim()) { showAlert('Add your name', NO_NAME_ON_SHEET); return; }
     setBusy(true);
     try {
       const file = await readingCopy();
@@ -549,6 +565,7 @@ export default function TimesheetScreen() {
   };
 
   const exportSheet = async () => {
+    if (!sheet.employeeName.trim()) { showAlert('Add your name', NO_NAME_ON_SHEET); return; }
     setBusy(true);
     try {
       const file = workbook();

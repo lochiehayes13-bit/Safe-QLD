@@ -248,6 +248,7 @@ export function timesheetDocumentHtml(sheet: Timesheet): string {
   <div class="sign">
     <div>
       Employee
+      ${sheet.employeeName.trim() ? `<div><b>${esc(sheet.employeeName.trim())}</b></div>` : ''}
       ${sheet.employeeSignature
     ? `<img class="sig" src="${esc(sheet.employeeSignature)}" alt="" />`
     : '<div class="rule"></div>'}

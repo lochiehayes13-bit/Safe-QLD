@@ -1,3 +1,4 @@
+import { NO_NAME_ON_SHEET } from './timesheetOwner';
 import { dayName, entryHours, timesheetTotals, type Timesheet } from './timesheet';
 
 /**
@@ -185,9 +186,7 @@ export function timesheetBody(sheet: Timesheet): string {
  * than discovering in the office on Friday.
  */
 export function timesheetNotReady(sheet: Timesheet): string | null {
-  if (!sheet.employeeName.trim()) {
-    return 'This sheet has no technician name on it. Set your name in Settings, or type it on the sheet.';
-  }
+  if (!sheet.employeeName.trim()) return NO_NAME_ON_SHEET;
   if (!sheet.entries.length) {
     return 'There are no days on this sheet yet.';
   }

@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { FlatList, View } from 'react-native';
 import { Stack, router, useFocusEffect } from 'expo-router';
-import { createTimesheet, listTimesheets, saveTimesheet } from '@/db/timesheetRepo';
+import { createTimesheet, listTimesheets, nameUnnamedDrafts, ownerOfThisPhone, saveTimesheet } from '@/db/timesheetRepo';
 import {
   copyForNextWeek, sheetUnpaidBreak, timesheetTotals, unpaidBreakMinutes, weekStartFor, withUnpaidBreaks, type Timesheet, type UnpaidBreak,
 } from '@/domain/timesheet';
@@ -54,6 +54,10 @@ export default function TimesheetsScreen() {
       const prefs = await loadPrefs();
       setFillPref(fillModeFor(prefs) ?? '');
       setBreakMinutes(unpaidBreakMinutes(prefs.unpaidLunchMinutes));
+      // Drafts left unnamed take the name now rather than reaching accounts
+      // blank. One update, name only; a failure is no reason to hide the list.
+      const owner = await ownerOfThisPhone(prefs).catch(() => null);
+      if (owner?.name) await nameUnnamedDrafts(owner.name).catch(() => 0);
       setSheets(await listTimesheets());
     } catch (e) {
       setSheets([]);
@@ -96,11 +100,11 @@ export default function TimesheetsScreen() {
     }
     setBusy(true);
     try {
-      const prefs = await loadPrefs();
+      const owner = await ownerOfThisPhone(await loadPrefs());
       const sheet = await createTimesheet({
         weekStarting,
-        employeeName: prefs.technicianName,
-        vehicleRego: prefs.vehicleRego,
+        employeeName: owner.name,
+        vehicleRego: owner.vehicleRego,
       });
       router.push({ pathname: '/timesheet/[id]', params: { id: sheet.id } });
     } catch (e) {
@@ -139,10 +143,11 @@ export default function TimesheetsScreen() {
         router.push({ pathname: '/timesheet/[id]', params: { id: existing.id } });
         return;
       }
+      const owner = await ownerOfThisPhone(prefs);
       const sheet = await createTimesheet({
         weekStarting: thisWeek,
-        employeeName: prefs.technicianName,
-        vehicleRego: prefs.vehicleRego,
+        employeeName: owner.name,
+        vehicleRego: owner.vehicleRego,
         entries,
       });
       router.push({ pathname: '/timesheet/[id]', params: { id: sheet.id } });

@@ -1,5 +1,7 @@
 import { getDb, newId, nowIso } from './index';
 import { hydrateEntry, type Timesheet, type TimesheetEntry } from '@/domain/timesheet';
+import { timesheetOwner, type TimesheetOwner } from '@/domain/timesheetOwner';
+import { getEmployee } from './employeeRepo';
 
 /** Timesheet persistence. Entries live as a JSON column — always read whole. */
 
@@ -73,4 +75,36 @@ export async function saveTimesheet(sheet: Timesheet): Promise<void> {
 export async function deleteTimesheet(id: string): Promise<void> {
   const db = await getDb();
   await db.runAsync('DELETE FROM timesheet WHERE id = ?', id);
+}
+
+/**
+ * Whose weeks these are: the name from Settings, else the person picked in
+ * Simpro as the last sync recorded them (not if they have since been
+ * archived), and the vehicle from Settings.
+ */
+export async function ownerOfThisPhone(
+  prefs: { technicianName: string; vehicleRego: string; simproEmployeeId: string },
+): Promise<TimesheetOwner> {
+  const id = prefs.simproEmployeeId.trim();
+  const me = prefs.technicianName.trim() || !id ? null : await getEmployee(id).catch(() => null);
+  return timesheetOwner(prefs, me);
+}
+
+/**
+ * Puts a name on draft weeks that have none, and on nothing else.
+ *
+ * One statement that touches only the name, so it cannot put back an older
+ * copy of a week somebody is typing into, and only drafts, so a week already
+ * sent stays exactly as accounts received it. Pass an id for one week.
+ */
+export async function nameUnnamedDrafts(name: string, id?: string): Promise<number> {
+  const who = name.trim();
+  if (!who) return 0;
+  const db = await getDb();
+  const done = await db.runAsync(
+    `UPDATE timesheet SET employeeName = ?, updatedAt = ?
+     WHERE trim(employeeName) = '' AND status = 'draft'${id ? ' AND id = ?' : ''}`,
+    ...(id ? [who, nowIso(), id] : [who, nowIso()]),
+  );
+  return done.changes;
 }

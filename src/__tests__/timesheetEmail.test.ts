@@ -207,7 +207,7 @@ describe('what stops a sheet being sent', () => {
   });
 
   it('refuses a sheet with no name, which payroll cannot file', () => {
-    expect(timesheetNotReady(sheet({ employeeName: '  ' }))).toMatch(/no technician name/i);
+    expect(timesheetNotReady(sheet({ employeeName: '  ' }))).toMatch(/type your name/i);
   });
 
   it('refuses a sheet with no days', () => {
