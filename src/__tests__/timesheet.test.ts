@@ -1,0 +1,702 @@
+import {
+  STANDARD_DAY_HOURS,
+  STANDARD_WEEK_HOURS,
+  blankEntry,
+  copyDay,
+  dayName,
+  dayWorkedHours,
+  entryHours,
+  filterJobOptions,
+  groupByDate,
+  hydrateEntry,
+  jobOptions,
+  leaveOf,
+  parseTime,
+  previousDayWithEntries,
+  setLeave,
+  sheetUnpaidBreak,
+  timesheetTotals,
+  toggleExtra,
+  UNPAID_BREAK_AFTER_HOURS,
+  dayUnpaidBreakHours,
+  isUnpaidBreakLine,
+  unpaidBreakLabel,
+  unpaidBreakMinutes,
+  unpaidBreakTotal,
+  usualTimes,
+  validateTimesheet,
+  weekDates,
+  weekPeak,
+  weekSummary,
+  withUnpaidBreaks,
+  type Timesheet,
+  type TimesheetEntry,
+} from '@/domain/timesheet';
+
+function entry(p: Partial<TimesheetEntry> = {}): TimesheetEntry {
+  return {
+    id: p.id ?? 'e1',
+    date: p.date ?? '2026-08-12',
+    jobNumber: p.jobNumber ?? '',
+    siteName: p.siteName ?? 'Site',
+    serviceReportNumber: p.serviceReportNumber ?? '',
+    startTime: p.startTime ?? '06:30',
+    finishTime: p.finishTime ?? '14:30',
+    hourKind: p.hourKind ?? 'ord',
+    hoursOverride: p.hoursOverride,
+    sick: p.sick ?? '',
+    rdo: p.rdo ?? '',
+    annual: p.annual ?? '',
+    lwop: p.lwop ?? '',
+    publicHoliday: p.publicHoliday ?? '',
+    comments: p.comments ?? '',
+    extras: p.extras ?? [],
+  };
+}
+
+function sheet(entries: TimesheetEntry[]): Timesheet {
+  return {
+    id: 't1',
+    employeeName: 'Lachlan Hayes',
+    vehicleRego: 'ABC123',
+    kilometerReading: '120450',
+    weekStarting: '2026-08-12',
+    entries,
+    managerName: '',
+    checkedBy: '',
+    status: 'draft',
+    createdAt: '2026-08-12T00:00:00.000Z',
+    updatedAt: '2026-08-12T00:00:00.000Z',
+  };
+}
+
+describe('parseTime', () => {
+  it('parses valid times', () => {
+    expect(parseTime('06:30')).toBe(390);
+    expect(parseTime('6:30')).toBe(390);
+    expect(parseTime('00:00')).toBe(0);
+    expect(parseTime('23:59')).toBe(1439);
+  });
+
+  it('rejects invalid times', () => {
+    expect(parseTime('25:00')).toBeNull();
+    expect(parseTime('06:75')).toBeNull();
+    expect(parseTime('half six')).toBeNull();
+    expect(parseTime('')).toBeNull();
+  });
+});
+
+describe('entryHours', () => {
+  it('computes a standard day', () => {
+    expect(entryHours(entry({ startTime: '06:30', finishTime: '14:30' }))).toBe(8);
+  });
+
+  it('computes an after-hours callout', () => {
+    // The real timesheet's overtime row: 17:30 to 20:45 is 3.25 hours.
+    expect(entryHours(entry({ startTime: '17:30', finishTime: '20:45' }))).toBe(3.25);
+  });
+
+  it('handles a shift running past midnight rather than going negative', () => {
+    expect(entryHours(entry({ startTime: '22:00', finishTime: '02:30' }))).toBe(4.5);
+  });
+
+  it('reads the same start and finish as no time at all, not as a full day round', () => {
+    /*
+     * The overnight case and this one are the same comparison, and it decides
+     * between nought hours and twenty-four. A finish before a start means the
+     * shift crossed midnight and a day is added; a finish equal to the start is
+     * a typo or an abandoned row, and adding a day to it puts twenty-four
+     * hours on somebody's pay.
+     */
+    expect(entryHours(entry({ startTime: '06:30', finishTime: '06:30' }))).toBe(0);
+  });
+
+  it('honours a manual override', () => {
+    expect(entryHours(entry({ startTime: '06:30', finishTime: '14:30', hoursOverride: '7.5' }))).toBe(7.5);
+  });
+
+  it('returns zero when times are missing or unparseable', () => {
+    expect(entryHours(entry({ startTime: '', finishTime: '' }))).toBe(0);
+    expect(entryHours(entry({ startTime: 'nope', finishTime: '14:30' }))).toBe(0);
+  });
+});
+
+describe('timesheetTotals', () => {
+  it('splits worked hours across ordinary, overtime and double time', () => {
+    const t = timesheetTotals(
+      sheet([
+        entry({ id: 'a', startTime: '06:30', finishTime: '14:30', hourKind: 'ord' }),
+        entry({ id: 'b', startTime: '17:30', finishTime: '20:45', hourKind: 'ot' }),
+        entry({ id: 'c', startTime: '08:00', finishTime: '10:00', hourKind: 'dt' }),
+      ]),
+    );
+    expect(t.ord).toBe(8);
+    expect(t.ot).toBe(3.25);
+    expect(t.dt).toBe(2);
+    expect(t.worked).toBe(13.25);
+  });
+
+  it('totals leave separately from worked hours', () => {
+    const t = timesheetTotals(
+      sheet([
+        entry({ id: 'a', startTime: '06:30', finishTime: '14:30' }),
+        entry({ id: 'b', startTime: '', finishTime: '', sick: '8' }),
+        entry({ id: 'c', startTime: '', finishTime: '', annual: '8' }),
+      ]),
+    );
+    expect(t.worked).toBe(8);
+    expect(t.sick).toBe(8);
+    expect(t.annual).toBe(8);
+    expect(t.grand).toBe(24);
+  });
+
+  it('reproduces the five-day week on the supplied sheet', () => {
+    // Wed-Tue, five 8 hour days plus one 3.25 hour overtime callout.
+    const days = ['2026-08-12', '2026-08-13', '2026-08-14', '2026-08-17', '2026-08-18'];
+    const entries = days.map((d, i) => entry({ id: `d${i}`, date: d }));
+    entries.push(entry({ id: 'ot', date: '2026-08-12', startTime: '17:30', finishTime: '20:45', hourKind: 'ot' }));
+    const t = timesheetTotals(sheet(entries));
+    expect(t.ord).toBe(40);
+    expect(t.ot).toBe(3.25);
+    expect(t.grand).toBe(43.25);
+  });
+
+  it('ignores non-numeric leave entries instead of producing NaN', () => {
+    const t = timesheetTotals(sheet([entry({ sick: 'n/a' })]));
+    expect(t.sick).toBe(0);
+    expect(Number.isNaN(t.grand)).toBe(false);
+  });
+});
+
+describe('validateTimesheet', () => {
+  it('accepts a well-formed sheet', () => {
+    expect(validateTimesheet(sheet([entry()]))).toHaveLength(0);
+  });
+
+  it('flags an entry with neither times nor leave', () => {
+    const issues = validateTimesheet(sheet([entry({ startTime: '', finishTime: '' })]));
+    expect(issues.some((i) => i.message.includes('no times'))).toBe(true);
+  });
+
+  it('flags a malformed time', () => {
+    const issues = validateTimesheet(sheet([entry({ startTime: '6.30' })]));
+    expect(issues.some((i) => i.message.includes('HH:MM'))).toBe(true);
+  });
+
+  it('flags an implausibly long entry', () => {
+    const issues = validateTimesheet(sheet([entry({ startTime: '04:00', finishTime: '23:00' })]));
+    expect(issues.some((i) => i.message.includes('hours in one entry'))).toBe(true);
+  });
+
+  it('says an entry ending when it started is exactly that', () => {
+    // A row somebody started and did not finish. Silently worth twenty-four
+    // hours if the span is read the wrong way, and worth saying out loud
+    // either way.
+    const issues = validateTimesheet(sheet([entry({ startTime: '06:30', finishTime: '06:30' })]));
+    expect(issues.some((i) => i.message.includes('start and finish are the same'))).toBe(true);
+    expect(issues.some((i) => i.message.includes('hours in one entry'))).toBe(false);
+  });
+
+  it('treats a half-filled pair of times as no times, not as a bad shift', () => {
+    /*
+     * A start typed and the finish still to come. Counted as a complete pair
+     * it works out to nought hours and is reported as "start and finish are
+     * the same", which sends somebody looking at two times when only one is
+     * there.
+     */
+    const issues = validateTimesheet(sheet([entry({ finishTime: '' })]));
+    expect(issues.some((i) => i.message.includes('no times'))).toBe(true);
+    expect(issues.some((i) => i.message.includes('start and finish are the same'))).toBe(false);
+  });
+
+  it('leaves a sixteen-hour day alone and questions the one past it', () => {
+    // Sixteen hours is a long day and a real one — a full day and a callout
+    // on the end of it. Seventeen is worth a second look.
+    expect(validateTimesheet(sheet([entry({ startTime: '05:00', finishTime: '21:00' })]))
+      .some((i) => i.message.includes('hours in one entry'))).toBe(false);
+    expect(validateTimesheet(sheet([entry({ startTime: '05:00', finishTime: '22:00' })]))
+      .some((i) => i.message.includes('hours in one entry'))).toBe(true);
+  });
+
+  it('flags hours booked with no site name', () => {
+    const issues = validateTimesheet(sheet([entry({ siteName: '' })]));
+    expect(issues.some((i) => i.message.includes('no job or site name'))).toBe(true);
+  });
+
+  it('does not require a site name on a leave day', () => {
+    const issues = validateTimesheet(sheet([entry({ siteName: '', startTime: '', finishTime: '', annual: '8' })]));
+    expect(issues).toHaveLength(0);
+  });
+
+  it('flags a blank employee name', () => {
+    const s = sheet([entry()]);
+    s.employeeName = '';
+    expect(validateTimesheet(s).some((i) => i.message.includes('Employee name'))).toBe(true);
+  });
+});
+
+describe('dates', () => {
+  it('names weekdays as the sheet prints them', () => {
+    expect(dayName('2026-08-12')).toBe('Wed');
+    expect(dayName('2026-08-13')).toBe('Thu');
+    expect(dayName('2026-08-17')).toBe('Mon');
+  });
+
+  it('expands a week from its first day', () => {
+    const days = weekDates('2026-08-12');
+    expect(days).toHaveLength(7);
+    expect(days[0]).toBe('2026-08-12');
+    expect(days[6]).toBe('2026-08-18');
+  });
+
+  it('groups entries by date in order', () => {
+    const groups = groupByDate([
+      entry({ id: 'b', date: '2026-08-13' }),
+      entry({ id: 'a', date: '2026-08-12' }),
+      entry({ id: 'c', date: '2026-08-12' }),
+    ]);
+    expect(groups.map((g) => g.date)).toEqual(['2026-08-12', '2026-08-13']);
+    expect(groups[0]!.entries).toHaveLength(2);
+  });
+});
+
+/**
+ * The day-oriented editor.
+ *
+ * The screen thinks in two shapes — a job with hours, or a day off of one
+ * kind — and these are the translations between that and the flat row payroll
+ * still receives. The failures worth guarding are a leave column that outlives
+ * a switch to a worked day, a copy that quietly carries yesterday's leave, and
+ * a job list that offers a job twice.
+ */
+describe('leave on an entry', () => {
+  const base = (): TimesheetEntry => ({
+    id: 'e', date: '2026-09-07', jobNumber: '', siteName: '', serviceReportNumber: '',
+    startTime: '', finishTime: '', hourKind: 'ord',
+    sick: '', rdo: '', annual: '', lwop: '', publicHoliday: '', comments: '', extras: [],
+  });
+
+  it('reads the one leave column that is set', () => {
+    expect(leaveOf({ ...base(), annual: '7.6' })).toEqual({ kind: 'annual', hours: 7.6 });
+  });
+
+  it('is null for a worked day', () => {
+    expect(leaveOf({ ...base(), startTime: '06:30', finishTime: '14:30' })).toBeNull();
+  });
+
+  it('setting a leave kind clears the times and every other leave column', () => {
+    const worked = { ...base(), startTime: '06:30', finishTime: '14:30', sick: '4' };
+    const off = setLeave(worked, 'annual', 7.6);
+    expect({ annual: off.annual, sick: off.sick, start: off.startTime, finish: off.finishTime })
+      .toEqual({ annual: '7.6', sick: '', start: '', finish: '' });
+  });
+
+  it('setting hours to zero clears the day off, so a mistaken tap is undoable', () => {
+    const off = setLeave(base(), 'rdo', 7.6);
+    expect(leaveOf(setLeave(off, 'rdo', 0))).toBeNull();
+  });
+});
+
+describe('allowances', () => {
+  it('adds one and takes it away, case-insensitively', () => {
+    const e = blankEntry('e', '2026-09-07');
+    const withCallout = toggleExtra(e, 'Call-out');
+    expect(withCallout.extras).toEqual(['Call-out']);
+    expect(toggleExtra(withCallout, 'call-out').extras).toEqual([]);
+  });
+
+  it('will not add a blank label', () => {
+    expect(toggleExtra(blankEntry('e', '2026-09-07'), '   ').extras).toEqual([]);
+  });
+});
+
+describe('copying the previous day', () => {
+  const day = (date: string, over: Partial<TimesheetEntry> = {}) => ({ ...blankEntry(`${date}-${Math.random()}`, date), jobNumber: '43747', siteName: 'BRIC', startTime: '06:30', finishTime: '14:30', ...over });
+  let n = 0;
+  const ids = () => `new-${++n}`;
+
+  it('carries every field of every row, since a week of the same work is what it is for', () => {
+    const entries = [day('2026-09-07', {
+      serviceReportNumber: 'SR-1', comments: 'Service', extras: ['Call-out'], hourKind: 'ot', hoursOverride: '7.5',
+    })];
+    const [copied] = copyDay(entries, '2026-09-07', '2026-09-08', ids);
+    expect(copied).toEqual({ ...entries[0], id: 'new-1', date: '2026-09-08' });
+  });
+
+  it('gives each copy its own id and day, and its own list of allowances', () => {
+    const entries = [day('2026-09-07', { extras: ['Travel'] }), day('2026-09-07', { jobNumber: '43748' })];
+    const copied = copyDay(entries, '2026-09-07', '2026-09-08', ids);
+    expect(copied.map((c) => c.date)).toEqual(['2026-09-08', '2026-09-08']);
+    expect(new Set(copied.map((c) => c.id)).size).toBe(2);
+    // A shared array would have yesterday's chips toggling today's.
+    copied[0]!.extras!.push('Meal allowance');
+    expect(entries[0]!.extras).toEqual(['Travel']);
+  });
+
+  it('leaves a day off behind, which the button’s own alert already claimed', () => {
+    /*
+     * This asserted the opposite, on the reasoning that the button says the
+     * day. The screen's alert said otherwise — "Tuesday is a day off, so there
+     * is nothing to bring across" — and could never print, because the filter
+     * it described had not been written.
+     *
+     * What the old behaviour produced: copy a day off onto a day that already
+     * had a job on it and the day held both. The day card drew the leave and
+     * stopped drawing the job, so sixteen hours went onto the payroll file
+     * while the phone showed a leave picker and no hours at all. Nobody
+     * presses Copy previous day meaning "I was off again".
+     */
+    const entries = [setLeave(blankEntry('x', '2026-09-07'), 'annual', 7.6)];
+    expect(copyDay(entries, '2026-09-07', '2026-09-08', ids)).toEqual([]);
+  });
+
+  it('brings the worked rows across from a day that was partly off', () => {
+    // A day that somehow holds both: the work copies, the leave does not.
+    const entries = [day('2026-09-07'), setLeave(blankEntry('l', '2026-09-07'), 'annual', 7.6)];
+    const copied = copyDay(entries, '2026-09-07', '2026-09-08', ids);
+    expect(copied.map((c) => ({ job: c.jobNumber, annual: c.annual })))
+      .toEqual([{ job: '43747', annual: '' }]);
+  });
+
+  it('finds the nearest earlier day that has entries', () => {
+    const entries = [day('2026-09-07'), day('2026-09-09')];
+    expect(previousDayWithEntries(entries, '2026-09-10')).toBe('2026-09-09');
+    expect(previousDayWithEntries(entries, '2026-09-08')).toBe('2026-09-07');
+    expect(previousDayWithEntries(entries, '2026-09-07')).toBeNull();
+  });
+
+  it('counts only worked hours in a day, not leave', () => {
+    const entries = [day('2026-09-07'), setLeave(blankEntry('l', '2026-09-07'), 'annual', 7.6)];
+    expect(dayWorkedHours(entries, '2026-09-07')).toBe(8);
+  });
+});
+
+describe('the job list', () => {
+  const mkSheet = (weekStarting: string, es: Partial<TimesheetEntry>[]): Timesheet => ({
+    id: `s-${weekStarting}`, employeeName: 'L', vehicleRego: '', kilometerReading: '',
+    weekStarting, entries: es.map((e, i) => ({ ...blankEntry(`e${i}`, weekStarting), ...e })),
+    managerName: '', checkedBy: '', status: 'submitted', createdAt: '', updatedAt: '',
+  });
+
+  it('offers the most recent jobs first and never the same one twice', () => {
+    const sheets = [
+      mkSheet('2026-08-24', [{ jobNumber: '100', siteName: 'A' }]),
+      mkSheet('2026-08-31', [{ jobNumber: '200', siteName: 'B' }, { jobNumber: '100', siteName: 'A' }]),
+    ];
+    const opts = jobOptions(sheets, []);
+    expect(opts.map((o) => o.jobNumber)).toEqual(['200', '100']);
+  });
+
+  it('adds the office open jobs after the recent ones and drops completed', () => {
+    const opts = jobOptions([], [
+      { externalId: '900', siteName: 'Open site', status: 'scheduled' },
+      { externalId: '901', siteName: 'Done site', status: 'complete' },
+    ]);
+    expect(opts.map((o) => o.jobNumber)).toEqual(['900']);
+  });
+
+  it('does not offer a day off as a job', () => {
+    const off = mkSheet('2026-08-31', [{ annual: '7.6' }]);
+    expect(jobOptions([off], [])).toEqual([]);
+  });
+
+  it('filters by number or site, case-insensitively', () => {
+    const opts = jobOptions([], [
+      { externalId: '900', siteName: 'Emsworth St', status: 'scheduled' },
+      { externalId: '901', siteName: 'Carina Depot', status: 'scheduled' },
+    ]);
+    expect(filterJobOptions(opts, 'ems').map((o) => o.jobNumber)).toEqual(['900']);
+    expect(filterJobOptions(opts, '901').map((o) => o.siteName)).toEqual(['Carina Depot']);
+  });
+});
+
+describe('the usual times', () => {
+  const mk = (start: string, finish: string): TimesheetEntry => ({ ...blankEntry('e', '2026-09-07'), startTime: start, finishTime: finish });
+  it('is the pair worked most often', () => {
+    const sheet: Timesheet = {
+      id: 's', employeeName: '', vehicleRego: '', kilometerReading: '', weekStarting: '2026-09-07',
+      entries: [mk('06:30', '14:30'), mk('06:30', '14:30'), mk('07:00', '15:00')],
+      managerName: '', checkedBy: '', status: 'draft', createdAt: '', updatedAt: '',
+    };
+    expect(usualTimes([sheet])).toEqual({ start: '06:30', finish: '14:30' });
+  });
+  it('falls back to the standard day when there is no history', () => {
+    expect(usualTimes([])).toEqual({ start: '06:30', finish: '14:30' });
+  });
+});
+
+describe('hydrating an entry from an older saved sheet', () => {
+  it('fills a missing extras array and every missing text field', () => {
+    const raw = { id: 'e', date: '2026-09-07', jobNumber: '1' } as Partial<TimesheetEntry>;
+    const e = hydrateEntry(raw, () => 'gen');
+    expect({ extras: e.extras, sick: e.sick, comments: e.comments, hourKind: e.hourKind })
+      .toEqual({ extras: [], sick: '', comments: '', hourKind: 'ord' });
+  });
+
+  it('drops a non-string that snuck into extras', () => {
+    const raw = { extras: ['Call-out', 5, '', 'Travel'] } as unknown as Partial<TimesheetEntry>;
+    expect(hydrateEntry(raw, () => 'gen').extras).toEqual(['Call-out', 'Travel']);
+  });
+});
+
+describe('week dates on a Brisbane phone', () => {
+  // The bug this guards was invisible under jest's UTC clock: weekDates built
+  // local-midnight dates and read them back as UTC, one day early east of
+  // Greenwich. These assert the calendar is stable regardless of device zone.
+  const withTz = (tz: string, fn: () => void) => {
+    const prev = process.env.TZ;
+    process.env.TZ = tz;
+    try { fn(); } finally { process.env.TZ = prev; }
+  };
+
+  it('starts the week on the day asked for, in Brisbane', () => {
+    withTz('Australia/Brisbane', () => {
+      expect(weekDates('2026-08-31')[0]).toBe('2026-08-31');
+      expect(weekDates('2026-08-31')[6]).toBe('2026-09-06');
+    });
+  });
+
+  it('names the weekday the same in Brisbane and in UTC', () => {
+    withTz('Australia/Brisbane', () => { expect(dayName('2026-08-31')).toBe('Mon'); });
+    withTz('UTC', () => { expect(dayName('2026-08-31')).toBe('Mon'); });
+  });
+});
+
+describe('the week, a row per day', () => {
+  /**
+   * The summary panel on the timesheet. It reads as decoration and it is not:
+   * it is the only place a week is shown as seven days at once, which is the
+   * shape the missing day shows up in.
+   */
+  it('gives seven days whatever is on the sheet', () => {
+    expect(weekSummary(sheet([])).map((d) => d.day)).toEqual(['Wed', 'Thu', 'Fri', 'Sat', 'Sun', 'Mon', 'Tue']);
+  });
+
+  it('draws the day nobody filled in, rather than leaving it out', () => {
+    // A week built only from the days that have entries has no gap in it to
+    // notice, and the gap is a day's pay.
+    const week = weekSummary(sheet([entry({ date: '2026-08-12' })]));
+    expect(week.filter((d) => d.total === 0)).toHaveLength(6);
+    expect(week[0]?.total).toBe(8);
+  });
+
+  it('adds up several jobs on one day and says how many there were', () => {
+    const week = weekSummary(sheet([
+      entry({ id: 'a', date: '2026-08-13', startTime: '07:00', finishTime: '11:00' }),
+      entry({ id: 'b', date: '2026-08-13', startTime: '11:30', finishTime: '15:30' }),
+    ]));
+    expect(week[1]?.worked).toBe(8);
+    expect(week[1]?.jobs).toBe(2);
+  });
+
+  it('keeps leave apart from work, and names it', () => {
+    const week = weekSummary(sheet([setLeave(entry({ date: '2026-08-14' }), 'annual', 7.6)]));
+    expect(week[2]?.worked).toBe(0);
+    expect(week[2]?.leave).toEqual({ kind: 'annual', hours: 7.6 });
+    expect(week[2]?.total).toBe(7.6);
+  });
+
+  it('counts a day that is half worked and half leave as both', () => {
+    const week = weekSummary(sheet([
+      entry({ id: 'a', date: '2026-08-17', startTime: '06:30', finishTime: '10:30' }),
+      setLeave(entry({ id: 'b', date: '2026-08-17' }), 'sick', 4),
+    ]));
+    expect(week[5]?.worked).toBe(4);
+    expect(week[5]?.leave).toEqual({ kind: 'sick', hours: 4 });
+    expect(week[5]?.total).toBe(8);
+  });
+
+  it('marks the weekend, so an empty Saturday reads differently from an empty Thursday', () => {
+    expect(weekSummary(sheet([])).map((d) => d.weekend)).toEqual([false, false, false, true, true, false, false]);
+  });
+
+  it('agrees with the total the screen prints beside it', () => {
+    const entries = [
+      entry({ id: 'a', date: '2026-08-12' }),
+      entry({ id: 'b', date: '2026-08-13', hourKind: 'ot' }),
+      setLeave(entry({ id: 'c', date: '2026-08-14' }), 'rdo', 7.6),
+    ];
+    const week = weekSummary(sheet(entries));
+    const summed = Math.round(week.reduce((n, d) => n + d.total, 0) * 100) / 100;
+    expect(summed).toBe(timesheetTotals(sheet(entries)).grand);
+  });
+});
+
+describe('what the day bars are drawn against', () => {
+  it('is a standard day, so a week of short days does not look full', () => {
+    const week = weekSummary(sheet([entry({ date: '2026-08-12', startTime: '08:00', finishTime: '10:00' })]));
+    expect(weekPeak(week)).toBe(STANDARD_DAY_HOURS);
+  });
+
+  it('stretches to the longest day rather than clipping it', () => {
+    const week = weekSummary(sheet([entry({ date: '2026-08-12', startTime: '06:00', finishTime: '18:00' })]));
+    expect(weekPeak(week)).toBe(12);
+  });
+
+  it('is never zero, so an empty week cannot divide by it', () => {
+    expect(weekPeak(weekSummary(sheet([])))).toBeGreaterThan(0);
+  });
+});
+
+describe('a day off is a full day', () => {
+  it('is eight hours, because that is what the office pays it at', () => {
+    // The award's 7.6 is a 38-hour week divided over five days, and using it
+    // here made a day of leave come out shorter than the day either side of it.
+    expect(STANDARD_DAY_HOURS).toBe(8);
+  });
+
+  it('makes a week five of those, so the two cannot disagree', () => {
+    expect(STANDARD_WEEK_HOURS).toBe(STANDARD_DAY_HOURS * 5);
+    expect(STANDARD_WEEK_HOURS).toBe(40);
+  });
+
+  it('writes a full day of leave at eight hours on the entry', () => {
+    const off = setLeave(blankEntry('x', '2026-09-07'), 'annual', STANDARD_DAY_HOURS);
+    expect(off.annual).toBe('8');
+    expect(leaveOf(off)).toEqual({ kind: 'annual', hours: 8 });
+  });
+});
+
+/**
+ * The unpaid lunch.
+ *
+ * Off unless Settings turns it on. On, a day with more than five worked
+ * hours loses thirty minutes once, as a line under the day that every total
+ * and export reads like any other row.
+ */
+describe('the unpaid lunch', () => {
+  const WED = '2026-08-12';
+  const THU = '2026-08-13';
+
+  it('reads the setting safely, none unless it is thirty', () => {
+    expect(unpaidBreakMinutes(30)).toBe(30);
+    expect(unpaidBreakMinutes('30')).toBe(30);
+    expect(unpaidBreakMinutes(0)).toBe(0);
+    expect(unpaidBreakMinutes(45)).toBe(0);
+    expect(unpaidBreakMinutes(undefined)).toBe(0);
+  });
+
+  it('takes nothing off while the setting is none', () => {
+    const s = sheet([entry({ date: WED, startTime: '06:30', finishTime: '15:00' })]);
+    expect(dayUnpaidBreakHours(s.entries, WED, 0)).toBe(0);
+    expect(withUnpaidBreaks(s, 0)).toBe(s);
+    expect(timesheetTotals(withUnpaidBreaks(s, 0)).grand).toBe(8.5);
+  });
+
+  it('takes nothing off a day of five hours or less', () => {
+    const exactly = [entry({ date: WED, startTime: '07:00', finishTime: '12:00' })];
+    expect(UNPAID_BREAK_AFTER_HOURS).toBe(5);
+    expect(dayUnpaidBreakHours(exactly, WED, 30)).toBe(0);
+    expect(withUnpaidBreaks(sheet(exactly), 30).entries).toHaveLength(1);
+    expect(dayUnpaidBreakHours([entry({ date: WED, startTime: '07:00', finishTime: '10:00' })], WED, 30)).toBe(0);
+  });
+
+  it('reads a five-hour day of several lines as five, not a hair over', () => {
+    // 0.12 + 4.23 + 0.65 is 5.000000000000001 in floating point; the sheet shows 5.
+    const pieces = [
+      entry({ id: 'a', date: WED, startTime: '07:00', finishTime: '07:07' }),
+      entry({ id: 'b', date: WED, startTime: '07:07', finishTime: '11:21' }),
+      entry({ id: 'c', date: WED, startTime: '11:21', finishTime: '12:00' }),
+    ];
+    expect(dayUnpaidBreakHours(pieces, WED, 30)).toBe(0);
+    expect(timesheetTotals(withUnpaidBreaks(sheet(pieces), 30)).grand).toBe(5);
+  });
+
+  it('takes thirty minutes off once on a day over five hours, however many jobs', () => {
+    const jobs = [
+      entry({ id: 'a', date: WED, startTime: '06:30', finishTime: '10:30' }),
+      entry({ id: 'b', date: WED, startTime: '10:30', finishTime: '14:30' }),
+    ];
+    expect(dayUnpaidBreakHours(jobs, WED, 30)).toBe(0.5);
+    const paid = withUnpaidBreaks(sheet(jobs), 30);
+    const lines = paid.entries.filter(isUnpaidBreakLine);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ date: WED, siteName: 'Less 30 min unpaid break', hourKind: 'ord' });
+    expect(entryHours(lines[0]!)).toBe(-0.5);
+    expect(unpaidBreakLabel(30)).toBe('Less 30 min unpaid break');
+  });
+
+  it('never takes it off leave, and leave never makes a day long', () => {
+    const leaveDay = [setLeave(entry({ date: WED }), 'annual', 8)];
+    expect(dayUnpaidBreakHours(leaveDay, WED, 30)).toBe(0);
+    const halfAndHalf = [
+      entry({ id: 'a', date: THU, startTime: '06:30', finishTime: '10:30' }),
+      setLeave(entry({ id: 'b', date: THU }), 'sick', 4),
+    ];
+    expect(dayUnpaidBreakHours(halfAndHalf, THU, 30)).toBe(0);
+    const paid = withUnpaidBreaks(sheet([...leaveDay, ...halfAndHalf]), 30);
+    expect(paid.entries.some(isUnpaidBreakLine)).toBe(false);
+    expect(timesheetTotals(paid).annual).toBe(8);
+  });
+
+  it('comes out of the day and the week totals, and says how much', () => {
+    const s = sheet([
+      entry({ id: 'a', date: WED, startTime: '06:30', finishTime: '15:00' }),
+      entry({ id: 'b', date: THU, startTime: '06:30', finishTime: '15:00' }),
+      entry({ id: 'c', date: '2026-08-14', startTime: '06:30', finishTime: '10:00' }),
+      setLeave(entry({ id: 'd', date: '2026-08-17' }), 'rdo', 8),
+    ]);
+    const paid = withUnpaidBreaks(s, 30);
+    const totals = timesheetTotals(paid);
+    expect(totals.ord).toBe(8.5 + 8.5 + 3.5 - 1);
+    expect(totals.worked).toBe(19.5);
+    expect(totals.grand).toBe(27.5);
+    expect(unpaidBreakTotal(paid)).toBe(1);
+    expect(unpaidBreakTotal(s)).toBe(0);
+
+    const week = weekSummary(paid);
+    expect(week[0]).toMatchObject({ worked: 8, total: 8, jobs: 1, unpaidBreak: 0.5 });
+    expect(week[2]).toMatchObject({ worked: 3.5, unpaidBreak: 0 });
+    expect(week[5]).toMatchObject({ worked: 0, total: 8, unpaidBreak: 0 });
+    expect(dayWorkedHours(paid.entries, WED)).toBe(8);
+    const summed = Math.round(week.reduce((n, d) => n + d.total, 0) * 100) / 100;
+    expect(summed).toBe(totals.grand);
+  });
+
+  it('comes out of overtime where the day has no ordinary time', () => {
+    const paid = withUnpaidBreaks(sheet([entry({ date: '2026-08-15', startTime: '06:00', finishTime: '14:00', hourKind: 'ot' })]), 30);
+    expect(paid.entries.find(isUnpaidBreakLine)?.hourKind).toBe('ot');
+    expect(timesheetTotals(paid)).toMatchObject({ ord: 0, ot: 7.5 });
+  });
+
+  it('takes nothing more off a day whose times already leave the lunch out', () => {
+    const clockedLunch = [
+      entry({ id: 'a', date: WED, startTime: '07:00', finishTime: '12:00' }),
+      entry({ id: 'b', date: WED, startTime: '12:30', finishTime: '15:30' }),
+    ];
+    expect(dayUnpaidBreakHours(clockedLunch, WED, 30)).toBe(0);
+    expect(timesheetTotals(withUnpaidBreaks(sheet(clockedLunch), 30)).grand).toBe(8);
+    // A gap shorter than the break is not the break.
+    const smoko = [
+      entry({ id: 'a', date: WED, startTime: '07:00', finishTime: '12:00' }),
+      entry({ id: 'b', date: WED, startTime: '12:15', finishTime: '15:30' }),
+    ];
+    expect(dayUnpaidBreakHours(smoko, WED, 30)).toBe(0.5);
+    // Lines given out of order, or overlapping, are read by their times.
+    const muddled = [
+      entry({ id: 'b', date: WED, startTime: '10:00', finishTime: '15:00' }),
+      entry({ id: 'a', date: WED, startTime: '07:00', finishTime: '11:00' }),
+    ];
+    expect(dayUnpaidBreakHours(muddled, WED, 30)).toBe(0.5);
+  });
+
+  it('keeps the break a week was submitted with, whatever the setting says now', () => {
+    const draft = sheet([entry({ date: WED, startTime: '06:30', finishTime: '15:00' })]);
+    expect(sheetUnpaidBreak(draft, 30)).toBe(30);
+    expect(sheetUnpaidBreak(draft, 0)).toBe(0);
+    const before = { ...draft, status: 'submitted' as const };
+    expect(sheetUnpaidBreak(before, 30)).toBe(0);
+    const withIt = { ...before, unpaidBreakMinutes: 30 };
+    expect(sheetUnpaidBreak(withIt, 0)).toBe(30);
+    expect(timesheetTotals(withUnpaidBreaks(withIt, sheetUnpaidBreak(withIt, 0))).grand).toBe(8);
+    expect(timesheetTotals(withUnpaidBreaks(before, sheetUnpaidBreak(before, 30))).grand).toBe(8.5);
+  });
+
+  it('is added once however many times it is worked out, and leaves the stored sheet alone', () => {
+    const s = sheet([entry({ date: WED, startTime: '06:30', finishTime: '15:00' })]);
+    const twice = withUnpaidBreaks(withUnpaidBreaks(s, 30), 30);
+    expect(twice.entries.filter(isUnpaidBreakLine)).toHaveLength(1);
+    expect(s.entries).toHaveLength(1);
+    expect(withUnpaidBreaks(twice, 0).entries).toHaveLength(1);
+  });
+});
