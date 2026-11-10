@@ -124,15 +124,21 @@ jobs:
         if: steps.pages.outcome == 'success'
         run: node scripts/webShell.js web-build
 
+      # Named for the attempt so that "Re-run" works. An artifact outlives the
+      # attempt that uploaded it, and the deploy refuses a run holding two of
+      # the same name, so a re-run after any upload would fail every time.
       - uses: actions/upload-pages-artifact@v3
         if: steps.pages.outcome == 'success'
         with:
+          name: github-pages-${{ github.run_attempt }}
           path: web-build
 
       - name: Deploy
         if: steps.pages.outcome == 'success'
         id: deploy
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}
 
       - name: Say where it is
         if: steps.pages.outcome == 'success'
